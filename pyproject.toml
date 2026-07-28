@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-nettools"
+version = "0.2.0"
+description = "Safe, read-only Cisco IOS-XR network inspection tools with an LLM reasoning layer and MCP server."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "netmiko>=4.4.0",
+    "mcp>=1.9.0",
+    "python-dotenv>=1.0.1",
+]
+
+[project.optional-dependencies]
+# LLM SDKs are only needed to run analysis with a cloud provider. Ollama uses
+# the standard library, so it needs nothing here.
+llm = [
+    "anthropic>=0.54.0",
+    "openai>=1.99.0",
+]
+dev = [
+    "pytest>=8.3.0",
+    "ruff>=0.8.0",
+]
+
+[project.scripts]
+nettools = "agent_nettools.cli:main"
+nettools-mcp = "mcp_server.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src", "."]
+include = ["agent_nettools*", "mcp_server*"]
+exclude = ["tests*", "scripts*", "docs*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+ignore = ["E501"]

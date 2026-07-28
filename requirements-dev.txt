@@ -1,0 +1,8 @@
+# Development + full-provider dependencies.
+# Installs the runtime set plus cloud LLM SDKs and test/lint tooling.
+# Equivalent to: pip install -e ".[dev,llm]"
+-r requirements.txt
+anthropic>=0.54.0
+openai>=1.99.0
+pytest>=8.3.0
+ruff>=0.8.0

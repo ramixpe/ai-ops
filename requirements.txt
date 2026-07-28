@@ -1,0 +1,6 @@
+# Runtime dependencies for the MCP server and CLI.
+# Cloud LLM SDKs (anthropic, openai) and dev tools live in requirements-dev.txt;
+# the MCP server itself needs none of them.
+netmiko>=4.4.0
+mcp>=1.9.0
+python-dotenv>=1.0.1
