@@ -13,7 +13,6 @@ environment (`DEVICE_USERNAME`, `DEVICE_PASSWORD`).
 - `check_lab_lldp_neighbors`
 - `check_lab_isis_neighbors`
 - `check_lab_sr_policies`
-- `check_lab_fabric_bgp`
 - `check_lab_fabric`
 - `collect_lab_evidence`
 

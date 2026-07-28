@@ -17,7 +17,7 @@ import argparse
 import json
 import sys
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 from .inventory import InventoryError, get_default_device_name
 from .llm_analysis import LLMAnalysisError, analyze_evidence
@@ -71,7 +71,8 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
         print("\n# Analysis")
     try:
         print(analyze_evidence(evidence))
-    except LLMAnalysisError as exc:
+    except (LLMAnalysisError, ValueError) as exc:
+        # ValueError covers provider misconfiguration from get_provider().
         print(f"Analysis error: {exc}")
         return 1
     return 0
@@ -95,7 +96,8 @@ def _cmd_demo(args: argparse.Namespace) -> int:
     print("\n## Agent Step 3: Analyze evidence")
     try:
         print(analyze_evidence(evidence))
-    except LLMAnalysisError as exc:
+    except (LLMAnalysisError, ValueError) as exc:
+        # ValueError covers provider misconfiguration from get_provider().
         print(f"Analysis error: {exc}")
         return 1
     return 0
@@ -191,7 +193,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
-    load_dotenv()
+    # Two lookups so .env is found both from the current directory upward and
+    # next to an editable install of the package.
+    load_dotenv(find_dotenv(usecwd=True)) or load_dotenv()
     parser = build_parser()
     args = parser.parse_args()
     try:

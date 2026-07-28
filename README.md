@@ -107,8 +107,9 @@ nettools facts RR1
 
 ## BYOK Reasoning Provider
 
-The analysis script and final demo require either Anthropic or OpenAI
-credentials. Keep keys in the local environment or an ignored `.env` file.
+`nettools analyze` and `nettools demo` need a reasoning provider: Anthropic,
+OpenAI, or a local keyless Ollama model. Keep keys in the local environment or
+an ignored `.env` file (`cp .env.example .env` to start).
 
 ```bash
 LLM_PROVIDER=anthropic

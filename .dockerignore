@@ -9,9 +9,7 @@
 .env
 .env.*
 docs/
-fix/
 tests/
 evidence/
-*.patch
 *.jsonl
 LICENSE

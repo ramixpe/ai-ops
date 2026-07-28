@@ -6,7 +6,6 @@ from agent_nettools.network_tools import (
     EVIDENCE_COMMANDS,
     _run_approved_commands,
     check_fabric,
-    check_fabric_bgp,
     check_isis_neighbors,
     check_lldp_neighbors,
     check_sr_policies,
@@ -117,6 +116,41 @@ def test_diff_evidence_reports_changed_commands():
     assert diff["unchanged"] == ["show isis neighbors"]
     assert diff["added"] == []
     assert diff["removed"] == []
+    assert diff["failed"] == []
+    assert diff["recovered"] == []
+
+
+def test_diff_evidence_separates_failures_from_removals():
+    healthy_bgp = {"status": "success", "data": {"commands": {"show bgp summary": "Established"}}}
+    failed_bgp = {"status": "error", "data": {"commands": {}}, "errors": ["show bgp summary: boom"]}
+
+    # BGP failed in the new run: not "removed", reported as "failed".
+    diff = diff_evidence(
+        {"device": "PE1", "bgp": healthy_bgp},
+        {"device": "PE1", "bgp": failed_bgp},
+    )
+    assert diff["failed"] == ["show bgp summary"]
+    assert diff["removed"] == []
+
+    # BGP failed in the old run and is back: not "added", reported as "recovered".
+    diff = diff_evidence(
+        {"device": "PE1", "bgp": failed_bgp},
+        {"device": "PE1", "bgp": healthy_bgp},
+    )
+    assert diff["recovered"] == ["show bgp summary"]
+    assert diff["added"] == []
+
+
+def test_snapshot_round_trip_honors_evidence_dir(monkeypatch, tmp_path):
+    from agent_nettools.network_tools import load_latest_snapshot, save_snapshot
+
+    monkeypatch.setenv("NETTOOLS_EVIDENCE_DIR", str(tmp_path))
+
+    evidence = {"device": "PE1", "timestamp": "t0"}
+    path = save_snapshot(evidence)
+
+    assert path.startswith(str(tmp_path))
+    assert load_latest_snapshot("PE1") == evidence
 
 
 def install_fake_netmiko(monkeypatch, *, fail_commands=()):
@@ -213,17 +247,17 @@ def test_evidence_commands_are_all_approved():
             assert command in APPROVED_COMMANDS
 
 
-def test_fabric_bgp_aggregates_all_devices(monkeypatch):
+def test_fabric_default_check_is_bgp(monkeypatch):
     set_device_environment(monkeypatch)
 
     def bgp_sender(device, command):
         return f"BGP summary for {device['name']}"
 
-    result = check_fabric_bgp(sender=bgp_sender)
+    result = check_fabric(sender=bgp_sender)
 
     assert result["status"] == "success"
+    assert result["data"]["check"] == "bgp"
     devices = result["data"]["devices"]
     # Every inventory device should appear with its own BGP output.
     assert set(devices) == {"P1", "P2", "P3", "P4", "PE1", "PE2", "PE3", "PE4", "RR1"}
-    assert devices["PE1"]["status"] == "success"
-    assert devices["PE1"]["output"] == "BGP summary for PE1"
+    assert devices["PE1"]["data"]["commands"]["show bgp summary"] == "BGP summary for PE1"

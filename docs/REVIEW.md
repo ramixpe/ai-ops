@@ -15,6 +15,17 @@ State at review time: **32 tests passing, Ruff clean.**
 > verdicts, autonomous agent tool-loop, notifications, scheduling, published
 > image registry, containerlab import, and an async collection rewrite. State
 > after the pass: **37 tests passing, Ruff clean.**
+>
+> **Follow-up cleanup pass:** fixed a CLI regression (`analyze`/`demo` didn't
+> catch the `ValueError` that `get_provider()` raises on misconfiguration);
+> `diff_evidence` now separates transient failures from real changes (`failed`
+> / `recovered` buckets); snapshot location is overridable via
+> `NETTOOLS_EVIDENCE_DIR`; `.env` is found from the cwd upward *or* next to an
+> editable install. Removed as no longer needed: `requirements*.txt` (pyproject
+> is the single dependency source), the redundant `check_fabric_bgp` /
+> `check_lab_fabric_bgp` (use `check_fabric("bgp")` / `check_lab_fabric`), the
+> `FastMCP` import stub (mcp is a hard dependency), and stale `.dockerignore`
+> entries. State after: **39 tests passing, Ruff clean.**
 
 ---
 

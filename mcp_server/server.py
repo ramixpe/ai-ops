@@ -2,34 +2,18 @@
 
 from __future__ import annotations
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 try:
     # MCP SDK >= 2.0 renamed the high-level server to MCPServer.
     from mcp.server.mcpserver import MCPServer as FastMCP
 except ModuleNotFoundError:
-    try:
-        # MCP SDK < 2.0 exposed it as FastMCP.
-        from mcp.server.fastmcp import FastMCP
-    except ModuleNotFoundError:  # Allows safety tests to run before optional MCP install.
-        class FastMCP:  # type: ignore[no-redef]
-            def __init__(self, name: str):
-                self.name = name
-
-            def tool(self):
-                def decorator(func):
-                    return func
-                return decorator
-
-            def run(self):
-                raise RuntimeError(
-                    "MCP SDK is not installed. Run: pip install -r requirements.txt"
-                )
+    # MCP SDK < 2.0 exposed it as FastMCP.
+    from mcp.server.fastmcp import FastMCP
 
 from agent_nettools.network_tools import (
     check_bgp_neighbors,
     check_fabric,
-    check_fabric_bgp,
     check_interfaces,
     check_isis_neighbors,
     check_lldp_neighbors,
@@ -41,9 +25,10 @@ from agent_nettools.network_tools import (
 
 # MCP clients (and `make mcp` / `nettools-mcp`) launch this server directly, so it
 # has to load .env itself — otherwise every tool fails on a missing
-# DEVICE_USERNAME / DEVICE_PASSWORD. A no-op in Docker, where the credentials
-# arrive via -e / --env-file.
-load_dotenv()
+# DEVICE_USERNAME / DEVICE_PASSWORD. Two lookups so it works both from the
+# current directory upward and next to an editable install; a no-op in Docker,
+# where the credentials arrive via -e / --env-file.
+load_dotenv(find_dotenv(usecwd=True)) or load_dotenv()
 
 mcp = FastMCP("IOS-XR Read-Only Network Tools")
 
@@ -95,13 +80,6 @@ def check_lab_sr_policies(device_name: str) -> dict:
     """Collect read-only Segment Routing TE policy state from a lab device."""
 
     return check_sr_policies(device_name)
-
-
-@mcp.tool()
-def check_lab_fabric_bgp() -> dict:
-    """Collect read-only BGP summary from every device in the lab inventory."""
-
-    return check_fabric_bgp()
 
 
 @mcp.tool()

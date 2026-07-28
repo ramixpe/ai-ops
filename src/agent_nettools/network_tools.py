@@ -326,33 +326,6 @@ def check_fabric(
     return result
 
 
-def check_fabric_bgp(
-    *,
-    sender: Callable[[dict[str, Any], str], str] | None = None,
-) -> dict[str, Any]:
-    """Collect BGP summary from every device in the inventory (parallel).
-
-    Returns one aggregated result with a per-device ``{status, output, errors}``
-    entry so the whole fabric's BGP health can be reviewed at once.
-    """
-
-    fabric = check_fabric("bgp", sender=sender)
-    result = _base_result("check_fabric_bgp", "fabric")
-    result["status"] = fabric["status"]
-    result["errors"] = list(fabric["errors"])
-    result["data"] = {"devices": {}}
-
-    command = EVIDENCE_COMMANDS["bgp"][0]
-    for name, device_result in fabric.get("data", {}).get("devices", {}).items():
-        result["data"]["devices"][name] = {
-            "status": device_result["status"],
-            "output": device_result["data"].get("commands", {}).get(command),
-            "errors": device_result["errors"],
-        }
-
-    return result
-
-
 def _section_from_combined(
     device_name: str,
     commands: list[str],
@@ -396,7 +369,12 @@ def collect_evidence(
     return evidence
 
 
+# Snapshots land here, relative to the working directory unless overridden.
 DEFAULT_SNAPSHOT_DIR = "evidence"
+
+
+def _snapshot_dir(base_dir: str | None) -> Path:
+    return Path(base_dir or os.getenv("NETTOOLS_EVIDENCE_DIR") or DEFAULT_SNAPSHOT_DIR)
 
 
 def _evidence_commands(evidence: dict[str, Any]) -> dict[str, str]:
@@ -411,12 +389,28 @@ def _evidence_commands(evidence: dict[str, Any]) -> dict[str, str]:
     return commands
 
 
-def save_snapshot(evidence: dict[str, Any], *, base_dir: str = DEFAULT_SNAPSHOT_DIR) -> str:
-    """Persist one evidence collection as timestamped JSON. Returns the path."""
+def _failed_commands(evidence: dict[str, Any]) -> set[str]:
+    """Commands whose evidence section errored, so no output exists to compare."""
+
+    failed: set[str] = set()
+    for section, section_result in evidence.items():
+        if not isinstance(section_result, dict) or section_result.get("status") != "error":
+            continue
+        present = section_result.get("data", {}).get("commands", {})
+        failed.update(c for c in EVIDENCE_COMMANDS.get(section, []) if c not in present)
+    return failed
+
+
+def save_snapshot(evidence: dict[str, Any], *, base_dir: str | None = None) -> str:
+    """Persist one evidence collection as timestamped JSON. Returns the path.
+
+    Snapshots go to ``base_dir``, the ``NETTOOLS_EVIDENCE_DIR`` environment
+    variable, or ``evidence/`` in the working directory, in that order.
+    """
 
     device = str(evidence.get("device", "unknown"))
     stamp = _timestamp().replace(":", "-")
-    directory = Path(base_dir) / device
+    directory = _snapshot_dir(base_dir) / device
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{stamp}.json"
     path.write_text(json.dumps(evidence, indent=2), encoding="utf-8")
@@ -426,11 +420,11 @@ def save_snapshot(evidence: dict[str, Any], *, base_dir: str = DEFAULT_SNAPSHOT_
 def load_latest_snapshot(
     device_name: str,
     *,
-    base_dir: str = DEFAULT_SNAPSHOT_DIR,
+    base_dir: str | None = None,
 ) -> dict[str, Any] | None:
     """Return the most recent saved snapshot for a device, or None."""
 
-    directory = Path(base_dir) / device_name
+    directory = _snapshot_dir(base_dir) / device_name
     if not directory.is_dir():
         return None
     snapshots = sorted(directory.glob("*.json"))
@@ -442,13 +436,17 @@ def load_latest_snapshot(
 def diff_evidence(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
     """Compare two evidence collections command-by-command.
 
-    Returns ``{device, changed, unchanged, added, removed}`` where ``changed``
-    lists commands whose output differs, ``added``/``removed`` cover commands
-    present in only one snapshot.
+    ``changed`` lists commands whose output differs and ``added``/``removed``
+    cover commands genuinely present in only one snapshot. Commands that are
+    absent because their section *errored* are reported separately so a
+    transient failure never masquerades as a removal: ``failed`` (errored in
+    the new collection) and ``recovered`` (errored in the old one, back now).
     """
 
     old_cmds = _evidence_commands(old)
     new_cmds = _evidence_commands(new)
+    old_failed = _failed_commands(old)
+    new_failed = _failed_commands(new)
 
     changed = sorted(c for c in old_cmds.keys() & new_cmds.keys() if old_cmds[c] != new_cmds[c])
     unchanged = sorted(c for c in old_cmds.keys() & new_cmds.keys() if old_cmds[c] == new_cmds[c])
@@ -459,6 +457,8 @@ def diff_evidence(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
         "new_timestamp": new.get("timestamp"),
         "changed": changed,
         "unchanged": unchanged,
-        "added": sorted(new_cmds.keys() - old_cmds.keys()),
-        "removed": sorted(old_cmds.keys() - new_cmds.keys()),
+        "added": sorted(new_cmds.keys() - old_cmds.keys() - old_failed),
+        "removed": sorted(old_cmds.keys() - new_cmds.keys() - new_failed),
+        "failed": sorted(new_failed),
+        "recovered": sorted(old_failed & new_cmds.keys()),
     }
