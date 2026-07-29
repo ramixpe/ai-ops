@@ -20,12 +20,17 @@ from .lab import platform_for
 from .normalize import normalize_output
 from .platforms import (
     DEFAULT_PLATFORM,
+    TemplateValidationError,
     all_intents,
     commands_for,
     intents_for,
     is_approved,
+    is_safe_rendered_command,
     known_platforms,
+    render_command,
     supports,
+    supports_template,
+    template_for,
 )
 
 # Statuses a result envelope may carry. "unsupported" means the device's platform
@@ -93,11 +98,19 @@ def _audit_log(entry: dict[str, Any]) -> None:
 def _netmiko_send_commands(
     device: dict[str, Any],
     commands: list[str],
+    *,
+    read_timeout: float | None = None,
 ) -> tuple[dict[str, str], list[str]]:
     """Open one SSH session and run every approved command over it.
 
     One login per device check, not one login per command: IOS-XR rate-limits
     repeated logins, and a full evidence collection is seven commands.
+
+    ``read_timeout`` overrides netmiko's default per-command timeout for
+    every command in this batch. Templates pass their own suggested timeout
+    (ping/traceroute run much longer than a ``show`` command); evidence
+    collection and static allowlist checks pass ``None`` and get netmiko's
+    default, unchanged from before this parameter existed.
 
     Returns ``(outputs, errors)``. ``outputs`` maps command -> text for the
     commands that ran; ``errors`` holds one message per failure.
@@ -124,13 +137,14 @@ def _netmiko_send_commands(
 
     outputs: dict[str, str] = {}
     errors: list[str] = []
+    send_kwargs = {"read_timeout": read_timeout} if read_timeout is not None else {}
 
     try:
         with ConnectHandler(**connection_params) as connection:
             for command in commands:
                 started = time.monotonic()
                 try:
-                    output = connection.send_command(command)
+                    output = connection.send_command(command, **send_kwargs)
                     outputs[command] = output
                     _audit_log(
                         {
@@ -269,6 +283,252 @@ def run_intent(
 
     _attach_parsed(result, platform, intent)
     return result
+
+
+# --------------------------------------------------------------------------- #
+# Templates: validated, parameterized commands (Phase 5).
+# --------------------------------------------------------------------------- #
+
+# Whether ping/traceroute templates may run at all. Default enabled: they are
+# read-only in the sense that they change no device configuration, but unlike
+# every "show" command they *do* generate traffic (ICMP echoes, UDP/ICMP probes)
+# -- and they are table stakes for troubleshooting, which is why the default
+# favors availability. Set to "0"/"false"/"no"/"off" to disable them entirely,
+# e.g. for a stricter deployment that wants zero device-generated traffic ever;
+# every other truthy-looking value (including unset) leaves them enabled.
+NETTOOLS_ALLOW_ACTIVE_PROBES_ENV = "NETTOOLS_ALLOW_ACTIVE_PROBES"
+_FALSY_ENV_VALUES = frozenset({"0", "false", "no", "off"})
+
+
+def _active_probes_allowed() -> bool:
+    value = os.getenv(NETTOOLS_ALLOW_ACTIVE_PROBES_ENV, "1").strip().lower()
+    return value not in _FALSY_ENV_VALUES
+
+
+def _unsupported_template_result(
+    tool: str, device_name: str, template_name: str, platform: str
+) -> dict[str, Any]:
+    """Return an envelope for a template this platform has no definition for.
+
+    Mirrors ``_unsupported_result``'s "not a failure" shape for intents: a
+    platform simply not having a given template is a fact about the fabric,
+    not a caller error.
+    """
+
+    result = _base_result(tool, device_name)
+    result["status"] = STATUS_UNSUPPORTED
+    result["data"] = {"template": template_name, "platform": platform}
+    return result
+
+
+def _run_rendered_command(
+    device_name: str,
+    command: str,
+    *,
+    template_name: str,
+    platform: str,
+    read_timeout: float | None = None,
+    sender: Callable[[dict[str, Any], str], str] | None = None,
+) -> dict[str, Any]:
+    """Run one already-rendered, already-validated template command.
+
+    Mirrors ``_run_approved_commands``'s ordering invariant, but checks
+    ``is_safe_rendered_command`` instead of the static ``is_approved``
+    allowlist: a rendered template command (it carries a caller-supplied
+    parameter) is never a member of the flat per-platform allowlist, so its
+    authorization comes from ``render_command``'s own layered validation --
+    re-checked here, defense in depth, immediately before credentials are
+    loaded, exactly as ``is_approved`` is re-checked in
+    ``_run_approved_commands`` regardless of what the caller supposedly
+    already filtered.
+    """
+
+    if not is_safe_rendered_command(command):
+        return _safe_error(
+            "run_template", device_name, f"Refusing unsafe rendered command: {command!r}"
+        )
+
+    try:
+        device = get_device(device_name)
+    except InventoryError as exc:
+        return _safe_error("run_template", device_name, str(exc))
+
+    result = _base_result("run_template", device_name)
+    # Output goes under "commands", keyed by the rendered command, matching what
+    # run_intent produces. A second shape for the same concept would make every
+    # generic consumer -- the MCP client, the LLM prompt builder, anything walking
+    # data.commands -- silently skip template results. The rendered command is
+    # also echoed as "command" for readability, but the output is stored once.
+    result["data"] = {"template": template_name, "platform": platform, "command": command}
+
+    if sender is not None:
+        # Test/injection path: the caller supplies output for this command.
+        try:
+            result["data"]["commands"] = {command: sender(device, command)}
+        except Exception as exc:  # noqa: BLE001 - beginner-friendly structured errors.
+            result["status"] = STATUS_ERROR
+            result["errors"].append(f"{command}: {exc}")
+            result["data"]["commands"] = {}
+        return result
+
+    outputs, errors = _netmiko_send_commands(device, [command], read_timeout=read_timeout)
+    result["data"]["commands"] = dict(outputs)
+    if errors:
+        result["status"] = STATUS_ERROR
+        result["errors"].extend(errors)
+
+    return result
+
+
+def run_template(
+    device_name: str,
+    template_name: str,
+    *,
+    platform: str | None = None,
+    sender: Callable[[dict[str, Any], str], str] | None = None,
+    **params: str,
+) -> dict[str, Any]:
+    """Render and run one validated, parameterized command template.
+
+    Mirrors ``run_intent``'s ordering invariant exactly: platform resolves
+    from static lab data (``platform_for``, no credentials touched), the
+    template is looked up and every parameter is validated by reconstruction
+    -- never passed through -- *before* ``get_device``/credential access/a
+    socket. A bad parameter is therefore refused with no credentials loaded
+    at all, same as an unapproved static command.
+
+    An active-probe template (``ping``/``traceroute``) is refused before
+    rendering, if ``NETTOOLS_ALLOW_ACTIVE_PROBES`` says no, since that check
+    needs no device access either.
+
+    Unknown template for this platform returns ``status: "unsupported"``,
+    matching ``run_intent`` -- a platform not having a template is a fact
+    about the fabric, not a caller error.
+    """
+
+    platform = platform or platform_for(device_name)
+
+    if platform not in known_platforms():
+        # A typo'd or not-yet-defined platform is a real error: it approves
+        # nothing, so failing closed here gives a clearer message than an
+        # empty template set would.
+        result = _safe_error(
+            "run_template", device_name, f"No command definitions for platform: {platform}."
+        )
+        result["data"] = {"template": template_name, "platform": platform}
+        return result
+
+    if not supports_template(platform, template_name):
+        return _unsupported_template_result("run_template", device_name, template_name, platform)
+
+    template = template_for(platform, template_name)
+
+    if template.active_probe and not _active_probes_allowed():
+        result = _safe_error(
+            "run_template",
+            device_name,
+            "Active probes (ping/traceroute) are disabled: "
+            f"{NETTOOLS_ALLOW_ACTIVE_PROBES_ENV} is set to a falsy value. Unset it or set it to "
+            "1/true to allow ping/traceroute templates.",
+        )
+        result["data"] = {"template": template_name, "platform": platform}
+        return result
+
+    try:
+        command = render_command(platform, template_name, **params)
+    except TemplateValidationError as exc:
+        return _safe_error("run_template", device_name, str(exc))
+
+    return _run_rendered_command(
+        device_name,
+        command,
+        template_name=template_name,
+        platform=platform,
+        read_timeout=template.read_timeout,
+        sender=sender,
+    )
+
+
+# Named single-parameter template tools, one per registered template, kept
+# alongside CHECK_TOOLS's per-intent functions so the CLI and MCP server call
+# the same thing: a thin, typed wrapper over run_template(). The parameter is
+# still validated by reconstruction inside render_command() -- these wrappers
+# add nothing to the safety story, only a friendlier call shape.
+
+
+def get_route(
+    device_name: str,
+    prefix: str,
+    *,
+    sender: Callable[[dict[str, Any], str], str] | None = None,
+) -> dict[str, Any]:
+    """Look up a specific route by IPv4 address or prefix, e.g. "10.0.0.0/24"."""
+
+    return run_template(device_name, "route", prefix=prefix, sender=sender)
+
+
+def get_bgp_neighbor(
+    device_name: str,
+    address: str,
+    *,
+    sender: Callable[[dict[str, Any], str], str] | None = None,
+) -> dict[str, Any]:
+    """Look up a specific BGP neighbor by IPv4 address."""
+
+    return run_template(device_name, "bgp_neighbor", address=address, sender=sender)
+
+
+def get_interface(
+    device_name: str,
+    interface: str,
+    *,
+    sender: Callable[[dict[str, Any], str], str] | None = None,
+) -> dict[str, Any]:
+    """Look up a specific interface's status by name, e.g. "GigabitEthernet0/0/0/1"."""
+
+    return run_template(device_name, "interface", interface=interface, sender=sender)
+
+
+def get_logging(
+    device_name: str,
+    count: int | str = 20,
+    *,
+    sender: Callable[[dict[str, Any], str], str] | None = None,
+) -> dict[str, Any]:
+    """Show the last N log lines (1-500, default 20)."""
+
+    return run_template(device_name, "logging", count=str(count), sender=sender)
+
+
+def ping_device(
+    device_name: str,
+    address: str,
+    *,
+    sender: Callable[[dict[str, Any], str], str] | None = None,
+) -> dict[str, Any]:
+    """Ping a specific IPv4 address from the device.
+
+    An active probe: it generates ICMP traffic (unlike every other tool in
+    this module) even though it changes no device state. Gated by
+    ``NETTOOLS_ALLOW_ACTIVE_PROBES``; see the module docstring section above.
+    """
+
+    return run_template(device_name, "ping", address=address, sender=sender)
+
+
+def traceroute_device(
+    device_name: str,
+    address: str,
+    *,
+    sender: Callable[[dict[str, Any], str], str] | None = None,
+) -> dict[str, Any]:
+    """Traceroute to a specific IPv4 address from the device.
+
+    An active probe, like ``ping_device``: generates traffic, changes no
+    device state, gated by ``NETTOOLS_ALLOW_ACTIVE_PROBES``.
+    """
+
+    return run_template(device_name, "traceroute", address=address, sender=sender)
 
 
 def list_devices() -> dict[str, Any]:

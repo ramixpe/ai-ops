@@ -15,8 +15,23 @@ environment (`DEVICE_USERNAME`, `DEVICE_PASSWORD`).
 - `check_lab_sr_policies`
 - `check_lab_fabric`
 - `collect_lab_evidence`
+- `get_lab_route`
+- `get_lab_bgp_neighbor`
+- `get_lab_interface`
+- `get_lab_logging`
+- `get_lab_ping`
+- `get_lab_traceroute`
 
 There is no shell, configuration tool, or generic command runner.
+
+The last six tools above are validated, parameterized templates (Phase 5):
+each accepts one caller-supplied value (an IPv4 address/prefix, an interface
+name, or a bounded count) which is parsed into a typed object and the command
+is rendered from that object's own canonical form -- never passed through as
+text. `get_lab_ping` and `get_lab_traceroute` are active probes: they generate
+traffic (unlike every other tool listed) even though they change no device
+state, and are gated by the `NETTOOLS_ALLOW_ACTIVE_PROBES` environment
+variable (default enabled).
 
 ## Start Manually
 

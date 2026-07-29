@@ -144,6 +144,58 @@ no device to verify against yet.
 There is no configuration mode, reload, commit, rollback, shell access, or a
 generic `run_command(device, command)` tool.
 
+### Parameterized commands (Phase 5)
+
+The allowlist above is exact-match, so it can only express zero-argument
+commands. A second, narrower allowlist in `agent_nettools.templates` (see
+`PLATFORM_TEMPLATES[platform][template_name]`) adds validated, parameterized
+commands that *do* take one caller-supplied value: `show route <prefix>`,
+`show bgp neighbor <ip>`, `show interfaces <name>`, `show logging last <n>`,
+`ping <ip>`, and `traceroute <ip>` -- exactly the follow-up questions an
+operator (or an agent that just saw "peer 10.255.0.31 is Idle") needs to ask
+next.
+
+**Canonicalize by reconstruction, never pass-through.** A caller-supplied
+value is never substituted into a command as text. It is first parsed into a
+typed Python object -- `ipaddress.IPv4Address`, `ipaddress.IPv4Network`, a
+range-checked `int`, or a regex-validated interface name -- and the command
+is rendered from *that object's own canonical string form*, never from the
+original text. `ipaddress.IPv4Address("01.1.1.1")` simply raises (leading
+zeros are ambiguous octal/decimal and CPython rejects them), so there is no
+representation of that string that could ever reach the rendered command.
+Five layered, deliberately redundant defenses apply to every parameter:
+reject non-ASCII outright; reject control characters, whitespace, and an
+explicit forbidden set (`` | ; & > < ` $ { } \n \r \t \0 ``); enforce a hard
+length bound; re-validate the fully assembled command afterward (no
+forbidden character, and it must match the template's expected shape); and
+require the rendered command's first word to be in the explicit verb set
+`{"show", "ping", "traceroute"}` -- nothing else may ever be rendered.
+`|` gets special attention: IOS-XR supports piping a `show` command's output
+to `| file disk0:/...`, which *writes a file to the device* -- a pipe
+reaching the device is a state change, not just an information leak, so it
+must be structurally impossible.
+
+`ping` and `traceroute` are *active probes*: they generate traffic (ICMP
+echoes / UDP-or-ICMP probes) even though they change no device state, unlike
+every other command in this tool. They are gated by
+`NETTOOLS_ALLOW_ACTIVE_PROBES` (default enabled, since they are table stakes
+for troubleshooting); set it to `0`/`false`/`no`/`off` to disable them.
+
+```bash
+nettools route PE1 10.255.0.31
+nettools bgp-neighbor PE1 10.255.0.31
+nettools interface PE1 GigabitEthernet0/0/0/1
+nettools logging PE1 --count 20
+nettools ping PE1 10.255.0.31
+nettools traceroute PE1 10.255.0.31
+```
+
+Only `cisco_xr`'s templates are verified against the live lab; `cisco_iosxe`
+has `route`/`bgp_neighbor` declared from vendor documentation, unverified,
+kept for the same reason `cisco_iosxe`'s static commands are: to prove the
+template abstraction holds across a vendor with different syntax
+(`show ip route`/`show ip bgp neighbors`).
+
 ## Common Commands
 
 Everything is driven by the `nettools` CLI; the Makefile targets are thin
@@ -161,6 +213,12 @@ make lldp        # LLDP neighbors on PE1
 make isis        # IS-IS neighbors on PE1
 make sr          # SR-TE policies on PE1
 make fabric-bgp  # BGP summary across the whole inventory
+make route       # Look up a route (or DEVICE=name PREFIX=10.0.0.0/24)
+make bgp-neighbor  # Look up a BGP neighbor (or DEVICE=name ADDRESS=...)
+make interface   # Look up an interface (or DEVICE=name NAME=...)
+make logging     # Show recent log lines (or DEVICE=name COUNT=...)
+make ping        # Ping from a device (or DEVICE=name ADDRESS=...); active probe
+make traceroute  # Traceroute from a device (or DEVICE=name ADDRESS=...); active probe
 make analyze     # Collect evidence and analyze with the selected LLM
 make demo        # Narrated agent demo
 make diff        # Diff evidence against the last snapshot
@@ -302,6 +360,7 @@ OLLAMA_MODEL=ornith:9b-q8_0
 ```text
 inventory/lab.yaml                 Declarative device inventory (topology, not secrets)
 src/agent_nettools/platforms.py    Per-platform allowlist and intent table
+src/agent_nettools/templates.py    Validated, parameterized command templates (canonicalize-by-reconstruction)
 src/agent_nettools/inventory_model.py  Inventory schema (pydantic), YAML loading, credential-free
 src/agent_nettools/lab.py          Credential-free reads of the inventory: mgmt IP + platform
 src/agent_nettools/inventory.py    Joins the inventory with env credentials -> device dicts

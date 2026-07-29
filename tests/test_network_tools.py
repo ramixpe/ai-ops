@@ -1,3 +1,4 @@
+import pytest
 from helpers import (
     LAB_PLATFORM,
     install_fake_netmiko,
@@ -7,6 +8,7 @@ from helpers import (
 
 from agent_nettools import lab
 from agent_nettools.network_tools import (
+    NETTOOLS_ALLOW_ACTIVE_PROBES_ENV,
     _run_approved_commands,
     check_fabric,
     check_isis_neighbors,
@@ -14,14 +16,23 @@ from agent_nettools.network_tools import (
     check_sr_policies,
     collect_evidence,
     diff_evidence,
+    get_bgp_neighbor,
+    get_interface,
+    get_logging,
+    get_route,
     list_devices,
+    ping_device,
     run_intent,
+    run_template,
+    traceroute_device,
 )
 from agent_nettools.platforms import (
     APPROVED_COMMANDS,
+    TemplateValidationError,
     all_intents,
     commands_for,
     intents_for,
+    render_command,
 )
 
 LAB_INTENTS = intents_for(LAB_PLATFORM)
@@ -197,6 +208,195 @@ def test_check_fabric_rejects_unknown_check(monkeypatch):
     result = check_fabric("reload")
     assert result["status"] == "error"
     assert "Unknown check" in result["errors"][0]
+
+
+# --------------------------------------------------------------------------- #
+# run_template: validated, parameterized commands (Phase 5).
+# --------------------------------------------------------------------------- #
+
+
+def test_run_template_refuses_a_bad_parameter_before_loading_credentials():
+    """The Phase 5 equivalent of
+    test_refuses_unapproved_commands_before_loading_credentials: no
+    DEVICE_USERNAME/DEVICE_PASSWORD is set here on purpose. If parameter
+    validation ran after credential loading, this would raise InventoryError
+    instead of a clean structured refusal -- that ordering is the invariant
+    Phase 5 must not break."""
+
+    result = run_template("PE1", "bgp_neighbor", address="10.0.0.1; configure")
+
+    assert result["status"] == "error"
+    assert "bgp_neighbor" in result["errors"][0] or "address" in result["errors"][0]
+
+
+def test_run_template_renders_and_sends_the_expected_command(monkeypatch):
+    set_device_environment(monkeypatch)
+    seen = []
+
+    def recording_sender(device, command):
+        seen.append(command)
+        return f"output for {command}"
+
+    result = run_template("PE1", "route", prefix="10.255.0.31", sender=recording_sender)
+
+    assert result["status"] == "success"
+    assert seen == ["show route 10.255.0.31/32"]
+    assert result["data"]["command"] == "show route 10.255.0.31/32"
+    # Same "commands" shape run_intent produces, so generic consumers that walk
+    # data.commands do not silently skip template results.
+    assert result["data"]["commands"] == {
+        "show route 10.255.0.31/32": "output for show route 10.255.0.31/32"
+    }
+
+
+def test_run_template_resolves_to_platform_specific_syntax(monkeypatch):
+    """Same template name, different vendor syntax -- the parameterized
+    equivalent of test_intent_resolves_to_platform_specific_syntax."""
+
+    set_device_environment(monkeypatch)
+    seen = []
+
+    def recording_sender(device, command):
+        seen.append(command)
+        return "output"
+
+    run_template("PE1", "bgp_neighbor", address="10.255.0.31", sender=recording_sender)
+    assert seen == ["show bgp neighbor 10.255.0.31"]
+
+    seen.clear()
+    monkeypatch.setitem(lab.PLATFORMS, "PE1", "cisco_iosxe")
+    run_template("PE1", "bgp_neighbor", address="10.255.0.31", sender=recording_sender)
+    assert seen == ["show ip bgp neighbors 10.255.0.31"]
+
+
+def test_run_template_unknown_template_is_unsupported_not_an_error(monkeypatch):
+    set_device_environment(monkeypatch)
+    monkeypatch.setitem(lab.PLATFORMS, "PE1", "juniper_junos")
+
+    result = run_template("PE1", "route", prefix="10.0.0.0/24")
+
+    assert result["status"] == "unsupported"
+    assert result["errors"] == []
+    assert result["data"]["template"] == "route"
+    assert result["data"]["platform"] == "juniper_junos"
+
+
+def test_run_template_unknown_platform_fails_closed(monkeypatch):
+    set_device_environment(monkeypatch)
+    monkeypatch.setitem(lab.PLATFORMS, "PE1", "nonexistent_os")
+
+    result = run_template("PE1", "route", prefix="10.0.0.0/24")
+
+    assert result["status"] == "error"
+    assert "No command definitions for platform" in result["errors"][0]
+
+
+def test_run_template_rejects_a_bad_parameter_with_a_sender_configured(monkeypatch):
+    """A sender being available must not bypass parameter validation."""
+
+    set_device_environment(monkeypatch)
+
+    def failing_sender(device, command):
+        raise AssertionError("sender must never be called for a rejected parameter")
+
+    result = run_template("PE1", "bgp_neighbor", address="not-an-ip", sender=failing_sender)
+
+    assert result["status"] == "error"
+
+
+def test_run_template_raising_from_render_command_is_caught(monkeypatch):
+    """render_command's TemplateValidationError must be translated to a
+    structured error, not propagate as a raw exception."""
+
+    set_device_environment(monkeypatch)
+    with pytest.raises(TemplateValidationError):
+        # Direct call to prove the underlying function does raise ...
+        render_command("cisco_xr", "bgp_neighbor", address="not-an-ip")
+
+    # ... but run_template itself must never leak that exception to the caller.
+    result = run_template("PE1", "bgp_neighbor", address="not-an-ip", sender=lambda d, c: "x")
+    assert result["status"] == "error"
+    assert isinstance(result["errors"][0], str)
+
+
+def test_ping_and_traceroute_are_active_probes_gated_by_environment(monkeypatch):
+    set_device_environment(monkeypatch)
+
+    def recording_sender(device, command):
+        return f"output for {command}"
+
+    # Enabled by default (unset).
+    result = ping_device("PE1", "10.255.0.31", sender=recording_sender)
+    assert result["status"] == "success"
+    assert result["data"]["command"] == "ping 10.255.0.31"
+
+    result = traceroute_device("PE1", "10.255.0.31", sender=recording_sender)
+    assert result["status"] == "success"
+    assert result["data"]["command"] == "traceroute 10.255.0.31"
+
+    # Explicitly disabled.
+    monkeypatch.setenv(NETTOOLS_ALLOW_ACTIVE_PROBES_ENV, "0")
+    result = ping_device("PE1", "10.255.0.31", sender=recording_sender)
+    assert result["status"] == "error"
+    assert "Active probes" in result["errors"][0]
+
+    result = traceroute_device("PE1", "10.255.0.31", sender=recording_sender)
+    assert result["status"] == "error"
+    assert "Active probes" in result["errors"][0]
+
+    # A non-active-probe template must be unaffected by the switch.
+    result = get_route("PE1", "10.0.0.0/24", sender=recording_sender)
+    assert result["status"] == "success"
+
+
+def test_active_probe_gate_accepts_common_falsy_spellings(monkeypatch):
+    set_device_environment(monkeypatch)
+
+    def recording_sender(device, command):
+        return "output"
+
+    for falsy in ("0", "false", "False", "no", "NO", "off"):
+        monkeypatch.setenv(NETTOOLS_ALLOW_ACTIVE_PROBES_ENV, falsy)
+        result = ping_device("PE1", "10.255.0.31", sender=recording_sender)
+        assert result["status"] == "error", f"{falsy!r} should disable active probes"
+
+    for truthy in ("1", "true", "yes", "anything-else"):
+        monkeypatch.setenv(NETTOOLS_ALLOW_ACTIVE_PROBES_ENV, truthy)
+        result = ping_device("PE1", "10.255.0.31", sender=recording_sender)
+        assert result["status"] == "success", f"{truthy!r} should leave active probes enabled"
+
+
+def test_get_route_bgp_neighbor_interface_logging_use_the_expected_commands(monkeypatch):
+    set_device_environment(monkeypatch)
+
+    def recording_sender(device, command):
+        return f"output for {command}"
+
+    assert get_route("PE1", "10.255.0.31", sender=recording_sender)["data"]["command"] == (
+        "show route 10.255.0.31/32"
+    )
+    assert get_bgp_neighbor("PE1", "10.255.0.31", sender=recording_sender)["data"][
+        "command"
+    ] == "show bgp neighbor 10.255.0.31"
+    assert get_interface("PE1", "GigabitEthernet0/0/0/1", sender=recording_sender)["data"][
+        "command"
+    ] == "show interfaces GigabitEthernet0/0/0/1"
+    assert get_logging("PE1", 20, sender=recording_sender)["data"]["command"] == (
+        "show logging last 20"
+    )
+
+
+def test_run_template_uses_one_command_per_call_not_a_batched_session(monkeypatch):
+    """Unlike collect_evidence, a template call is a single command -- it must
+    not be batched with anything else."""
+
+    set_device_environment(monkeypatch)
+    sessions = install_fake_netmiko(monkeypatch)
+
+    result = run_template("PE1", "bgp_neighbor", address="10.255.0.31")
+
+    assert result["status"] == "success"
+    assert len(sessions) == 1
 
 
 def test_diff_evidence_reports_changed_intents():

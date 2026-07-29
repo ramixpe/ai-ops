@@ -1,8 +1,20 @@
 PYTHON ?= python3
-DEVICE ?=
+# PE1 matches agent_nettools.inventory.get_default_device_name()'s own
+# fallback, so this is an explicit spelling of the same default, not a new
+# one. Made explicit (rather than left empty) because the Phase 5 template
+# targets below take a *second* positional argument (PREFIX/ADDRESS/NAME);
+# with DEVICE left empty, `nettools route  10.255.0.31` collapses under
+# shell word-splitting to a single argument and the required second
+# positional goes missing.
+DEVICE ?= PE1
+PREFIX ?= 10.255.0.31
+ADDRESS ?= 10.255.0.31
+NAME ?= GigabitEthernet0/0/0/1
+COUNT ?= 20
 
 .PHONY: help setup test lint inventory facts interfaces bgp lldp isis sr \
-        fabric-bgp analyze demo diff capture learn-topology health health-fixtures \
+        fabric-bgp route bgp-neighbor interface logging ping traceroute \
+        analyze demo diff capture learn-topology health health-fixtures \
         baseline-pin baseline-show flaps mcp inspect docker-build clean
 
 help:
@@ -20,6 +32,12 @@ help:
 	@echo "  make isis          IS-IS neighbors on PE1 (or DEVICE=name)"
 	@echo "  make sr            SR-TE policies on PE1 (or DEVICE=name)"
 	@echo "  make fabric-bgp    BGP summary across the whole inventory"
+	@echo "  make route         Look up a route (DEVICE=name PREFIX=10.0.0.0/24)"
+	@echo "  make bgp-neighbor  Look up a BGP neighbor (DEVICE=name ADDRESS=...)"
+	@echo "  make interface     Look up an interface (DEVICE=name NAME=...)"
+	@echo "  make logging       Show recent log lines (DEVICE=name COUNT=...)"
+	@echo "  make ping          Ping from a device (DEVICE=name ADDRESS=...); active probe"
+	@echo "  make traceroute    Traceroute from a device (DEVICE=name ADDRESS=...); active probe"
 	@echo "  make analyze       Collect evidence and analyze with the selected LLM"
 	@echo "  make demo          Run the narrated agent demo (or DEVICE=name)"
 	@echo "  make diff          Diff evidence against the last snapshot (or DEVICE=name)"
@@ -67,6 +85,27 @@ sr:
 
 fabric-bgp:
 	nettools fabric bgp
+
+# Validated, parameterized command templates (Phase 5). See CLAUDE.md,
+# "Validated, parameterized command templates". ping/traceroute generate
+# traffic (active probes) and are gated by NETTOOLS_ALLOW_ACTIVE_PROBES.
+route:
+	nettools route $(DEVICE) $(PREFIX)
+
+bgp-neighbor:
+	nettools bgp-neighbor $(DEVICE) $(ADDRESS)
+
+interface:
+	nettools interface $(DEVICE) $(NAME)
+
+logging:
+	nettools logging $(DEVICE) --count $(COUNT)
+
+ping:
+	nettools ping $(DEVICE) $(ADDRESS)
+
+traceroute:
+	nettools traceroute $(DEVICE) $(ADDRESS)
 
 analyze:
 	nettools analyze $(DEVICE)

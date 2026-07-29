@@ -28,11 +28,41 @@ documentation but have **no live device to verify against yet**; treat their
 command strings as unconfirmed until a device exists. Their presence is what
 keeps the abstraction honest -- ``juniper_junos`` in particular shares no command
 words with IOS-XR for the same intents.
+
+Phase 5 adds a second, narrower allowlist for read-only commands that *do*
+take one caller-supplied value -- ``show route <prefix>``, ``show bgp
+neighbor <ip>``, ``ping``, and the like. Those live in ``templates.py`` as
+``PLATFORM_TEMPLATES[platform][template_name] -> Template``, re-exported here
+so this module stays the single place a reviewer looks to see everything that
+may ever be sent to a device. Unlike the static table above, a template's
+parameter is never passed through as text: it is parsed into a typed object
+(an IPv4 address/network, a bounded integer, or a regex-validated interface
+name) and the command is rendered from that object's own canonical string
+form. See ``templates.py``'s module docstring for the full "canonicalize by
+reconstruction" security model and its five layered defenses.
 """
 
 from __future__ import annotations
 
 from typing import Any
+
+from .templates import (  # noqa: F401 - re-exported so this module stays the single authority
+    PLATFORM_TEMPLATES,
+    VERB_ALLOWLIST,
+    BoundedIntParam,
+    InterfaceNameParam,
+    IPv4AddressParam,
+    IPv4PrefixParam,
+    ParamType,
+    Template,
+    TemplateValidationError,
+    UnknownTemplateError,
+    is_safe_rendered_command,
+    known_platform_templates,
+    render_command,
+    supports_template,
+    template_for,
+)
 
 # Ordered so evidence sections come out in a sensible narrative: what the device
 # is, then its links, then its protocols, then its traffic engineering.
