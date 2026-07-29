@@ -2,7 +2,8 @@ PYTHON ?= python3
 DEVICE ?=
 
 .PHONY: help setup test lint inventory facts interfaces bgp lldp isis sr \
-        fabric-bgp analyze demo diff capture learn-topology mcp inspect docker-build clean
+        fabric-bgp analyze demo diff capture learn-topology health health-fixtures \
+        baseline-pin baseline-show flaps mcp inspect docker-build clean
 
 help:
 	@echo "IOS-XR Read-Only Network Tools"
@@ -24,6 +25,11 @@ help:
 	@echo "  make diff          Diff evidence against the last snapshot (or DEVICE=name)"
 	@echo "  make capture       Recapture test fixtures from the whole lab"
 	@echo "  make learn-topology  Derive expected topology from fixtures and update inventory/lab.yaml"
+	@echo "  make health        Evaluate health verdicts across the whole fabric (live)"
+	@echo "  make health-fixtures  Evaluate health verdicts against the committed t0 fixtures"
+	@echo "  make baseline-pin  Pin a golden snapshot (or DEVICE=name)"
+	@echo "  make baseline-show Print a device's pinned golden snapshot (or DEVICE=name)"
+	@echo "  make flaps         Detect oscillating fields in snapshot history (or DEVICE=name)"
 	@echo "  make mcp           Start the MCP server over stdio"
 	@echo "  make inspect       Smoke-test the MCP server (or DEVICE=name)"
 	@echo "  make docker-build  Build the MCP server container image"
@@ -82,6 +88,23 @@ capture:
 # fabric anomaly report; pass ARGS=--live to derive from a live collection.
 learn-topology:
 	nettools learn-topology $(ARGS)
+
+# Deterministic health verdicts (see CLAUDE.md, "Phase 4"). Exit codes:
+# 0 ok/info, 1 warning, 2 critical.
+health:
+	nettools health --all
+
+health-fixtures:
+	nettools health --all --from-fixtures
+
+baseline-pin:
+	nettools baseline pin $(DEVICE)
+
+baseline-show:
+	nettools baseline show $(DEVICE)
+
+flaps:
+	nettools flaps $(DEVICE)
 
 mcp:
 	nettools-mcp

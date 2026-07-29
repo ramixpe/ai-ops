@@ -361,6 +361,146 @@ def test_evidence_commands_are_all_approved():
         assert command in APPROVED_COMMANDS[LAB_PLATFORM]
 
 
+def test_golden_snapshot_is_pinned_separately_from_timestamped_history(monkeypatch, tmp_path):
+    from agent_nettools.network_tools import (
+        load_golden_snapshot,
+        load_latest_snapshot,
+        save_golden_snapshot,
+        save_snapshot,
+    )
+
+    monkeypatch.setenv("NETTOOLS_EVIDENCE_DIR", str(tmp_path))
+
+    first = {"device": "PE1", "timestamp": "t0"}
+    save_snapshot(first)
+    golden = {"device": "PE1", "timestamp": "golden-capture"}
+    golden_path = save_golden_snapshot(golden)
+    second = {"device": "PE1", "timestamp": "t1"}
+    save_snapshot(second)
+
+    # The golden file sorts after every ISO timestamp lexicographically ("g" >
+    # any digit); if it were not excluded from the timestamped glob it would
+    # wrongly become "latest".
+    assert load_latest_snapshot("PE1") == second
+    assert load_golden_snapshot("PE1") == golden
+    assert golden_path.endswith("golden.json")
+
+
+def test_load_golden_snapshot_returns_none_when_never_pinned(tmp_path):
+    from agent_nettools.network_tools import load_golden_snapshot
+
+    assert load_golden_snapshot("PE1", base_dir=str(tmp_path)) is None
+
+
+def test_pinning_golden_twice_overwrites_the_previous_pin(tmp_path):
+    from agent_nettools.network_tools import load_golden_snapshot, save_golden_snapshot
+
+    save_golden_snapshot({"device": "PE1", "timestamp": "first"}, base_dir=str(tmp_path))
+    save_golden_snapshot({"device": "PE1", "timestamp": "second"}, base_dir=str(tmp_path))
+
+    assert load_golden_snapshot("PE1", base_dir=str(tmp_path)) == {
+        "device": "PE1",
+        "timestamp": "second",
+    }
+
+
+def _bgp_snapshot(state: str, *, up_down: str = "00:00:01") -> dict:
+    """One synthetic snapshot with a single BGP peer at the given St/PfxRcd state.
+
+    ``up_down`` is a volatile field (see ``parsers.VOLATILE_FIELDS``) included
+    here specifically so a test can assert it is excluded from flap detection.
+    """
+
+    return {
+        "device": "PE9",
+        "platform": "cisco_xr",
+        "timestamp": "irrelevant",
+        "bgp": {
+            "status": "success",
+            "data": {
+                "parse_status": "ok",
+                "parsed": {
+                    "meta": {"router_id": "10.0.0.9", "neighbor_count": 1},
+                    "records": [
+                        {"neighbor": "10.0.0.1", "state_pfx_rcd": state, "up_down": up_down}
+                    ],
+                },
+            },
+        },
+    }
+
+
+def _write_snapshot_at(tmp_path, device: str, index: int, evidence: dict) -> None:
+    """Write one snapshot file with an explicit, order-preserving timestamp name.
+
+    Bypasses ``save_snapshot``'s wall-clock timestamp so a tight test loop
+    cannot flakily collide on filename -- history order only needs to be
+    lexicographic, which a zero-padded index guarantees deterministically.
+    """
+
+    import json as _json
+
+    directory = tmp_path / device
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"2026-01-01T00-00-{index:02d}.json").write_text(
+        _json.dumps(evidence), encoding="utf-8"
+    )
+
+
+def test_detect_flaps_reports_an_oscillating_field(tmp_path):
+    from agent_nettools.network_tools import detect_flaps
+
+    # Idle/Established/Idle/Established/Idle: 4 transitions, well past the
+    # default min_transitions=3 threshold.
+    states = ["Idle", "5", "Idle", "5", "Idle"]
+    for index, state in enumerate(states):
+        _write_snapshot_at(tmp_path, "PE9", index, _bgp_snapshot(state, up_down=f"00:0{index}:00"))
+
+    result = detect_flaps("PE9", base_dir=str(tmp_path))
+
+    assert result["snapshots_examined"] == 5
+    assert len(result["flapping"]) == 1
+    entry = result["flapping"][0]
+    assert entry["intent"] == "bgp"
+    assert entry["subject"] == "10.0.0.1"
+    assert entry["field"] == "state_pfx_rcd"
+    assert entry["transitions"] == 4
+    assert entry["values"] == states
+
+
+def test_detect_flaps_ignores_volatile_fields(tmp_path):
+    """up_down changes on every single snapshot in a healthy fabric -- it must
+    never be reported as flapping."""
+
+    from agent_nettools.network_tools import detect_flaps
+
+    for index in range(5):
+        _write_snapshot_at(tmp_path, "PE9", index, _bgp_snapshot("5", up_down=f"00:0{index}:00"))
+
+    result = detect_flaps("PE9", base_dir=str(tmp_path))
+
+    assert result["flapping"] == []
+
+
+def test_detect_flaps_respects_min_transitions(tmp_path):
+    from agent_nettools.network_tools import detect_flaps
+
+    # Only 2 transitions: below the raised threshold.
+    for index, state in enumerate(("Idle", "5", "Idle")):
+        _write_snapshot_at(tmp_path, "PE9", index, _bgp_snapshot(state))
+
+    assert detect_flaps("PE9", base_dir=str(tmp_path), min_transitions=3)["flapping"] == []
+    assert len(detect_flaps("PE9", base_dir=str(tmp_path), min_transitions=2)["flapping"]) == 1
+
+
+def test_detect_flaps_with_no_history_reports_nothing(tmp_path):
+    from agent_nettools.network_tools import detect_flaps
+
+    result = detect_flaps("NEVER_SEEN", base_dir=str(tmp_path))
+
+    assert result == {"device": "NEVER_SEEN", "snapshots_examined": 0, "flapping": []}
+
+
 def test_fabric_default_check_is_bgp(monkeypatch):
     set_device_environment(monkeypatch)
 

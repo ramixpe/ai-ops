@@ -499,9 +499,24 @@ def collect_evidence(
 # Snapshots land here, relative to the working directory unless overridden.
 DEFAULT_SNAPSHOT_DIR = "evidence"
 
+# The golden (pinned) snapshot's filename. Deliberately not timestamp-shaped so
+# it can never be confused with -- or accidentally picked up by -- the
+# lexicographic "latest timestamped snapshot" glob below; every timestamped
+# snapshot lookup explicitly excludes this exact name instead of relying on
+# sort order to separate the two.
+GOLDEN_SNAPSHOT_FILENAME = "golden.json"
+
 
 def _snapshot_dir(base_dir: str | None) -> Path:
     return Path(base_dir or os.getenv("NETTOOLS_EVIDENCE_DIR") or DEFAULT_SNAPSHOT_DIR)
+
+
+def _timestamped_snapshot_paths(directory: Path) -> list[Path]:
+    """Return one device's timestamped snapshots, oldest first, golden excluded."""
+
+    if not directory.is_dir():
+        return []
+    return sorted(path for path in directory.glob("*.json") if path.name != GOLDEN_SNAPSHOT_FILENAME)
 
 
 def save_snapshot(evidence: dict[str, Any], *, base_dir: str | None = None) -> str:
@@ -525,15 +540,47 @@ def load_latest_snapshot(
     *,
     base_dir: str | None = None,
 ) -> dict[str, Any] | None:
-    """Return the most recent saved snapshot for a device, or None."""
+    """Return the most recent saved *timestamped* snapshot for a device, or None.
+
+    Never returns the golden snapshot -- it lives under a fixed filename that
+    this listing explicitly excludes, so pinning a baseline can never silently
+    change what "latest" means.
+    """
 
     directory = _snapshot_dir(base_dir) / device_name
-    if not directory.is_dir():
-        return None
-    snapshots = sorted(directory.glob("*.json"))
+    snapshots = _timestamped_snapshot_paths(directory)
     if not snapshots:
         return None
     return json.loads(snapshots[-1].read_text(encoding="utf-8"))
+
+
+def save_golden_snapshot(evidence: dict[str, Any], *, base_dir: str | None = None) -> str:
+    """Pin one evidence collection as the device's golden (known-good) baseline.
+
+    Overwrites any previously pinned golden snapshot for this device -- there
+    is exactly one golden snapshot per device, unlike the unbounded history of
+    timestamped snapshots. Returns the path written.
+    """
+
+    device = str(evidence.get("device", "unknown"))
+    directory = _snapshot_dir(base_dir) / device
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / GOLDEN_SNAPSHOT_FILENAME
+    path.write_text(json.dumps(evidence, indent=2), encoding="utf-8")
+    return str(path)
+
+
+def load_golden_snapshot(
+    device_name: str,
+    *,
+    base_dir: str | None = None,
+) -> dict[str, Any] | None:
+    """Return a device's pinned golden snapshot, or None if never pinned."""
+
+    path = _snapshot_dir(base_dir) / device_name / GOLDEN_SNAPSHOT_FILENAME
+    if not path.is_file():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 # Sentinel distinguishing "field absent" from "field present with value None"
@@ -759,3 +806,97 @@ def diff_evidence(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
         "unsupported": sorted(unsupported),
         "details": details,
     }
+
+
+# --------------------------------------------------------------------------- #
+# Flap detection: history a single before/after diff cannot see.
+# --------------------------------------------------------------------------- #
+
+
+def _flap_sequences(
+    snapshots: list[dict[str, Any]],
+) -> dict[tuple[str, str | None, str], list[Any]]:
+    """Build ``{(intent, subject, field): [value, value, ...]}`` across snapshots.
+
+    ``subject`` is ``None`` for a meta-level field (device- or protocol-wide,
+    e.g. a BGP process's ``active`` flag) and the record key's value
+    (``parsers.record_key``) for a per-row field -- the same identity diffing
+    already uses, so a peer that bounces is tracked as one continuous history
+    across snapshots rather than compared pairwise. Volatile fields
+    (``parsers.volatile_fields``) are excluded: they move every collection and
+    would swamp real oscillation with noise. Only intents that parsed cleanly
+    contribute; a snapshot with a failed or unsupported intent simply has
+    nothing to add for it in that round, rather than breaking the sequence.
+    """
+
+    sequences: dict[tuple[str, str | None, str], list[Any]] = {}
+
+    for snapshot in snapshots:
+        platform = str(snapshot.get("platform") or DEFAULT_PLATFORM)
+        for intent, section in snapshot.items():
+            if not isinstance(section, dict):
+                continue  # "device", "platform", "timestamp" are plain strings.
+            data = section.get("data", {}) or {}
+            if data.get("parse_status") != parsers.PARSE_OK:
+                continue
+            parsed = data.get("parsed") or {}
+            volatile = parsers.volatile_fields(platform, intent)
+            key_field = parsers.record_key(platform, intent)
+
+            for field, value in (parsed.get("meta") or {}).items():
+                if field in volatile:
+                    continue
+                sequences.setdefault((intent, None, field), []).append(value)
+
+            if key_field is None:
+                continue
+            for record in parsed.get("records") or []:
+                subject = record.get(key_field)
+                if subject is None:
+                    continue
+                for field, value in record.items():
+                    if field == key_field or field in volatile:
+                        continue
+                    sequences.setdefault((intent, subject, field), []).append(value)
+
+    return sequences
+
+
+def detect_flaps(
+    device_name: str,
+    *,
+    base_dir: str | None = None,
+    min_transitions: int = 3,
+) -> dict[str, Any]:
+    """Report fields that oscillate across a device's saved snapshot history.
+
+    A peer that bounced up/down/up between collections can look clean in
+    every single pairwise ``diff_evidence`` call -- each one only ever shows
+    one change, never the pattern of repeated change. Reading the *whole*
+    history instead surfaces it. History is read from every timestamped
+    snapshot under this device's evidence directory (oldest first; the golden
+    snapshot is excluded, same as ``load_latest_snapshot``), grouped into
+    per-(intent, subject, field) value sequences, and a sequence is reported
+    once it has accumulated at least ``min_transitions`` changes in value.
+    """
+
+    directory = _snapshot_dir(base_dir) / device_name
+    paths = _timestamped_snapshot_paths(directory)
+    snapshots = [json.loads(path.read_text(encoding="utf-8")) for path in paths]
+
+    flapping: list[dict[str, Any]] = []
+    for (intent, subject, field), values in _flap_sequences(snapshots).items():
+        transitions = sum(1 for old, new in zip(values, values[1:], strict=False) if old != new)
+        if transitions >= min_transitions:
+            flapping.append(
+                {
+                    "intent": intent,
+                    "subject": subject,
+                    "field": field,
+                    "transitions": transitions,
+                    "values": values,
+                }
+            )
+
+    flapping.sort(key=lambda item: (-item["transitions"], item["intent"], str(item["subject"]), item["field"]))
+    return {"device": device_name, "snapshots_examined": len(snapshots), "flapping": flapping}
