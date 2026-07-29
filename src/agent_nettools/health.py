@@ -53,7 +53,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from . import parsers
+from . import metrics, parsers
 from .inventory_model import Device, load_inventory_file
 from .network_tools import STATUS_ERROR, STATUS_UNSUPPORTED
 from .platforms import DEFAULT_PLATFORM
@@ -590,6 +590,10 @@ def evaluate_device(evidence: dict[str, Any], device: Device) -> dict[str, Any]:
             counts[finding["severity"]] += 1
 
     platform = str(evidence.get("platform") or device.platform or DEFAULT_PLATFORM)
+    # One record per device evaluated, whether called directly or via
+    # evaluate_fabric (which calls this once per device) -- see metrics.py's
+    # module docstring for why this is the one hook point for verdict counts.
+    metrics.record_verdict(severity)
     return {
         "device": device.name,
         "role": device.role,

@@ -68,7 +68,20 @@ def test_mcp_readme_lists_exactly_the_exposed_tools():
         name
         for name, obj in vars(server).items()
         if callable(obj)
-        and name.startswith(("list_lab", "get_lab", "check_lab", "collect_lab"))
+        and name.startswith(
+            (
+                "list_lab",
+                "get_lab",
+                "check_lab",
+                "collect_lab",
+                # Phase 8: snapshots/diffing, health verdicts, flap detection.
+                "diff_lab",
+                "save_lab",
+                "pin_lab",
+                "assess_lab",
+                "detect_lab",
+            )
+        )
     }
     mcp_readme = (REPO_ROOT / "mcp_server" / "README.md").read_text(encoding="utf-8")
     documented = _backticked_between(mcp_readme, "## Exposed Tools", "There is no shell")

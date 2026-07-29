@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import inspect
+import json
+from typing import Any, Callable
+
 from dotenv import find_dotenv, load_dotenv
 
 try:
@@ -11,6 +15,9 @@ except ModuleNotFoundError:
     # MCP SDK < 2.0 exposed it as FastMCP.
     from mcp.server.fastmcp import FastMCP
 
+from agent_nettools.health import evaluate_fabric
+from agent_nettools.inventory_model import load_inventory_file
+from agent_nettools.llm_analysis import TROUBLESHOOTING_PROMPT
 from agent_nettools.network_tools import (
     check_bgp_neighbors,
     check_fabric,
@@ -19,13 +26,19 @@ from agent_nettools.network_tools import (
     check_lldp_neighbors,
     check_sr_policies,
     collect_evidence,
+    detect_flaps,
+    diff_evidence,
     get_bgp_neighbor,
     get_device_facts,
     get_interface,
     get_logging,
     get_route,
     list_devices,
+    load_golden_snapshot,
+    load_latest_snapshot,
     ping_device,
+    save_golden_snapshot,
+    save_snapshot,
     traceroute_device,
 )
 
@@ -38,71 +51,109 @@ load_dotenv(find_dotenv(usecwd=True)) or load_dotenv()
 
 mcp = FastMCP("IOS-XR Read-Only Network Tools")
 
+# --------------------------------------------------------------------------- #
+# readOnlyHint annotations: every tool this server exposes is read-only (see
+# CLAUDE.md, "The safety boundary") -- ToolAnnotations.read_only_hint is how a
+# client acts on that guarantee (e.g. auto-approving calls) without having to
+# inspect this file. The installed MCP SDK's `tool()` decorator is checked for
+# an `annotations=` parameter at import time, rather than assumed, because an
+# older SDK's decorator does not accept that keyword at all -- passing it
+# would be a TypeError on every single tool registration, which would take
+# the whole server down rather than just omitting a nice-to-have annotation.
+# --------------------------------------------------------------------------- #
 
-@mcp.tool()
+_TOOL_ACCEPTS_ANNOTATIONS = "annotations" in inspect.signature(FastMCP.tool).parameters
+
+try:
+    from mcp.types import ToolAnnotations
+
+    READ_ONLY_HINT: Any | None = ToolAnnotations(read_only_hint=True) if _TOOL_ACCEPTS_ANNOTATIONS else None
+except ImportError:
+    READ_ONLY_HINT = None
+
+# What actually happened, so a caller/reviewer can tell without re-deriving it
+# from the two checks above.
+READ_ONLY_ANNOTATIONS_SUPPORTED = READ_ONLY_HINT is not None
+
+
+def _read_only_tool(*args: Any, **kwargs: Any) -> Callable[[Callable], Callable]:
+    """``@mcp.tool()``, with a ``readOnlyHint`` annotation when the installed SDK supports it.
+
+    Every tool below uses this instead of the bare ``@mcp.tool()`` decorator.
+    Degrades silently (no annotation, no error) on an SDK old enough to lack
+    ``ToolAnnotations``/the ``annotations=`` keyword -- see
+    ``READ_ONLY_ANNOTATIONS_SUPPORTED`` for which path this process took.
+    """
+
+    if READ_ONLY_HINT is not None:
+        kwargs.setdefault("annotations", READ_ONLY_HINT)
+    return mcp.tool(*args, **kwargs)
+
+
+@_read_only_tool()
 def list_lab_devices() -> dict:
     """List the IOS-XR devices available in the lab inventory."""
 
     return list_devices()
 
 
-@mcp.tool()
+@_read_only_tool()
 def get_lab_device_facts(device_name: str) -> dict:
     """Collect basic read-only facts from a lab device."""
 
     return get_device_facts(device_name)
 
 
-@mcp.tool()
+@_read_only_tool()
 def check_lab_interfaces(device_name: str) -> dict:
     """Collect read-only interface status from a lab device."""
 
     return check_interfaces(device_name)
 
 
-@mcp.tool()
+@_read_only_tool()
 def check_lab_bgp_neighbors(device_name: str) -> dict:
     """Collect read-only BGP neighbor state from a lab device."""
 
     return check_bgp_neighbors(device_name)
 
 
-@mcp.tool()
+@_read_only_tool()
 def check_lab_lldp_neighbors(device_name: str) -> dict:
     """Collect read-only LLDP neighbor state from a lab device."""
 
     return check_lldp_neighbors(device_name)
 
 
-@mcp.tool()
+@_read_only_tool()
 def check_lab_isis_neighbors(device_name: str) -> dict:
     """Collect read-only IS-IS neighbor state from a lab device."""
 
     return check_isis_neighbors(device_name)
 
 
-@mcp.tool()
+@_read_only_tool()
 def check_lab_sr_policies(device_name: str) -> dict:
     """Collect read-only Segment Routing TE policy state from a lab device."""
 
     return check_sr_policies(device_name)
 
 
-@mcp.tool()
+@_read_only_tool()
 def check_lab_fabric(check: str = "bgp") -> dict:
     """Run one read-only check (facts|interfaces|bgp|lldp|isis|sr) across the fabric."""
 
     return check_fabric(check)
 
 
-@mcp.tool()
+@_read_only_tool()
 def collect_lab_evidence(device_name: str) -> dict:
     """Collect the full read-only evidence bundle from a lab device in one session."""
 
     return collect_evidence(device_name)
 
 
-@mcp.tool()
+@_read_only_tool()
 def get_lab_route(device_name: str, prefix: str) -> dict:
     """Look up a specific route on a lab device.
 
@@ -116,7 +167,7 @@ def get_lab_route(device_name: str, prefix: str) -> dict:
     return get_route(device_name, prefix)
 
 
-@mcp.tool()
+@_read_only_tool()
 def get_lab_bgp_neighbor(device_name: str, address: str) -> dict:
     """Look up a specific BGP neighbor on a lab device.
 
@@ -128,7 +179,7 @@ def get_lab_bgp_neighbor(device_name: str, address: str) -> dict:
     return get_bgp_neighbor(device_name, address)
 
 
-@mcp.tool()
+@_read_only_tool()
 def get_lab_interface(device_name: str, name: str) -> dict:
     """Look up a specific interface's status on a lab device.
 
@@ -141,7 +192,7 @@ def get_lab_interface(device_name: str, name: str) -> dict:
     return get_interface(device_name, name)
 
 
-@mcp.tool()
+@_read_only_tool()
 def get_lab_logging(device_name: str, count: int = 20) -> dict:
     """Show a lab device's most recent log lines.
 
@@ -151,7 +202,7 @@ def get_lab_logging(device_name: str, count: int = 20) -> dict:
     return get_logging(device_name, count)
 
 
-@mcp.tool()
+@_read_only_tool()
 def get_lab_ping(device_name: str, address: str) -> dict:
     """Ping an IPv4 address from a lab device.
 
@@ -164,7 +215,7 @@ def get_lab_ping(device_name: str, address: str) -> dict:
     return ping_device(device_name, address)
 
 
-@mcp.tool()
+@_read_only_tool()
 def get_lab_traceroute(device_name: str, address: str) -> dict:
     """Traceroute to an IPv4 address from a lab device.
 
@@ -175,6 +226,241 @@ def get_lab_traceroute(device_name: str, address: str) -> dict:
     """
 
     return traceroute_device(device_name, address)
+
+
+# --------------------------------------------------------------------------- #
+# Phase 8: MCP parity for snapshots, diffing, health, and flap detection --
+# through Phase 7 these were CLI-only, so the MCP client (an LLM, the primary
+# consumer of this server) could not do drift detection or get a health
+# verdict at all. Every tool below is a thin wrapper over an existing,
+# already-safe network_tools.py/health.py function -- no new device access
+# path, exactly like every tool above.
+# --------------------------------------------------------------------------- #
+
+
+def _diff_against(tool_name: str, device_name: str, previous: dict | None) -> dict:
+    """Shared shape for both diff tools: collect fresh evidence, save it, diff if possible.
+
+    Mirrors ``nettools diff DEVICE [--against golden|latest]``: the fresh
+    collection is always saved as the new "latest" timestamped snapshot,
+    regardless of which baseline it was compared against -- pinning golden is
+    a separate, explicit action (``pin_lab_golden_snapshot``).
+    """
+
+    current = collect_evidence(device_name)
+    path = save_snapshot(current)
+    result: dict[str, Any] = {
+        "tool": tool_name,
+        "device": device_name,
+        "status": "success",
+        "data": {"snapshot_path": path, "has_previous": previous is not None, "diff": None},
+        "errors": [],
+    }
+    if previous is not None:
+        result["data"]["diff"] = diff_evidence(previous, current)
+    return result
+
+
+@_read_only_tool()
+def diff_lab_device_against_latest(device_name: str) -> dict:
+    """Collect fresh evidence and diff it against the device's most recently saved snapshot.
+
+    Saves the fresh collection as the new "latest" snapshot, same as
+    ``nettools diff DEVICE``. ``data.has_previous`` is ``false`` (and
+    ``data.diff`` is ``null``) the first time this runs for a device -- there
+    is nothing to compare against yet, not an error.
+    """
+
+    return _diff_against(
+        "diff_lab_device_against_latest", device_name, load_latest_snapshot(device_name)
+    )
+
+
+@_read_only_tool()
+def diff_lab_device_against_golden(device_name: str) -> dict:
+    """Collect fresh evidence and diff it against the device's pinned golden snapshot.
+
+    ``data.has_previous`` is ``false`` (and ``data.diff`` is ``null``) when no
+    golden snapshot has ever been pinned for this device -- see
+    ``pin_lab_golden_snapshot``.
+    """
+
+    return _diff_against(
+        "diff_lab_device_against_golden", device_name, load_golden_snapshot(device_name)
+    )
+
+
+@_read_only_tool()
+def save_lab_snapshot(device_name: str) -> dict:
+    """Collect fresh evidence and save it as a new timestamped snapshot.
+
+    Does not affect the device's pinned golden baseline -- see
+    ``pin_lab_golden_snapshot`` to update that.
+    """
+
+    evidence = collect_evidence(device_name)
+    path = save_snapshot(evidence)
+    return {
+        "tool": "save_lab_snapshot",
+        "device": device_name,
+        "status": "success",
+        "data": {"snapshot_path": path},
+        "errors": [],
+    }
+
+
+@_read_only_tool()
+def pin_lab_golden_snapshot(device_name: str, from_latest: bool = False) -> dict:
+    """Pin a golden (known-good) baseline snapshot for a device.
+
+    By default collects fresh evidence and pins that. ``from_latest=true``
+    instead pins the most recently *saved* snapshot (``save_lab_snapshot`` /
+    ``diff_lab_device_against_latest`` / ``diff_lab_device_against_golden``,
+    whichever ran most recently) without a new collection -- and reports a
+    structured error if there is no saved snapshot to pin yet.
+    """
+
+    if from_latest:
+        evidence = load_latest_snapshot(device_name)
+        if evidence is None:
+            return {
+                "tool": "pin_lab_golden_snapshot",
+                "device": device_name,
+                "status": "error",
+                "data": {},
+                "errors": [
+                    f"No saved snapshot for {device_name} to pin; call save_lab_snapshot "
+                    "first, or omit from_latest to collect fresh evidence now."
+                ],
+            }
+    else:
+        evidence = collect_evidence(device_name)
+        save_snapshot(evidence)
+
+    path = save_golden_snapshot(evidence)
+    return {
+        "tool": "pin_lab_golden_snapshot",
+        "device": device_name,
+        "status": "success",
+        "data": {"golden_path": path},
+        "errors": [],
+    }
+
+
+@_read_only_tool()
+def assess_lab_device_health(device_name: str) -> dict:
+    """Evaluate deterministic health verdicts (role invariants + baseline drift) for one device.
+
+    Cheap, rule-based -- not an LLM call -- so a client can get a severity
+    verdict (``ok``/``info``/``warning``/``critical``) and its findings
+    without spending a reasoning call. See ``assess_lab_fabric_health`` to
+    evaluate every device at once.
+    """
+
+    evidence = collect_evidence(device_name)
+    result = evaluate_fabric({device_name: evidence})
+    verdict = result["devices"].get(device_name)
+    if verdict is None:
+        return {
+            "tool": "assess_lab_device_health",
+            "device": device_name,
+            "status": "error",
+            "data": {},
+            "errors": [f"{device_name} is not in the lab inventory."],
+        }
+    return verdict
+
+
+@_read_only_tool()
+def assess_lab_fabric_health() -> dict:
+    """Evaluate deterministic health verdicts across every device in the fabric inventory.
+
+    Same rules as ``assess_lab_device_health``, rolled up to one fabric-wide
+    severity (the max over every device's own severity) -- see
+    ``health.evaluate_fabric``.
+    """
+
+    listed = list_devices()
+    if listed.get("status") != "success":
+        return listed
+    names = [device["name"] for device in listed["data"]["devices"]]
+    evidence_by_device = {name: collect_evidence(name) for name in names}
+    return evaluate_fabric(evidence_by_device)
+
+
+@_read_only_tool()
+def detect_lab_flaps(device_name: str, min_transitions: int = 3) -> dict:
+    """Report fields that oscillated across a device's saved snapshot history.
+
+    A peer that bounced up/down/up between collections can look clean in
+    every single pairwise diff -- this reads the device's *entire* saved
+    snapshot history instead. Requires prior snapshots (``save_lab_snapshot``,
+    ``diff_lab_device_against_latest``, or ``nettools diff``/``capture``) --
+    with none saved yet, ``data.flapping`` is simply empty.
+    """
+
+    return detect_flaps(device_name, min_transitions=min_transitions)
+
+
+# --------------------------------------------------------------------------- #
+# MCP resources: let a client ground itself in the inventory and the expected
+# topology without spending a tool call on it. Both are read directly off the
+# credential-free inventory layers (`inventory_model.py`/`network_tools.list_devices`),
+# so exposing them adds no new device-access path either.
+# --------------------------------------------------------------------------- #
+
+
+@mcp.resource(
+    "lab://inventory",
+    name="lab_inventory",
+    description="The lab's device inventory (name, hostname, platform) -- no credentials.",
+    mime_type="application/json",
+)
+def lab_inventory_resource() -> str:
+    """Same data as the ``list_lab_devices`` tool, as a resource instead of a tool call."""
+
+    return json.dumps(list_devices(), indent=2)
+
+
+@mcp.resource(
+    "lab://topology/expected",
+    name="lab_expected_topology",
+    description=(
+        "Each device's derived expected topology counts (isis_adjacencies, bgp_peers) "
+        "from inventory/lab.yaml -- see `nettools learn-topology`."
+    ),
+    mime_type="application/json",
+)
+def lab_expected_topology_resource() -> str:
+    """Expected per-device topology counts, keyed by device name.
+
+    A device's value is ``null`` if no baseline has ever been derived for it,
+    never a fabricated zero -- ``isis_adjacencies``/``bgp_peers`` are absent
+    for a device with no active BGP process, matching ``Expected``'s own
+    "absent, not zero" contract (see ``inventory_model.py``).
+    """
+
+    inventory = load_inventory_file()
+    payload = {
+        device.name: (device.expected.model_dump(exclude_none=True) if device.expected else None)
+        for device in inventory.devices
+    }
+    return json.dumps(payload, indent=2)
+
+
+# --------------------------------------------------------------------------- #
+# MCP prompt: the same troubleshooting framing `nettools analyze` sends to
+# whichever LLM provider is configured, exposed so an MCP client can reuse it
+# directly instead of inventing its own analysis prompt from scratch.
+# --------------------------------------------------------------------------- #
+
+
+@mcp.prompt(
+    name="troubleshooting_prompt",
+    description="This project's own network-troubleshooting system prompt (see llm_analysis.py).",
+)
+def troubleshooting_prompt() -> str:
+    return TROUBLESHOOTING_PROMPT
 
 
 def main() -> None:

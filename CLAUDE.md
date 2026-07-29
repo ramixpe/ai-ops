@@ -14,7 +14,7 @@ reasoning layer, and an MCP server — all over the same narrow allowlist of
 ```bash
 make setup                  # python -m venv .venv + pip install -e ".[dev,llm]"
 source .venv/bin/activate
-make test                   # pytest -q  (444 tests, no network needed)
+make test                   # pytest -q  (554 tests -- 550 run + 4 live_lab-skipped, no network needed)
 make lint                   # ruff check .
 make help                   # full target list
 ```
@@ -36,8 +36,16 @@ Anthropic only) runs a bounded, read-only tool-calling loop.
 `nettools evidence prune --keep-days N --keep-count M [--device D]` and
 `nettools evidence history [DEVICE]` (Phase 7) manage stored snapshots
 against whichever backend `NETTOOLS_EVIDENCE_BACKEND` selects.
+`nettools metrics [--format json|prometheus] [--quiet]` (Phase 8) reports
+per-device collection/latency/retry metrics and health verdict counts;
+`nettools version` prints the installed package version. Most other commands
+now accept `--format json|table|summary` (default `json`) and `--quiet`; see
+"Output formats and exit codes (Phase 8)" below.
 
 CI (`.github/workflows/ci.yml`) runs `ruff check .` then `pytest -q` on Python 3.11.
+`tests/test_live_lab.py` (marker `live_lab`, registered in `pyproject.toml`) is
+excluded from that by default -- every test in it self-skips unless
+`NETTOOLS_LIVE_LAB=1` is set, so CI/`make test` never needs a reachable lab.
 
 Requires `DEVICE_USERNAME` / `DEVICE_PASSWORD` (or `DEVICE_SSH_KEYFILE`) for
 anything that touches a device; `cp .env.example .env` and see that file for
@@ -47,7 +55,8 @@ the full env surface (`LLM_PROVIDER`, `NETTOOLS_LOG`, `NETTOOLS_EVIDENCE_DIR`,
 `NETTOOLS_CONNECT_TIMEOUT_SECONDS`, `NETTOOLS_READ_TIMEOUT_SECONDS`,
 `NETTOOLS_BANNER_TIMEOUT_SECONDS`, `NETTOOLS_COMMAND_RETRIES`,
 `NETTOOLS_RETRY_BACKOFF_SECONDS`, `NETTOOLS_EVIDENCE_BACKEND`,
-`NETTOOLS_LOG_MAX_BYTES`, `NETTOOLS_LOG_BACKUP_COUNT`).
+`NETTOOLS_LOG_MAX_BYTES`, `NETTOOLS_LOG_BACKUP_COUNT`,
+`NETTOOLS_CREDENTIAL_PROVIDER`, `NETTOOLS_ACTOR`, `NETTOOLS_METRICS_FILE`).
 
 ## Architecture
 
@@ -70,9 +79,11 @@ Data flows in one direction through five layers:
    here, which is what lets platform be resolved before the allowlist check.
    `PLATFORMS` is a per-device override dict consulted *before* the YAML
    (tests use it to simulate other vendors without a second inventory file).
-3. `inventory.py` — joins the parsed inventory with env credentials (resolved
-   per device through its `credential_group`) into device dicts. Raises
-   `InventoryError` when required env is missing or the inventory is invalid.
+3. `inventory.py` — joins the parsed inventory with credentials (resolved per
+   device through its `credential_group`, via whichever pluggable provider
+   `credential_resolver.get_resolver()` selects -- see Phase 8) into device
+   dicts. Raises `InventoryError` when required env is missing or the
+   inventory is invalid.
 4. `network_tools.py` — the allowlist, SSH transport, evidence collection,
    snapshots, and diffing. All real logic lives here.
 5. `cli.py` and `mcp_server/server.py` — two independent front ends that call
@@ -82,6 +93,10 @@ Data flows in one direction through five layers:
 `topology.py` (derived expected topology counts + the fabric anomaly report)
 and `devices_doc.py` (renders `docs/devices.md`) sit beside layer 4/5: they
 read parsed evidence and the inventory, but nothing depends on them.
+`credential_resolver.py` (Phase 8) sits beside layer 3, called only from
+`inventory.py`; `metrics.py` (Phase 8) sits beside layer 4, called from
+`network_tools.py`/`health.py`; `output.py` (Phase 8) sits beside layer 5,
+called only from `cli.py`.
 
 `build/lib/` and `agent_nettools.egg-info/` are stale build artifacts. Never edit
 those copies; `make clean` removes them.
@@ -644,6 +659,137 @@ remains best-effort: a rotation or write failure is still swallowed, never
 raised -- `test_audit_log_failure_never_breaks_a_check` pins that a bad
 `NETTOOLS_LOG` path cannot turn a successful check into a reported failure.
 
+### Production hardening (Phase 8)
+
+Six mostly-independent additions, none touching the safety boundary itself.
+
+**MCP parity.** Through Phase 7, snapshots, diffing, health, and flap
+detection were CLI-only -- the MCP client is an LLM, the primary consumer of
+this server, and it could not do drift detection or get a health verdict at
+all. `mcp_server/server.py` adds seven tools, each a thin wrapper over an
+existing function, no new device-access path:
+`diff_lab_device_against_latest`/`diff_lab_device_against_golden`,
+`save_lab_snapshot`, `pin_lab_golden_snapshot`,
+`assess_lab_device_health`/`assess_lab_fabric_health` (reuses
+`health.evaluate_fabric` even for one device -- `evaluate_fabric({name:
+evidence})["devices"][name]` -- rather than duplicating device lookup), and
+`detect_lab_flaps`. `tests/test_docs.py`'s prefix filter for
+`test_mcp_readme_lists_exactly_the_exposed_tools` was widened (`diff_lab`,
+`save_lab`, `pin_lab`, `assess_lab`, `detect_lab`) to keep pinning the README
+against the server's real surface; that test itself is not in the
+do-not-modify list, only its assertion logic in `test_safety.py` is.
+
+Every tool is registered via `_read_only_tool()`, a thin wrapper around
+`@mcp.tool()` that adds `annotations=ToolAnnotations(read_only_hint=True)`
+*when the installed SDK's `tool()` decorator accepts an `annotations=`
+keyword at all* (checked once via `inspect.signature` at import time,
+mirroring the existing `FastMCP`/`MCPServer` old/new-SDK import fallback) --
+an older SDK without that parameter gets the bare decorator instead of a
+`TypeError` on every tool registration. `server.READ_ONLY_ANNOTATIONS_SUPPORTED`
+records which path a given install took. Two MCP **resources**
+(`lab://inventory`, `lab://topology/expected`) let a client ground itself
+without spending a tool call; one MCP **prompt** (`troubleshooting_prompt`)
+exposes `llm_analysis.TROUBLESHOOTING_PROMPT` directly. `tests/test_mcp_server.py`
+drives real tool/resource/prompt calls through an actual `ClientSession` over
+the SDK's in-memory transport (`mcp.shared.memory.create_client_server_memory_streams`,
+no subprocess, no `pytest-asyncio` -- each test is a plain function that
+builds a small `async def` and drives it with `asyncio.run()`), asserting on
+the returned result envelope -- `test_safety.py` only ever asserted tool
+names were *absent*; nothing before this actually called one through the
+protocol.
+
+**Output formats and exit codes.** `output.py` renders any result payload as
+`json` (default, so nothing already parsing this tool's output breaks),
+`table` (plain padded columns, no dependency), or `summary` (one line) by
+recognizing the handful of shapes this package's results actually come in
+(a single-device tool envelope, a fabric envelope, a health verdict --
+single-device or fabric -- a diff result, an inventory listing) and falling
+back to a flat key/value reformat for anything else. **It never invents or
+softens data**: every `_cmd_*` in `cli.py` computes its exit code from the
+full result *before* calling `_emit()`, so `--format summary` on a critical
+fabric still exits non-zero exactly like `--format json` would -- rendering
+and exit-code computation are two separate steps, deliberately. Exit codes
+follow one scheme everywhere, generalizing the shape `nettools health`
+already used (0 ok/info, 1 warning, 2 critical): `0` success, `1` the command
+ran but reports a problem (`status: "error"`, a `warning` verdict, or real
+`diff` drift), `2` could not run at all or reports the worst outcome
+(`InventoryError`, `get_provider()`'s `ValueError`, a `critical` verdict, or a
+`diff` where an intent failed to collect). `nettools diff` layers the Unix
+`diff --exit-code` convention on top: `0` nothing differs, `1` differences
+found, `2` the comparison itself is not trustworthy.
+
+**Metrics.** `metrics.py` is a thread-safe `MetricsCollector` (a lock guards
+every mutation, since `check_fabric`'s thread pool can call it concurrently)
+recording per-device collection success/failure, latency, and retries --
+hooked into `_netmiko_send_commands`, the one function every real device
+connection already flows through (same reasoning `_audit_log` uses, and the
+same "`sender=` bypasses it entirely" behavior: unit tests using `sender=`
+never pollute metrics) -- plus health verdict counts by severity, hooked
+into `health.evaluate_device` (covers `evaluate_fabric` too, which calls it
+once per device). Exposed via `nettools metrics` as JSON or hand-written
+Prometheus text exposition format (stdlib only, no `prometheus_client`
+dependency). Counters are in-memory by default (a fresh process every CLI
+invocation would otherwise always read zero, but this still accumulates
+correctly within one process -- a single `nettools fabric bgp` call, or the
+whole lifetime of the long-lived MCP server); `NETTOOLS_METRICS_FILE` opts
+into on-disk persistence across separate invocations, read lazily on first
+use per process (never at import time, so it cannot race `cli.py`'s own
+`.env` loading) and best-effort written back after each mutation -- the same
+"swallow a write failure, never raise" idiom `_audit_log`/`evidence_store.py`
+already use. No result envelope changes because of this module; it is purely
+a side channel.
+
+**Pluggable credential resolution.** `credential_resolver.py` replaces
+`inventory.py`'s inline `os.environ` reads with a small `CredentialResolver`
+interface, selected by `NETTOOLS_CREDENTIAL_PROVIDER` (`env`, the default and
+the exact pre-Phase-8 behavior, or `file`). Both providers share the same
+`CredentialGroup` schema -- no inventory YAML change needed to switch --
+because the difference is only in *how* a named field becomes a string:
+`EnvCredentialResolver` reads the named environment variable's value
+directly; `FileCredentialResolver` reads that same variable's value as a
+*file path* (the Docker/Kubernetes secrets convention, e.g. one secret
+mounted per file under `/run/secrets/`) and returns the file's content. A
+real secret-manager backend (Vault, AWS Secrets Manager, ...) is
+**deliberately not shipped** -- there is no such service in this lab to test
+against, and an untested credential path is worse than an honest gap; the
+module docstring spells out exactly what one would need to implement
+(subclass `CredentialResolver`, map every failure to `InventoryError`, never
+leak a raw secret through logs or an exception, register under a new
+provider name). The safety invariant is unaffected regardless of provider:
+`test_refuses_unapproved_commands_before_loading_credentials` and
+`test_refuses_another_platforms_command_without_credentials` (both
+unmodified, both still run with an empty environment) pass because platform
+resolution and the allowlist check never construct a resolver at all --
+credential resolution is still reached only from `inventory.load_inventory()`/
+`get_device()`, at the same point in the call chain as before this module
+existed.
+
+**Audit actor.** `_audit_log` records an `actor` field: `NETTOOLS_ACTOR` if
+set, else `getpass.getuser()`, else `"unknown"`. **This is provenance, not
+authorization** -- attribution for a trusted single-operator deployment,
+spelled out explicitly in `_resolve_actor`'s docstring. It is never consulted
+before a command runs; the allowlist is the only enforcement mechanism this
+project has. Real RBAC needs an identity provider this project does not have
+(a verified SSO/OIDC token, a signed client certificate -- something a caller
+cannot simply set an environment variable to become), checked *before* any
+command runs; no fake authorization check was added anywhere as a
+substitute.
+
+**Cross-cutting.** `cli.py` had zero tests despite ~400 lines of argument
+wiring, exit codes, and error handling -- `tests/test_cli.py` now drives
+`build_parser()`/every `_cmd_*` (monkeypatching the specific `cli`-module-bound
+function each one calls, never the network) and `main()` itself, including
+the exact regression `docs/REVIEW.md` records (`analyze`/`demo` not catching
+the `ValueError` `get_provider()` raises on misconfiguration) and the
+top-level `InventoryError` → exit-2 handler. A live-lab integration tier
+(`tests/test_live_lab.py`, marker `live_lab` registered in `pyproject.toml`)
+exercises real SSH against the real lab; every test in it self-skips unless
+`NETTOOLS_LIVE_LAB=1` is set, so a bare `pytest`/CI never needs a reachable
+lab and never warns about an unregistered marker. `nettools version` prints
+the installed package version (`importlib.metadata.version("agent-nettools")`,
+falling back to a placeholder string when run from a source checkout with no
+install metadata) plus the Python/platform it is running on.
+
 ### Testing seams
 
 Three mechanisms, all SSH-free — prefer them over mocking netmiko internals.
@@ -664,6 +810,11 @@ collect it; test modules `from helpers import ...`).
   `tests/helpers.py`, with `fail_commands=` and `fail_connect=`). Use this when
   the test cares about transport behavior — session count, connection params,
   per-command failures.
+
+`tests/test_live_lab.py` (Phase 8) is the one deliberate exception to "all
+SSH-free": it needs a real, reachable lab, is marked `live_lab`, and every
+test in it self-skips unless `NETTOOLS_LIVE_LAB=1` is set — see the Phase 8
+section above.
 
 `tests/fixtures/<platform>/<device>/<label>/<command-slug>.txt` holds two
 captures ~90s apart (`t0`, `t1`) from all nine devices. Refresh with

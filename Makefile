@@ -18,7 +18,8 @@ KEEP_COUNT ?= 20
 .PHONY: help setup test lint inventory facts interfaces bgp lldp isis sr \
         fabric-bgp route bgp-neighbor interface logging ping traceroute \
         analyze analyze-fabric agent demo diff capture learn-topology health health-fixtures \
-        baseline-pin baseline-show flaps evidence-prune mcp inspect docker-build clean
+        baseline-pin baseline-show flaps evidence-prune metrics version mcp inspect \
+        docker-build clean
 
 help:
 	@echo "IOS-XR Read-Only Network Tools"
@@ -54,6 +55,8 @@ help:
 	@echo "  make baseline-show Print a device's pinned golden snapshot (or DEVICE=name)"
 	@echo "  make flaps         Detect oscillating fields in snapshot history (or DEVICE=name)"
 	@echo "  make evidence-prune  Prune old snapshots (KEEP_DAYS=$(KEEP_DAYS) KEEP_COUNT=$(KEEP_COUNT))"
+	@echo "  make metrics       Report operational metrics (JSON; ARGS=--format=prometheus for text exposition)"
+	@echo "  make version       Print the installed nettools version"
 	@echo "  make mcp           Start the MCP server over stdio"
 	@echo "  make inspect       Smoke-test the MCP server (or DEVICE=name)"
 	@echo "  make docker-build  Build the MCP server container image"
@@ -166,6 +169,15 @@ flaps:
 # NETTOOLS_EVIDENCE_BACKEND selects.
 evidence-prune:
 	nettools evidence prune --keep-days $(KEEP_DAYS) --keep-count $(KEEP_COUNT)
+
+# Phase 8: operational metrics (per-device collection outcomes/latency/retries,
+# health verdict counts by severity). In-memory only unless
+# NETTOOLS_METRICS_FILE is set -- see .env.example.
+metrics:
+	nettools metrics $(ARGS)
+
+version:
+	nettools version
 
 mcp:
 	nettools-mcp

@@ -11,9 +11,9 @@ call time -- never stored in the repository, and never read by
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
+from .credential_resolver import get_resolver
 from .inventory_model import (
     CredentialGroup,
     Defaults,
@@ -33,30 +33,19 @@ __all__ = [
 ]
 
 
-def _required_environment(name: str) -> str:
-    """Return one required environment variable or raise a clear error."""
-
-    value = os.getenv(name, "").strip()
-    if not value:
-        raise InventoryError(f"Required environment variable is not set: {name}")
-    return value
-
-
 def _resolve_credentials(group: CredentialGroup) -> dict[str, str | None]:
-    """Resolve one credential group's environment variables.
+    """Resolve one credential group via the configured pluggable resolver.
 
-    Authentication is by shared password by default. If the group's
-    ``ssh_keyfile_env`` is set in the environment, key-based auth is used and
-    the password variable becomes an optional key passphrase instead of a
-    required password.
+    ``NETTOOLS_CREDENTIAL_PROVIDER`` selects *how* (env value directly, or a
+    file path per the Docker/Kubernetes secrets convention); see
+    ``credential_resolver.py``. Authentication is by shared password by
+    default -- if the group's ``ssh_keyfile_env`` resolves to a path,
+    key-based auth is used and the password becomes an optional passphrase
+    instead of a required password, exactly as before this indirection
+    existed.
     """
 
-    username = _required_environment(group.username_env)
-    key_file = os.getenv(group.ssh_keyfile_env, "").strip() if group.ssh_keyfile_env else ""
-    password = os.getenv(group.password_env, "").strip() if key_file else _required_environment(
-        group.password_env
-    )
-    return {"username": username, "password": password, "key_file": key_file or None}
+    return get_resolver().resolve(group)
 
 
 def _device_record(
