@@ -220,6 +220,8 @@ make logging     # Show recent log lines (or DEVICE=name COUNT=...)
 make ping        # Ping from a device (or DEVICE=name ADDRESS=...); active probe
 make traceroute  # Traceroute from a device (or DEVICE=name ADDRESS=...); active probe
 make analyze     # Collect evidence and analyze with the selected LLM
+make analyze-fabric  # Analyze the whole fabric together (cross-device correlation)
+make agent       # Ask the bounded tool-calling agent a question (QUESTION=...; Anthropic only)
 make demo        # Narrated agent demo
 make diff        # Diff evidence against the last snapshot
 make capture     # Recapture test fixtures from the whole lab
@@ -355,6 +357,60 @@ OLLAMA_HOST=http://localhost:11434
 OLLAMA_MODEL=ornith:9b-q8_0
 ```
 
+`ANTHROPIC_MODEL` defaults to `claude-opus-5` when unset -- pin an older
+model explicitly (e.g. `claude-sonnet-4-5`) if you need to. The Anthropic path
+streams, caps output at 32000 tokens (thinking is on by default on
+`claude-opus-5`, and `max_tokens` covers thinking plus text together), and
+caches the static instructions across calls. Server-side refusal fallbacks
+(`fallbacks="default"`) are requested automatically when the resolved model
+is in the Opus-5/Fable-5/Mythos-5 family; set `NETTOOLS_LLM_FALLBACKS=0` to
+disable them even for those models.
+
+## Fabric-Wide Analysis
+
+`nettools analyze --fabric` collects evidence from every inventory device,
+computes Phase 4 health verdicts for all of them, and sends both to the LLM
+together -- so it can correlate a finding on one device with a related
+finding on another (`check_fabric` only ever concatenates per-device
+results; nothing ties them together). The evidence is passed through an
+explicit character budget (`evidence_budget.py`) so a fabric-wide bundle
+cannot silently blow the model's context: long sections are truncated in the
+middle with an explicit `[TRUNCATED: N characters omitted]` marker, and
+parsed structures are preferred over raw command text whenever parsing
+succeeded (more information per character, and free of the whitespace-table
+formatting a model tends to misread).
+
+```bash
+nettools analyze --fabric
+nettools analyze --fabric --show-evidence --save
+```
+
+Tune the evidence budget (characters, a cheap proxy for tokens) with
+`NETTOOLS_EVIDENCE_PER_INTENT_CHARS` and `NETTOOLS_EVIDENCE_TOTAL_CHARS` --
+see `.env.example`.
+
+## Bounded Agent Loop
+
+`nettools agent "QUESTION"` runs a hand-written, bounded tool-calling loop
+(Anthropic only -- OpenAI is not implemented yet, and a 9B local Ollama model
+is not reliable enough for tool calling) over exactly six read-only tools,
+each a thin wrapper over an already-safe function: listing devices, running
+one intent or one validated template, checking the fabric, collecting full
+evidence, and evaluating health. Every model-supplied argument goes through
+the same validation a human CLI/MCP caller would -- a template parameter is
+still canonicalized by reconstruction (Phase 5), not passed through as text.
+
+```bash
+nettools agent "Why is RR1 unhappy right now?"
+nettools agent "Is PE2 reachable via IS-IS?" --device PE2 --max-iterations 5
+```
+
+The loop is bounded on two independent axes -- `--max-iterations` (default
+8) and a wall-clock `--time-budget` in seconds (default 120) -- and hitting
+either is a normal outcome, not an error: the command still prints whatever
+partial answer the model produced, tagged with how it stopped
+(`end_turn` / `max_iterations` / `time_budget` / `truncated`).
+
 ## Repository Map
 
 ```text
@@ -368,7 +424,10 @@ src/agent_nettools/network_tools.py  Allowlist, SSH, evidence, fabric, diff, gol
 src/agent_nettools/health.py       Deterministic health verdicts: role invariants + baseline rules
 src/agent_nettools/topology.py     Derived expected topology + the fabric anomaly report
 src/agent_nettools/devices_doc.py  Renders docs/devices.md from the inventory
-src/agent_nettools/llm_analysis.py   Provider selection + analysis
+src/agent_nettools/llm_analysis.py   Provider selection + single-device analysis + Anthropic plumbing
+src/agent_nettools/evidence_budget.py  Character budget + middle-truncation for fabric-wide evidence
+src/agent_nettools/fabric_analysis.py  Cross-device correlation over evidence + Phase 4 health verdicts
+src/agent_nettools/agent_loop.py   Bounded, read-only, tool-calling agent loop (Anthropic only)
 src/agent_nettools/cli.py          The `nettools` command-line entry point
 src/agent_nettools/fixtures.py     Capture real device output; replay it offline
 mcp_server/                        Read-only MCP server
