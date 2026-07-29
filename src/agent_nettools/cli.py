@@ -22,6 +22,7 @@ Exposed as the ``nettools`` console script. Subcommands:
     nettools baseline pin [DEVICE] [--from-latest]
     nettools baseline show [DEVICE]
     nettools flaps [DEVICE]
+    nettools evidence prune [--keep-days N] [--keep-count M] [--device DEVICE]
     nettools inspect [DEVICE]
 
 ``nettools health`` exit codes: 0 (ok/info, nothing actionable), 1 (warning),
@@ -35,6 +36,11 @@ canonical form (see ``agent_nettools.templates``, "canonicalize by
 reconstruction"). ``ping``/``traceroute`` generate traffic (unlike every other
 command here) and are gated by ``NETTOOLS_ALLOW_ACTIVE_PROBES`` (default
 enabled).
+
+``nettools evidence prune`` (Phase 7) deletes timestamped snapshots outside a
+retention window (age and/or count; golden snapshots are never touched),
+against whichever evidence backend ``NETTOOLS_EVIDENCE_BACKEND`` selects
+(JSON files, the default, or SQLite).
 """
 
 from __future__ import annotations
@@ -64,9 +70,11 @@ from .network_tools import (
     get_logging,
     get_route,
     list_devices,
+    list_snapshot_history,
     load_golden_snapshot,
     load_latest_snapshot,
     ping_device,
+    prune_snapshots,
     save_golden_snapshot,
     save_snapshot,
     traceroute_device,
@@ -292,6 +300,24 @@ def _cmd_flaps(args: argparse.Namespace) -> int:
     result = detect_flaps(device, min_transitions=args.min_transitions)
     _print(result)
     return 0 if not result["flapping"] else 1
+
+
+def _cmd_evidence_prune(args: argparse.Namespace) -> int:
+    if args.keep_days is None and args.keep_count is None:
+        print("Nothing to do: pass --keep-days and/or --keep-count.")
+        return 1
+    result = prune_snapshots(
+        device_name=args.device, keep_days=args.keep_days, keep_count=args.keep_count
+    )
+    _print(result)
+    return 0
+
+
+def _cmd_evidence_history(args: argparse.Namespace) -> int:
+    device = _resolve_device(args.device)
+    history = list_snapshot_history(device)
+    _print({"device": device, "count": len(history), "history": history})
+    return 0
 
 
 def _cmd_health(args: argparse.Namespace) -> int:
@@ -623,6 +649,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="Minimum value changes before a field is reported as flapping (default: 3).",
     )
     p_flaps.set_defaults(func=_cmd_flaps)
+
+    p_evidence = sub.add_parser("evidence", help="Manage stored evidence snapshots (Phase 7).")
+    evidence_sub = p_evidence.add_subparsers(dest="evidence_command", required=True)
+
+    p_evidence_prune = evidence_sub.add_parser(
+        "prune", help="Delete timestamped snapshots outside a retention window."
+    )
+    p_evidence_prune.add_argument(
+        "--keep-days", type=float, default=None, help="Keep snapshots from the last N days."
+    )
+    p_evidence_prune.add_argument(
+        "--keep-count", type=int, default=None, help="Keep the N most recent snapshots per device."
+    )
+    p_evidence_prune.add_argument(
+        "--device", help="Prune only this device; defaults to every device in the store."
+    )
+    p_evidence_prune.set_defaults(func=_cmd_evidence_prune)
+
+    p_evidence_history = evidence_sub.add_parser(
+        "history", help="List a device's saved timestamped snapshots, oldest first."
+    )
+    p_evidence_history.add_argument("device", nargs="?", help="Device name; defaults to PE1.")
+    p_evidence_history.set_defaults(func=_cmd_evidence_history)
 
     p_inspect = sub.add_parser("inspect", help="Smoke-test the MCP server over stdio.")
     p_inspect.add_argument("device", nargs="?", help="Device name; defaults to PE1.")

@@ -258,6 +258,18 @@ def resolve_inventory_path(explicit: str | None = None) -> Path:
 # purely for tests that swap ``NETTOOLS_INVENTORY`` mid-run.
 _cache: dict[str, InventoryFile] = {}
 
+# A second cache, alongside ``_cache`` and invalidated by the same
+# ``reset_inventory_cache()``: a name -> Device index built once per resolved
+# path. Phase 7's fabric-scale measurement found ``inventory.get_device()``
+# rebuilding the whole credentialed device list and then linear-scanning it
+# for one name -- O(n) work repeated once per device, O(n^2) for a
+# whole-fabric check. This index is credential-free (just the parsed YAML
+# `Device` objects), so caching it carries none of the "env changed, cache
+# went stale" risk a credentialed cache would: `inventory.get_device()` still
+# resolves credentials fresh from the environment on every call, using this
+# index only to find *which* device to resolve in O(1) instead of O(n).
+_index_cache: dict[str, dict[str, Device]] = {}
+
 
 def load_inventory_file(explicit_path: str | None = None) -> InventoryFile:
     """Return the parsed, validated inventory, cached by resolved path."""
@@ -269,7 +281,23 @@ def load_inventory_file(explicit_path: str | None = None) -> InventoryFile:
     return _cache[key]
 
 
+def find_device(device_name: str, explicit_path: str | None = None) -> Device | None:
+    """Return one device by name in O(1), or ``None`` if the inventory has none.
+
+    Reads nothing from the environment, same as everything else in this
+    module -- only the parsed ``Device`` (no credentials) comes back.
+    """
+
+    path = resolve_inventory_path(explicit_path)
+    key = str(path)
+    if key not in _index_cache:
+        inventory = load_inventory_file(explicit_path)
+        _index_cache[key] = {device.name: device for device in inventory.devices}
+    return _index_cache[key].get(device_name)
+
+
 def reset_inventory_cache() -> None:
     """Drop the cached inventory. Call after monkeypatching ``NETTOOLS_INVENTORY``."""
 
     _cache.clear()
+    _index_cache.clear()

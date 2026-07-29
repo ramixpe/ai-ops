@@ -12,9 +12,10 @@ import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
-from . import parsers
+from . import evidence_store, parsers
+from .evidence_store import get_store
 from .inventory import InventoryError, get_device, load_inventory
 from .lab import platform_for
 from .normalize import normalize_output
@@ -40,6 +41,28 @@ from .platforms import (
 STATUS_SUCCESS = "success"
 STATUS_ERROR = "error"
 STATUS_UNSUPPORTED = "unsupported"
+
+
+def _float_env(name: str, default: float) -> float:
+    """Read a float-valued env var, env-then-default, same pattern as everywhere else."""
+
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+def _int_env(name: str, default: int) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
 
 
 def _timestamp() -> str:
@@ -77,22 +100,148 @@ def _unsupported_result(tool: str, device_name: str, intent: str, platform: str)
     return result
 
 
+# Size-based rotation for NETTOOLS_LOG: one JSONL file appended to forever has
+# no bound, and at fleet scale (thousands of devices, every command logged)
+# that is an unbounded disk-usage leak, not just an inconvenience. Rotation is
+# checked before every write, so the file never grows past roughly
+# max_bytes + one record.
+NETTOOLS_LOG_MAX_BYTES_ENV = "NETTOOLS_LOG_MAX_BYTES"
+NETTOOLS_LOG_BACKUP_COUNT_ENV = "NETTOOLS_LOG_BACKUP_COUNT"
+DEFAULT_LOG_MAX_BYTES = 10 * 1024 * 1024  # 10 MiB
+DEFAULT_LOG_BACKUP_COUNT = 5
+
+
+def _rotate_log_if_needed(path: Path, *, max_bytes: int, backup_count: int) -> None:
+    """Rotate ``path`` -> ``path.1`` -> ``path.2`` ... once it reaches ``max_bytes``.
+
+    The same rename-chain algorithm ``logging.handlers.RotatingFileHandler``
+    uses, reimplemented directly rather than routed through the ``logging``
+    module: the audit log is a hand-formatted JSONL append, not a ``Logger``,
+    and adding a whole second logging framework just for rotation would be
+    more surface area than the feature is worth. ``max_bytes <= 0`` disables
+    rotation entirely (unbounded growth, the pre-Phase-7 behavior) -- an
+    explicit opt-out, not the default.
+    """
+
+    if max_bytes <= 0 or not path.is_file() or path.stat().st_size < max_bytes:
+        return
+
+    if backup_count <= 0:
+        # No backups kept: rotation still bounds the live file's size by
+        # simply dropping what came before, rather than growing forever.
+        path.unlink(missing_ok=True)
+        return
+
+    oldest = path.with_name(f"{path.name}.{backup_count}")
+    oldest.unlink(missing_ok=True)
+    for index in range(backup_count - 1, 0, -1):
+        older = path.with_name(f"{path.name}.{index}")
+        if older.is_file():
+            older.replace(path.with_name(f"{path.name}.{index + 1}"))
+    path.replace(path.with_name(f"{path.name}.1"))
+
+
 def _audit_log(entry: dict[str, Any]) -> None:
     """Append one JSONL audit record when NETTOOLS_LOG is set.
 
     Cheap, best-effort observability: every command run records device, command,
-    duration, and bytes returned. Logging failures never break a check.
+    duration, and bytes returned. Logging failures never break a check -- this
+    is deliberate and covered by
+    ``test_audit_log_failure_never_breaks_a_check``: a bad NETTOOLS_LOG path
+    (permission denied, a directory in the way) must not turn an otherwise
+    successful command into a reported failure.
     """
 
     log_path = os.getenv("NETTOOLS_LOG")
     if not log_path:
         return
     try:
+        path = Path(log_path)
+        _rotate_log_if_needed(
+            path,
+            max_bytes=_int_env(NETTOOLS_LOG_MAX_BYTES_ENV, DEFAULT_LOG_MAX_BYTES),
+            backup_count=_int_env(NETTOOLS_LOG_BACKUP_COUNT_ENV, DEFAULT_LOG_BACKUP_COUNT),
+        )
         record = {"timestamp": _timestamp(), **entry}
-        with open(log_path, "a", encoding="utf-8") as handle:
+        with open(path, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(record) + "\n")
     except OSError:
         pass
+
+
+# Connection/read timeouts and bounded retries: env-then-default, same pattern
+# as NETTOOLS_ALLOW_ACTIVE_PROBES. Netmiko's own defaults (unset conn_timeout,
+# 10s read_timeout in recent versions) are silently generous for a reachable
+# but slow device -- with nothing configurable, a stalled device could hang a
+# whole check. A per-template ``read_timeout`` (ping/traceroute run much
+# longer than a ``show`` command) still wins over the env/default value here,
+# since it is always passed explicitly rather than left ``None``.
+NETTOOLS_CONNECT_TIMEOUT_ENV = "NETTOOLS_CONNECT_TIMEOUT_SECONDS"
+NETTOOLS_READ_TIMEOUT_ENV = "NETTOOLS_READ_TIMEOUT_SECONDS"
+NETTOOLS_BANNER_TIMEOUT_ENV = "NETTOOLS_BANNER_TIMEOUT_SECONDS"
+NETTOOLS_COMMAND_RETRIES_ENV = "NETTOOLS_COMMAND_RETRIES"
+NETTOOLS_RETRY_BACKOFF_ENV = "NETTOOLS_RETRY_BACKOFF_SECONDS"
+
+DEFAULT_CONNECT_TIMEOUT_SECONDS = 10.0
+DEFAULT_READ_TIMEOUT_SECONDS = 10.0
+DEFAULT_BANNER_TIMEOUT_SECONDS = 15.0
+DEFAULT_COMMAND_RETRIES = 2  # total attempts, i.e. up to 1 retry by default.
+DEFAULT_RETRY_BACKOFF_SECONDS = 0.5
+
+
+def _is_transient_failure(exc: Exception) -> bool:
+    """Whether a transport failure is worth retrying.
+
+    Authentication failures are never transient: retrying with the same
+    (wrong) credentials cannot succeed and only burns the whole retry budget
+    before reporting the real problem. Every other failure netmiko's
+    transport layer can raise -- read timeouts, connection resets, "pattern
+    never detected" -- is treated as transient, which is exactly the class of
+    failure bounded retries exist to smooth over on a reachable-but-slow
+    device. If netmiko's exception hierarchy cannot even be imported (a fake
+    transport installed for tests, or netmiko genuinely absent), there is no
+    way to distinguish auth failures from anything else, so every failure is
+    treated as transient rather than silently disabling retries.
+    """
+
+    try:
+        from netmiko.exceptions import NetmikoAuthenticationException
+    except ImportError:
+        return True
+    return not isinstance(exc, NetmikoAuthenticationException)
+
+
+def _with_retries(
+    fn: Callable[[], Any],
+    *,
+    retries: int,
+    backoff: float,
+    on_retry: Callable[[int], None] | None = None,
+) -> Any:
+    """Call ``fn()`` with bounded retries and exponential backoff on transient failure.
+
+    ``retries`` is the total number of attempts (at least 1 is always made);
+    a non-transient failure (e.g. bad credentials) is raised immediately
+    without spending any of the retry budget on something that can never
+    succeed. ``on_retry(attempts_consumed)`` fires once, only on eventual
+    success after at least one retry, so callers can record that a retry
+    happened without threading a counter through every call site.
+    """
+
+    attempts = max(1, retries)
+    for attempt in range(1, attempts + 1):
+        try:
+            result = fn()
+        except Exception as exc:  # noqa: BLE001 - classified below; re-raised once exhausted.
+            if attempt == attempts or not _is_transient_failure(exc):
+                raise
+            if backoff > 0:
+                time.sleep(backoff * (2 ** (attempt - 1)))
+            continue
+        if attempt > 1 and on_retry is not None:
+            on_retry(attempt - 1)
+        return result
+    raise AssertionError("unreachable: the loop above always returns or raises")  # pragma: no cover
 
 
 def _netmiko_send_commands(
@@ -100,20 +249,33 @@ def _netmiko_send_commands(
     commands: list[str],
     *,
     read_timeout: float | None = None,
-) -> tuple[dict[str, str], list[str]]:
+    connect_timeout: float | None = None,
+    banner_timeout: float | None = None,
+    retries: int | None = None,
+    retry_backoff: float | None = None,
+) -> tuple[dict[str, str], list[str], dict[str, int]]:
     """Open one SSH session and run every approved command over it.
 
     One login per device check, not one login per command: IOS-XR rate-limits
     repeated logins, and a full evidence collection is seven commands.
 
-    ``read_timeout`` overrides netmiko's default per-command timeout for
+    ``read_timeout`` overrides the configured default per-command timeout for
     every command in this batch. Templates pass their own suggested timeout
-    (ping/traceroute run much longer than a ``show`` command); evidence
-    collection and static allowlist checks pass ``None`` and get netmiko's
-    default, unchanged from before this parameter existed.
+    (ping/traceroute run much longer than a ``show`` command) and always win;
+    every other caller passes ``None`` and gets ``NETTOOLS_READ_TIMEOUT_SECONDS``
+    (env-then-default). ``connect_timeout``/``banner_timeout``/``retries``/
+    ``retry_backoff`` follow the same env-then-default resolution when left
+    ``None`` -- see the constants just above this function.
 
-    Returns ``(outputs, errors)``. ``outputs`` maps command -> text for the
-    commands that ran; ``errors`` holds one message per failure.
+    Both the initial connection and each individual command are retried up to
+    ``retries`` total attempts (with exponential backoff) on a transient
+    failure; a non-transient one (bad credentials) is never retried. Returns
+    ``(outputs, errors, retries_used)``: ``outputs`` maps command -> text for
+    the commands that ran; ``errors`` holds one message per failure;
+    ``retries_used`` maps ``"connection"`` or a command string -> the number of
+    retries actually consumed before it eventually succeeded, present only for
+    entries that needed at least one -- how a retry is made obvious in the
+    result, alongside the audit log's own per-attempt record.
     """
 
     from netmiko import ConnectHandler  # Imported lazily so unit tests do not need live SSH.
@@ -121,11 +283,33 @@ def _netmiko_send_commands(
     platform = device.get("platform", "")
     device_type = platform or "cisco_xr"
 
+    effective_connect_timeout = (
+        connect_timeout if connect_timeout is not None
+        else _float_env(NETTOOLS_CONNECT_TIMEOUT_ENV, DEFAULT_CONNECT_TIMEOUT_SECONDS)
+    )
+    effective_banner_timeout = (
+        banner_timeout if banner_timeout is not None
+        else _float_env(NETTOOLS_BANNER_TIMEOUT_ENV, DEFAULT_BANNER_TIMEOUT_SECONDS)
+    )
+    effective_read_timeout = (
+        read_timeout if read_timeout is not None
+        else _float_env(NETTOOLS_READ_TIMEOUT_ENV, DEFAULT_READ_TIMEOUT_SECONDS)
+    )
+    effective_retries = (
+        retries if retries is not None else _int_env(NETTOOLS_COMMAND_RETRIES_ENV, DEFAULT_COMMAND_RETRIES)
+    )
+    effective_backoff = (
+        retry_backoff if retry_backoff is not None
+        else _float_env(NETTOOLS_RETRY_BACKOFF_ENV, DEFAULT_RETRY_BACKOFF_SECONDS)
+    )
+
     connection_params: dict[str, Any] = {
         "device_type": device_type,
         "host": device["hostname"],
         "username": device["username"],
         "port": device.get("port", 22),
+        "conn_timeout": effective_connect_timeout,
+        "banner_timeout": effective_banner_timeout,
     }
     # Password and/or SSH key: a key file is used when provided, otherwise the
     # shared password. Netmiko accepts both together for key + passphrase setups.
@@ -137,14 +321,31 @@ def _netmiko_send_commands(
 
     outputs: dict[str, str] = {}
     errors: list[str] = []
-    send_kwargs = {"read_timeout": read_timeout} if read_timeout is not None else {}
+    retries_used: dict[str, int] = {}
 
     try:
-        with ConnectHandler(**connection_params) as connection:
+        connection = _with_retries(
+            lambda: ConnectHandler(**connection_params),
+            retries=effective_retries,
+            backoff=effective_backoff,
+            on_retry=lambda used: retries_used.__setitem__("connection", used),
+        )
+    except Exception as exc:  # noqa: BLE001 - every attempt to connect failed.
+        errors.append(f"connection to {device['hostname']} failed: {exc}")
+        _audit_log({"device": device["name"], "status": "connection_error", "error": str(exc)})
+        return outputs, errors, retries_used
+
+    try:
+        with connection:
             for command in commands:
                 started = time.monotonic()
                 try:
-                    output = connection.send_command(command, **send_kwargs)
+                    output = _with_retries(
+                        lambda c=command: connection.send_command(c, read_timeout=effective_read_timeout),
+                        retries=effective_retries,
+                        backoff=effective_backoff,
+                        on_retry=lambda used, c=command: retries_used.__setitem__(c, used),
+                    )
                     outputs[command] = output
                     _audit_log(
                         {
@@ -153,6 +354,7 @@ def _netmiko_send_commands(
                             "duration_ms": round((time.monotonic() - started) * 1000, 1),
                             "bytes": len(output),
                             "status": "success",
+                            "retries": retries_used.get(command, 0),
                         }
                     )
                 except Exception as exc:  # noqa: BLE001 - beginner-friendly structured errors.
@@ -164,13 +366,14 @@ def _netmiko_send_commands(
                             "duration_ms": round((time.monotonic() - started) * 1000, 1),
                             "status": "error",
                             "error": str(exc),
+                            "retries": effective_retries - 1,
                         }
                     )
     except Exception as exc:  # noqa: BLE001 - the session itself failed; no command ran.
         errors.append(f"connection to {device['hostname']} failed: {exc}")
         _audit_log({"device": device["name"], "status": "connection_error", "error": str(exc)})
 
-    return outputs, errors
+    return outputs, errors, retries_used
 
 
 def _run_approved_commands(
@@ -179,6 +382,7 @@ def _run_approved_commands(
     *,
     platform: str | None = None,
     sender: Callable[[dict[str, Any], str], str] | None = None,
+    device: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run a set of approved read-only commands against one device.
 
@@ -187,6 +391,15 @@ def _run_approved_commands(
     somewhere. The platform is resolved from static lab data, which needs no
     credentials -- so this check still happens before any credential access or
     socket, exactly as before.
+
+    ``device``, if supplied, is an already-resolved credentialed record (as
+    ``inventory.get_device()`` would return) that ``check_fabric`` threads down
+    from its single ``load_inventory()`` call, so a whole-fabric check never
+    re-resolves the same device once per check. It is read only *after* the
+    allowlist check above -- never before -- so passing it changes nothing
+    about the safety ordering: a caller that omits it (every caller except
+    ``check_fabric``) gets the exact previous behavior, including the two
+    tests that call this with no credentials in the environment at all.
     """
 
     platform = platform or platform_for(device_name)
@@ -199,10 +412,11 @@ def _run_approved_commands(
             f"Refusing unapproved commands for {platform}: {', '.join(unsafe_commands)}",
         )
 
-    try:
-        device = get_device(device_name)
-    except InventoryError as exc:
-        return _safe_error("run_approved_commands", device_name, str(exc))
+    if device is None:
+        try:
+            device = get_device(device_name)
+        except InventoryError as exc:
+            return _safe_error("run_approved_commands", device_name, str(exc))
 
     result = _base_result("run_approved_commands", device_name)
     result["data"] = {"commands": {}}
@@ -217,8 +431,10 @@ def _run_approved_commands(
                 result["errors"].append(f"{command}: {exc}")
         return result
 
-    outputs, errors = _netmiko_send_commands(device, commands)
+    outputs, errors, retries = _netmiko_send_commands(device, commands)
     result["data"]["commands"] = outputs
+    if retries:
+        result["data"]["retries"] = retries
     if errors:
         result["status"] = STATUS_ERROR
         result["errors"].extend(errors)
@@ -253,11 +469,16 @@ def run_intent(
     intent: str,
     *,
     sender: Callable[[dict[str, Any], str], str] | None = None,
+    device: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run one vendor-neutral intent against one device.
 
     Resolves the intent to this device's platform syntax. A platform that cannot
     answer the intent yields ``status: "unsupported"`` rather than an error.
+
+    ``device``, if supplied, is threaded straight through to
+    ``_run_approved_commands`` -- see its docstring for the ordering
+    guarantee this preserves.
     """
 
     platform = platform_for(device_name)
@@ -279,6 +500,7 @@ def run_intent(
             list(commands_for(platform, intent)),
             platform=platform,
             sender=sender,
+            device=device,
         )
 
     _attach_parsed(result, platform, intent)
@@ -371,8 +593,10 @@ def _run_rendered_command(
             result["data"]["commands"] = {}
         return result
 
-    outputs, errors = _netmiko_send_commands(device, [command], read_timeout=read_timeout)
+    outputs, errors, retries = _netmiko_send_commands(device, [command], read_timeout=read_timeout)
     result["data"]["commands"] = dict(outputs)
+    if retries:
+        result["data"]["retries"] = retries
     if errors:
         result["status"] = STATUS_ERROR
         result["errors"].extend(errors)
@@ -553,60 +777,66 @@ def get_device_facts(
     device_name: str,
     *,
     sender: Callable[[dict[str, Any], str], str] | None = None,
+    device: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Collect basic read-only device facts (hostname and/or version)."""
 
-    return run_intent(device_name, "facts", sender=sender)
+    return run_intent(device_name, "facts", sender=sender, device=device)
 
 
 def check_interfaces(
     device_name: str,
     *,
     sender: Callable[[dict[str, Any], str], str] | None = None,
+    device: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Collect interface status using a read-only command."""
 
-    return run_intent(device_name, "interfaces", sender=sender)
+    return run_intent(device_name, "interfaces", sender=sender, device=device)
 
 
 def check_bgp_neighbors(
     device_name: str,
     *,
     sender: Callable[[dict[str, Any], str], str] | None = None,
+    device: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Collect BGP summary information using a read-only command."""
 
-    return run_intent(device_name, "bgp", sender=sender)
+    return run_intent(device_name, "bgp", sender=sender, device=device)
 
 
 def check_lldp_neighbors(
     device_name: str,
     *,
     sender: Callable[[dict[str, Any], str], str] | None = None,
+    device: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Collect LLDP neighbor information using a read-only command."""
 
-    return run_intent(device_name, "lldp", sender=sender)
+    return run_intent(device_name, "lldp", sender=sender, device=device)
 
 
 def check_isis_neighbors(
     device_name: str,
     *,
     sender: Callable[[dict[str, Any], str], str] | None = None,
+    device: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Collect IS-IS neighbor state using a read-only command."""
 
-    return run_intent(device_name, "isis", sender=sender)
+    return run_intent(device_name, "isis", sender=sender, device=device)
 
 
 def check_sr_policies(
     device_name: str,
     *,
     sender: Callable[[dict[str, Any], str], str] | None = None,
+    device: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Collect Segment Routing TE policy state using a read-only command."""
 
-    return run_intent(device_name, "sr", sender=sender)
+    return run_intent(device_name, "sr", sender=sender, device=device)
 
 
 # Named single-device checks, keyed by intent. One source of truth so the CLI,
@@ -624,6 +854,64 @@ CHECK_TOOLS: dict[str, Callable[..., dict[str, Any]]] = {
 }
 
 
+def _iter_check_results(
+    tool: Callable[..., dict[str, Any]],
+    devices: list[dict[str, Any]],
+    *,
+    sender: Callable[[dict[str, Any], str], str] | None,
+    max_workers: int,
+) -> Iterator[tuple[str, dict[str, Any]]]:
+    """Run ``tool`` across every device concurrently, yielding results as they land.
+
+    Each ``device`` record was already resolved once by the single
+    ``load_inventory()`` call the caller made -- passed straight through to
+    ``tool`` (every ``CHECK_TOOLS`` entry accepts an optional pre-resolved
+    ``device``) so a whole-fabric check never re-resolves the same device by
+    name once per check (see ``inventory.get_device``'s docstring for why that
+    used to be quadratic). Yields in *completion* order, not inventory order --
+    callers that need inventory order (``check_fabric``) reorder themselves.
+    """
+
+    def run_one(device_record: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        name = str(device_record["name"])
+        return name, tool(name, sender=sender, device=device_record)
+
+    workers = max(1, min(max_workers, len(devices)))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(run_one, device) for device in devices]
+        for future in concurrent.futures.as_completed(futures):
+            yield future.result()
+
+
+def iter_fabric(
+    check: str = "bgp",
+    *,
+    sender: Callable[[dict[str, Any], str], str] | None = None,
+    max_workers: int = 8,
+) -> Iterator[tuple[str, dict[str, Any]]]:
+    """Run one named check across every device, yielding ``(name, result)`` as each completes.
+
+    Unlike ``check_fabric``, this never materializes the whole fabric's results
+    in memory at once: at 1000+ devices with real (not synthetic-benchmark)
+    command output, holding every device's full evidence in one ``dict`` before
+    returning anything is the memory ceiling. A caller that only needs
+    verdicts -- not raw command output -- can consume this iterator and drop
+    each result after use instead of waiting for (and holding) the last one.
+
+    Raises ``ValueError`` for an unknown ``check`` and propagates
+    ``InventoryError`` from ``load_inventory()`` -- unlike ``check_fabric``,
+    which turns both into a structured error envelope; this is a generator,
+    so there is no envelope to return before the first ``yield``.
+    """
+
+    if check not in CHECK_TOOLS:
+        choices = ", ".join(sorted(CHECK_TOOLS))
+        raise ValueError(f"Unknown check: {check}. Choose from {choices}.")
+
+    devices = load_inventory()
+    yield from _iter_check_results(CHECK_TOOLS[check], devices, sender=sender, max_workers=max_workers)
+
+
 def check_fabric(
     check: str = "bgp",
     *,
@@ -633,7 +921,12 @@ def check_fabric(
     """Run one named check across every device in the inventory, in parallel.
 
     Logins to all devices happen concurrently, so a fabric-wide check is roughly
-    one device's latency instead of nine sequential logins.
+    one device's latency instead of nine sequential logins. Built on
+    ``_iter_check_results`` (the same runner ``iter_fabric`` streams from), so
+    behavior -- including inventory-ordered output and the ``unsupported``
+    bucket -- is unchanged for existing callers; this just also waits for and
+    collects every result, which is what a caller wanting one complete envelope
+    back wants.
     """
 
     if check not in CHECK_TOOLS:
@@ -645,17 +938,12 @@ def check_fabric(
     except InventoryError as exc:
         return _safe_error("check_fabric", "fabric", str(exc))
 
-    tool = CHECK_TOOLS[check]
     result = _base_result("check_fabric", "fabric")
     result["data"] = {"check": check, "devices": {}, "unsupported": []}
 
-    def run_one(device: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-        name = str(device["name"])
-        return name, tool(name, sender=sender)
-
-    workers = max(1, min(max_workers, len(devices)))
-    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-        collected = dict(pool.map(run_one, devices))
+    collected = dict(
+        _iter_check_results(CHECK_TOOLS[check], devices, sender=sender, max_workers=max_workers)
+    )
 
     # Preserve inventory order in the output regardless of completion order.
     for device in devices:
@@ -756,15 +1044,11 @@ def collect_evidence(
     return evidence
 
 
-# Snapshots land here, relative to the working directory unless overridden.
-DEFAULT_SNAPSHOT_DIR = "evidence"
-
-# The golden (pinned) snapshot's filename. Deliberately not timestamp-shaped so
-# it can never be confused with -- or accidentally picked up by -- the
-# lexicographic "latest timestamped snapshot" glob below; every timestamped
-# snapshot lookup explicitly excludes this exact name instead of relying on
-# sort order to separate the two.
-GOLDEN_SNAPSHOT_FILENAME = "golden.json"
+# Re-exported so existing imports of these two names from network_tools keep
+# working unchanged; the file-backend logic itself now lives in
+# evidence_store.py, alongside its sqlite sibling.
+DEFAULT_SNAPSHOT_DIR = evidence_store.DEFAULT_SNAPSHOT_DIR
+GOLDEN_SNAPSHOT_FILENAME = evidence_store.GOLDEN_SNAPSHOT_FILENAME
 
 
 def _snapshot_dir(base_dir: str | None) -> Path:
@@ -772,7 +1056,13 @@ def _snapshot_dir(base_dir: str | None) -> Path:
 
 
 def _timestamped_snapshot_paths(directory: Path) -> list[Path]:
-    """Return one device's timestamped snapshots, oldest first, golden excluded."""
+    """Return one device's timestamped snapshots, oldest first, golden excluded.
+
+    Used only by ``detect_flaps``, which reads a device's whole history
+    directly off the file store -- see ``evidence_store``'s module docstring
+    for why flap detection stays file-only rather than going through the
+    backend-selectable store below.
+    """
 
     if not directory.is_dir():
         return []
@@ -780,19 +1070,15 @@ def _timestamped_snapshot_paths(directory: Path) -> list[Path]:
 
 
 def save_snapshot(evidence: dict[str, Any], *, base_dir: str | None = None) -> str:
-    """Persist one evidence collection as timestamped JSON. Returns the path.
+    """Persist one evidence collection as a new timestamped entry. Returns its identifier.
 
-    Snapshots go to ``base_dir``, the ``NETTOOLS_EVIDENCE_DIR`` environment
+    Goes to whichever backend ``NETTOOLS_EVIDENCE_BACKEND`` selects (files, the
+    default, or sqlite); see ``evidence_store.get_store``. Snapshot location for
+    the file backend is ``base_dir``, the ``NETTOOLS_EVIDENCE_DIR`` environment
     variable, or ``evidence/`` in the working directory, in that order.
     """
 
-    device = str(evidence.get("device", "unknown"))
-    stamp = _timestamp().replace(":", "-")
-    directory = _snapshot_dir(base_dir) / device
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"{stamp}.json"
-    path.write_text(json.dumps(evidence, indent=2), encoding="utf-8")
-    return str(path)
+    return get_store(base_dir).save_snapshot(evidence)
 
 
 def load_latest_snapshot(
@@ -802,16 +1088,11 @@ def load_latest_snapshot(
 ) -> dict[str, Any] | None:
     """Return the most recent saved *timestamped* snapshot for a device, or None.
 
-    Never returns the golden snapshot -- it lives under a fixed filename that
-    this listing explicitly excludes, so pinning a baseline can never silently
+    Never returns the golden snapshot, so pinning a baseline can never silently
     change what "latest" means.
     """
 
-    directory = _snapshot_dir(base_dir) / device_name
-    snapshots = _timestamped_snapshot_paths(directory)
-    if not snapshots:
-        return None
-    return json.loads(snapshots[-1].read_text(encoding="utf-8"))
+    return get_store(base_dir).load_latest_snapshot(device_name)
 
 
 def save_golden_snapshot(evidence: dict[str, Any], *, base_dir: str | None = None) -> str:
@@ -819,15 +1100,10 @@ def save_golden_snapshot(evidence: dict[str, Any], *, base_dir: str | None = Non
 
     Overwrites any previously pinned golden snapshot for this device -- there
     is exactly one golden snapshot per device, unlike the unbounded history of
-    timestamped snapshots. Returns the path written.
+    timestamped snapshots. Returns its identifier.
     """
 
-    device = str(evidence.get("device", "unknown"))
-    directory = _snapshot_dir(base_dir) / device
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / GOLDEN_SNAPSHOT_FILENAME
-    path.write_text(json.dumps(evidence, indent=2), encoding="utf-8")
-    return str(path)
+    return get_store(base_dir).save_golden_snapshot(evidence)
 
 
 def load_golden_snapshot(
@@ -837,10 +1113,31 @@ def load_golden_snapshot(
 ) -> dict[str, Any] | None:
     """Return a device's pinned golden snapshot, or None if never pinned."""
 
-    path = _snapshot_dir(base_dir) / device_name / GOLDEN_SNAPSHOT_FILENAME
-    if not path.is_file():
-        return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    return get_store(base_dir).load_golden_snapshot(device_name)
+
+
+def list_snapshot_history(device_name: str, *, base_dir: str | None = None) -> list[dict[str, Any]]:
+    """Return a device's timestamped snapshots, oldest first, golden excluded."""
+
+    return get_store(base_dir).list_history(device_name)
+
+
+def prune_snapshots(
+    *,
+    device_name: str | None = None,
+    keep_days: float | None = None,
+    keep_count: int | None = None,
+    base_dir: str | None = None,
+) -> dict[str, Any]:
+    """Delete timestamped snapshots outside the retention window. Golden is never touched.
+
+    A snapshot survives if it satisfies *either* configured rule -- among the
+    most recent ``keep_count``, or younger than ``keep_days``. Neither rule
+    given is a no-op (nothing pruned), not "prune everything". Backs
+    ``nettools evidence prune``.
+    """
+
+    return get_store(base_dir).prune(device_name=device_name, keep_days=keep_days, keep_count=keep_count)
 
 
 # Sentinel distinguishing "field absent" from "field present with value None"
