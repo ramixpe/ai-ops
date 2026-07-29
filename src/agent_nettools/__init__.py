@@ -40,6 +40,17 @@ from .network_tools import (
     run_intent,
     save_snapshot,
 )
+from .normalize import mask_volatile, normalize_output, strip_preamble
+from .parsers import (
+    PARSE_FAILED,
+    PARSE_OK,
+    PARSE_UNAVAILABLE,
+    ParseError,
+    has_parser,
+    parse_intent,
+    record_key,
+    volatile_fields,
+)
 from .platforms import (
     ALL_APPROVED_COMMANDS,
     APPROVED_COMMANDS,
@@ -96,6 +107,19 @@ __all__ = [
     "save_snapshot",
     "load_latest_snapshot",
     "diff_evidence",
+    # parsing: structured records from raw command output
+    "parse_intent",
+    "has_parser",
+    "record_key",
+    "volatile_fields",
+    "ParseError",
+    "PARSE_OK",
+    "PARSE_UNAVAILABLE",
+    "PARSE_FAILED",
+    # normalization: the diff fallback when no parser exists
+    "normalize_output",
+    "strip_preamble",
+    "mask_volatile",
     # fixtures
     "command_slug",
     "scrub_output",

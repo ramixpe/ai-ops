@@ -8,6 +8,8 @@ health-rule work, none of which needs lab access to develop against.
 
 from __future__ import annotations
 
+import copy
+
 import pytest
 from helpers import (
     FIXTURE_DIR,
@@ -17,6 +19,7 @@ from helpers import (
     set_device_environment,
 )
 
+from agent_nettools import parsers
 from agent_nettools.fixtures import (
     QUIET_PAIR_LABELS,
     capture_device,
@@ -119,8 +122,8 @@ def test_missing_fixture_surfaces_as_a_structured_error(monkeypatch):
 
 
 @pytest.mark.parametrize("device_name", sorted(DEVICES))
-def test_quiet_fabric_pair_diffs_every_command_today(monkeypatch, device_name):
-    """Pins the current diff defect against real data.
+def test_quiet_fabric_pair_reports_no_change(monkeypatch, device_name):
+    """Proves the Phase 2 fix against real data: a quiet fabric now diffs clean.
 
     Every IOS-XR show command prefixes its output with the current timestamp
     (``Wed Jul 29 11:59:09.555 UTC``), and several add their own moving fields:
@@ -138,12 +141,13 @@ def test_quiet_fabric_pair_diffs_every_command_today(monkeypatch, device_name):
                                                 is the advertised TTL and is stable)
     ==========================================  ====================================
 
-    Because ``diff_evidence`` compares whole command strings, all 7 commands are
-    reported as changed on a fabric where nothing actually happened: a 100%
-    false-positive rate with no true negatives.
-
-    **Phase 2 inverts this test** -- ``changed`` becomes empty and ``unchanged``
-    becomes all 7 commands. It is written to fail loudly when that lands.
+    Diffing at the intent level fixes this two ways: the parsers (``parsers.py``)
+    exclude each intent's ``VOLATILE_FIELDS`` from record/meta comparison, and the
+    normalized-text fallback (``normalize.py``) strips the timestamp preamble and
+    masks the same moving fields in place. Either path used alone on this fixture
+    pair reports zero real change -- this test is the proof: every intent this
+    platform's parsers can read lands in ``unchanged``, none in ``changed``, and
+    nothing appeared, vanished, or failed.
     """
 
     set_device_environment(monkeypatch)
@@ -151,13 +155,13 @@ def test_quiet_fabric_pair_diffs_every_command_today(monkeypatch, device_name):
 
     diff = diff_evidence(old, new)
 
-    assert sorted(diff["changed"]) == sorted(ALL_COMMANDS)
-    assert diff["unchanged"] == []
-    # The noise is purely volatile fields -- nothing appeared, vanished, or failed.
+    assert diff["changed"] == []
+    assert sorted(diff["unchanged"]) == sorted(LAB_INTENTS)
     assert diff["added"] == []
     assert diff["removed"] == []
     assert diff["failed"] == []
     assert diff["recovered"] == []
+    assert diff["unsupported"] == []
 
 
 def test_capture_reports_a_failed_command_instead_of_writing_it(monkeypatch, tmp_path):
@@ -183,3 +187,134 @@ def test_capture_deduplicates_a_connection_level_failure(monkeypatch, tmp_path):
     assert len(result["errors"]) == 1
     assert "connection to 172.20.250.21 failed" in result["errors"][0]
     assert result["written"] == []
+
+
+def load_evidence(device_name, label):
+    """Full evidence (parsed, per Task 2 wiring) from a committed fixture."""
+
+    return load_fixture_evidence(device_name, label=label, base_dir=str(FIXTURE_DIR))
+
+
+def test_parse_xr_facts_from_real_fixture(monkeypatch):
+    set_device_environment(monkeypatch)
+    evidence = load_evidence("PE1", "t0")
+
+    assert evidence["facts"]["data"]["parse_status"] == parsers.PARSE_OK
+    meta = evidence["facts"]["data"]["parsed"]["meta"]
+    assert meta["hostname"] == "PE1"
+    assert meta["version"] == "7.11.2"
+
+
+def test_parse_xr_bgp_from_real_fixture(monkeypatch):
+    set_device_environment(monkeypatch)
+    evidence = load_evidence("PE1", "t0")
+
+    parsed = evidence["bgp"]["data"]["parsed"]
+    assert parsed["meta"]["router_id"] == "10.255.0.11"
+    assert parsed["meta"]["local_as"] == "65000"
+    assert any(record["neighbor"] == "10.255.0.31" for record in parsed["records"])
+
+
+def test_parse_xr_interfaces_from_real_fixture(monkeypatch):
+    set_device_environment(monkeypatch)
+    evidence = load_evidence("PE1", "t0")
+
+    by_name = {r["interface"]: r for r in evidence["interfaces"]["data"]["parsed"]["records"]}
+    assert by_name["Gi0/0/0/2.300"]["line_protocol"] == "down"
+
+
+def test_parse_xr_sr_from_real_fixture(monkeypatch):
+    set_device_environment(monkeypatch)
+    evidence = load_evidence("PE1", "t0")
+
+    records = evidence["sr"]["data"]["parsed"]["records"]
+    assert any(record["operational_state"] == "down" for record in records)
+
+
+@pytest.mark.parametrize("platform_intent", sorted(parsers.PARSERS))
+def test_every_parser_fails_on_garbage_input_without_raising(platform_intent):
+    """Pins the strictness contract from every parser's own docstring: a parser
+    that returns nothing from non-empty, unrecognized input must report
+    PARSE_FAILED rather than a silent empty success (the ntc-templates failure
+    mode ``parsers.py`` exists to avoid)."""
+
+    platform, intent = platform_intent
+    garbage = {"cmd": "this is not a recognized command output\njust some words\n"}
+
+    parsed, status = parsers.parse_intent(platform, intent, garbage)
+
+    assert status == parsers.PARSE_FAILED
+    assert parsed is None
+
+
+def test_parser_exception_is_caught_not_propagated(monkeypatch):
+    """A parser bug must never break collection -- parse_intent's broad except
+    turns any exception into PARSE_FAILED."""
+
+    def exploding_parser(outputs):
+        raise RuntimeError("parser bug")
+
+    monkeypatch.setitem(parsers.PARSERS, ("cisco_xr", "bgp"), exploding_parser)
+
+    parsed, status = parsers.parse_intent("cisco_xr", "bgp", {"show bgp summary": "some output"})
+
+    assert status == parsers.PARSE_FAILED
+    assert parsed is None
+
+
+def test_diff_detects_a_real_non_volatile_change(monkeypatch):
+    """A change to a field outside VOLATILE_FIELDS must be reported as real."""
+
+    set_device_environment(monkeypatch)
+    old = load_evidence("PE1", "t0")
+    new = copy.deepcopy(old)
+
+    neighbor = new["bgp"]["data"]["parsed"]["records"][0]
+    assert neighbor["neighbor"] == "10.255.0.31"
+    neighbor["state_pfx_rcd"] = "12"  # was "0" -- a real prefix-count change.
+
+    diff = diff_evidence(old, new)
+
+    assert "bgp" in diff["changed"]
+    entry = diff["details"]["bgp"]
+    assert entry["compared_via"] == "parsed"
+    assert entry["changed_records"] == [
+        {"key": "10.255.0.31", "changes": {"state_pfx_rcd": {"old": "0", "new": "12"}}}
+    ]
+
+
+def test_diff_ignores_a_volatile_only_change(monkeypatch):
+    """MsgRcvd/Up-Down move on keepalives alone and must not be reported."""
+
+    set_device_environment(monkeypatch)
+    old = load_evidence("PE1", "t0")
+    new = copy.deepcopy(old)
+
+    neighbor = new["bgp"]["data"]["parsed"]["records"][0]
+    neighbor["msg_rcvd"] = "99999"
+    neighbor["up_down"] = "00:00:01"
+
+    diff = diff_evidence(old, new)
+
+    assert "bgp" not in diff["changed"]
+    assert "bgp" in diff["unchanged"]
+    assert diff["details"]["bgp"]["changed_records"] == []
+
+
+def test_diff_falls_back_to_normalized_text_when_parsing_unavailable(monkeypatch):
+    """Forcing both sides to PARSE_FAILED must not break the quiet-fabric pair:
+    the normalized-text fallback masks the same volatile fields the parser
+    excludes, so it independently agrees there is no real change."""
+
+    set_device_environment(monkeypatch)
+    old, new = load_pair("PE1")
+
+    for evidence in (old, new):
+        evidence["bgp"]["data"]["parsed"] = None
+        evidence["bgp"]["data"]["parse_status"] = parsers.PARSE_FAILED
+
+    diff = diff_evidence(old, new)
+
+    assert diff["details"]["bgp"]["compared_via"] == "normalized_text"
+    assert "bgp" not in diff["changed"]
+    assert "bgp" in diff["unchanged"]

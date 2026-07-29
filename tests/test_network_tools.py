@@ -199,7 +199,11 @@ def test_check_fabric_rejects_unknown_check(monkeypatch):
     assert "Unknown check" in result["errors"][0]
 
 
-def test_diff_evidence_reports_changed_commands():
+def test_diff_evidence_reports_changed_intents():
+    """No parser is wired for these hand-built sections (no "parse_status"), so
+    the comparison falls back to normalized text -- exercised on its own merits
+    by the fixture-backed tests below."""
+
     old = {
         "device": "PE1",
         "timestamp": "t0",
@@ -215,12 +219,16 @@ def test_diff_evidence_reports_changed_commands():
 
     diff = diff_evidence(old, new)
 
-    assert diff["changed"] == ["show bgp summary"]
-    assert diff["unchanged"] == ["show isis neighbors"]
+    assert diff["changed"] == ["bgp"]
+    assert diff["unchanged"] == ["isis"]
     assert diff["added"] == []
     assert diff["removed"] == []
     assert diff["failed"] == []
     assert diff["recovered"] == []
+    assert diff["unsupported"] == []
+    assert diff["details"]["bgp"]["compared_via"] == "normalized_text"
+    assert diff["details"]["bgp"]["changed_records"] == []
+    assert diff["details"]["isis"]["compared_via"] == "normalized_text"
 
 
 def test_diff_evidence_separates_failures_from_removals():
@@ -232,7 +240,7 @@ def test_diff_evidence_separates_failures_from_removals():
         {"device": "PE1", "bgp": healthy_bgp},
         {"device": "PE1", "bgp": failed_bgp},
     )
-    assert diff["failed"] == ["show bgp summary"]
+    assert diff["failed"] == ["bgp"]
     assert diff["removed"] == []
 
     # BGP failed in the old run and is back: not "added", reported as "recovered".
@@ -240,8 +248,42 @@ def test_diff_evidence_separates_failures_from_removals():
         {"device": "PE1", "bgp": failed_bgp},
         {"device": "PE1", "bgp": healthy_bgp},
     )
-    assert diff["recovered"] == ["show bgp summary"]
+    assert diff["recovered"] == ["bgp"]
     assert diff["added"] == []
+
+
+def test_diff_evidence_removed_and_added_intents():
+    """An intent present-and-healthy in only one snapshot (not because it
+    errored) is "removed" or "added" -- distinct from the failed/recovered
+    pair above, which is specifically about transient errors."""
+
+    healthy_bgp = {"status": "success", "data": {"commands": {"show bgp summary": "Established"}}}
+
+    diff = diff_evidence({"device": "PE1", "bgp": healthy_bgp}, {"device": "PE1"})
+    assert diff["removed"] == ["bgp"]
+    assert diff["failed"] == []
+
+    diff = diff_evidence({"device": "PE1"}, {"device": "PE1", "bgp": healthy_bgp})
+    assert diff["added"] == ["bgp"]
+    assert diff["recovered"] == []
+
+
+def test_diff_evidence_unsupported_intent_is_its_own_bucket():
+    """An intent unsupported on the current platform is neither failed nor
+    removed nor changed -- it is a fact about the fabric, not a diff outcome."""
+
+    healthy_bgp = {"status": "success", "data": {"commands": {"show bgp summary": "Established"}}}
+    unsupported_bgp = {"status": "unsupported", "data": {"intent": "bgp", "commands": {}}}
+
+    diff = diff_evidence(
+        {"device": "PE1", "bgp": healthy_bgp},
+        {"device": "PE1", "bgp": unsupported_bgp},
+    )
+    assert diff["unsupported"] == ["bgp"]
+    assert diff["failed"] == []
+    assert diff["removed"] == []
+    assert diff["changed"] == []
+    assert "bgp" not in diff["details"]
 
 
 def test_snapshot_round_trip_honors_evidence_dir(monkeypatch, tmp_path):
