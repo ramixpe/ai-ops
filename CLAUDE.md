@@ -109,18 +109,46 @@ missing because its section errored lands in `failed` / `recovered`, never in
 `load_latest_snapshot` relies on the ISO timestamp filenames sorting
 lexicographically.
 
+**Known defect (Phase 2 fixes this).** `diff_evidence` compares whole command
+output strings, and every IOS-XR `show` command prefixes its output with the
+current timestamp. Measured against the committed t0/t1 fixture pair: all 63
+command outputs across all 9 devices report `changed` on a quiet fabric — a 100%
+false-positive rate with no true negatives. `show version` (uptime),
+`show bgp summary` (`MsgRcvd`/`MsgSent`, `Up/Down`), `show isis neighbors`
+(`Holdtime`), and the SR-TE policy `up for`/`down for` durations add their own
+moving fields; `show interfaces brief`, `show lldp neighbors`, and
+`show running-config hostname` differ *only* by the timestamp line. Note LLDP
+`Hold-time` is the advertised TTL and is **stable** — do not treat it as
+volatile. `test_quiet_fabric_pair_diffs_every_command_today` pins this and is
+written to fail loudly when the fix lands.
+
 ### Testing seams
 
-Two mechanisms, both SSH-free — prefer them over mocking netmiko internals:
+Three mechanisms, all SSH-free — prefer them over mocking netmiko internals.
+Shared helpers live in `tests/helpers.py` (not `test_*`, so pytest does not
+collect it; test modules `from helpers import ...`).
 
 - `sender=` — every check, `collect_evidence`, and `check_fabric` accept an
   optional `sender(device, command) -> str`, which short-circuits the transport
   entirely. Best for exercising tool logic and asserting exact commands.
+- **Fixture replay** — `load_fixture_evidence(device, label=...)` in
+  `fixtures.py` replays real captured output from `tests/fixtures/`. It is built
+  *on* the `sender=` seam, so it reuses the real envelope construction, section
+  slicing, and error attribution rather than a parallel implementation; a missing
+  fixture file surfaces as the same structured error a failed command would. Use
+  this for anything that needs realistic output: parsers, diff, health rules.
 - A fake `netmiko` module installed with
-  `monkeypatch.setitem(sys.modules, "netmiko", fake)` (see
-  `install_fake_netmiko` in `tests/test_network_tools.py`). Use this when the
-  test cares about transport behavior — session count, connection params,
+  `monkeypatch.setitem(sys.modules, "netmiko", fake)` (`install_fake_netmiko` in
+  `tests/helpers.py`, with `fail_commands=` and `fail_connect=`). Use this when
+  the test cares about transport behavior — session count, connection params,
   per-command failures.
+
+`tests/fixtures/<platform>/<device>/<label>/<command-slug>.txt` holds two
+captures ~90s apart (`t0`, `t1`) from all nine devices. Refresh with
+`nettools capture --all --label t0`. Fixtures are committed, so review the diff
+by eye — `scrub_output` covers credential- and serial-shaped material, but the
+current XRd output contains none, so the scrubber's only coverage is its unit
+test.
 
 ### Doc-sync tests
 

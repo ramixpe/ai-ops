@@ -8,6 +8,7 @@ Exposed as the ``nettools`` console script. Subcommands:
     nettools analyze [DEVICE] [--show-evidence] [--save]
     nettools demo [DEVICE]
     nettools diff [DEVICE]
+    nettools capture [DEVICE ...] [--all] [--label t0] [--out DIR] [--no-scrub]
     nettools inspect [DEVICE]
 """
 
@@ -19,6 +20,7 @@ import sys
 
 from dotenv import find_dotenv, load_dotenv
 
+from .fixtures import capture_device
 from .inventory import InventoryError, get_default_device_name
 from .llm_analysis import LLMAnalysisError, analyze_evidence
 from .network_tools import (
@@ -116,6 +118,30 @@ def _cmd_diff(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_capture(args: argparse.Namespace) -> int:
+    if args.all:
+        listed = list_devices()
+        if listed.get("status") != "success":
+            _print(listed)
+            return 1
+        devices = [device["name"] for device in listed["data"]["devices"]]
+    else:
+        devices = args.devices or [_resolve_device(None)]
+
+    captures = [
+        capture_device(
+            name,
+            label=args.label,
+            base_dir=args.out,
+            scrub=not args.no_scrub,
+        )
+        for name in devices
+    ]
+    _print({"label": args.label, "captures": captures})
+    # A partial capture must not look like a clean one.
+    return 0 if all(not capture["errors"] for capture in captures) else 1
+
+
 def _cmd_inspect(args: argparse.Namespace) -> int:
     # Imported lazily so the rest of the CLI works without the MCP SDK installed.
     import asyncio
@@ -184,6 +210,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_diff = sub.add_parser("diff", help="Diff current evidence against the last snapshot.")
     p_diff.add_argument("device", nargs="?", help="Device name; defaults to PE1.")
     p_diff.set_defaults(func=_cmd_diff)
+
+    p_capture = sub.add_parser("capture", help="Capture real device output as test fixtures.")
+    p_capture.add_argument("devices", nargs="*", help="Device names; defaults to PE1.")
+    p_capture.add_argument("--all", action="store_true", help="Capture every inventory device.")
+    p_capture.add_argument("--label", default="t0", help="Capture label (default: t0).")
+    p_capture.add_argument("--out", help="Fixture root; defaults to tests/fixtures.")
+    p_capture.add_argument(
+        "--no-scrub",
+        action="store_true",
+        help="Write raw output without scrubbing. For local inspection only; never commit.",
+    )
+    p_capture.set_defaults(func=_cmd_capture)
 
     p_inspect = sub.add_parser("inspect", help="Smoke-test the MCP server over stdio.")
     p_inspect.add_argument("device", nargs="?", help="Device name; defaults to PE1.")
