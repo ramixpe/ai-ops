@@ -7,10 +7,17 @@ Exposed as the ``nettools`` console script. Subcommands:
     nettools fabric [CHECK]
     nettools analyze [DEVICE] [--show-evidence] [--save]
     nettools demo [DEVICE]
-    nettools diff [DEVICE]
+    nettools diff [DEVICE] [--against golden|latest]
     nettools capture [DEVICE ...] [--all] [--label t0] [--out DIR] [--no-scrub]
     nettools learn-topology [--from-fixtures|--live] [--label t0] [--out PATH] [--write]
+    nettools health [DEVICE ...] [--all] [--from-fixtures] [--label t0] [--min-severity S]
+    nettools baseline pin [DEVICE] [--from-latest]
+    nettools baseline show [DEVICE]
+    nettools flaps [DEVICE]
     nettools inspect [DEVICE]
+
+``nettools health`` exit codes: 0 (ok/info, nothing actionable), 1 (warning),
+2 (critical) -- so CI and cron can gate on the fabric's worst severity.
 """
 
 from __future__ import annotations
@@ -23,6 +30,7 @@ from pathlib import Path
 from dotenv import find_dotenv, load_dotenv
 
 from .fixtures import capture_device, load_fixture_evidence
+from .health import evaluate_fabric, exit_code_for_severity, severity_rank
 from .inventory import InventoryError, get_default_device_name
 from .inventory_model import resolve_inventory_path
 from .llm_analysis import LLMAnalysisError, analyze_evidence
@@ -30,9 +38,12 @@ from .network_tools import (
     CHECK_TOOLS,
     check_fabric,
     collect_evidence,
+    detect_flaps,
     diff_evidence,
     list_devices,
+    load_golden_snapshot,
     load_latest_snapshot,
+    save_golden_snapshot,
     save_snapshot,
 )
 from .topology import (
@@ -116,15 +127,98 @@ def _cmd_demo(args: argparse.Namespace) -> int:
 
 def _cmd_diff(args: argparse.Namespace) -> int:
     device = _resolve_device(args.device)
-    previous = load_latest_snapshot(device)
+    if args.against == "golden":
+        previous = load_golden_snapshot(device)
+        missing_message = (
+            f"No golden snapshot pinned for {device}; run `nettools baseline pin {device}` first."
+        )
+    else:
+        previous = load_latest_snapshot(device)
+        missing_message = f"No previous snapshot for {device}; baseline established."
+
     current = collect_evidence(device)
     path = save_snapshot(current)
     print(f"# Snapshot saved: {path}")
     if previous is None:
-        print(f"No previous snapshot for {device}; baseline established.")
+        print(missing_message)
         return 0
     _print(diff_evidence(previous, current))
     return 0
+
+
+def _cmd_baseline_pin(args: argparse.Namespace) -> int:
+    device = _resolve_device(args.device)
+    if args.from_latest:
+        evidence = load_latest_snapshot(device)
+        if evidence is None:
+            print(
+                f"No saved snapshot for {device} to pin; run `nettools diff {device}` "
+                "first, or omit --from-latest to collect fresh evidence now."
+            )
+            return 1
+    else:
+        evidence = collect_evidence(device)
+        save_snapshot(evidence)
+
+    path = save_golden_snapshot(evidence)
+    print(f"# Golden snapshot pinned: {path}")
+    return 0
+
+
+def _cmd_baseline_show(args: argparse.Namespace) -> int:
+    device = _resolve_device(args.device)
+    evidence = load_golden_snapshot(device)
+    if evidence is None:
+        print(f"No golden snapshot pinned for {device}.")
+        return 1
+    _print(evidence)
+    return 0
+
+
+def _cmd_flaps(args: argparse.Namespace) -> int:
+    device = _resolve_device(args.device)
+    result = detect_flaps(device, min_transitions=args.min_transitions)
+    _print(result)
+    return 0 if not result["flapping"] else 1
+
+
+def _cmd_health(args: argparse.Namespace) -> int:
+    if args.all:
+        listed = list_devices()
+        if listed.get("status") != "success":
+            _print(listed)
+            return 2
+        names = [device["name"] for device in listed["data"]["devices"]]
+    else:
+        names = args.devices or [_resolve_device(None)]
+
+    if args.from_fixtures:
+        evidence_by_device = {name: load_fixture_evidence(name, label=args.label) for name in names}
+    else:
+        evidence_by_device = {name: collect_evidence(name) for name in names}
+
+    result = evaluate_fabric(evidence_by_device)
+
+    # One JSON document, like every other subcommand: a stream of concatenated
+    # pretty-printed objects is not parseable, and `nettools health --all | jq`
+    # is the whole point of having exit codes. --min-severity filters which
+    # devices appear, but the fabric severity is always computed over all of
+    # them, so filtering the view can never soften the verdict.
+    threshold = severity_rank(args.min_severity)
+    reported = {
+        name: verdict
+        for name, verdict in result["devices"].items()
+        if severity_rank(verdict["severity"]) >= threshold
+    }
+    _print(
+        {
+            "severity": result["severity"],
+            "counts": result.get("counts", {}),
+            "devices": reported,
+            "suppressed": sorted(set(result["devices"]) - set(reported)),
+        }
+    )
+    return exit_code_for_severity(result["severity"])
 
 
 def _cmd_capture(args: argparse.Namespace) -> int:
@@ -258,8 +352,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_demo.add_argument("device", nargs="?", help="Device name; defaults to PE1.")
     p_demo.set_defaults(func=_cmd_demo)
 
-    p_diff = sub.add_parser("diff", help="Diff current evidence against the last snapshot.")
+    p_diff = sub.add_parser("diff", help="Diff current evidence against a saved snapshot.")
     p_diff.add_argument("device", nargs="?", help="Device name; defaults to PE1.")
+    p_diff.add_argument(
+        "--against",
+        choices=("golden", "latest"),
+        default="latest",
+        help="Compare against the pinned golden snapshot or the most recent one (default: latest).",
+    )
     p_diff.set_defaults(func=_cmd_diff)
 
     p_capture = sub.add_parser("capture", help="Capture real device output as test fixtures.")
@@ -297,6 +397,56 @@ def build_parser() -> argparse.ArgumentParser:
         help="Rewrite the resolved inventory in place. Discards its comments.",
     )
     p_learn.set_defaults(func=_cmd_learn_topology)
+
+    p_health = sub.add_parser(
+        "health",
+        help="Evaluate deterministic health verdicts. Exit codes: 0 ok/info, 1 warning, 2 critical.",
+    )
+    p_health.add_argument("devices", nargs="*", help="Device names; defaults to PE1 (or use --all).")
+    p_health.add_argument("--all", action="store_true", help="Evaluate every inventory device.")
+    p_health.add_argument(
+        "--from-fixtures",
+        action="store_true",
+        help="Evaluate committed test fixtures instead of a live collection.",
+    )
+    p_health.add_argument(
+        "--label", default="t0", help="Fixture label to use with --from-fixtures (default: t0)."
+    )
+    p_health.add_argument(
+        "--min-severity",
+        default="ok",
+        choices=("ok", "info", "warning", "critical"),
+        help="Only print devices at or above this severity (default: ok, i.e. every device).",
+    )
+    p_health.set_defaults(func=_cmd_health)
+
+    p_baseline = sub.add_parser("baseline", help="Manage per-device pinned golden snapshots.")
+    baseline_sub = p_baseline.add_subparsers(dest="baseline_command", required=True)
+
+    p_baseline_pin = baseline_sub.add_parser("pin", help="Pin a golden snapshot for a device.")
+    p_baseline_pin.add_argument("device", nargs="?", help="Device name; defaults to PE1.")
+    p_baseline_pin.add_argument(
+        "--from-latest",
+        action="store_true",
+        help="Pin the most recently saved snapshot instead of collecting a fresh one.",
+    )
+    p_baseline_pin.set_defaults(func=_cmd_baseline_pin)
+
+    p_baseline_show = baseline_sub.add_parser("show", help="Print a device's pinned golden snapshot.")
+    p_baseline_show.add_argument("device", nargs="?", help="Device name; defaults to PE1.")
+    p_baseline_show.set_defaults(func=_cmd_baseline_show)
+
+    p_flaps = sub.add_parser(
+        "flaps", help="Detect oscillating fields across a device's saved snapshot history."
+    )
+    p_flaps.add_argument("device", nargs="?", help="Device name; defaults to PE1.")
+    p_flaps.add_argument(
+        "--min-transitions",
+        type=int,
+        default=3,
+        help="Minimum value changes before a field is reported as flapping (default: 3).",
+    )
+    p_flaps.set_defaults(func=_cmd_flaps)
 
     p_inspect = sub.add_parser("inspect", help="Smoke-test the MCP server over stdio.")
     p_inspect.add_argument("device", nargs="?", help="Device name; defaults to PE1.")

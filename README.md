@@ -15,6 +15,9 @@ Python, Netmiko, an LLM reasoning layer, and MCP.
 - Derives expected per-device topology counts from evidence, and reports where
   the fabric's own data disagrees with itself, rather than assuming a clean
   topology (`nettools learn-topology`).
+- Evaluates deterministic health verdicts (`nettools health`) from role
+  invariants and baseline drift, so an LLM never has to look at a healthy
+  device -- only anomalies.
 - Exposes the same narrow tools through MCP, with no shell or config access.
 
 ## Environment
@@ -163,6 +166,10 @@ make demo        # Narrated agent demo
 make diff        # Diff evidence against the last snapshot
 make capture     # Recapture test fixtures from the whole lab
 make learn-topology  # Derive expected topology + print the fabric anomaly report
+make health      # Evaluate deterministic health verdicts across the whole fabric
+make baseline-pin   # Pin a golden snapshot (or DEVICE=name)
+make baseline-show  # Print a device's pinned golden snapshot (or DEVICE=name)
+make flaps       # Detect oscillating fields in a device's snapshot history
 make mcp         # Start the MCP server over stdio
 make inspect     # Smoke-test the MCP server
 ```
@@ -174,6 +181,84 @@ make facts DEVICE=RR1
 # or directly:
 nettools facts RR1
 ```
+
+## Health Verdicts
+
+`status: "success"` everywhere else in this tool means only that the SSH
+session and its commands succeeded -- a device whose every BGP peer is down
+still reports `success`. `nettools health` answers the actual question, "is
+this device healthy?", with deterministic rules instead of an LLM, so an LLM
+(or a human) only ever has to look at anomalies, not the whole fleet.
+
+```bash
+nettools health --all                      # live collection, every device
+nettools health PE1 PE2                    # live collection, specific devices
+nettools health --all --from-fixtures      # against the committed t0 fixtures
+nettools health --all --min-severity warning   # only print devices at/above warning
+```
+
+Rules come in two independent kinds (see `agent_nettools.health` and
+CLAUDE.md for the full rationale):
+
+- **Role invariants** -- what must be true of a router *given its role*,
+  independent of the inventory's recorded baseline. These catch brokenness
+  the baseline would otherwise bless: this lab's `expected: {isis_adjacencies:
+  0}` for PE2/PE4 records a fact about a broken fabric, not a healthy target,
+  so a role invariant (`isis_isolated`) flags zero adjacencies regardless of
+  what the baseline says.
+- **Baseline rules** -- drift between an observed count and the inventory's
+  derived `expected:` value (`nettools learn-topology`). These catch a fabric
+  that changed from its last known-derived state.
+- One meta rule, `suspicious_baseline`, flags a recorded baseline that a role
+  invariant would itself call unhealthy, so "matches the baseline" is never
+  mistaken for "is healthy".
+
+A finding's `severity` is one of `ok < info < warning < critical`; a device's
+severity is the max over its findings, and the fabric's is the max over its
+devices. An intent that errored, was `unsupported`, or failed to parse is
+never read as healthy -- it is listed in that device's `unevaluated` list
+instead of silently producing an "ok" finding.
+
+**Exit codes** (for CI/cron gating): `0` when the fabric is ok/info, `1` when
+the worst device is `warning`, `2` when the worst device is `critical`.
+
+## Golden Baseline and Drift
+
+Snapshots (`nettools diff`) normally compare against the most recently saved
+one. A pinned "golden" snapshot is a separate, single, known-good reference
+per device that does not get overwritten by routine `diff`/`analyze --save`
+runs:
+
+```bash
+nettools baseline pin PE1                # collect fresh evidence now, pin it
+nettools baseline pin PE1 --from-latest  # pin the most recently saved snapshot instead
+nettools baseline show PE1               # print the pinned snapshot
+nettools diff PE1 --against golden       # diff against the pin instead of "latest"
+nettools diff PE1                        # unchanged: diffs against "latest" by default
+```
+
+The golden snapshot is stored as `golden.json` in the device's evidence
+directory -- a fixed filename, deliberately not timestamp-shaped, so it can
+never be picked up by (or confused with) the timestamped snapshot history.
+
+## Flap Detection
+
+A peer that bounced up and down several times between collections can look
+clean in every single pairwise `nettools diff` -- each one only ever shows
+one change, never the repeating pattern. `nettools flaps` reads a device's
+*entire* saved snapshot history instead and reports every `(intent, subject,
+field)` whose value oscillated at least `--min-transitions` times (default
+3):
+
+```bash
+nettools flaps PE1
+nettools flaps PE1 --min-transitions 2
+```
+
+History is built from parsed records only, keyed by `parsers.record_key` and
+excluding `parsers.volatile_fields` -- the same identity and noise rules
+`diff_evidence` already uses, so a field that legitimately changes every
+collection (e.g. BGP `Up/Down`) is never reported as flapping.
 
 ## Test Fixtures
 
@@ -220,7 +305,8 @@ src/agent_nettools/platforms.py    Per-platform allowlist and intent table
 src/agent_nettools/inventory_model.py  Inventory schema (pydantic), YAML loading, credential-free
 src/agent_nettools/lab.py          Credential-free reads of the inventory: mgmt IP + platform
 src/agent_nettools/inventory.py    Joins the inventory with env credentials -> device dicts
-src/agent_nettools/network_tools.py  Allowlist, SSH, evidence, fabric, diff
+src/agent_nettools/network_tools.py  Allowlist, SSH, evidence, fabric, diff, golden snapshots, flaps
+src/agent_nettools/health.py       Deterministic health verdicts: role invariants + baseline rules
 src/agent_nettools/topology.py     Derived expected topology + the fabric anomaly report
 src/agent_nettools/devices_doc.py  Renders docs/devices.md from the inventory
 src/agent_nettools/llm_analysis.py   Provider selection + analysis

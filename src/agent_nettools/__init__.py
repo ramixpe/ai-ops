@@ -8,6 +8,17 @@ from .fixtures import (
     load_fixture_evidence,
     scrub_output,
 )
+from .health import (
+    ALL_RULES,
+    BASELINE_RULES,
+    META_RULES,
+    ROLE_INVARIANT_RULES,
+    SEVERITY_ORDER,
+    evaluate_device,
+    evaluate_fabric,
+    exit_code_for_severity,
+    severity_rank,
+)
 from .inventory import (
     InventoryError,
     get_default_device_name,
@@ -34,6 +45,7 @@ from .llm_analysis import (
 )
 from .network_tools import (
     CHECK_TOOLS,
+    GOLDEN_SNAPSHOT_FILENAME,
     STATUS_ERROR,
     STATUS_SUCCESS,
     STATUS_UNSUPPORTED,
@@ -44,12 +56,15 @@ from .network_tools import (
     check_lldp_neighbors,
     check_sr_policies,
     collect_evidence,
+    detect_flaps,
     diff_evidence,
     evidence_intents,
     get_device_facts,
     list_devices,
+    load_golden_snapshot,
     load_latest_snapshot,
     run_intent,
+    save_golden_snapshot,
     save_snapshot,
 )
 from .normalize import mask_volatile, normalize_output, strip_preamble
@@ -149,6 +164,21 @@ __all__ = [
     "save_snapshot",
     "load_latest_snapshot",
     "diff_evidence",
+    # golden (pinned) snapshots and flap detection
+    "GOLDEN_SNAPSHOT_FILENAME",
+    "save_golden_snapshot",
+    "load_golden_snapshot",
+    "detect_flaps",
+    # health: deterministic verdicts over collected evidence (Phase 4)
+    "SEVERITY_ORDER",
+    "ROLE_INVARIANT_RULES",
+    "BASELINE_RULES",
+    "META_RULES",
+    "ALL_RULES",
+    "severity_rank",
+    "exit_code_for_severity",
+    "evaluate_device",
+    "evaluate_fabric",
     # parsing: structured records from raw command output
     "parse_intent",
     "has_parser",
