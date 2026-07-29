@@ -47,7 +47,11 @@ def install_fake_netmiko(monkeypatch, *, fail_commands=(), fail_connect=False):
         def __exit__(self, *exc_info):
             return False
 
-        def send_command(self, command):
+        def send_command(self, command, **kwargs):
+            # **kwargs absorbs netmiko options real callers may pass (e.g.
+            # ``read_timeout``, used by template commands whose Template
+            # declares a per-command timeout) -- this fake only cares about
+            # the command string itself.
             if command in fail_commands:
                 raise OSError(f"timed out running {command}")
             return f"output for {command}"

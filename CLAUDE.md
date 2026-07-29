@@ -14,7 +14,7 @@ reasoning layer, and an MCP server — all over the same narrow allowlist of
 ```bash
 make setup                  # python -m venv .venv + pip install -e ".[dev,llm]"
 source .venv/bin/activate
-make test                   # pytest -q  (156 tests, no network needed)
+make test                   # pytest -q  (373 tests, no network needed)
 make lint                   # ruff check .
 make help                   # full target list
 ```
@@ -25,6 +25,9 @@ Runtime targets are thin wrappers over the `nettools` console script and all
 hit live devices: `make facts|interfaces|bgp|lldp|isis|sr [DEVICE=RR1]`,
 `make fabric-bgp`, `make analyze`, `make demo`, `make diff`, `make mcp`,
 `make inspect`. `nettools <check> <DEVICE>` works directly too.
+`make route|bgp-neighbor|interface|logging|ping|traceroute` (Phase 5,
+validated parameterized templates) take an additional value
+(`PREFIX`/`ADDRESS`/`NAME`/`COUNT`), e.g. `nettools route PE1 10.255.0.31`.
 
 CI (`.github/workflows/ci.yml`) runs `ruff check .` then `pytest -q` on Python 3.11.
 
@@ -40,8 +43,11 @@ Two packages, two source roots — `src/agent_nettools` and a top-level
 
 Data flows in one direction through five layers:
 
-0. `platforms.py` — the per-platform allowlist and intent table. Depends on
-   nothing; everything depends on it.
+0. `platforms.py` — the per-platform allowlist and intent table, plus
+   (Phase 5) `templates.py`'s validated, parameterized commands, re-exported
+   so `platforms.py` stays the single place a reviewer looks to see
+   everything that may ever be sent to a device. Depends on nothing;
+   everything depends on it.
 1. `inventory_model.py` — the declarative inventory's schema (pydantic v2,
    `extra="forbid"` everywhere) and YAML loader for `inventory/lab.yaml`.
    Reads nothing from the environment; depends only on `platforms.py` (for
@@ -93,7 +99,10 @@ into the credential-free layer — don't do it; keep resolving credentials in
 `inventory.py` only, at `load_inventory()` time.
 
 `tests/test_safety.py` iterates *every* platform, so adding a vendor cannot
-smuggle in a state-changing command, a shell metacharacter, or a non-`show` verb.
+smuggle in a state-changing command, a shell metacharacter, or a non-read-only
+verb. Since Phase 5 the checked verb set is
+`templates.VERB_ALLOWLIST = {"show", "ping", "traceroute"}`, applied to both
+`APPROVED_COMMANDS` and every template's format string — not just `"show "`.
 
 ### Intents: the multi-vendor keystone
 
@@ -312,6 +321,114 @@ in every single pairwise `diff_evidence` call -- each one only ever shows one
 change, never the repeating pattern. Both reuse `parsers.record_key` and
 `parsers.volatile_fields`, the same identity and noise rules diffing already
 established.
+
+### Validated, parameterized command templates (Phase 5)
+
+Through Phase 4, `platforms.APPROVED_COMMANDS` can only express zero-argument
+commands, so `show route <prefix>`, `show bgp neighbor <ip>`,
+`show interfaces <name>`, `show logging last <n>`, `ping`, and `traceroute`
+are all unreachable -- an agent that reads "peer 10.255.0.31 is Idle" cannot
+then ask about that peer specifically. **This is the highest-risk change in
+the project**: it is the only one that alters the shape of the safety
+guarantee, from "an exact string is a member of a frozenset" to "a
+caller-supplied value survives typed parsing".
+
+`templates.py` holds `PLATFORM_TEMPLATES[platform][template_name] -> Template`,
+structured platform-major like `PLATFORM_INTENTS`, and `platforms.py`
+re-exports its public names so it stays the single place a reviewer looks to
+see everything that may ever be sent to a device -- both the static allowlist
+and every template.
+
+**The security model is canonicalize by reconstruction, never pass-through.**
+A caller-supplied value is never substituted into a command as text. Every
+parameter is first parsed into a typed object --
+`ipaddress.IPv4Address`/`ipaddress.IPv4Network` (via `IPv4AddressParam`/
+`IPv4PrefixParam`), a range-checked `int` (`BoundedIntParam`), or a
+regex-validated interface name over an anchored `[A-Za-z][A-Za-z0-9_./-]{0,62}`
+charset (`InterfaceNameParam`) -- and the command is rendered from *that
+object's own canonical string form* (`str(parsed)`), never from the original
+text. This is why `"01.1.1.1"` can never reach a device: `ipaddress`
+rejects ambiguous leading zeros outright, so there is no code path from
+"weird but technically parseable" input to a rendered command. A
+"validate-then-pass-through" design (regex-check the raw text, then
+interpolate the text itself) was deliberately rejected: a regex broad enough
+to accept every legitimate value is also broad enough to admit a lookalike
+nobody anticipated.
+
+Five layered, deliberately redundant defenses in `render_command()`:
+1. Reject any non-ASCII codepoint first -- kills homoglyph and
+   fullwidth-digit bypasses before anything else runs.
+2. Reject control characters, whitespace, and an explicit forbidden set
+   (`` | ; & > < ` $ { } \n \r \t \0 ``), even though the typed parsers below
+   already exclude all of this -- defense in depth, and a far better error
+   message.
+3. A hard per-parameter length bound (`MAX_PARAM_LENGTH`), checked before any
+   parser runs.
+4. Re-validate the *assembled* command after rendering: no forbidden
+   character, and it must fullmatch the template's own shape regex
+   (`_shape_pattern`, placeholders widened to wildcards, everything else
+   literal) -- this catches a badly written template, not just bad input.
+5. The rendered command's first word must be in `VERB_ALLOWLIST =
+   {"show", "ping", "traceroute"}`. Nothing else is ever rendered, by any
+   template, on any platform.
+
+`|` gets called out specifically: IOS-XR's CLI supports piping a `show`
+command's output to `| file disk0:/...`, which *writes a file to the
+device* -- a pipe reaching the device is a state change, not just an
+information leak, so it must be structurally impossible, not merely
+discouraged.
+
+Every parameter is parsed in one pass *before* `str.format` is ever called
+once, so a rejection always means nothing was rendered at all -- there is no
+partially assembled command, even transiently, even with more than one
+parameter (today's templates each take exactly one, but this invariant is
+what protects a future multi-parameter template too;
+`tests/test_templates.py::test_render_command_attempts_every_parameter_before_ever_assembling_a_command`
+pins it against a synthetic two-parameter template built just for that test).
+
+`network_tools.run_template()` mirrors `run_intent()`'s ordering invariant
+exactly: platform resolves via `platform_for()` (no credentials), the
+template is validated by reconstruction, and *only then* is
+`get_device()`/credentials/a socket touched --
+`test_run_template_refuses_a_bad_parameter_before_loading_credentials` pins
+it with no credentials set at all, exactly like the static-allowlist test it
+sits beside. Unknown template for a platform returns `status: "unsupported"`,
+matching `run_intent`, not an error. `is_safe_rendered_command()` is a second,
+template-agnostic gate re-checked immediately before a rendered command
+reaches the transport layer -- the same "check right at the boundary
+regardless of what the caller supposedly already filtered" pattern
+`_run_approved_commands` uses for `is_approved()`.
+
+`ping`/`traceroute` are marked `active_probe=True` on their `Template`: they
+generate traffic (ICMP echoes / UDP-or-ICMP probes), unlike every `show`
+template, even though they change no device state. Gated by
+`NETTOOLS_ALLOW_ACTIVE_PROBES` (default enabled -- they are table stakes for
+troubleshooting); set to `0`/`false`/`no`/`off` to refuse them with a
+structured error instead of running. A `Template` also carries a suggested
+`read_timeout`, since `ping`/`traceroute` legitimately run much longer than a
+`show` command; `network_tools._netmiko_send_commands()` takes an optional
+`read_timeout` for exactly this, unused (and behavior-identical to before
+Phase 5) by every other caller.
+
+`tests/test_template_security.py` is the adversarial suite: every template
+and every one of its parameters is checked against a table of attack strings
+(pipes, `;`/`&&`, newlines/CR, backtick/`$()` substitution, `${IFS}`,
+null bytes, leading zeros, malformed/overlong octets, an empty string, a
+10,000-character string, fullwidth-digit and Cyrillic-homoglyph spellings of
+an IPv4 address, and a path-traversal string), plus `count`-specific bad
+values (`0`, `501`, `-1`, `1.5`, `1e3`, `0x10`). It also asserts no command is
+ever rendered for a rejected input, and property-tests that a rendered
+command built from many valid inputs never contains a forbidden character.
+`tests/test_safety.py` was widened, not weakened: the "read-only verb" check
+now covers `VERB_ALLOWLIST` instead of a hardcoded `"show "`, and applies to
+every template's format string, not just the static allowlist.
+
+CLI: `nettools route|bgp-neighbor|interface|logging|ping|traceroute DEVICE
+...`. MCP: `get_lab_route`/`get_lab_bgp_neighbor`/`get_lab_interface`/
+`get_lab_logging`/`get_lab_ping`/`get_lab_traceroute`, named to keep the
+`get_lab_*` prefix `test_mcp_readme_lists_exactly_the_exposed_tools` already
+filters on, each with a docstring stating the accepted parameter form so an
+MCP client can narrow iteratively.
 
 ### Testing seams
 

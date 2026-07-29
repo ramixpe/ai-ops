@@ -5,6 +5,12 @@ Exposed as the ``nettools`` console script. Subcommands:
     nettools inventory
     nettools facts | interfaces | bgp | lldp | isis | sr  [DEVICE]
     nettools fabric [CHECK]
+    nettools route DEVICE PREFIX
+    nettools bgp-neighbor DEVICE ADDRESS
+    nettools interface DEVICE NAME
+    nettools logging DEVICE [--count N]
+    nettools ping DEVICE ADDRESS
+    nettools traceroute DEVICE ADDRESS
     nettools analyze [DEVICE] [--show-evidence] [--save]
     nettools demo [DEVICE]
     nettools diff [DEVICE] [--against golden|latest]
@@ -18,6 +24,15 @@ Exposed as the ``nettools`` console script. Subcommands:
 
 ``nettools health`` exit codes: 0 (ok/info, nothing actionable), 1 (warning),
 2 (critical) -- so CI and cron can gate on the fabric's worst severity.
+
+``route``/``bgp-neighbor``/``interface``/``logging``/``ping``/``traceroute``
+are validated, parameterized templates (Phase 5): the prefix/address/interface
+name/count argument is never passed through to the device as text -- it is
+parsed into a typed object and the command is rendered from that object's own
+canonical form (see ``agent_nettools.templates``, "canonicalize by
+reconstruction"). ``ping``/``traceroute`` generate traffic (unlike every other
+command here) and are gated by ``NETTOOLS_ALLOW_ACTIVE_PROBES`` (default
+enabled).
 """
 
 from __future__ import annotations
@@ -40,11 +55,17 @@ from .network_tools import (
     collect_evidence,
     detect_flaps,
     diff_evidence,
+    get_bgp_neighbor,
+    get_interface,
+    get_logging,
+    get_route,
     list_devices,
     load_golden_snapshot,
     load_latest_snapshot,
+    ping_device,
     save_golden_snapshot,
     save_snapshot,
+    traceroute_device,
 )
 from .topology import (
     build_anomaly_report,
@@ -77,6 +98,42 @@ def _cmd_check(args: argparse.Namespace) -> int:
 
 def _cmd_fabric(args: argparse.Namespace) -> int:
     result = check_fabric(args.check)
+    _print(result)
+    return 0 if result.get("status") == "success" else 1
+
+
+def _cmd_route(args: argparse.Namespace) -> int:
+    result = get_route(args.device, args.prefix)
+    _print(result)
+    return 0 if result.get("status") == "success" else 1
+
+
+def _cmd_bgp_neighbor(args: argparse.Namespace) -> int:
+    result = get_bgp_neighbor(args.device, args.address)
+    _print(result)
+    return 0 if result.get("status") == "success" else 1
+
+
+def _cmd_interface(args: argparse.Namespace) -> int:
+    result = get_interface(args.device, args.name)
+    _print(result)
+    return 0 if result.get("status") == "success" else 1
+
+
+def _cmd_logging(args: argparse.Namespace) -> int:
+    result = get_logging(args.device, args.count)
+    _print(result)
+    return 0 if result.get("status") == "success" else 1
+
+
+def _cmd_ping(args: argparse.Namespace) -> int:
+    result = ping_device(args.device, args.address)
+    _print(result)
+    return 0 if result.get("status") == "success" else 1
+
+
+def _cmd_traceroute(args: argparse.Namespace) -> int:
+    result = traceroute_device(args.device, args.address)
     _print(result)
     return 0 if result.get("status") == "success" else 1
 
@@ -341,6 +398,52 @@ def build_parser() -> argparse.ArgumentParser:
         "check", nargs="?", default="bgp", choices=sorted(CHECK_TOOLS), help="Check to run."
     )
     p_fabric.set_defaults(func=_cmd_fabric)
+
+    p_route = sub.add_parser("route", help="Look up a specific route (validated template).")
+    p_route.add_argument("device", help="Device name.")
+    p_route.add_argument("prefix", help="IPv4 address or prefix, e.g. 10.0.0.0/24.")
+    p_route.set_defaults(func=_cmd_route)
+
+    p_bgp_neighbor = sub.add_parser(
+        "bgp-neighbor", help="Look up a specific BGP neighbor (validated template)."
+    )
+    p_bgp_neighbor.add_argument("device", help="Device name.")
+    p_bgp_neighbor.add_argument("address", help="Neighbor IPv4 address.")
+    p_bgp_neighbor.set_defaults(func=_cmd_bgp_neighbor)
+
+    p_interface = sub.add_parser(
+        "interface", help="Look up a specific interface's status (validated template)."
+    )
+    p_interface.add_argument("device", help="Device name.")
+    p_interface.add_argument("name", help="Interface name, e.g. GigabitEthernet0/0/0/1.")
+    p_interface.set_defaults(func=_cmd_interface)
+
+    p_logging = sub.add_parser(
+        "logging", help="Show recent log lines (validated template)."
+    )
+    p_logging.add_argument("device", help="Device name.")
+    p_logging.add_argument(
+        "--count", type=int, default=20, help="Number of log lines, 1-500 (default: 20)."
+    )
+    p_logging.set_defaults(func=_cmd_logging)
+
+    p_ping = sub.add_parser(
+        "ping",
+        help="Ping an IPv4 address from a device (validated template; active probe -- see "
+        "NETTOOLS_ALLOW_ACTIVE_PROBES).",
+    )
+    p_ping.add_argument("device", help="Device name.")
+    p_ping.add_argument("address", help="Target IPv4 address.")
+    p_ping.set_defaults(func=_cmd_ping)
+
+    p_traceroute = sub.add_parser(
+        "traceroute",
+        help="Traceroute to an IPv4 address from a device (validated template; active probe -- "
+        "see NETTOOLS_ALLOW_ACTIVE_PROBES).",
+    )
+    p_traceroute.add_argument("device", help="Device name.")
+    p_traceroute.add_argument("address", help="Target IPv4 address.")
+    p_traceroute.set_defaults(func=_cmd_traceroute)
 
     p_analyze = sub.add_parser("analyze", help="Collect evidence and analyze with the LLM.")
     p_analyze.add_argument("device", nargs="?", help="Device name; defaults to PE1.")

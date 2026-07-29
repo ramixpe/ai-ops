@@ -6,6 +6,8 @@ vendor cannot smuggle in a state-changing command, and they assert on the MCP
 module's public surface, so a generic executor cannot appear unnoticed.
 """
 
+import re
+
 import pytest
 
 from agent_nettools.network_tools import CHECK_TOOLS
@@ -13,6 +15,8 @@ from agent_nettools.platforms import (
     ALL_APPROVED_COMMANDS,
     APPROVED_COMMANDS,
     PLATFORM_INTENTS,
+    PLATFORM_TEMPLATES,
+    VERB_ALLOWLIST,
     all_intents,
     is_approved,
     known_platforms,
@@ -63,16 +67,78 @@ def test_approved_commands_are_plain_single_commands(platform):
 
 
 @pytest.mark.parametrize("platform", known_platforms())
-def test_every_approved_command_is_a_show_command(platform):
-    """Pins that the table contains only inspection verbs.
+def test_every_approved_command_starts_with_a_read_only_verb(platform):
+    """Pins that the static table contains only read-only-verb commands.
 
-    Phase 5 introduces validated ``ping``/``traceroute`` templates and will widen
-    this to an explicit read-only verb set; until then, "show" is the whole
-    surface and asserting it is the cheapest possible guard.
+    Widened for Phase 5: ``VERB_ALLOWLIST`` is the explicit set
+    (``show``/``ping``/``traceroute``) that both the static allowlist and
+    every template's format string must draw their first word from. Before
+    Phase 5 this only ever needed to check "show"; ping/traceroute now live in
+    ``PLATFORM_TEMPLATES``, not here, but the same verb set covers both so
+    there is exactly one place a reviewer needs to check for "what verbs can
+    ever be sent to a device".
     """
 
     for command in APPROVED_COMMANDS[platform]:
-        assert command.startswith("show "), f"{platform}: {command!r} is not a show command"
+        verb = command.split(" ", 1)[0]
+        assert verb in VERB_ALLOWLIST, f"{platform}: {command!r} does not start with a read-only verb"
+
+
+@pytest.mark.parametrize("platform", known_platforms())
+def test_every_template_format_string_starts_with_a_read_only_verb(platform):
+    for template_name, template in PLATFORM_TEMPLATES.get(platform, {}).items():
+        verb = template.format_string.split(" ", 1)[0]
+        assert verb in VERB_ALLOWLIST, (
+            f"{platform}.{template_name}: {template.format_string!r} does not start with a "
+            "read-only verb"
+        )
+
+
+@pytest.mark.parametrize("platform", known_platforms())
+def test_every_template_format_string_is_free_of_banned_snippets(platform):
+    for template_name, template in PLATFORM_TEMPLATES.get(platform, {}).items():
+        lowered = template.format_string.lower()
+        for snippet in BANNED_SNIPPETS:
+            assert snippet not in lowered, (
+                f"{platform}.{template_name} format string contains {snippet!r}"
+            )
+
+
+@pytest.mark.parametrize("platform", known_platforms())
+def test_every_template_format_string_has_only_safe_characters(platform):
+    """A template's *literal* text must never itself carry a forbidden
+    character -- this is independent of whatever a caller later supplies,
+    since the literal parts of the format string are never validated at
+    render time (only the substituted parameter values are)."""
+
+    for template_name, template in PLATFORM_TEMPLATES.get(platform, {}).items():
+        # "{" and "}" are expected around a placeholder name -- that is the
+        # one legitimate use of either character in a template. Strip
+        # placeholders out first so this test polices the *literal* text
+        # around them, not the substitution syntax itself.
+        literal_text = re.sub(r"\{\w+\}", "", template.format_string)
+        for character in FORBIDDEN_CHARACTERS:
+            assert character not in literal_text, (
+                f"{platform}.{template_name}: {template.format_string!r} contains {character!r} "
+                "outside of a placeholder"
+            )
+
+
+@pytest.mark.parametrize("platform", known_platforms())
+def test_every_template_placeholder_matches_its_declared_parameters(platform):
+    """Every ``{name}`` in a format string must have a declared parameter of
+    that name, and every declared parameter must actually appear in the
+    format string -- an un-declared placeholder would let unsubstituted text
+    reach ``.format()`` uncontrolled, and an unused declared parameter would
+    mean a validated value that never actually lands in the rendered
+    command (a silent no-op at best, a sign of a copy-paste bug at worst)."""
+
+    for template_name, template in PLATFORM_TEMPLATES.get(platform, {}).items():
+        placeholders = set(re.findall(r"\{(\w+)\}", template.format_string))
+        declared = set(template.params)
+        assert placeholders == declared, (
+            f"{platform}.{template_name}: placeholders {placeholders} != declared params {declared}"
+        )
 
 
 def test_unknown_platform_approves_nothing():
