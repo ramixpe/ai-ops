@@ -14,7 +14,7 @@ reasoning layer, and an MCP server — all over the same narrow allowlist of
 ```bash
 make setup                  # python -m venv .venv + pip install -e ".[dev,llm]"
 source .venv/bin/activate
-make test                   # pytest -q  (402 tests, no network needed)
+make test                   # pytest -q  (444 tests, no network needed)
 make lint                   # ruff check .
 make help                   # full target list
 ```
@@ -33,6 +33,9 @@ validated parameterized templates) take an additional value
 across every device instead of one at a time; `nettools agent "QUESTION"
 [--device D] [--max-iterations N] [--time-budget SECONDS]` (Phase 6,
 Anthropic only) runs a bounded, read-only tool-calling loop.
+`nettools evidence prune --keep-days N --keep-count M [--device D]` and
+`nettools evidence history [DEVICE]` (Phase 7) manage stored snapshots
+against whichever backend `NETTOOLS_EVIDENCE_BACKEND` selects.
 
 CI (`.github/workflows/ci.yml`) runs `ruff check .` then `pytest -q` on Python 3.11.
 
@@ -40,7 +43,11 @@ Requires `DEVICE_USERNAME` / `DEVICE_PASSWORD` (or `DEVICE_SSH_KEYFILE`) for
 anything that touches a device; `cp .env.example .env` and see that file for
 the full env surface (`LLM_PROVIDER`, `NETTOOLS_LOG`, `NETTOOLS_EVIDENCE_DIR`,
 `NETTOOLS_INVENTORY`, `NETTOOLS_LLM_FALLBACKS`,
-`NETTOOLS_EVIDENCE_PER_INTENT_CHARS`, `NETTOOLS_EVIDENCE_TOTAL_CHARS`).
+`NETTOOLS_EVIDENCE_PER_INTENT_CHARS`, `NETTOOLS_EVIDENCE_TOTAL_CHARS`,
+`NETTOOLS_CONNECT_TIMEOUT_SECONDS`, `NETTOOLS_READ_TIMEOUT_SECONDS`,
+`NETTOOLS_BANNER_TIMEOUT_SECONDS`, `NETTOOLS_COMMAND_RETRIES`,
+`NETTOOLS_RETRY_BACKOFF_SECONDS`, `NETTOOLS_EVIDENCE_BACKEND`,
+`NETTOOLS_LOG_MAX_BYTES`, `NETTOOLS_LOG_BACKUP_COUNT`).
 
 ## Architecture
 
@@ -550,6 +557,92 @@ network-troubleshooting prompt can plausibly trip a cyber-content classifier
 even though nothing here is malicious, so `stop_reason == "refusal"` is
 always handled, reading `stop_details` only in that branch (it is `null`
 otherwise).
+
+### Scaling the fabric path, and a second evidence backend (Phase 7)
+
+A fabric-scale measurement found `check_fabric` super-linear (2.9-3.6x time
+per 2x devices, not 2x) even with an injected `sender` and zero network I/O.
+Root cause: `check_fabric` calls `load_inventory()` once, but each per-device
+check calls `get_device(name)` (via `run_intent` -> `_run_approved_commands`),
+and `get_device` used to rebuild the *entire* credentialed inventory and
+linear-scan it for one name -- O(n) work repeated once per device.
+
+Two independent fixes, deliberately kept separate:
+
+- **O(1) device lookup.** `inventory_model.find_device()` caches a
+  `{name: Device}` index alongside the existing YAML-parse cache, invalidated
+  by the same `reset_inventory_cache()` -- credential-free, so it carries none
+  of the "env changed, cache went stale" risk a credentialed cache would.
+  `inventory.get_device()` now does an indexed lookup plus resolving *one*
+  device's own credential group, not the whole inventory's; `lab.platform_for()`
+  uses the same index. `load_inventory()`'s behavior is unchanged.
+- **Resolve once, thread down.** `check_fabric`/`iter_fabric` resolve every
+  device exactly once (the existing single `load_inventory()` call) and pass
+  each record straight through `run_intent`/`_run_approved_commands` via an
+  optional `device=` parameter, so a whole-fabric check never re-resolves a
+  device by name at all. `device=` is read *only after* the allowlist check in
+  `_run_approved_commands` -- never before -- so the safety ordering invariant
+  holds regardless of whether a caller supplies it; every caller except
+  `check_fabric` leaves it `None` and gets the exact previous behavior,
+  including the two tests that call `_run_approved_commands` with no
+  credentials in the environment at all.
+
+**Streaming fabric results.** `check_fabric` used to build
+`dict(pool.map(run_one, devices))`, materializing every device's full result
+before returning anything -- the memory ceiling at 1000+ devices with real
+command output. `iter_fabric(check, *, sender=None, max_workers=...)` is the
+streaming twin: it yields `(device_name, result)` via
+`concurrent.futures.as_completed` as each device finishes, in completion
+order, not inventory order. `check_fabric` is now built on the same shared
+runner (`_iter_check_results`) and simply collects + reorders into inventory
+order for callers that want one complete envelope back -- behavior, including
+the `unsupported` bucket, is unchanged.
+
+**Connection timeouts and bounded retries.** `_netmiko_send_commands` had no
+`conn_timeout`/`banner_timeout`, and only ever got a `read_timeout` from a
+`Template` (ping/traceroute); a reachable-but-slow device could otherwise
+stall a check for however long netmiko's own defaults allow. All three
+timeouts are now env-then-default configurable
+(`NETTOOLS_CONNECT_TIMEOUT_SECONDS`/`NETTOOLS_READ_TIMEOUT_SECONDS`/
+`NETTOOLS_BANNER_TIMEOUT_SECONDS`), and a `Template`'s own `read_timeout`
+still wins whenever it is set, since it is always passed explicitly rather
+than left `None`. Both the initial connection and each command are retried up
+to `NETTOOLS_COMMAND_RETRIES` total attempts (default 2) with exponential
+backoff (`NETTOOLS_RETRY_BACKOFF_SECONDS`) on a *transient* failure only --
+`_is_transient_failure` never retries a `NetmikoAuthenticationException` (bad
+credentials cannot succeed on a later attempt), and nothing upstream of
+`_netmiko_send_commands` ever retries a command the allowlist refused, since
+that check happens before this function is ever reached. A retry that
+happened is never silent: it appears both in the `NETTOOLS_LOG` audit record
+and, for the command(s) that needed one, under `data.retries` in the result.
+
+**A second evidence backend.** `evidence/<device>/*.json` (still the default)
+grows unbounded and cannot be queried; `load_latest_snapshot` relies on
+ISO-timestamp filenames sorting lexicographically. `evidence_store.py` adds a
+`EvidenceStore` shape (save a snapshot, load latest, save/load golden, list a
+device's history, prune by age and/or count) with two implementations --
+`FileEvidenceStore` (the original layout, moved here unchanged) and
+`SQLiteEvidenceStore` (stdlib `sqlite3` only, one table indexed on
+`(device, timestamp)`). `NETTOOLS_EVIDENCE_BACKEND=sqlite` opts in; unset or
+anything else keeps files. `network_tools.py`'s public snapshot functions are
+now thin wrappers over `evidence_store.get_store()`, so `diff_evidence` needs
+no change -- both backends hand back the identical evidence dict shape.
+Pruning (`nettools evidence prune --keep-days N --keep-count M`) keeps a
+snapshot that satisfies *either* configured rule (restic/borg-style: the
+union of what any rule wants to keep survives); neither rule given is a
+no-op, not "prune everything"; the golden snapshot is never touched by
+pruning in either backend. `detect_flaps` deliberately keeps reading history
+straight off the file store rather than going through this abstraction --
+moving flap detection onto a second backend is future work, not something
+this phase's fabric-scale measurement asked for.
+
+**Audit log rotation.** `_audit_log`'s single ever-growing JSONL file now
+rotates by size (`NETTOOLS_LOG_MAX_BYTES`, default 10 MiB) with a bounded
+number of kept backups (`NETTOOLS_LOG_BACKUP_COUNT`, default 5), the same
+rename-chain algorithm `logging.handlers.RotatingFileHandler` uses. Logging
+remains best-effort: a rotation or write failure is still swallowed, never
+raised -- `test_audit_log_failure_never_breaks_a_check` pins that a bad
+`NETTOOLS_LOG` path cannot turn a successful check into a reported failure.
 
 ### Testing seams
 

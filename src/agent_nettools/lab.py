@@ -12,7 +12,11 @@ by ``inventory.load_inventory()``.
 
 from __future__ import annotations
 
-from .inventory_model import load_inventory_file, reset_inventory_cache  # noqa: F401 - re-exported
+from .inventory_model import (  # noqa: F401 - re-exported
+    find_device,
+    load_inventory_file,
+    reset_inventory_cache,
+)
 from .platforms import DEFAULT_PLATFORM
 
 # Per-device platform overrides, consulted *before* the YAML. Every node in
@@ -41,17 +45,18 @@ DEVICES = all_devices()
 def platform_for(device_name: str) -> str:
     """Return a device's platform without touching credentials.
 
-    Checks the ``PLATFORMS`` override first, then the inventory file, then
-    falls back to the default platform for a name the inventory does not know
-    at all -- the device itself is rejected later by ``inventory.get_device``.
-    This function must never require credentials; see the module docstring.
+    Checks the ``PLATFORMS`` override first, then the inventory file (an O(1)
+    name lookup, not a linear scan -- see ``inventory_model.find_device``),
+    then falls back to the default platform for a name the inventory does not
+    know at all -- the device itself is rejected later by
+    ``inventory.get_device``. This function must never require credentials;
+    see the module docstring.
     """
 
     if device_name in PLATFORMS:
         return PLATFORMS[device_name]
 
-    inventory = load_inventory_file()
-    for device in inventory.devices:
-        if device.name == device_name:
-            return device.platform or inventory.defaults.platform
+    device = find_device(device_name)
+    if device is not None:
+        return device.platform or load_inventory_file().defaults.platform
     return DEFAULT_PLATFORM

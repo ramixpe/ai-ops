@@ -12,11 +12,13 @@ ADDRESS ?= 10.255.0.31
 NAME ?= GigabitEthernet0/0/0/1
 COUNT ?= 20
 QUESTION ?= What, if anything, is wrong with the fabric right now?
+KEEP_DAYS ?= 30
+KEEP_COUNT ?= 20
 
 .PHONY: help setup test lint inventory facts interfaces bgp lldp isis sr \
         fabric-bgp route bgp-neighbor interface logging ping traceroute \
         analyze analyze-fabric agent demo diff capture learn-topology health health-fixtures \
-        baseline-pin baseline-show flaps mcp inspect docker-build clean
+        baseline-pin baseline-show flaps evidence-prune mcp inspect docker-build clean
 
 help:
 	@echo "IOS-XR Read-Only Network Tools"
@@ -51,6 +53,7 @@ help:
 	@echo "  make baseline-pin  Pin a golden snapshot (or DEVICE=name)"
 	@echo "  make baseline-show Print a device's pinned golden snapshot (or DEVICE=name)"
 	@echo "  make flaps         Detect oscillating fields in snapshot history (or DEVICE=name)"
+	@echo "  make evidence-prune  Prune old snapshots (KEEP_DAYS=$(KEEP_DAYS) KEEP_COUNT=$(KEEP_COUNT))"
 	@echo "  make mcp           Start the MCP server over stdio"
 	@echo "  make inspect       Smoke-test the MCP server (or DEVICE=name)"
 	@echo "  make docker-build  Build the MCP server container image"
@@ -157,6 +160,12 @@ baseline-show:
 
 flaps:
 	nettools flaps $(DEVICE)
+
+# Retention/prune (Phase 7): deletes timestamped snapshots outside the
+# retention window (never the pinned golden snapshot), against whichever
+# NETTOOLS_EVIDENCE_BACKEND selects.
+evidence-prune:
+	nettools evidence prune --keep-days $(KEEP_DAYS) --keep-count $(KEEP_COUNT)
 
 mcp:
 	nettools-mcp

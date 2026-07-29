@@ -1,3 +1,5 @@
+import threading
+
 import pytest
 from helpers import (
     LAB_PLATFORM,
@@ -6,7 +8,7 @@ from helpers import (
     set_device_environment,
 )
 
-from agent_nettools import lab
+from agent_nettools import lab, network_tools
 from agent_nettools.network_tools import (
     NETTOOLS_ALLOW_ACTIVE_PROBES_ENV,
     _run_approved_commands,
@@ -20,6 +22,7 @@ from agent_nettools.network_tools import (
     get_interface,
     get_logging,
     get_route,
+    iter_fabric,
     list_devices,
     ping_device,
     run_intent,
@@ -715,3 +718,324 @@ def test_fabric_default_check_is_bgp(monkeypatch):
     # Every inventory device should appear with its own BGP output.
     assert set(devices) == {"P1", "P2", "P3", "P4", "PE1", "PE2", "PE3", "PE4", "RR1"}
     assert devices["PE1"]["data"]["commands"]["show bgp summary"] == "BGP summary for PE1"
+
+
+# --------------------------------------------------------------------------- #
+# Phase 7, Task 1: fabric checks resolve each device record once.
+# --------------------------------------------------------------------------- #
+
+
+def test_check_fabric_never_re_resolves_a_device_by_name(monkeypatch):
+    """check_fabric resolves every device once via load_inventory() and threads
+    the record down; get_device() (a by-name lookup) must never be called again
+    for any of the per-device checks that follow."""
+
+    set_device_environment(monkeypatch)
+
+    def _must_not_be_called(_name):
+        raise AssertionError("get_device() was called again after check_fabric's single resolve")
+
+    monkeypatch.setattr(network_tools, "get_device", _must_not_be_called)
+
+    result = check_fabric("facts", sender=lambda device, command: "output")
+
+    assert result["status"] == "success"
+    assert set(result["data"]["devices"]) == {
+        "P1", "P2", "P3", "P4", "PE1", "PE2", "PE3", "PE4", "RR1",
+    }
+
+
+def test_run_intent_accepts_a_pre_resolved_device_and_skips_get_device(monkeypatch):
+    """The same threading seam CHECK_TOOLS/check_fabric use, exercised directly:
+    passing an already-resolved device record must bypass get_device() entirely,
+    and the sender must receive that exact record."""
+
+    def _must_not_be_called(_name):
+        raise AssertionError("get_device() should not be called when device= is supplied")
+
+    monkeypatch.setattr(network_tools, "get_device", _must_not_be_called)
+
+    prebuilt = {
+        "name": "PE1",
+        "hostname": "172.20.250.21",
+        "platform": "cisco_xr",
+        "username": "preloaded-user",
+        "password": "preloaded-password",
+        "key_file": None,
+        "port": 22,
+    }
+    seen = []
+
+    def sender(device, command):
+        seen.append(device)
+        return "output"
+
+    result = run_intent("PE1", "facts", sender=sender, device=prebuilt)
+
+    assert result["status"] == "success"
+    assert all(device is prebuilt for device in seen)
+
+
+def test_refuses_unapproved_commands_before_using_a_pre_resolved_device():
+    """The ordering invariant holds even when a caller supplies device=: the
+    allowlist check still runs, and rejection never touches the passed-in
+    record. No credentials are set in the environment on purpose."""
+
+    result = _run_approved_commands(
+        "PE1", ["configure"], device={"name": "PE1", "hostname": "unused"}
+    )
+
+    assert result["status"] == "error"
+    assert "Refusing unapproved commands" in result["errors"][0]
+
+
+# --------------------------------------------------------------------------- #
+# Phase 7, Task 2: iter_fabric streams results instead of materializing them.
+# --------------------------------------------------------------------------- #
+
+
+def test_iter_fabric_yields_incrementally_not_after_every_device_finishes(monkeypatch):
+    """A blocked PE1 must not hold up every other device's result: the very
+    first item out of the iterator must be some device other than PE1, proven
+    by blocking PE1's command with an Event this test controls -- not by
+    fragile timing."""
+
+    set_device_environment(monkeypatch)
+    blocker = threading.Event()
+
+    def sender(device, command):
+        if device["name"] == "PE1":
+            assert blocker.wait(timeout=5), "test setup: PE1 was never unblocked"
+        return "output"
+
+    gen = iter_fabric("facts", sender=sender, max_workers=8)
+    try:
+        first_name, first_result = next(gen)
+        assert first_name != "PE1"
+        assert first_result["status"] == "success"
+    finally:
+        blocker.set()
+
+    remaining = dict(gen)
+    assert "PE1" in remaining
+    assert remaining["PE1"]["status"] == "success"
+
+
+def test_iter_fabric_rejects_unknown_check():
+    with pytest.raises(ValueError, match="Unknown check"):
+        list(iter_fabric("reload"))
+
+
+def test_check_fabric_matches_iter_fabric_collected(monkeypatch):
+    """check_fabric is documented as "iter_fabric, collected and reordered" --
+    pin that the two agree on every device's result."""
+
+    set_device_environment(monkeypatch)
+
+    def sender(device, command):
+        return f"{command} on {device['name']}"
+
+    def strip_timestamps(devices):
+        return {
+            name: {key: value for key, value in result.items() if key != "timestamp"}
+            for name, result in devices.items()
+        }
+
+    from_iter = strip_timestamps(dict(iter_fabric("lldp", sender=sender)))
+    from_check = strip_timestamps(check_fabric("lldp", sender=sender)["data"]["devices"])
+
+    assert from_iter == from_check
+
+
+# --------------------------------------------------------------------------- #
+# Phase 7, Task 3: connection timeouts and bounded retries.
+# --------------------------------------------------------------------------- #
+
+
+def test_netmiko_connection_uses_configured_timeouts(monkeypatch):
+    set_device_environment(monkeypatch)
+    monkeypatch.setenv("NETTOOLS_CONNECT_TIMEOUT_SECONDS", "3")
+    monkeypatch.setenv("NETTOOLS_BANNER_TIMEOUT_SECONDS", "7")
+    sessions = install_fake_netmiko(monkeypatch)
+
+    result = run_intent("PE1", "facts")
+
+    assert result["status"] == "success"
+    assert sessions[0]["conn_timeout"] == 3.0
+    assert sessions[0]["banner_timeout"] == 7.0
+
+
+def test_retries_a_transient_command_failure_and_reports_it(monkeypatch):
+    """A command that fails twice then succeeds must eventually report success,
+    with the retry made obvious in the result rather than silently absorbed."""
+
+    set_device_environment(monkeypatch)
+    monkeypatch.setenv("NETTOOLS_COMMAND_RETRIES", "3")
+    monkeypatch.setenv("NETTOOLS_RETRY_BACKOFF_SECONDS", "0")
+
+    attempts = {"show version": 0}
+
+    class FlakyConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            return False
+
+        def send_command(self, command, **kwargs):
+            if command != "show version":
+                return f"output for {command}"
+            attempts["show version"] += 1
+            if attempts["show version"] < 3:
+                raise OSError("timed out")
+            return "output for show version"
+
+    import sys
+    import types
+
+    fake_netmiko = types.ModuleType("netmiko")
+    fake_netmiko.ConnectHandler = lambda **params: FlakyConnection()
+    monkeypatch.setitem(sys.modules, "netmiko", fake_netmiko)
+
+    result = run_intent("PE1", "facts")
+
+    assert result["status"] == "success"
+    assert attempts["show version"] == 3
+    assert result["data"]["retries"]["show version"] == 2
+
+
+def test_never_retries_more_than_the_configured_attempts(monkeypatch):
+    set_device_environment(monkeypatch)
+    monkeypatch.setenv("NETTOOLS_COMMAND_RETRIES", "2")
+    monkeypatch.setenv("NETTOOLS_RETRY_BACKOFF_SECONDS", "0")
+
+    attempts = {"count": 0}
+
+    class AlwaysFailsConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            return False
+
+        def send_command(self, command, **kwargs):
+            attempts["count"] += 1
+            raise OSError("timed out")
+
+    import sys
+    import types
+
+    fake_netmiko = types.ModuleType("netmiko")
+    fake_netmiko.ConnectHandler = lambda **params: AlwaysFailsConnection()
+    monkeypatch.setitem(sys.modules, "netmiko", fake_netmiko)
+
+    result = run_intent("PE1", "facts")
+
+    assert result["status"] == "error"
+    # 2 configured attempts per command, times however many commands "facts" sends.
+    assert attempts["count"] == 2 * len(commands_for(LAB_PLATFORM, "facts"))
+
+
+def test_unapproved_commands_are_never_retried_or_even_sent(monkeypatch):
+    """The allowlist refusal happens before the transport layer is ever
+    reached, so there is nothing to retry -- confirmed here by a fake netmiko
+    that would fail the test outright if it were ever invoked."""
+
+    def _must_not_connect(**params):
+        raise AssertionError("transport must never be reached for a refused command")
+
+    import sys
+    import types
+
+    fake_netmiko = types.ModuleType("netmiko")
+    fake_netmiko.ConnectHandler = _must_not_connect
+    monkeypatch.setitem(sys.modules, "netmiko", fake_netmiko)
+
+    result = _run_approved_commands("PE1", ["configure"])
+
+    assert result["status"] == "error"
+    assert "Refusing unapproved commands" in result["errors"][0]
+
+
+def test_auth_failure_is_never_retried(monkeypatch):
+    """A real netmiko authentication exception is never transient: retrying
+    with the same (wrong) credentials cannot succeed."""
+
+    set_device_environment(monkeypatch)
+    monkeypatch.setenv("NETTOOLS_COMMAND_RETRIES", "5")
+    monkeypatch.setenv("NETTOOLS_RETRY_BACKOFF_SECONDS", "0")
+
+    from netmiko.exceptions import NetmikoAuthenticationException
+
+    attempts = {"count": 0}
+
+    class AuthFailsConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            return False
+
+        def send_command(self, command, **kwargs):
+            attempts["count"] += 1
+            raise NetmikoAuthenticationException("bad credentials")
+
+    import sys
+    import types
+
+    fake_netmiko = types.ModuleType("netmiko")
+    fake_netmiko.exceptions = types.ModuleType("netmiko.exceptions")
+    fake_netmiko.exceptions.NetmikoAuthenticationException = NetmikoAuthenticationException
+    fake_netmiko.ConnectHandler = lambda **params: AuthFailsConnection()
+    monkeypatch.setitem(sys.modules, "netmiko", fake_netmiko)
+    monkeypatch.setitem(sys.modules, "netmiko.exceptions", fake_netmiko.exceptions)
+
+    result = run_intent("PE1", "facts")
+
+    assert result["status"] == "error"
+    # Exactly one attempt per command -- an auth failure must burn none of the
+    # retry budget, since it can never succeed on a later attempt.
+    assert attempts["count"] == len(commands_for(LAB_PLATFORM, "facts"))
+
+
+# --------------------------------------------------------------------------- #
+# Phase 7, Task 5: audit log rotation, and that logging failures stay inert.
+# --------------------------------------------------------------------------- #
+
+
+def test_audit_log_rotates_once_it_exceeds_the_configured_size(monkeypatch, tmp_path):
+    """The audit log only records real transport activity (_netmiko_send_commands),
+    never the sender-injection test seam -- so a fake netmiko transport, not
+    sender=, is what exercises it here."""
+
+    set_device_environment(monkeypatch)
+    install_fake_netmiko(monkeypatch)
+    log_path = tmp_path / "audit.jsonl"
+    monkeypatch.setenv("NETTOOLS_LOG", str(log_path))
+    monkeypatch.setenv("NETTOOLS_LOG_MAX_BYTES", "200")
+    monkeypatch.setenv("NETTOOLS_LOG_BACKUP_COUNT", "2")
+
+    for _ in range(10):
+        result = collect_evidence("PE1")
+        assert result["device"] == "PE1"
+
+    assert log_path.is_file()
+    # Bounded: never more than backup_count rotated files plus the live one.
+    rotated = sorted(tmp_path.glob("audit.jsonl.*"))
+    assert len(rotated) <= 2
+    assert not (tmp_path / "audit.jsonl.3").exists()
+
+
+def test_audit_log_failure_never_breaks_a_check(monkeypatch, tmp_path):
+    """A bad NETTOOLS_LOG path (a directory sitting where the log file should
+    be) must not turn an otherwise successful check into a reported failure --
+    the audit log is best-effort observability, never load-bearing."""
+
+    set_device_environment(monkeypatch)
+    log_path = tmp_path / "not-a-file"
+    log_path.mkdir()  # Any attempt to open this path for writing raises OSError.
+    monkeypatch.setenv("NETTOOLS_LOG", str(log_path))
+
+    result = run_intent("PE1", "facts", sender=lambda device, command: "output")
+
+    assert result["status"] == "success"

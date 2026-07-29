@@ -230,6 +230,7 @@ make health      # Evaluate deterministic health verdicts across the whole fabri
 make baseline-pin   # Pin a golden snapshot (or DEVICE=name)
 make baseline-show  # Print a device's pinned golden snapshot (or DEVICE=name)
 make flaps       # Detect oscillating fields in a device's snapshot history
+make evidence-prune  # Prune old snapshots (KEEP_DAYS=... KEEP_COUNT=...)
 make mcp         # Start the MCP server over stdio
 make inspect     # Smoke-test the MCP server
 ```
@@ -319,6 +320,67 @@ History is built from parsed records only, keyed by `parsers.record_key` and
 excluding `parsers.volatile_fields` -- the same identity and noise rules
 `diff_evidence` already uses, so a field that legitimately changes every
 collection (e.g. BGP `Up/Down`) is never reported as flapping.
+
+## Scaling to a Larger Fabric (Phase 7)
+
+`check_fabric`/`nettools fabric` resolve every device once (an O(1) name
+lookup, not a linear scan) and thread that record down to each per-device
+check, so a whole-fabric check scales linearly in the device count instead of
+quadratically. `iter_fabric()` is the streaming twin of `check_fabric()`:
+it yields `(device_name, result)` as each device finishes instead of waiting
+for -- and holding in memory -- every device's full result at once, for
+callers (large fleets, verdict-only consumers) that cannot afford to hold the
+whole fabric's evidence at the same time.
+
+Connection and read timeouts, and bounded retries for transient transport
+failures (never for a command the allowlist refused), are configurable:
+
+```text
+NETTOOLS_CONNECT_TIMEOUT_SECONDS=10   # TCP/SSH connect timeout
+NETTOOLS_READ_TIMEOUT_SECONDS=10      # per-command read timeout (a template's own
+                                       # read_timeout, e.g. ping/traceroute, still wins)
+NETTOOLS_BANNER_TIMEOUT_SECONDS=15    # SSH banner timeout
+NETTOOLS_COMMAND_RETRIES=2            # total attempts per connection/command (>=1)
+NETTOOLS_RETRY_BACKOFF_SECONDS=0.5    # exponential backoff base between attempts
+```
+
+A retry that actually happened is never silent: it shows up both in the
+`NETTOOLS_LOG` audit record and, for the command(s) that needed one, under
+`data.retries` in the returned result.
+
+### Evidence storage: files or SQLite
+
+`evidence/<device>/*.json` (unbounded, unqueryable) is still the default, but
+`NETTOOLS_EVIDENCE_BACKEND=sqlite` switches every snapshot read/write to a
+single `evidence.db` (stdlib `sqlite3`, no new dependency) indexed on
+`(device, timestamp)`, so "this device's history" and "the latest snapshot"
+are indexed queries instead of a directory walk. `diff_evidence` is
+unaffected either way -- both backends hand back the same evidence dict.
+
+```bash
+NETTOOLS_EVIDENCE_BACKEND=sqlite nettools diff PE1
+nettools evidence history PE1
+nettools evidence prune --keep-days 30 --keep-count 20
+nettools evidence prune --keep-count 5 --device PE1
+```
+
+A snapshot survives pruning if it satisfies *either* configured rule (among
+the most recent `--keep-count`, or younger than `--keep-days`); the pinned
+golden snapshot is never pruned. Neither flag given is a no-op, not "prune
+everything".
+
+### Audit log rotation
+
+`NETTOOLS_LOG`'s JSONL file now rotates by size instead of growing forever:
+
+```text
+NETTOOLS_LOG_MAX_BYTES=10485760   # rotate once the live file reaches this size (10 MiB)
+NETTOOLS_LOG_BACKUP_COUNT=5       # bounded number of rotated files kept (app.jsonl.1 .. .5)
+```
+
+Logging is still best-effort: a rotation or write failure is swallowed, never
+raised, exactly like the un-rotated logger before it -- a bad `NETTOOLS_LOG`
+path must never turn a successful check into a reported failure.
 
 ## Test Fixtures
 
@@ -421,6 +483,7 @@ src/agent_nettools/inventory_model.py  Inventory schema (pydantic), YAML loading
 src/agent_nettools/lab.py          Credential-free reads of the inventory: mgmt IP + platform
 src/agent_nettools/inventory.py    Joins the inventory with env credentials -> device dicts
 src/agent_nettools/network_tools.py  Allowlist, SSH, evidence, fabric, diff, golden snapshots, flaps
+src/agent_nettools/evidence_store.py  Snapshot storage backends: JSON files (default) or SQLite
 src/agent_nettools/health.py       Deterministic health verdicts: role invariants + baseline rules
 src/agent_nettools/topology.py     Derived expected topology + the fabric anomaly report
 src/agent_nettools/devices_doc.py  Renders docs/devices.md from the inventory
