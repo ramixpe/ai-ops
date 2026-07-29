@@ -13,6 +13,8 @@ dependencies = [
     "netmiko>=4.4.0",
     "mcp>=1.9.0",
     "python-dotenv>=1.0.1",
+    "pydantic>=2.7",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

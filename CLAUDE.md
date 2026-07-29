@@ -14,7 +14,7 @@ reasoning layer, and an MCP server — all over the same narrow allowlist of
 ```bash
 make setup                  # python -m venv .venv + pip install -e ".[dev,llm]"
 source .venv/bin/activate
-make test                   # pytest -q  (39 tests, no network needed)
+make test                   # pytest -q  (124 tests, no network needed)
 make lint                   # ruff check .
 make help                   # full target list
 ```
@@ -30,27 +30,39 @@ CI (`.github/workflows/ci.yml`) runs `ruff check .` then `pytest -q` on Python 3
 
 Requires `DEVICE_USERNAME` / `DEVICE_PASSWORD` (or `DEVICE_SSH_KEYFILE`) for
 anything that touches a device; `cp .env.example .env` and see that file for
-the full env surface (`LLM_PROVIDER`, `NETTOOLS_LOG`, `NETTOOLS_EVIDENCE_DIR`).
+the full env surface (`LLM_PROVIDER`, `NETTOOLS_LOG`, `NETTOOLS_EVIDENCE_DIR`,
+`NETTOOLS_INVENTORY`).
 
 ## Architecture
 
 Two packages, two source roots — `src/agent_nettools` and a top-level
 `mcp_server` (see `[tool.setuptools.packages.find] where = ["src", "."]`).
 
-Data flows in one direction through four layers:
+Data flows in one direction through five layers:
 
 0. `platforms.py` — the per-platform allowlist and intent table. Depends on
    nothing; everything depends on it.
-1. `lab.py` — static `{device_name: management_ip}` plus `platform_for()`. No
-   credentials ever live here, which is what lets platform be resolved before the
-   allowlist check.
-2. `inventory.py` — joins the lab map with env credentials into device dicts.
-   Raises `InventoryError` when required env is missing.
-3. `network_tools.py` — the allowlist, SSH transport, evidence collection,
+1. `inventory_model.py` — the declarative inventory's schema (pydantic v2,
+   `extra="forbid"` everywhere) and YAML loader for `inventory/lab.yaml`.
+   Reads nothing from the environment; depends only on `platforms.py` (for
+   `known_platforms()`).
+2. `lab.py` — the credential-free read path onto that inventory:
+   `all_devices()`, `DEVICES`, and `platform_for()`. No credentials ever live
+   here, which is what lets platform be resolved before the allowlist check.
+   `PLATFORMS` is a per-device override dict consulted *before* the YAML
+   (tests use it to simulate other vendors without a second inventory file).
+3. `inventory.py` — joins the parsed inventory with env credentials (resolved
+   per device through its `credential_group`) into device dicts. Raises
+   `InventoryError` when required env is missing or the inventory is invalid.
+4. `network_tools.py` — the allowlist, SSH transport, evidence collection,
    snapshots, and diffing. All real logic lives here.
-4. `cli.py` and `mcp_server/server.py` — two independent front ends that call
-   the *same* functions from layer 3. Anything added to layer 3 should usually
+5. `cli.py` and `mcp_server/server.py` — two independent front ends that call
+   the *same* functions from layer 4. Anything added to layer 4 should usually
    be surfaced in both.
+
+`topology.py` (derived expected topology counts + the fabric anomaly report)
+and `devices_doc.py` (renders `docs/devices.md`) sit beside layer 4/5: they
+read parsed evidence and the inventory, but nothing depends on them.
 
 `build/lib/` and `agent_nettools.egg-info/` are stale build artifacts. Never edit
 those copies; `make clean` removes them.
@@ -69,6 +81,16 @@ The ordering matters and is load-bearing: platform resolves via
 resolution require credentials** — that would silently move the allowlist check
 after credential access. `test_refuses_unapproved_commands_before_loading_credentials`
 pins it by running with no credentials set at all.
+
+This still holds after Phase 3's declarative inventory: `platform_for()` parses
+`inventory/lab.yaml` through `inventory_model.load_inventory_file()`, and that
+module never imports `os.environ` for anything except locating the YAML file
+itself (`NETTOOLS_INVENTORY`, a path, not a credential). Credentials are joined
+in only by `inventory.load_inventory()`, which is a separate, later step. If a
+future change to the inventory loader ever needs an environment variable to
+*parse* the file (not just to find it), that variable is a credential leaking
+into the credential-free layer — don't do it; keep resolving credentials in
+`inventory.py` only, at `load_inventory()` time.
 
 `tests/test_safety.py` iterates *every* platform, so adding a vendor cannot
 smuggle in a state-changing command, a shell metacharacter, or a non-`show` verb.
@@ -183,6 +205,42 @@ TTL and is **stable** — it is not excluded from comparison.
 `test_quiet_fabric_pair_reports_no_change` (parametrized over all 9 devices) now
 pins the fix: `changed` is empty and every parseable intent lands in
 `unchanged`.
+
+### Declarative inventory and topology (Phase 3)
+
+`inventory/lab.yaml` replaces the hardcoded device map. Schema (pydantic v2,
+`inventory_model.py`): `version`, `defaults` (platform/credential_group/port),
+`credential_groups` (each names environment variables, never holds a value),
+and `devices` (name, mgmt_ip, role, site, optional platform/router_id/local_as/
+tags/expected). Every model uses `extra="forbid"`, so a typo'd key is a load
+failure, not a silently ignored no-op — load failures raise `InventoryError`
+with a message naming the file and, wherever derivable, the offending
+device/field. `router_id`/`local_as` are **absent**, not zero, for the four
+devices with no BGP process (P1–P4, PE4) — the fixtures literally answer `%
+BGP instance 'default' not active` and asserting a fake router-id would be a
+lie the fixtures themselves contradict.
+
+`expected:` blocks (`isis_adjacencies`, `bgp_peers` per device) are *derived*,
+never hand-typed: `nettools learn-topology [--from-fixtures|--live]` counts
+parsed IS-IS/BGP neighbor records per device and writes them back via
+`topology.update_expected_in_yaml`. `bgp_peers` is omitted (not `0`) for a
+device with no active BGP process, matching the `router_id`/`local_as` rule
+above. Only per-device *counts* are ever written — never link-level ("A
+connects to B") topology, because this fabric's own LLDP data is
+self-contradictory: P1 reports its Gi0/0/0/0 facing P2's Gi0/0/0/0, while P2
+reports that same port facing `LEAF05_DHCP_SERVER` instead. Asserting a
+specific link would silently pick a side of a real disagreement; a count
+survives it. `learn-topology` always exits `0` but prints an anomaly report
+covering exactly this fabric's three verified anomaly classes — LLDP links
+where the two ends disagree, LLDP neighbors that are not in this inventory at
+all (`Lab-leaf01`, `LEAF05_DHCP_SERVER`, `SDWAN-Edge01`), and devices with zero
+adjacencies (PE2: 0 LLDP/0 IS-IS despite having an active BGP peer toward RR1;
+PE4: an LLDP neighbor but 0 IS-IS adjacencies) — so the report, not a clean
+inventory file, is where those specifics live.
+
+`docs/devices.md` is generated by `devices_doc.render_devices_doc()` from the
+same inventory; `test_devices_doc_matches_rendered_inventory` fails if the
+committed file and the renderer's output ever diverge.
 
 ### Testing seams
 

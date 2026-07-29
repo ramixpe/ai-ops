@@ -9,6 +9,7 @@ Exposed as the ``nettools`` console script. Subcommands:
     nettools demo [DEVICE]
     nettools diff [DEVICE]
     nettools capture [DEVICE ...] [--all] [--label t0] [--out DIR] [--no-scrub]
+    nettools learn-topology [--from-fixtures|--live] [--label t0] [--out PATH] [--write]
     nettools inspect [DEVICE]
 """
 
@@ -17,11 +18,13 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 
 from dotenv import find_dotenv, load_dotenv
 
-from .fixtures import capture_device
+from .fixtures import capture_device, load_fixture_evidence
 from .inventory import InventoryError, get_default_device_name
+from .inventory_model import resolve_inventory_path
 from .llm_analysis import LLMAnalysisError, analyze_evidence
 from .network_tools import (
     CHECK_TOOLS,
@@ -31,6 +34,12 @@ from .network_tools import (
     list_devices,
     load_latest_snapshot,
     save_snapshot,
+)
+from .topology import (
+    build_anomaly_report,
+    derive_expected,
+    format_anomaly_report,
+    update_expected_in_yaml,
 )
 
 
@@ -142,6 +151,48 @@ def _cmd_capture(args: argparse.Namespace) -> int:
     return 0 if all(not capture["errors"] for capture in captures) else 1
 
 
+def _cmd_learn_topology(args: argparse.Namespace) -> int:
+    """Derive expected topology counts from evidence and report fabric anomalies.
+
+    Reports by default and writes nothing: the inventory YAML is hand-maintained
+    and carries explanatory comments that a PyYAML round-trip would silently
+    discard. ``--out`` writes a generated draft to a new path for review;
+    ``--write`` edits the resolved inventory in place and says what it costs.
+
+    Always exits 0 -- an inconsistent fabric is not a tool failure -- but the
+    anomaly report is printed unconditionally so it cannot be missed even when
+    every device's counts derive cleanly.
+    """
+
+    listed = list_devices()
+    if listed.get("status") != "success":
+        _print(listed)
+        return 1
+    names = [device["name"] for device in listed["data"]["devices"]]
+
+    if args.live:
+        evidence_by_device = {name: collect_evidence(name) for name in names}
+    else:
+        evidence_by_device = {name: load_fixture_evidence(name, label=args.label) for name in names}
+
+    derived = derive_expected(evidence_by_device)
+    source_path = resolve_inventory_path()
+
+    if args.out or args.write:
+        out_path = Path(args.out) if args.out else source_path
+        update_expected_in_yaml(source_path, derived, out_path=out_path)
+        print(f"# Wrote expected topology for {len(derived)} device(s) to {out_path}")
+        print("# Note: comments in the source YAML are not preserved by this rewrite.\n")
+    else:
+        print(f"# Derived expected topology for {len(derived)} device(s) (nothing written).")
+        print(f"# Compare against {source_path}; use --out PATH for a draft or --write to apply.\n")
+        _print(derived)
+        print()
+
+    print(format_anomaly_report(build_anomaly_report(evidence_by_device)))
+    return 0
+
+
 def _cmd_inspect(args: argparse.Namespace) -> int:
     # Imported lazily so the rest of the CLI works without the MCP SDK installed.
     import asyncio
@@ -222,6 +273,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write raw output without scrubbing. For local inspection only; never commit.",
     )
     p_capture.set_defaults(func=_cmd_capture)
+
+    p_learn = sub.add_parser(
+        "learn-topology",
+        help="Derive expected topology counts from evidence and update the inventory.",
+    )
+    source = p_learn.add_mutually_exclusive_group()
+    source.add_argument(
+        "--from-fixtures",
+        action="store_false",
+        dest="live",
+        default=False,
+        help="Derive from committed test fixtures (default).",
+    )
+    source.add_argument(
+        "--live", action="store_true", dest="live", help="Derive from a live collection."
+    )
+    p_learn.add_argument("--label", default="t0", help="Fixture label to use (default: t0).")
+    p_learn.add_argument("--out", help="Write a generated draft inventory to this new path.")
+    p_learn.add_argument(
+        "--write",
+        action="store_true",
+        help="Rewrite the resolved inventory in place. Discards its comments.",
+    )
+    p_learn.set_defaults(func=_cmd_learn_topology)
 
     p_inspect = sub.add_parser("inspect", help="Smoke-test the MCP server over stdio.")
     p_inspect.add_argument("device", nargs="?", help="Device name; defaults to PE1.")
