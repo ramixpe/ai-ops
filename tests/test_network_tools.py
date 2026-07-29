@@ -1,5 +1,4 @@
-import sys
-import types
+from helpers import install_fake_netmiko, set_device_environment
 
 from agent_nettools.network_tools import (
     APPROVED_COMMANDS,
@@ -13,11 +12,6 @@ from agent_nettools.network_tools import (
     diff_evidence,
     list_devices,
 )
-
-
-def set_device_environment(monkeypatch):
-    monkeypatch.setenv("DEVICE_USERNAME", "test-user")
-    monkeypatch.setenv("DEVICE_PASSWORD", "test-password")
 
 
 def test_list_devices_does_not_expose_credentials(monkeypatch):
@@ -153,33 +147,6 @@ def test_snapshot_round_trip_honors_evidence_dir(monkeypatch, tmp_path):
     assert load_latest_snapshot("PE1") == evidence
 
 
-def install_fake_netmiko(monkeypatch, *, fail_commands=()):
-    """Install a fake netmiko module and record every session it opens."""
-
-    sessions = []
-
-    class FakeConnection:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc_info):
-            return False
-
-        def send_command(self, command):
-            if command in fail_commands:
-                raise OSError(f"timed out running {command}")
-            return f"output for {command}"
-
-    def fake_connect_handler(**params):
-        sessions.append(params)
-        return FakeConnection()
-
-    fake_netmiko = types.ModuleType("netmiko")
-    fake_netmiko.ConnectHandler = fake_connect_handler
-    monkeypatch.setitem(sys.modules, "netmiko", fake_netmiko)
-    return sessions
-
-
 def test_collect_evidence_uses_one_ssh_session(monkeypatch):
     set_device_environment(monkeypatch)
     sessions = install_fake_netmiko(monkeypatch)
@@ -212,13 +179,7 @@ def test_collect_evidence_isolates_a_failed_command(monkeypatch):
 
 def test_collect_evidence_reports_a_connection_failure_everywhere(monkeypatch):
     set_device_environment(monkeypatch)
-
-    def exploding_connect_handler(**params):
-        raise OSError("TCP connection to device failed")
-
-    fake_netmiko = types.ModuleType("netmiko")
-    fake_netmiko.ConnectHandler = exploding_connect_handler
-    monkeypatch.setitem(sys.modules, "netmiko", fake_netmiko)
+    install_fake_netmiko(monkeypatch, fail_connect=True)
 
     evidence = collect_evidence("PE1")
 
