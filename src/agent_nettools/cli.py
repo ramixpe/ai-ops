@@ -23,10 +23,42 @@ Exposed as the ``nettools`` console script. Subcommands:
     nettools baseline show [DEVICE]
     nettools flaps [DEVICE]
     nettools evidence prune [--keep-days N] [--keep-count M] [--device DEVICE]
+    nettools evidence history [DEVICE]
+    nettools metrics [--format json|prometheus] [--quiet]
     nettools inspect [DEVICE]
+    nettools version
 
-``nettools health`` exit codes: 0 (ok/info, nothing actionable), 1 (warning),
-2 (critical) -- so CI and cron can gate on the fabric's worst severity.
+Most commands that print a structured result accept ``--format
+json|table|summary`` (default: ``json``, so nothing that already parses this
+tool's JSON output breaks) and ``--quiet``/``-q`` (suppress all output; only
+the exit code carries the outcome) -- see ``agent_nettools.output`` for what
+each format shows. **A table or summary view never invents or softens data**:
+the exit code below is always computed from the full result before
+rendering, so ``--format summary`` on a critical fabric still exits
+non-zero exactly like ``--format json`` would. Commands whose output is
+narrative text rather than one structured payload (``analyze``, ``agent``,
+``demo``, ``capture``, ``learn-topology``, ``inspect``) do not take
+``--format``/``--quiet``.
+
+Exit codes
+------------
+``nettools health`` set the shape this project follows everywhere else:
+``0`` (ok/info, nothing actionable), ``1`` (warning), ``2`` (critical).
+Applied consistently:
+
+- ``0`` -- success; nothing actionable.
+- ``1`` -- the command ran but reports a problem: a tool/fabric result with
+  ``status: "error"`` (one or more commands/devices failed), a health
+  verdict at ``warning``, or (``diff``) real drift was found.
+- ``2`` -- the command could not run at all, or reports the worst possible
+  outcome: a missing/invalid inventory or LLM configuration
+  (``InventoryError``, or ``get_provider()``'s ``ValueError``), a health
+  verdict at ``critical``, or (``diff``) an intent failed to collect on
+  either side, so the comparison itself is not trustworthy.
+
+``diff`` follows the Unix ``diff --exit-code`` convention on top of that
+scheme: ``0`` no differences, ``1`` differences found, ``2`` could not fully
+compare.
 
 ``route``/``bgp-neighbor``/``interface``/``logging``/``ping``/``traceroute``
 are validated, parameterized templates (Phase 5): the prefix/address/interface
@@ -41,17 +73,27 @@ enabled).
 retention window (age and/or count; golden snapshots are never touched),
 against whichever evidence backend ``NETTOOLS_EVIDENCE_BACKEND`` selects
 (JSON files, the default, or SQLite).
+
+``nettools metrics`` (Phase 8) reports the current process's operational
+metrics -- per-device collection success/failure, latency, retries, and
+health verdict counts by severity -- as JSON (default) or Prometheus text
+exposition format (``--format prometheus``). Counters are in-memory only
+unless ``NETTOOLS_METRICS_FILE`` is set, in which case they persist across
+separate ``nettools`` invocations too; see ``agent_nettools.metrics``.
+
+``nettools version`` (Phase 8) prints the installed package version plus the
+Python/platform it is running on.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
 from dotenv import find_dotenv, load_dotenv
 
+from . import __version__, metrics, output
 from .agent_loop import run_agent_loop
 from .fabric_analysis import analyze_fabric
 from .fixtures import capture_device, load_fixture_evidence
@@ -86,76 +128,114 @@ from .topology import (
     update_expected_in_yaml,
 )
 
+# Exit codes, applied consistently across every command -- see the module
+# docstring's "Exit codes" section for the full rationale.
+EXIT_OK = 0
+EXIT_WARNING = 1
+EXIT_CRITICAL = 2
 
-def _print(payload: dict) -> None:
-    print(json.dumps(payload, indent=2))
+
+def _emit(payload: dict, args: argparse.Namespace) -> None:
+    """Print one structured result, honoring ``--format``/``--quiet``.
+
+    Never affects the exit code: every ``_cmd_*`` function computes its
+    return value from the full, unfiltered ``payload`` before (or without
+    regard to) calling this -- a table/summary rendering is strictly a
+    reformat, never a softer read of the same facts.
+    """
+
+    if getattr(args, "quiet", False):
+        return
+    print(output.render(payload, getattr(args, "format", "json")))
+
+
+def _note(message: str, args: argparse.Namespace) -> None:
+    """Print an informational (non-payload) line, suppressed by --quiet."""
+
+    if not getattr(args, "quiet", False):
+        print(message)
+
+
+def _add_output_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--format",
+        choices=output.FORMATS,
+        default="json",
+        help="Output format for the structured result (default: json).",
+    )
+    parser.add_argument(
+        "--quiet",
+        "-q",
+        action="store_true",
+        help="Suppress all output; only the exit code carries the outcome.",
+    )
 
 
 def _resolve_device(name: str | None) -> str:
     return name or get_default_device_name()
 
 
-def _cmd_inventory(_args: argparse.Namespace) -> int:
+def _cmd_inventory(args: argparse.Namespace) -> int:
     result = list_devices()
-    _print(result)
-    return 0 if result.get("status") == "success" else 1
+    _emit(result, args)
+    return EXIT_OK if result.get("status") == "success" else EXIT_WARNING
 
 
 def _cmd_check(args: argparse.Namespace) -> int:
     device = _resolve_device(args.device)
     result = CHECK_TOOLS[args.check](device)
-    _print(result)
-    return 0 if result.get("status") == "success" else 1
+    _emit(result, args)
+    return EXIT_OK if result.get("status") == "success" else EXIT_WARNING
 
 
 def _cmd_fabric(args: argparse.Namespace) -> int:
     result = check_fabric(args.check)
-    _print(result)
-    return 0 if result.get("status") == "success" else 1
+    _emit(result, args)
+    return EXIT_OK if result.get("status") == "success" else EXIT_WARNING
 
 
 def _cmd_route(args: argparse.Namespace) -> int:
     result = get_route(args.device, args.prefix)
-    _print(result)
-    return 0 if result.get("status") == "success" else 1
+    _emit(result, args)
+    return EXIT_OK if result.get("status") == "success" else EXIT_WARNING
 
 
 def _cmd_bgp_neighbor(args: argparse.Namespace) -> int:
     result = get_bgp_neighbor(args.device, args.address)
-    _print(result)
-    return 0 if result.get("status") == "success" else 1
+    _emit(result, args)
+    return EXIT_OK if result.get("status") == "success" else EXIT_WARNING
 
 
 def _cmd_interface(args: argparse.Namespace) -> int:
     result = get_interface(args.device, args.name)
-    _print(result)
-    return 0 if result.get("status") == "success" else 1
+    _emit(result, args)
+    return EXIT_OK if result.get("status") == "success" else EXIT_WARNING
 
 
 def _cmd_logging(args: argparse.Namespace) -> int:
     result = get_logging(args.device, args.count)
-    _print(result)
-    return 0 if result.get("status") == "success" else 1
+    _emit(result, args)
+    return EXIT_OK if result.get("status") == "success" else EXIT_WARNING
 
 
 def _cmd_ping(args: argparse.Namespace) -> int:
     result = ping_device(args.device, args.address)
-    _print(result)
-    return 0 if result.get("status") == "success" else 1
+    _emit(result, args)
+    return EXIT_OK if result.get("status") == "success" else EXIT_WARNING
 
 
 def _cmd_traceroute(args: argparse.Namespace) -> int:
     result = traceroute_device(args.device, args.address)
-    _print(result)
-    return 0 if result.get("status") == "success" else 1
+    _emit(result, args)
+    return EXIT_OK if result.get("status") == "success" else EXIT_WARNING
 
 
 def _cmd_analyze(args: argparse.Namespace) -> int:
     if args.fabric:
         listed = list_devices()
         if listed.get("status") != "success":
-            _print(listed)
-            return 1
+            print(output.render(listed, "json"))
+            return EXIT_CRITICAL
         names = [device["name"] for device in listed["data"]["devices"]]
         evidence_by_device = {name: collect_evidence(name) for name in names}
         if args.save:
@@ -164,14 +244,17 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
                 print(f"# Snapshot saved: {path}")
         if args.show_evidence:
             print("# Evidence")
-            _print(evidence_by_device)
+            print(output.render(evidence_by_device, "json"))
             print("\n# Analysis")
         try:
             result = analyze_fabric(evidence_by_device)
-        except (LLMAnalysisError, ValueError) as exc:
-            # ValueError covers provider misconfiguration from get_provider().
+        except ValueError as exc:
+            # Provider misconfiguration from get_provider(): nothing could be attempted.
             print(f"Analysis error: {exc}")
-            return 1
+            return EXIT_CRITICAL
+        except LLMAnalysisError as exc:
+            print(f"Analysis error: {exc}")
+            return EXIT_WARNING
         print(result["analysis"])
         if result["truncated"]:
             print(
@@ -179,7 +262,7 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
                 "section(s) to stay within the evidence budget; see the "
                 "programmatic 'truncated' report for details.]"
             )
-        return 0
+        return EXIT_OK
 
     device = _resolve_device(args.device)
     evidence = collect_evidence(device)
@@ -188,15 +271,18 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
         print(f"# Snapshot saved: {path}")
     if args.show_evidence:
         print("# Evidence")
-        _print(evidence)
+        print(output.render(evidence, "json"))
         print("\n# Analysis")
     try:
         print(analyze_evidence(evidence))
-    except (LLMAnalysisError, ValueError) as exc:
-        # ValueError covers provider misconfiguration from get_provider().
+    except ValueError as exc:
+        # Provider misconfiguration from get_provider(): nothing could be attempted.
         print(f"Analysis error: {exc}")
-        return 1
-    return 0
+        return EXIT_CRITICAL
+    except LLMAnalysisError as exc:
+        print(f"Analysis error: {exc}")
+        return EXIT_WARNING
+    return EXIT_OK
 
 
 def _cmd_agent(args: argparse.Namespace) -> int:
@@ -207,17 +293,20 @@ def _cmd_agent(args: argparse.Namespace) -> int:
             max_iterations=args.max_iterations,
             time_budget_s=args.time_budget,
         )
-    except (LLMAnalysisError, ValueError) as exc:
-        # ValueError covers provider misconfiguration from get_provider().
+    except ValueError as exc:
+        # Provider misconfiguration from get_provider(): nothing could be attempted.
         print(f"Agent error: {exc}")
-        return 1
+        return EXIT_CRITICAL
+    except LLMAnalysisError as exc:
+        print(f"Agent error: {exc}")
+        return EXIT_WARNING
 
     print(result["answer"])
     print(
         f"\n[{result['iterations']} iteration(s), {len(result['tool_calls'])} tool call(s), "
         f"stopped_because={result['stopped_because']}]"
     )
-    return 0 if result["stopped_because"] == "end_turn" else 1
+    return EXIT_OK if result["stopped_because"] == "end_turn" else EXIT_WARNING
 
 
 def _cmd_demo(args: argparse.Namespace) -> int:
@@ -229,7 +318,7 @@ def _cmd_demo(args: argparse.Namespace) -> int:
     print(f"Available devices: {', '.join(names)}")
     if device not in names:
         print(f"Device not found: {device}")
-        return 1
+        return EXIT_CRITICAL
 
     print("\n## Agent Step 2: Collect approved evidence")
     evidence = collect_evidence(device)
@@ -238,11 +327,14 @@ def _cmd_demo(args: argparse.Namespace) -> int:
     print("\n## Agent Step 3: Analyze evidence")
     try:
         print(analyze_evidence(evidence))
-    except (LLMAnalysisError, ValueError) as exc:
-        # ValueError covers provider misconfiguration from get_provider().
+    except ValueError as exc:
+        # Provider misconfiguration from get_provider(): nothing could be attempted.
         print(f"Analysis error: {exc}")
-        return 1
-    return 0
+        return EXIT_CRITICAL
+    except LLMAnalysisError as exc:
+        print(f"Analysis error: {exc}")
+        return EXIT_WARNING
+    return EXIT_OK
 
 
 def _cmd_diff(args: argparse.Namespace) -> int:
@@ -258,12 +350,22 @@ def _cmd_diff(args: argparse.Namespace) -> int:
 
     current = collect_evidence(device)
     path = save_snapshot(current)
-    print(f"# Snapshot saved: {path}")
+    _note(f"# Snapshot saved: {path}", args)
     if previous is None:
-        print(missing_message)
-        return 0
-    _print(diff_evidence(previous, current))
-    return 0
+        _note(missing_message, args)
+        return EXIT_OK
+
+    result = diff_evidence(previous, current)
+    _emit(result, args)
+
+    # Unix `diff --exit-code`-style: 0 nothing differs, 1 real differences,
+    # 2 the comparison itself is not trustworthy (an intent failed to collect
+    # on one side or the other).
+    if result["failed"]:
+        return EXIT_CRITICAL
+    if result["changed"] or result["added"] or result["removed"]:
+        return EXIT_WARNING
+    return EXIT_OK
 
 
 def _cmd_baseline_pin(args: argparse.Namespace) -> int:
@@ -275,57 +377,57 @@ def _cmd_baseline_pin(args: argparse.Namespace) -> int:
                 f"No saved snapshot for {device} to pin; run `nettools diff {device}` "
                 "first, or omit --from-latest to collect fresh evidence now."
             )
-            return 1
+            return EXIT_WARNING
     else:
         evidence = collect_evidence(device)
         save_snapshot(evidence)
 
     path = save_golden_snapshot(evidence)
     print(f"# Golden snapshot pinned: {path}")
-    return 0
+    return EXIT_OK
 
 
 def _cmd_baseline_show(args: argparse.Namespace) -> int:
     device = _resolve_device(args.device)
     evidence = load_golden_snapshot(device)
     if evidence is None:
-        print(f"No golden snapshot pinned for {device}.")
-        return 1
-    _print(evidence)
-    return 0
+        _note(f"No golden snapshot pinned for {device}.", args)
+        return EXIT_WARNING
+    _emit(evidence, args)
+    return EXIT_OK
 
 
 def _cmd_flaps(args: argparse.Namespace) -> int:
     device = _resolve_device(args.device)
     result = detect_flaps(device, min_transitions=args.min_transitions)
-    _print(result)
-    return 0 if not result["flapping"] else 1
+    _emit(result, args)
+    return EXIT_OK if not result["flapping"] else EXIT_WARNING
 
 
 def _cmd_evidence_prune(args: argparse.Namespace) -> int:
     if args.keep_days is None and args.keep_count is None:
-        print("Nothing to do: pass --keep-days and/or --keep-count.")
-        return 1
+        _note("Nothing to do: pass --keep-days and/or --keep-count.", args)
+        return EXIT_WARNING
     result = prune_snapshots(
         device_name=args.device, keep_days=args.keep_days, keep_count=args.keep_count
     )
-    _print(result)
-    return 0
+    _emit(result, args)
+    return EXIT_OK
 
 
 def _cmd_evidence_history(args: argparse.Namespace) -> int:
     device = _resolve_device(args.device)
     history = list_snapshot_history(device)
-    _print({"device": device, "count": len(history), "history": history})
-    return 0
+    _emit({"device": device, "count": len(history), "history": history}, args)
+    return EXIT_OK
 
 
 def _cmd_health(args: argparse.Namespace) -> int:
     if args.all:
         listed = list_devices()
         if listed.get("status") != "success":
-            _print(listed)
-            return 2
+            print(output.render(listed, "json"))
+            return EXIT_CRITICAL
         names = [device["name"] for device in listed["data"]["devices"]]
     else:
         names = args.devices or [_resolve_device(None)]
@@ -348,13 +450,14 @@ def _cmd_health(args: argparse.Namespace) -> int:
         for name, verdict in result["devices"].items()
         if severity_rank(verdict["severity"]) >= threshold
     }
-    _print(
+    _emit(
         {
             "severity": result["severity"],
             "counts": result.get("counts", {}),
             "devices": reported,
             "suppressed": sorted(set(result["devices"]) - set(reported)),
-        }
+        },
+        args,
     )
     return exit_code_for_severity(result["severity"])
 
@@ -363,8 +466,8 @@ def _cmd_capture(args: argparse.Namespace) -> int:
     if args.all:
         listed = list_devices()
         if listed.get("status") != "success":
-            _print(listed)
-            return 1
+            print(output.render(listed, "json"))
+            return EXIT_CRITICAL
         devices = [device["name"] for device in listed["data"]["devices"]]
     else:
         devices = args.devices or [_resolve_device(None)]
@@ -378,9 +481,9 @@ def _cmd_capture(args: argparse.Namespace) -> int:
         )
         for name in devices
     ]
-    _print({"label": args.label, "captures": captures})
+    print(output.render({"label": args.label, "captures": captures}, "json"))
     # A partial capture must not look like a clean one.
-    return 0 if all(not capture["errors"] for capture in captures) else 1
+    return EXIT_OK if all(not capture["errors"] for capture in captures) else EXIT_WARNING
 
 
 def _cmd_learn_topology(args: argparse.Namespace) -> int:
@@ -398,8 +501,8 @@ def _cmd_learn_topology(args: argparse.Namespace) -> int:
 
     listed = list_devices()
     if listed.get("status") != "success":
-        _print(listed)
-        return 1
+        print(output.render(listed, "json"))
+        return EXIT_CRITICAL
     names = [device["name"] for device in listed["data"]["devices"]]
 
     if args.live:
@@ -418,11 +521,35 @@ def _cmd_learn_topology(args: argparse.Namespace) -> int:
     else:
         print(f"# Derived expected topology for {len(derived)} device(s) (nothing written).")
         print(f"# Compare against {source_path}; use --out PATH for a draft or --write to apply.\n")
-        _print(derived)
+        print(output.render(derived, "json"))
         print()
 
     print(format_anomaly_report(build_anomaly_report(evidence_by_device)))
-    return 0
+    return EXIT_OK
+
+
+def _cmd_metrics(args: argparse.Namespace) -> int:
+    """Report operational metrics: always exits 0 -- this is a report, not a check."""
+
+    if args.quiet:
+        return EXIT_OK
+    if args.format == "prometheus":
+        print(metrics.render_prometheus_text(), end="")
+    else:
+        print(metrics.render_json())
+    return EXIT_OK
+
+
+def _cmd_version(args: argparse.Namespace) -> int:
+    import platform as platform_module
+
+    payload = {
+        "nettools_version": __version__,
+        "python_version": platform_module.python_version(),
+        "platform": platform_module.platform(),
+    }
+    _emit(payload, args)
+    return EXIT_OK
 
 
 def _cmd_inspect(args: argparse.Namespace) -> int:
@@ -439,11 +566,22 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
         async with stdio_client(params) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
+
                 tools = await session.list_tools()
                 print("=== TOOLS EXPOSED BY THE SERVER ===")
                 for tool in tools.tools:
                     summary = (tool.description or "").splitlines()
                     print(f"  - {tool.name}: {summary[0] if summary else ''}")
+
+                resources = await session.list_resources()
+                print("\n=== RESOURCES EXPOSED BY THE SERVER ===")
+                for resource in resources.resources:
+                    print(f"  - {resource.uri}: {resource.description or ''}")
+
+                prompts = await session.list_prompts()
+                print("\n=== PROMPTS EXPOSED BY THE SERVER ===")
+                for prompt in prompts.prompts:
+                    print(f"  - {prompt.name}: {prompt.description or ''}")
 
                 print("\n=== CALL: list_lab_devices ===")
                 result = await session.call_tool("list_lab_devices", {})
@@ -457,32 +595,46 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
                 for block in result.content:
                     print(getattr(block, "text", block))
 
+                print(f"\n=== CALL: assess_lab_device_health (device_name={device}) ===")
+                result = await session.call_tool(
+                    "assess_lab_device_health", {"device_name": device}
+                )
+                for block in result.content:
+                    print(getattr(block, "text", block))
+
     asyncio.run(run())
-    return 0
+    return EXIT_OK
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="nettools", description=__doc__)
+    parser = argparse.ArgumentParser(
+        prog="nettools",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("inventory", help="List devices without credentials.").set_defaults(
-        func=_cmd_inventory
-    )
+    p_inventory = sub.add_parser("inventory", help="List devices without credentials.")
+    _add_output_arguments(p_inventory)
+    p_inventory.set_defaults(func=_cmd_inventory)
 
     for check in sorted(CHECK_TOOLS):
         p = sub.add_parser(check, help=f"Run the {check} check on a device.")
         p.add_argument("device", nargs="?", help="Device name; defaults to PE1.")
+        _add_output_arguments(p)
         p.set_defaults(func=_cmd_check, check=check)
 
     p_fabric = sub.add_parser("fabric", help="Run a check across the whole inventory.")
     p_fabric.add_argument(
         "check", nargs="?", default="bgp", choices=sorted(CHECK_TOOLS), help="Check to run."
     )
+    _add_output_arguments(p_fabric)
     p_fabric.set_defaults(func=_cmd_fabric)
 
     p_route = sub.add_parser("route", help="Look up a specific route (validated template).")
     p_route.add_argument("device", help="Device name.")
     p_route.add_argument("prefix", help="IPv4 address or prefix, e.g. 10.0.0.0/24.")
+    _add_output_arguments(p_route)
     p_route.set_defaults(func=_cmd_route)
 
     p_bgp_neighbor = sub.add_parser(
@@ -490,6 +642,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_bgp_neighbor.add_argument("device", help="Device name.")
     p_bgp_neighbor.add_argument("address", help="Neighbor IPv4 address.")
+    _add_output_arguments(p_bgp_neighbor)
     p_bgp_neighbor.set_defaults(func=_cmd_bgp_neighbor)
 
     p_interface = sub.add_parser(
@@ -497,6 +650,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_interface.add_argument("device", help="Device name.")
     p_interface.add_argument("name", help="Interface name, e.g. GigabitEthernet0/0/0/1.")
+    _add_output_arguments(p_interface)
     p_interface.set_defaults(func=_cmd_interface)
 
     p_logging = sub.add_parser(
@@ -506,6 +660,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_logging.add_argument(
         "--count", type=int, default=20, help="Number of log lines, 1-500 (default: 20)."
     )
+    _add_output_arguments(p_logging)
     p_logging.set_defaults(func=_cmd_logging)
 
     p_ping = sub.add_parser(
@@ -515,6 +670,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_ping.add_argument("device", help="Device name.")
     p_ping.add_argument("address", help="Target IPv4 address.")
+    _add_output_arguments(p_ping)
     p_ping.set_defaults(func=_cmd_ping)
 
     p_traceroute = sub.add_parser(
@@ -524,6 +680,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_traceroute.add_argument("device", help="Device name.")
     p_traceroute.add_argument("address", help="Target IPv4 address.")
+    _add_output_arguments(p_traceroute)
     p_traceroute.set_defaults(func=_cmd_traceroute)
 
     p_analyze = sub.add_parser("analyze", help="Collect evidence and analyze with the LLM.")
@@ -554,7 +711,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_demo.add_argument("device", nargs="?", help="Device name; defaults to PE1.")
     p_demo.set_defaults(func=_cmd_demo)
 
-    p_diff = sub.add_parser("diff", help="Diff current evidence against a saved snapshot.")
+    p_diff = sub.add_parser(
+        "diff",
+        help="Diff current evidence against a saved snapshot. Exit codes: 0 no differences, "
+        "1 differences found, 2 could not fully compare.",
+    )
     p_diff.add_argument("device", nargs="?", help="Device name; defaults to PE1.")
     p_diff.add_argument(
         "--against",
@@ -562,6 +723,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="latest",
         help="Compare against the pinned golden snapshot or the most recent one (default: latest).",
     )
+    _add_output_arguments(p_diff)
     p_diff.set_defaults(func=_cmd_diff)
 
     p_capture = sub.add_parser("capture", help="Capture real device output as test fixtures.")
@@ -620,6 +782,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("ok", "info", "warning", "critical"),
         help="Only print devices at or above this severity (default: ok, i.e. every device).",
     )
+    _add_output_arguments(p_health)
     p_health.set_defaults(func=_cmd_health)
 
     p_baseline = sub.add_parser("baseline", help="Manage per-device pinned golden snapshots.")
@@ -636,6 +799,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_baseline_show = baseline_sub.add_parser("show", help="Print a device's pinned golden snapshot.")
     p_baseline_show.add_argument("device", nargs="?", help="Device name; defaults to PE1.")
+    _add_output_arguments(p_baseline_show)
     p_baseline_show.set_defaults(func=_cmd_baseline_show)
 
     p_flaps = sub.add_parser(
@@ -648,6 +812,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=3,
         help="Minimum value changes before a field is reported as flapping (default: 3).",
     )
+    _add_output_arguments(p_flaps)
     p_flaps.set_defaults(func=_cmd_flaps)
 
     p_evidence = sub.add_parser("evidence", help="Manage stored evidence snapshots (Phase 7).")
@@ -665,13 +830,35 @@ def build_parser() -> argparse.ArgumentParser:
     p_evidence_prune.add_argument(
         "--device", help="Prune only this device; defaults to every device in the store."
     )
+    _add_output_arguments(p_evidence_prune)
     p_evidence_prune.set_defaults(func=_cmd_evidence_prune)
 
     p_evidence_history = evidence_sub.add_parser(
         "history", help="List a device's saved timestamped snapshots, oldest first."
     )
     p_evidence_history.add_argument("device", nargs="?", help="Device name; defaults to PE1.")
+    _add_output_arguments(p_evidence_history)
     p_evidence_history.set_defaults(func=_cmd_evidence_history)
+
+    p_metrics = sub.add_parser(
+        "metrics",
+        help="Report operational metrics: per-device collection outcomes/latency/retries and "
+        "health verdict counts by severity. Always exits 0.",
+    )
+    p_metrics.add_argument(
+        "--format",
+        choices=("json", "prometheus"),
+        default="json",
+        help="Output form (default: json).",
+    )
+    p_metrics.add_argument(
+        "--quiet", "-q", action="store_true", help="Suppress output; still exits 0."
+    )
+    p_metrics.set_defaults(func=_cmd_metrics)
+
+    p_version = sub.add_parser("version", help="Print the installed nettools version.")
+    _add_output_arguments(p_version)
+    p_version.set_defaults(func=_cmd_version)
 
     p_inspect = sub.add_parser("inspect", help="Smoke-test the MCP server over stdio.")
     p_inspect.add_argument("device", nargs="?", help="Device name; defaults to PE1.")
@@ -689,8 +876,10 @@ def main() -> int:
     try:
         return args.func(args)
     except InventoryError as exc:
-        _print({"status": "error", "errors": [str(exc)]})
-        return 1
+        # Nothing could even be resolved (bad/missing inventory or
+        # credentials) -- the worst-possible, "could not run at all" outcome.
+        print(output.render({"status": "error", "errors": [str(exc)]}, "json"))
+        return EXIT_CRITICAL
 
 
 if __name__ == "__main__":

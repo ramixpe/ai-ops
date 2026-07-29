@@ -1,3 +1,4 @@
+import json
 import threading
 
 import pytest
@@ -1039,3 +1040,55 @@ def test_audit_log_failure_never_breaks_a_check(monkeypatch, tmp_path):
     result = run_intent("PE1", "facts", sender=lambda device, command: "output")
 
     assert result["status"] == "success"
+
+
+# --------------------------------------------------------------------------- #
+# Phase 8: audit actor -- provenance, never authorization (see the module
+# docstring on _resolve_actor).
+# --------------------------------------------------------------------------- #
+
+
+def test_audit_log_records_actor_from_env_var(monkeypatch, tmp_path):
+    set_device_environment(monkeypatch)
+    install_fake_netmiko(monkeypatch)
+    log_path = tmp_path / "audit.jsonl"
+    monkeypatch.setenv("NETTOOLS_LOG", str(log_path))
+    monkeypatch.setenv("NETTOOLS_ACTOR", "alice@lab")
+
+    collect_evidence("PE1")
+
+    records = [
+        json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line
+    ]
+    assert records
+    assert all(record["actor"] == "alice@lab" for record in records)
+
+
+def test_audit_log_falls_back_to_os_user_when_actor_env_unset(monkeypatch, tmp_path):
+    import getpass
+
+    set_device_environment(monkeypatch)
+    install_fake_netmiko(monkeypatch)
+    log_path = tmp_path / "audit.jsonl"
+    monkeypatch.setenv("NETTOOLS_LOG", str(log_path))
+    monkeypatch.delenv("NETTOOLS_ACTOR", raising=False)
+
+    collect_evidence("PE1")
+
+    records = [
+        json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line
+    ]
+    assert records
+    assert all(record["actor"] == getpass.getuser() for record in records)
+
+
+def test_audit_actor_is_never_treated_as_an_authorization_check(monkeypatch):
+    """A bogus/empty actor must not affect the safety boundary in any way: the
+    allowlist check still runs, and still refuses, with no credentials set."""
+
+    monkeypatch.setenv("NETTOOLS_ACTOR", "")  # explicitly blank
+
+    result = _run_approved_commands("PE1", ["configure"])
+
+    assert result["status"] == "error"
+    assert "Refusing unapproved commands" in result["errors"][0]

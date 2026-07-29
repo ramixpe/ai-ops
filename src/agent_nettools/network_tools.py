@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-from . import evidence_store, parsers
+from . import evidence_store, metrics, parsers
 from .evidence_store import get_store
 from .inventory import InventoryError, get_device, load_inventory
 from .lab import platform_for
@@ -141,12 +141,47 @@ def _rotate_log_if_needed(path: Path, *, max_bytes: int, backup_count: int) -> N
     path.replace(path.with_name(f"{path.name}.1"))
 
 
+NETTOOLS_ACTOR_ENV = "NETTOOLS_ACTOR"
+
+
+def _resolve_actor() -> str:
+    """Resolve the operator attributed to this process's audit records.
+
+    **Provenance, not authorization.** This is a label for "who ran this" in
+    a trusted single-operator deployment -- it grants no permission and is
+    never consulted before a command runs; the allowlist in
+    ``_run_approved_commands`` is the only enforcement mechanism this project
+    has (see CLAUDE.md, "The safety boundary"). Real RBAC needs an identity
+    provider this project does not have -- something a caller cannot simply
+    set an environment variable to become, e.g. a verified SSO/OIDC token or a
+    signed client certificate checked *before* any command runs. Do not read
+    this field as an authorization check anywhere; it exists purely so a
+    reviewer of ``NETTOOLS_LOG`` can answer "who ran this" after the fact.
+
+    Resolution order: ``NETTOOLS_ACTOR`` if set, else the OS login user
+    (``getpass.getuser()``), else the literal string ``"unknown"`` if even
+    that fails (e.g. no controlling terminal and no relevant environment
+    variable in a stripped-down container).
+    """
+
+    actor = os.getenv(NETTOOLS_ACTOR_ENV, "").strip()
+    if actor:
+        return actor
+    try:
+        import getpass
+
+        return getpass.getuser()
+    except Exception:  # noqa: BLE001 - best-effort attribution, never fatal.
+        return "unknown"
+
+
 def _audit_log(entry: dict[str, Any]) -> None:
     """Append one JSONL audit record when NETTOOLS_LOG is set.
 
-    Cheap, best-effort observability: every command run records device, command,
-    duration, and bytes returned. Logging failures never break a check -- this
-    is deliberate and covered by
+    Cheap, best-effort observability: every command run records device,
+    command, duration, bytes returned, and the resolved actor (see
+    ``_resolve_actor`` -- provenance only, not an authorization decision).
+    Logging failures never break a check -- this is deliberate and covered by
     ``test_audit_log_failure_never_breaks_a_check``: a bad NETTOOLS_LOG path
     (permission denied, a directory in the way) must not turn an otherwise
     successful command into a reported failure.
@@ -162,7 +197,7 @@ def _audit_log(entry: dict[str, Any]) -> None:
             max_bytes=_int_env(NETTOOLS_LOG_MAX_BYTES_ENV, DEFAULT_LOG_MAX_BYTES),
             backup_count=_int_env(NETTOOLS_LOG_BACKUP_COUNT_ENV, DEFAULT_LOG_BACKUP_COUNT),
         )
-        record = {"timestamp": _timestamp(), **entry}
+        record = {"timestamp": _timestamp(), "actor": _resolve_actor(), **entry}
         with open(path, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(record) + "\n")
     except OSError:
@@ -280,6 +315,7 @@ def _netmiko_send_commands(
 
     from netmiko import ConnectHandler  # Imported lazily so unit tests do not need live SSH.
 
+    session_started = time.monotonic()
     platform = device.get("platform", "")
     device_type = platform or "cisco_xr"
 
@@ -333,6 +369,9 @@ def _netmiko_send_commands(
     except Exception as exc:  # noqa: BLE001 - every attempt to connect failed.
         errors.append(f"connection to {device['hostname']} failed: {exc}")
         _audit_log({"device": device["name"], "status": "connection_error", "error": str(exc)})
+        metrics.record_collection(
+            device["name"], success=False, duration_s=time.monotonic() - session_started
+        )
         return outputs, errors, retries_used
 
     try:
@@ -373,6 +412,12 @@ def _netmiko_send_commands(
         errors.append(f"connection to {device['hostname']} failed: {exc}")
         _audit_log({"device": device["name"], "status": "connection_error", "error": str(exc)})
 
+    metrics.record_collection(
+        device["name"],
+        success=not errors,
+        duration_s=time.monotonic() - session_started,
+        retries=sum(retries_used.values()),
+    )
     return outputs, errors, retries_used
 
 

@@ -40,6 +40,9 @@ exclude = ["tests*", "scripts*", "docs*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "live_lab: needs a reachable live IOS-XR lab (real SSH, real credentials). Skipped by default -- run with `NETTOOLS_LIVE_LAB=1 pytest -m live_lab` (see tests/test_live_lab.py).",
+]
 
 [tool.ruff]
 line-length = 100

@@ -1,7 +1,24 @@
 """Read-only, multi-vendor network inspection tools."""
 
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _package_version
+
+try:
+    __version__ = _package_version("agent-nettools")
+except PackageNotFoundError:  # Running from a source checkout with no install metadata.
+    __version__ = "0.0.0+unknown"
+
 from .agent_loop import TOOLS as AGENT_TOOLS
 from .agent_loop import run_agent_loop
+from .credential_resolver import (
+    DEFAULT_CREDENTIAL_PROVIDER,
+    NETTOOLS_CREDENTIAL_PROVIDER_ENV,
+    CredentialResolver,
+    EnvCredentialResolver,
+    FileCredentialResolver,
+    get_resolver,
+    known_credential_providers,
+)
 from .devices_doc import render_devices_doc
 from .evidence_budget import (
     DEFAULT_PER_INTENT_CHAR_BUDGET,
@@ -68,6 +85,23 @@ from .llm_analysis import (
     build_analysis_prompt,
     get_provider,
 )
+from .metrics import (
+    NETTOOLS_METRICS_FILE_ENV,
+    MetricsCollector,
+    render_prometheus,
+)
+from .metrics import (
+    record_collection as record_metrics_collection,
+)
+from .metrics import (
+    record_verdict as record_metrics_verdict,
+)
+from .metrics import (
+    reset as reset_metrics,
+)
+from .metrics import (
+    snapshot as metrics_snapshot,
+)
 from .network_tools import (
     CHECK_TOOLS,
     DEFAULT_BANNER_TIMEOUT_SECONDS,
@@ -78,6 +112,7 @@ from .network_tools import (
     DEFAULT_READ_TIMEOUT_SECONDS,
     DEFAULT_RETRY_BACKOFF_SECONDS,
     GOLDEN_SNAPSHOT_FILENAME,
+    NETTOOLS_ACTOR_ENV,
     NETTOOLS_ALLOW_ACTIVE_PROBES_ENV,
     NETTOOLS_BANNER_TIMEOUT_ENV,
     NETTOOLS_COMMAND_RETRIES_ENV,
@@ -118,6 +153,10 @@ from .network_tools import (
     traceroute_device,
 )
 from .normalize import mask_volatile, normalize_output, strip_preamble
+from .output import FORMATS as OUTPUT_FORMATS
+from .output import render as render_output
+from .output import render_summary as render_output_summary
+from .output import render_table as render_output_table
 from .parsers import (
     PARSE_FAILED,
     PARSE_OK,
@@ -168,6 +207,31 @@ from .topology import (
 )
 
 __all__ = [
+    # package version (Phase 8, `nettools version`)
+    "__version__",
+    # pluggable credential resolution (Phase 8)
+    "NETTOOLS_CREDENTIAL_PROVIDER_ENV",
+    "DEFAULT_CREDENTIAL_PROVIDER",
+    "CredentialResolver",
+    "EnvCredentialResolver",
+    "FileCredentialResolver",
+    "get_resolver",
+    "known_credential_providers",
+    # metrics (Phase 8)
+    "NETTOOLS_METRICS_FILE_ENV",
+    "MetricsCollector",
+    "render_prometheus",
+    "record_metrics_collection",
+    "record_metrics_verdict",
+    "metrics_snapshot",
+    "reset_metrics",
+    # output formatting (Phase 8): json (default)/table/summary
+    "OUTPUT_FORMATS",
+    "render_output",
+    "render_output_table",
+    "render_output_summary",
+    # audit actor (Phase 8, provenance only -- see network_tools.py)
+    "NETTOOLS_ACTOR_ENV",
     # inventory
     "InventoryError",
     "load_inventory",
