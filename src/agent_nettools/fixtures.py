@@ -122,8 +122,10 @@ def capture_device(
     errors: list[str] = []
     for section_result in evidence.values():
         if not isinstance(section_result, dict):
-            continue  # "device" and "timestamp" are plain strings.
+            continue  # "device", "platform", and "timestamp" are plain strings.
         errors.extend(section_result.get("errors", []))
+        # An unsupported intent has no commands and no errors, so it contributes
+        # nothing here -- correct, there is no output to capture.
         for command, output in section_result.get("data", {}).get("commands", {}).items():
             text = scrub_output(output) if scrub else output
             path = fixture_path(device, command, label=label, base_dir=base_dir)

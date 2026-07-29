@@ -15,28 +15,24 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .inventory import InventoryError, get_device, load_inventory
+from .lab import platform_for
+from .platforms import (
+    DEFAULT_PLATFORM,
+    all_intents,
+    commands_for,
+    intents_for,
+    is_approved,
+    known_platforms,
+    supports,
+)
 
-# Approved read-only IOS-XR show commands. Nothing here changes device state.
-APPROVED_COMMANDS = {
-    "show running-config hostname",
-    "show version",
-    "show interfaces brief",
-    "show bgp summary",
-    "show lldp neighbors",
-    "show isis neighbors",
-    "show segment-routing traffic-eng policy",
-}
-
-# Evidence section -> the approved commands that fill it. collect_evidence runs
-# every one of these over a single SSH session.
-EVIDENCE_COMMANDS = {
-    "facts": ["show running-config hostname", "show version"],
-    "interfaces": ["show interfaces brief"],
-    "bgp": ["show bgp summary"],
-    "lldp": ["show lldp neighbors"],
-    "isis": ["show isis neighbors"],
-    "sr_policies": ["show segment-routing traffic-eng policy"],
-}
+# Statuses a result envelope may carry. "unsupported" means the device's platform
+# has no command for the requested intent -- a Junos box has no SR-TE policy
+# output. That is a property of the fabric, not a failure, so it is neither an
+# error nor a success and must not make a fabric check go red.
+STATUS_SUCCESS = "success"
+STATUS_ERROR = "error"
+STATUS_UNSUPPORTED = "unsupported"
 
 
 def _timestamp() -> str:
@@ -47,7 +43,7 @@ def _base_result(tool: str, device_name: str) -> dict[str, Any]:
     return {
         "tool": tool,
         "device": device_name,
-        "status": "success",
+        "status": STATUS_SUCCESS,
         "timestamp": _timestamp(),
         "data": {},
         "errors": [],
@@ -56,8 +52,21 @@ def _base_result(tool: str, device_name: str) -> dict[str, Any]:
 
 def _safe_error(tool: str, device_name: str, message: str) -> dict[str, Any]:
     result = _base_result(tool, device_name)
-    result["status"] = "error"
+    result["status"] = STATUS_ERROR
     result["errors"].append(message)
+    return result
+
+
+def _unsupported_result(tool: str, device_name: str, intent: str, platform: str) -> dict[str, Any]:
+    """Return an envelope for an intent this platform cannot answer.
+
+    ``errors`` stays empty -- this is not a failure. ``data.commands`` is present
+    and empty so every caller that walks commands keeps working unchanged.
+    """
+
+    result = _base_result(tool, device_name)
+    result["status"] = STATUS_UNSUPPORTED
+    result["data"] = {"intent": intent, "platform": platform, "commands": {}}
     return result
 
 
@@ -152,16 +161,26 @@ def _run_approved_commands(
     device_name: str,
     commands: list[str],
     *,
+    platform: str | None = None,
     sender: Callable[[dict[str, Any], str], str] | None = None,
 ) -> dict[str, Any]:
-    """Run a set of approved read-only commands against one device."""
+    """Run a set of approved read-only commands against one device.
 
-    unsafe_commands = [command for command in commands if command not in APPROVED_COMMANDS]
+    The allowlist is checked against the *device's own platform*, so an IOS-XE
+    command can never reach an IOS-XR device even though both are approved
+    somewhere. The platform is resolved from static lab data, which needs no
+    credentials -- so this check still happens before any credential access or
+    socket, exactly as before.
+    """
+
+    platform = platform or platform_for(device_name)
+
+    unsafe_commands = [command for command in commands if not is_approved(platform, command)]
     if unsafe_commands:
         return _safe_error(
             "run_approved_commands",
             device_name,
-            f"Refusing unapproved commands: {', '.join(unsafe_commands)}",
+            f"Refusing unapproved commands for {platform}: {', '.join(unsafe_commands)}",
         )
 
     try:
@@ -178,17 +197,52 @@ def _run_approved_commands(
             try:
                 result["data"]["commands"][command] = sender(device, command)
             except Exception as exc:  # noqa: BLE001 - beginner-friendly structured errors.
-                result["status"] = "error"
+                result["status"] = STATUS_ERROR
                 result["errors"].append(f"{command}: {exc}")
         return result
 
     outputs, errors = _netmiko_send_commands(device, commands)
     result["data"]["commands"] = outputs
     if errors:
-        result["status"] = "error"
+        result["status"] = STATUS_ERROR
         result["errors"].extend(errors)
 
     return result
+
+
+def run_intent(
+    device_name: str,
+    intent: str,
+    *,
+    sender: Callable[[dict[str, Any], str], str] | None = None,
+) -> dict[str, Any]:
+    """Run one vendor-neutral intent against one device.
+
+    Resolves the intent to this device's platform syntax. A platform that cannot
+    answer the intent yields ``status: "unsupported"`` rather than an error.
+    """
+
+    platform = platform_for(device_name)
+
+    if platform not in known_platforms():
+        # A typo'd or not-yet-defined platform is a real error: it approves
+        # nothing, so failing closed here gives a clearer message than an empty
+        # allowlist would.
+        return _safe_error(
+            "run_approved_commands",
+            device_name,
+            f"No command definitions for platform: {platform}.",
+        )
+
+    if not supports(platform, intent):
+        return _unsupported_result("run_approved_commands", device_name, intent, platform)
+
+    return _run_approved_commands(
+        device_name,
+        list(commands_for(platform, intent)),
+        platform=platform,
+        sender=sender,
+    )
 
 
 def list_devices() -> dict[str, Any]:
@@ -214,9 +268,9 @@ def get_device_facts(
     *,
     sender: Callable[[dict[str, Any], str], str] | None = None,
 ) -> dict[str, Any]:
-    """Collect basic read-only device facts (hostname + version)."""
+    """Collect basic read-only device facts (hostname and/or version)."""
 
-    return _run_approved_commands(device_name, EVIDENCE_COMMANDS["facts"], sender=sender)
+    return run_intent(device_name, "facts", sender=sender)
 
 
 def check_interfaces(
@@ -226,7 +280,7 @@ def check_interfaces(
 ) -> dict[str, Any]:
     """Collect interface status using a read-only command."""
 
-    return _run_approved_commands(device_name, EVIDENCE_COMMANDS["interfaces"], sender=sender)
+    return run_intent(device_name, "interfaces", sender=sender)
 
 
 def check_bgp_neighbors(
@@ -236,7 +290,7 @@ def check_bgp_neighbors(
 ) -> dict[str, Any]:
     """Collect BGP summary information using a read-only command."""
 
-    return _run_approved_commands(device_name, EVIDENCE_COMMANDS["bgp"], sender=sender)
+    return run_intent(device_name, "bgp", sender=sender)
 
 
 def check_lldp_neighbors(
@@ -246,7 +300,7 @@ def check_lldp_neighbors(
 ) -> dict[str, Any]:
     """Collect LLDP neighbor information using a read-only command."""
 
-    return _run_approved_commands(device_name, EVIDENCE_COMMANDS["lldp"], sender=sender)
+    return run_intent(device_name, "lldp", sender=sender)
 
 
 def check_isis_neighbors(
@@ -256,7 +310,7 @@ def check_isis_neighbors(
 ) -> dict[str, Any]:
     """Collect IS-IS neighbor state using a read-only command."""
 
-    return _run_approved_commands(device_name, EVIDENCE_COMMANDS["isis"], sender=sender)
+    return run_intent(device_name, "isis", sender=sender)
 
 
 def check_sr_policies(
@@ -266,11 +320,14 @@ def check_sr_policies(
 ) -> dict[str, Any]:
     """Collect Segment Routing TE policy state using a read-only command."""
 
-    return _run_approved_commands(device_name, EVIDENCE_COMMANDS["sr_policies"], sender=sender)
+    return run_intent(device_name, "sr", sender=sender)
 
 
-# Named single-device checks, keyed by their CLI / fabric name. One source of
-# truth so the CLI, fabric runner, and MCP server all agree.
+# Named single-device checks, keyed by intent. One source of truth so the CLI,
+# fabric runner, and MCP server all agree, and one vocabulary: these keys are the
+# same intent names used by platforms.PLATFORM_INTENTS and by the evidence
+# sections. Adding an intent here is not enough on its own -- the platform table
+# must define commands for it.
 CHECK_TOOLS: dict[str, Callable[..., dict[str, Any]]] = {
     "facts": get_device_facts,
     "interfaces": check_interfaces,
@@ -304,7 +361,7 @@ def check_fabric(
 
     tool = CHECK_TOOLS[check]
     result = _base_result("check_fabric", "fabric")
-    result["data"] = {"check": check, "devices": {}}
+    result["data"] = {"check": check, "devices": {}, "unsupported": []}
 
     def run_one(device: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         name = str(device["name"])
@@ -319,8 +376,13 @@ def check_fabric(
         name = str(device["name"])
         device_result = collected[name]
         result["data"]["devices"][name] = device_result
-        if device_result["status"] != "success":
-            result["status"] = "error"
+        status = device_result["status"]
+        if status == STATUS_UNSUPPORTED:
+            # A vendor that cannot answer this intent is a fact about the fabric,
+            # not a failure. Reported, but the fabric check stays green.
+            result["data"]["unsupported"].append(name)
+        elif status != STATUS_SUCCESS:
+            result["status"] = STATUS_ERROR
             result["errors"].append(f"{name}: {check} check failed")
 
     return result
@@ -339,13 +401,19 @@ def _section_from_combined(
 
     missing = [command for command in commands if command not in executed]
     if missing:
-        result["status"] = "error"
+        result["status"] = STATUS_ERROR
         prefixes = tuple(f"{command}: " for command in missing)
         related = [error for error in combined["errors"] if error.startswith(prefixes)]
         # A connection-level failure carries no command prefix; report it as-is.
         result["errors"] = related or list(combined["errors"])
 
     return result
+
+
+def evidence_intents(platform: str) -> tuple[str, ...]:
+    """Return the intents a full evidence collection covers on one platform."""
+
+    return intents_for(platform)
 
 
 def collect_evidence(
@@ -356,15 +424,46 @@ def collect_evidence(
     """Collect all evidence used by the final troubleshooting workflow.
 
     Every approved command runs over one SSH session, so a full evidence
-    collection is a single login instead of one per check.
+    collection is a single login instead of one per intent.
+
+    The returned dict carries one section per intent *known to any platform*, so
+    the shape is identical across a mixed fabric; intents this device's platform
+    cannot answer are marked ``unsupported``. ``platform`` is recorded so later
+    consumers -- diffing, parsing, health rules -- can resolve sections back to
+    the commands that filled them without re-reading the inventory.
     """
 
-    commands = [command for group in EVIDENCE_COMMANDS.values() for command in group]
-    combined = _run_approved_commands(device_name, commands, sender=sender)
+    platform = platform_for(device_name)
 
-    evidence: dict[str, Any] = {"device": device_name, "timestamp": _timestamp()}
-    for section, section_commands in EVIDENCE_COMMANDS.items():
-        evidence[section] = _section_from_combined(device_name, section_commands, combined)
+    if platform not in known_platforms():
+        failure = _safe_error(
+            "run_approved_commands",
+            device_name,
+            f"No command definitions for platform: {platform}.",
+        )
+        evidence: dict[str, Any] = {
+            "device": device_name,
+            "platform": platform,
+            "timestamp": _timestamp(),
+        }
+        for intent in all_intents():
+            evidence[intent] = dict(failure)
+        return evidence
+
+    supported = intents_for(platform)
+    commands = [command for intent in supported for command in commands_for(platform, intent)]
+    combined = _run_approved_commands(device_name, commands, platform=platform, sender=sender)
+
+    evidence = {"device": device_name, "platform": platform, "timestamp": _timestamp()}
+    for intent in all_intents():
+        if intent in supported:
+            evidence[intent] = _section_from_combined(
+                device_name, list(commands_for(platform, intent)), combined
+            )
+        else:
+            evidence[intent] = _unsupported_result(
+                "run_approved_commands", device_name, intent, platform
+            )
 
     return evidence
 
@@ -390,14 +489,24 @@ def _evidence_commands(evidence: dict[str, Any]) -> dict[str, str]:
 
 
 def _failed_commands(evidence: dict[str, Any]) -> set[str]:
-    """Commands whose evidence section errored, so no output exists to compare."""
+    """Commands whose evidence section errored, so no output exists to compare.
 
+    Intents are resolved through the platform the evidence was collected on, so
+    this stays correct for a snapshot taken from any vendor. An ``unsupported``
+    section is skipped: its commands were never expected, so they are neither
+    failed nor removed.
+    """
+
+    platform = str(evidence.get("platform") or DEFAULT_PLATFORM)
     failed: set[str] = set()
-    for section, section_result in evidence.items():
-        if not isinstance(section_result, dict) or section_result.get("status") != "error":
+    for intent, section_result in evidence.items():
+        if not isinstance(section_result, dict):
+            continue
+        if section_result.get("status") != STATUS_ERROR:
             continue
         present = section_result.get("data", {}).get("commands", {})
-        failed.update(c for c in EVIDENCE_COMMANDS.get(section, []) if c not in present)
+        expected = commands_for(platform, intent) if supports(platform, intent) else ()
+        failed.update(command for command in expected if command not in present)
     return failed
 
 
@@ -451,8 +560,16 @@ def diff_evidence(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
     changed = sorted(c for c in old_cmds.keys() & new_cmds.keys() if old_cmds[c] != new_cmds[c])
     unchanged = sorted(c for c in old_cmds.keys() & new_cmds.keys() if old_cmds[c] == new_cmds[c])
 
+    old_platform = old.get("platform")
+    new_platform = new.get("platform")
+
     return {
         "device": new.get("device", old.get("device")),
+        "platform": new_platform or old_platform,
+        # A device that changed vendor between snapshots explains every command
+        # appearing and disappearing at once, so surface it rather than leaving
+        # the reader to infer it from a wholesale added/removed churn.
+        "platform_changed": bool(old_platform and new_platform and old_platform != new_platform),
         "old_timestamp": old.get("timestamp"),
         "new_timestamp": new.get("timestamp"),
         "changed": changed,
