@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 import mcp_server.server as server
+from agent_nettools.devices_doc import render_devices_doc
 from agent_nettools.platforms import APPROVED_COMMANDS, known_platforms
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -72,3 +73,11 @@ def test_mcp_readme_lists_exactly_the_exposed_tools():
     mcp_readme = (REPO_ROOT / "mcp_server" / "README.md").read_text(encoding="utf-8")
     documented = _backticked_between(mcp_readme, "## Exposed Tools", "There is no shell")
     assert documented == exposed
+
+
+def test_devices_doc_matches_rendered_inventory():
+    """docs/devices.md is generated, not hand-maintained -- so it cannot drift
+    from the inventory it describes."""
+
+    committed = (REPO_ROOT / "docs" / "devices.md").read_text(encoding="utf-8")
+    assert committed == render_devices_doc()

@@ -1,0 +1,122 @@
+# Declarative topology for the single-user IOS-XR lab. This file is topology,
+# not secrets: credentials are resolved at runtime from the environment
+# variables *named* under credential_groups below, never stored here (see
+# CLAUDE.md and README.md's "Inventory" section).
+#
+# platforms.known_platforms() gates every `platform` field, lab.platform_for()
+# reads this file without ever touching an environment variable (the
+# precondition for the safety boundary: the command allowlist is checked
+# before credentials load), and inventory.load_inventory() joins this file
+# with environment credentials at call time.
+#
+# `expected:` blocks hold DERIVED per-device topology counts, produced by
+# `nettools learn-topology` from parsed evidence -- never hand-invented. That
+# command reports by default and rewrites this file only with --write, which
+# strips these comments; use --out to review a generated draft instead.
+#
+# CAUTION: a derived expectation records what the fabric *does*, which is only a
+# valid target if the fabric is currently healthy. PE2's and PE4's zero
+# adjacencies below are baked-in brokenness, not a healthy baseline, so health
+# rules must also apply role-based invariants that do not depend on these counts
+# (an edge router with no IS-IS adjacency is wrong whatever this file says).
+#
+# Deliberately absent: link-level ("A connects to B") expected topology. The
+# fabric's real LLDP data is self-contradictory -- P1 reports Gi0/0/0/0 facing
+# P2's Gi0/0/0/0 while P2 reports that same port facing LEAF05_DHCP_SERVER (see
+# `nettools learn-topology`'s anomaly report). Asserting a specific link would
+# silently paper over a real, verified inconsistency; a per-device count
+# survives that ambiguity, a specific link claim would not.
+version: 1
+
+defaults:
+  platform: cisco_xr
+  credential_group: lab
+  port: 22
+
+credential_groups:
+  lab:
+    username_env: DEVICE_USERNAME
+    password_env: DEVICE_PASSWORD
+    ssh_keyfile_env: DEVICE_SSH_KEYFILE
+
+devices:
+  - name: P1
+    mgmt_ip: 172.20.250.11
+    role: core
+    site: lab
+    expected:
+      isis_adjacencies: 2
+
+  - name: P2
+    mgmt_ip: 172.20.250.12
+    role: core
+    site: lab
+    expected:
+      isis_adjacencies: 4
+
+  - name: P3
+    mgmt_ip: 172.20.250.13
+    role: core
+    site: lab
+    expected:
+      isis_adjacencies: 1
+
+  - name: P4
+    mgmt_ip: 172.20.250.14
+    role: core
+    site: lab
+    expected:
+      isis_adjacencies: 3
+
+  - name: PE1
+    mgmt_ip: 172.20.250.21
+    role: edge
+    site: lab
+    router_id: 10.255.0.11
+    local_as: 65000
+    expected:
+      isis_adjacencies: 1
+      bgp_peers: 1
+
+  # Isolated: 0 LLDP neighbours and 0 IS-IS adjacencies, yet it carries a BGP
+  # router-id and one (idle) peer toward RR1. Recorded as observed, not smoothed
+  # over -- see the caution above about derived baselines.
+  - name: PE2
+    mgmt_ip: 172.20.250.22
+    role: edge
+    site: lab
+    router_id: 10.255.0.12
+    local_as: 65000
+    expected:
+      isis_adjacencies: 0
+      bgp_peers: 1
+
+  - name: PE3
+    mgmt_ip: 172.20.250.23
+    role: edge
+    site: lab
+    router_id: 10.255.0.13
+    local_as: 65000
+    expected:
+      isis_adjacencies: 2
+      bgp_peers: 1
+
+  # No BGP process configured at all ("% BGP instance 'default' not active"),
+  # like the P-routers. bgp_peers is absent rather than zero: zero would claim a
+  # BGP process that produced no peers, which is not what this device reports.
+  - name: PE4
+    mgmt_ip: 172.20.250.24
+    role: edge
+    site: lab
+    expected:
+      isis_adjacencies: 0
+
+  - name: RR1
+    mgmt_ip: 172.20.250.31
+    role: route-reflector
+    site: lab
+    router_id: 10.255.0.31
+    local_as: 65000
+    expected:
+      isis_adjacencies: 1
+      bgp_peers: 4

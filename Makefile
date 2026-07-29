@@ -2,7 +2,7 @@ PYTHON ?= python3
 DEVICE ?=
 
 .PHONY: help setup test lint inventory facts interfaces bgp lldp isis sr \
-        fabric-bgp analyze demo diff capture mcp inspect docker-build clean
+        fabric-bgp analyze demo diff capture learn-topology mcp inspect docker-build clean
 
 help:
 	@echo "IOS-XR Read-Only Network Tools"
@@ -23,6 +23,7 @@ help:
 	@echo "  make demo          Run the narrated agent demo (or DEVICE=name)"
 	@echo "  make diff          Diff evidence against the last snapshot (or DEVICE=name)"
 	@echo "  make capture       Recapture test fixtures from the whole lab"
+	@echo "  make learn-topology  Derive expected topology from fixtures and update inventory/lab.yaml"
 	@echo "  make mcp           Start the MCP server over stdio"
 	@echo "  make inspect       Smoke-test the MCP server (or DEVICE=name)"
 	@echo "  make docker-build  Build the MCP server container image"
@@ -76,6 +77,11 @@ capture:
 	nettools capture --all --label t0
 	sleep 75
 	nettools capture --all --label t1
+
+# Derives expected/ blocks from the committed t0 fixtures and prints the
+# fabric anomaly report; pass ARGS=--live to derive from a live collection.
+learn-topology:
+	nettools learn-topology $(ARGS)
 
 mcp:
 	nettools-mcp

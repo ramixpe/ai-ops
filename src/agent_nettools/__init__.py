@@ -1,5 +1,6 @@
 """Read-only, multi-vendor network inspection tools."""
 
+from .devices_doc import render_devices_doc
 from .fixtures import (
     capture_device,
     command_slug,
@@ -13,7 +14,18 @@ from .inventory import (
     get_device,
     load_inventory,
 )
-from .lab import DEVICES, all_devices, platform_for
+from .inventory_model import (
+    CredentialGroup,
+    Defaults,
+    Device,
+    Expected,
+    InventoryFile,
+    load_inventory_file,
+    parse_inventory,
+    reset_inventory_cache,
+    resolve_inventory_path,
+)
+from .lab import DEVICES, PLATFORMS, all_devices, platform_for
 from .llm_analysis import (
     LLMAnalysisError,
     analyze_evidence,
@@ -65,6 +77,15 @@ from .platforms import (
     known_platforms,
     supports,
 )
+from .topology import (
+    build_anomaly_report,
+    derive_expected,
+    find_lldp_disagreements,
+    find_neighbors_not_in_inventory,
+    find_zero_adjacency_devices,
+    format_anomaly_report,
+    update_expected_in_yaml,
+)
 
 __all__ = [
     # inventory
@@ -73,8 +94,29 @@ __all__ = [
     "get_device",
     "get_default_device_name",
     "DEVICES",
+    "PLATFORMS",
     "all_devices",
     "platform_for",
+    # inventory schema and YAML loading (inventory_model.py)
+    "InventoryFile",
+    "Device",
+    "Defaults",
+    "CredentialGroup",
+    "Expected",
+    "parse_inventory",
+    "load_inventory_file",
+    "resolve_inventory_path",
+    "reset_inventory_cache",
+    # topology: derived expected counts and the fabric anomaly report
+    "derive_expected",
+    "build_anomaly_report",
+    "format_anomaly_report",
+    "find_lldp_disagreements",
+    "find_neighbors_not_in_inventory",
+    "find_zero_adjacency_devices",
+    "update_expected_in_yaml",
+    # docs generation
+    "render_devices_doc",
     # platforms: the allowlist, keyed by vendor
     "PLATFORM_INTENTS",
     "APPROVED_COMMANDS",
