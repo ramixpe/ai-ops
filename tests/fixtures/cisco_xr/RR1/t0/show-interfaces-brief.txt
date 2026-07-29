@@ -1,0 +1,11 @@
+
+Wed Jul 29 11:59:14.298 UTC
+
+               Intf       Intf        LineP              Encap  MTU        BW
+               Name       State       State               Type (byte)    (Kbps)
+--------------------------------------------------------------------------------
+                Lo0          up          up           Loopback  1500          0
+                Nu0          up          up               Null  1500          0
+     Mg0/RP0/CPU0/0          up          up               ARPA  1514    1000000
+          Gi0/0/0/0          up          up               ARPA  1514    1000000
+          Gi0/0/0/1          up          up               ARPA  1514    1000000

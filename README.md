@@ -93,6 +93,7 @@ make fabric-bgp  # BGP summary across the whole inventory
 make analyze     # Collect evidence and analyze with the selected LLM
 make demo        # Narrated agent demo
 make diff        # Diff evidence against the last snapshot
+make capture     # Recapture test fixtures from the whole lab
 make mcp         # Start the MCP server over stdio
 make inspect     # Smoke-test the MCP server
 ```
@@ -104,6 +105,17 @@ make facts DEVICE=RR1
 # or directly:
 nettools facts RR1
 ```
+
+## Test Fixtures
+
+`tests/fixtures/` holds real IOS-XR output captured from all nine devices as two
+snapshots ~90s apart (`t0` and `t1`) on a quiet fabric. Parser, diff, and
+health-rule work is developed and tested against these, so it needs no lab
+access. `nettools capture` refreshes them; review the git diff by eye before
+committing, since fixtures are permanent once pushed.
+
+Replay a capture offline with `load_fixture_evidence("PE1", label="t0")` — it
+returns the same structure a live `collect_evidence` call would.
 
 ## BYOK Reasoning Provider
 
@@ -139,7 +151,9 @@ src/agent_nettools/inventory.py    Env credentials + lab -> device dicts
 src/agent_nettools/network_tools.py  Allowlist, SSH, evidence, fabric, diff
 src/agent_nettools/llm_analysis.py   Provider selection + analysis
 src/agent_nettools/cli.py          The `nettools` command-line entry point
+src/agent_nettools/fixtures.py     Capture real device output; replay it offline
 mcp_server/                        Read-only MCP server
 tests/                             Inventory, tool, provider, docs, safety tests
+tests/fixtures/                    Captured real IOS-XR output (t0/t1 pairs)
 docs/                              devices.md and the code review
 ```

@@ -1,0 +1,5 @@
+
+Wed Jul 29 11:59:11.011 UTC
+
+IS-IS CORE neighbors:
+System Id      Interface        SNPA           State Holdtime Type IETF-NSF

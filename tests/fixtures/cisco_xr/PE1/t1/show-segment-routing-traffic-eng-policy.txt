@@ -1,0 +1,51 @@
+
+Wed Jul 29 12:00:42.910 UTC
+
+SR-TE policy database
+---------------------
+
+Color: 10, End-point: 10.255.0.13
+  Name: srte_c_10_ep_10.255.0.13
+  Status:
+    Admin: up  Operational: up for 15:35:18 (since Jul 28 20:25:23.937)
+  Candidate-paths:
+    Preference: 100 (configuration) (active)
+      Name: srte_c_10_ep_10.255.0.13
+      Requested BSID: dynamic
+      Constraints:
+        Protection Type: protected-preferred
+        Maximum SID Depth: 10 
+      Explicit: segment-list SL-VIA-P3 (valid)
+        Weight: 1, Metric Type: TE
+          SID[0]: 16003
+          SID[1]: 16013
+  Attributes:
+    Binding SID: 28126
+    Forward Class: Not Configured
+    Steering labeled-services disabled: no
+    Steering BGP disabled: no
+    IPv6 caps enable: yes
+    Invalidation drop enabled: no
+    Max Install Standby Candidate Paths: 0
+
+Color: 20, End-point: 10.255.0.13
+  Name: srte_c_20_ep_10.255.0.13
+  Status:
+    Admin: up  Operational: down for 15:37:27 (since Jul 28 20:23:15.690)
+  Candidate-paths:
+    Preference: 100 (configuration) (inactive)
+      Name: srte_c_20_ep_10.255.0.13
+      Requested BSID: dynamic
+      Constraints:
+        Protection Type: protected-preferred
+        Maximum SID Depth: 10 
+      Dynamic (inactive)
+      Last error: No path found
+        Metric Type: LATENCY,   Path Accumulated Metric: 0 
+  Attributes:
+    Forward Class: 0
+    Steering labeled-services disabled: no
+    Steering BGP disabled: no
+    IPv6 caps enable: no
+    Invalidation drop enabled: no
+    Max Install Standby Candidate Paths: 0

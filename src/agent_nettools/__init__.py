@@ -1,5 +1,12 @@
 """Read-only Cisco IOS-XR network tools package."""
 
+from .fixtures import (
+    capture_device,
+    command_slug,
+    fixture_sender,
+    load_fixture_evidence,
+    scrub_output,
+)
 from .inventory import (
     InventoryError,
     get_default_device_name,
@@ -55,6 +62,12 @@ __all__ = [
     "save_snapshot",
     "load_latest_snapshot",
     "diff_evidence",
+    # fixtures
+    "command_slug",
+    "scrub_output",
+    "capture_device",
+    "fixture_sender",
+    "load_fixture_evidence",
     # analysis
     "LLMAnalysisError",
     "get_provider",
