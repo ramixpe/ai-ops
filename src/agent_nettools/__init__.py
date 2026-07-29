@@ -1,6 +1,18 @@
 """Read-only, multi-vendor network inspection tools."""
 
+from .agent_loop import TOOLS as AGENT_TOOLS
+from .agent_loop import run_agent_loop
 from .devices_doc import render_devices_doc
+from .evidence_budget import (
+    DEFAULT_PER_INTENT_CHAR_BUDGET,
+    DEFAULT_TOTAL_CHAR_BUDGET,
+    PER_INTENT_CHAR_BUDGET_ENV,
+    TOTAL_CHAR_BUDGET_ENV,
+    budget_device_evidence,
+    budget_fabric_evidence,
+    render_budgeted_evidence,
+)
+from .fabric_analysis import FABRIC_ANALYSIS_PROMPT, analyze_fabric, build_fabric_prompt
 from .fixtures import (
     capture_device,
     command_slug,
@@ -38,8 +50,13 @@ from .inventory_model import (
 )
 from .lab import DEVICES, PLATFORMS, all_devices, platform_for
 from .llm_analysis import (
+    ANTHROPIC_MAX_OUTPUT_TOKENS,
+    ANTHROPIC_MODEL_DEFAULT,
     LLMAnalysisError,
     analyze_evidence,
+    analyze_with_anthropic,
+    analyze_with_ollama,
+    analyze_with_openai,
     build_analysis_prompt,
     get_provider,
 )
@@ -250,4 +267,24 @@ __all__ = [
     "get_provider",
     "build_analysis_prompt",
     "analyze_evidence",
+    "analyze_with_anthropic",
+    "analyze_with_openai",
+    "analyze_with_ollama",
+    "ANTHROPIC_MODEL_DEFAULT",
+    "ANTHROPIC_MAX_OUTPUT_TOKENS",
+    # evidence budget (Phase 6): keep a fabric-wide bundle from blowing the context
+    "DEFAULT_PER_INTENT_CHAR_BUDGET",
+    "DEFAULT_TOTAL_CHAR_BUDGET",
+    "PER_INTENT_CHAR_BUDGET_ENV",
+    "TOTAL_CHAR_BUDGET_ENV",
+    "budget_device_evidence",
+    "budget_fabric_evidence",
+    "render_budgeted_evidence",
+    # fabric-wide analysis (Phase 6): cross-device correlation
+    "FABRIC_ANALYSIS_PROMPT",
+    "analyze_fabric",
+    "build_fabric_prompt",
+    # bounded agent loop (Phase 6): read-only tool-calling over the same safety boundary
+    "AGENT_TOOLS",
+    "run_agent_loop",
 ]

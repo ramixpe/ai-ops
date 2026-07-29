@@ -14,7 +14,7 @@ reasoning layer, and an MCP server — all over the same narrow allowlist of
 ```bash
 make setup                  # python -m venv .venv + pip install -e ".[dev,llm]"
 source .venv/bin/activate
-make test                   # pytest -q  (373 tests, no network needed)
+make test                   # pytest -q  (402 tests, no network needed)
 make lint                   # ruff check .
 make help                   # full target list
 ```
@@ -23,18 +23,24 @@ Single test: `pytest tests/test_network_tools.py::test_collect_evidence_uses_one
 
 Runtime targets are thin wrappers over the `nettools` console script and all
 hit live devices: `make facts|interfaces|bgp|lldp|isis|sr [DEVICE=RR1]`,
-`make fabric-bgp`, `make analyze`, `make demo`, `make diff`, `make mcp`,
-`make inspect`. `nettools <check> <DEVICE>` works directly too.
+`make fabric-bgp`, `make analyze`, `make analyze-fabric`, `make agent
+QUESTION="..."`, `make demo`, `make diff`, `make mcp`, `make inspect`.
+`nettools <check> <DEVICE>` works directly too.
 `make route|bgp-neighbor|interface|logging|ping|traceroute` (Phase 5,
 validated parameterized templates) take an additional value
 (`PREFIX`/`ADDRESS`/`NAME`/`COUNT`), e.g. `nettools route PE1 10.255.0.31`.
+`nettools analyze --fabric` (Phase 6) correlates evidence + health verdicts
+across every device instead of one at a time; `nettools agent "QUESTION"
+[--device D] [--max-iterations N] [--time-budget SECONDS]` (Phase 6,
+Anthropic only) runs a bounded, read-only tool-calling loop.
 
 CI (`.github/workflows/ci.yml`) runs `ruff check .` then `pytest -q` on Python 3.11.
 
 Requires `DEVICE_USERNAME` / `DEVICE_PASSWORD` (or `DEVICE_SSH_KEYFILE`) for
 anything that touches a device; `cp .env.example .env` and see that file for
 the full env surface (`LLM_PROVIDER`, `NETTOOLS_LOG`, `NETTOOLS_EVIDENCE_DIR`,
-`NETTOOLS_INVENTORY`).
+`NETTOOLS_INVENTORY`, `NETTOOLS_LLM_FALLBACKS`,
+`NETTOOLS_EVIDENCE_PER_INTENT_CHARS`, `NETTOOLS_EVIDENCE_TOTAL_CHARS`).
 
 ## Architecture
 
@@ -430,6 +436,121 @@ CLI: `nettools route|bgp-neighbor|interface|logging|ping|traceroute DEVICE
 filters on, each with a docstring stating the accepted parameter form so an
 MCP client can narrow iteratively.
 
+### Bounded agent loop, fabric analysis, and prompt caching (Phase 6)
+
+Three additions, all downstream of `llm_analysis.py`'s provider layer, none
+touching the safety boundary itself:
+
+**Evidence budget (`evidence_budget.py`).** A single device's evidence is
+always small enough to send whole; a fabric-wide bundle (Phase 6's
+`analyze_fabric`, one evidence collection per inventory device) has no such
+guarantee, and nothing before this module ever capped it. Every budget is
+measured in *characters*, a cheap dependency-free proxy for tokens -- no
+tokenizer call needed, and a slightly generous character bound is a safe
+conservative token bound for the mostly-ASCII CLI output this tool handles.
+Long sections are truncated in the *middle*, not the tail (a route table or
+log dump is often most informative at both ends), with an explicit
+`[TRUNCATED: N characters omitted]` marker so the model is told evidence is
+partial rather than reading a short section as a complete, uneventful one --
+the analysis prompts already instruct the model to say what is missing.
+Parsed structures are sent instead of raw command text whenever
+`parse_status == parsers.PARSE_OK`: parsed JSON is far more information-dense
+per character, and a raw CLI table's column-aligned whitespace is exactly
+what a model tends to misread or waste tokens re-deriving structure from.
+Per-intent truncation runs first so no single pathological section (a huge
+route table) can dominate; a fabric-wide total ceiling is enforced after,
+proportionally shrinking every already-budgeted section if the sum still
+exceeds it. Tunable via `NETTOOLS_EVIDENCE_PER_INTENT_CHARS` /
+`NETTOOLS_EVIDENCE_TOTAL_CHARS` (see `.env.example`).
+
+**Fabric-wide analysis (`fabric_analysis.py`).** `check_fabric` only
+concatenates -- it runs one check across every device and hands back a dict
+keyed by device name, with nothing tying two devices' findings together as
+one incident. `analyze_fabric(evidence_by_device, verdicts=None)` feeds the
+model both the (budgeted) raw evidence *and* the Phase 4 deterministic
+health verdicts for every device, so the model's job is interpretation and
+correlation, not detection -- the verdicts are already the anomaly signal.
+Ground truth this is measured against (from the committed fixtures, the same
+numbers `test_health.py` pins directly against `health.py`): PE2 and PE4 have
+zero IS-IS adjacencies, so neither can reach RR1's loopback, so their iBGP
+sessions toward RR1 sit Idle -- and RR1 independently reports those same two
+sessions (`10.255.0.12`, `10.255.0.14`) as Idle from the other side. That is
+one correlated incident with a single root cause, and
+`test_fabric_prompt_contains_pe2_pe4_isolation_and_rr1_idle_peers` asserts the
+built prompt actually carries what is needed to reach that conclusion --
+never asserting on model output, only on the evidence handed to it. Wired to
+`nettools analyze --fabric`.
+
+**Bounded agent loop (`agent_loop.py`).** A hand-written, provider-agnostic
+loop over `stop_reason`, not `client.beta.messages.tool_runner` -- three
+reasons, spelled out fully in the module docstring: the loop needs a hard
+`max_iterations` *and* a wall-clock `time_budget_s` in a safety-critical path
+(this talks to real lab devices) and the tool runner exposes no wall-clock
+budget; the loop shape must stay provider-agnostic for when OpenAI/Ollama
+support lands; and `tool_runner` is a beta surface this small loop does not
+need. Exactly six read-only tools are exposed
+(`list_lab_devices`/`run_lab_intent`/`run_lab_template`/`check_lab_fabric`/
+`collect_lab_evidence`/`assess_lab_health`), each a thin wrapper over an
+existing, already-safe function -- no generic executor, no new device access
+path. `intent`/`template`/`check` are declared with an `enum` in their JSON
+schema, drawn live from `platforms.all_intents()`, `templates
+.PLATFORM_TEMPLATES`, and `network_tools.CHECK_TOOLS`, so the model cannot
+even *name* an unknown one. Critically, every `run_lab_template` call's
+parameters flow through the same `run_template` -> `render_command` Phase 5
+validation a human CLI/MCP caller goes through -- a malicious or malformed
+value from the model (e.g. an `address` of `"10.0.0.1 | reload"`) is refused
+with the same structured error, not a special case; this is pinned by
+`test_execute_tool_refuses_a_malicious_template_argument_directly` and its
+full-loop counterpart, and needs no credentials or fake transport because
+`render_command`'s validation runs before any device access, exactly as it
+does for `run_template` itself.
+
+Hitting a bound is a normal outcome, not an exception: `run_agent_loop`
+returns `{"answer", "iterations", "tool_calls", "stopped_because", "usage"}`
+with partial results and `stopped_because` set to why
+(`end_turn`/`max_iterations`/`time_budget`/`truncated`), never raising for a
+bound. Multiple `tool_use` blocks in one response are all executed, and every
+result goes back in a *single* `user` message (splitting them across
+messages silently trains the model to stop requesting tools in parallel); a
+failed tool call becomes a `tool_result` with `is_error: true` rather than
+being dropped -- but a *validation* refusal from `render_command` is a
+structured result, not a Python exception, so it comes back with
+`is_error: false` and the refusal text as ordinary content, exactly like any
+other structured error this package returns. Wired to `nettools agent
+"QUESTION" [--device D] [--max-iterations N] [--time-budget SECONDS]`.
+Anthropic only for now (Task D); OpenAI and Ollama raise `LLMAnalysisError`
+with a clear message (a 9B local Ollama model is not reliable for tool
+calling) rather than attempting an unreliable loop. Single-shot
+`analyze_evidence` is unaffected and still works on all three providers.
+
+**Anthropic call plumbing, shared by all three surfaces.** `ANTHROPIC_MODEL`'s
+unset-fallback is now `claude-opus-5` (this repo's own `.env` pins an older
+model on purpose, unaffected). No call ever sets `temperature`/`top_p`/
+`top_k`/`thinking.budget_tokens` -- all four 400 on `claude-opus-5`, and
+adaptive thinking is on by default there, so `thinking` is simply left
+unset. Because thinking now shares `max_tokens` with the response text, the
+Anthropic path streams (`client.messages.stream(...)` /
+`get_final_message()`, removing the non-streaming SDK's HTTP-timeout guard)
+and the ceiling is raised to `ANTHROPIC_MAX_OUTPUT_TOKENS` (32000).
+**Prompt caching is a prefix match** (render order `tools` -> `system` ->
+`messages`): every Anthropic call puts its static instructions in `system`
+as a single text block carrying `cache_control={"type": "ephemeral"}`, and
+all volatile content (evidence, the question, a device name, a timestamp)
+in `messages` -- never the other way around, or the cache is invalidated on
+every single call. `test_anthropic_cached_prefix_is_byte_identical_across_...`
+and the agent loop's equivalent assert this directly on the request a fake
+`anthropic` module captured. **Refusal fallbacks are conditional, not
+automatic**: `fallbacks="default"` requires the beta endpoint
+(`client.beta.messages.stream`, beta header
+`server-side-fallback-2026-07-01`) and is only meaningful for the
+Opus-5/Fable-5/Mythos-5 family -- `_fallbacks_enabled` gates on both the
+resolved model's prefix and `NETTOOLS_LLM_FALLBACKS` (falsy disables it even
+for a matching model); every other model uses the plain, non-beta path. A
+network-troubleshooting prompt can plausibly trip a cyber-content classifier
+even though nothing here is malicious, so `stop_reason == "refusal"` is
+always handled, reading `stop_details` only in that branch (it is `null`
+otherwise).
+
 ### Testing seams
 
 Three mechanisms, all SSH-free — prefer them over mocking netmiko internals.
@@ -476,7 +597,10 @@ the tests. Update code and docs in the same change.
 functions raise `LLMAnalysisError`; CLI callers must catch both (a past
 regression). `auto` never selects Ollama — it must be requested explicitly.
 Provider SDKs are imported lazily and live in the optional `llm` extra, so the
-core package and the Docker image install without them.
+core package and the Docker image install without them. Phase 6 layers
+fabric-wide analysis (`fabric_analysis.py`) and a bounded tool-calling agent
+loop (`agent_loop.py`) on top of the same Anthropic call plumbing — see
+"Bounded agent loop, fabric analysis, and prompt caching (Phase 6)" above.
 
 ### .env loading
 

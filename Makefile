@@ -11,10 +11,11 @@ PREFIX ?= 10.255.0.31
 ADDRESS ?= 10.255.0.31
 NAME ?= GigabitEthernet0/0/0/1
 COUNT ?= 20
+QUESTION ?= What, if anything, is wrong with the fabric right now?
 
 .PHONY: help setup test lint inventory facts interfaces bgp lldp isis sr \
         fabric-bgp route bgp-neighbor interface logging ping traceroute \
-        analyze demo diff capture learn-topology health health-fixtures \
+        analyze analyze-fabric agent demo diff capture learn-topology health health-fixtures \
         baseline-pin baseline-show flaps mcp inspect docker-build clean
 
 help:
@@ -39,6 +40,8 @@ help:
 	@echo "  make ping          Ping from a device (DEVICE=name ADDRESS=...); active probe"
 	@echo "  make traceroute    Traceroute from a device (DEVICE=name ADDRESS=...); active probe"
 	@echo "  make analyze       Collect evidence and analyze with the selected LLM"
+	@echo "  make analyze-fabric  Analyze the whole fabric together (cross-device correlation)"
+	@echo "  make agent         Ask the bounded tool-calling agent a question (QUESTION=...; Anthropic only)"
 	@echo "  make demo          Run the narrated agent demo (or DEVICE=name)"
 	@echo "  make diff          Diff evidence against the last snapshot (or DEVICE=name)"
 	@echo "  make capture       Recapture test fixtures from the whole lab"
@@ -109,6 +112,16 @@ traceroute:
 
 analyze:
 	nettools analyze $(DEVICE)
+
+# Phase 6: cross-device correlation over the whole fabric's evidence + Phase 4
+# health verdicts, instead of one device at a time.
+analyze-fabric:
+	nettools analyze --fabric
+
+# Phase 6: bounded, read-only tool-calling agent loop. Anthropic only -- see
+# CLAUDE.md, "Bounded agent loop (Phase 6)".
+agent:
+	nettools agent "$(QUESTION)"
 
 demo:
 	nettools demo $(DEVICE)

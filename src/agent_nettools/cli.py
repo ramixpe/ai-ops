@@ -12,6 +12,8 @@ Exposed as the ``nettools`` console script. Subcommands:
     nettools ping DEVICE ADDRESS
     nettools traceroute DEVICE ADDRESS
     nettools analyze [DEVICE] [--show-evidence] [--save]
+    nettools analyze --fabric [--show-evidence] [--save]
+    nettools agent "QUESTION" [--device DEVICE] [--max-iterations N] [--time-budget SECONDS]
     nettools demo [DEVICE]
     nettools diff [DEVICE] [--against golden|latest]
     nettools capture [DEVICE ...] [--all] [--label t0] [--out DIR] [--no-scrub]
@@ -44,6 +46,8 @@ from pathlib import Path
 
 from dotenv import find_dotenv, load_dotenv
 
+from .agent_loop import run_agent_loop
+from .fabric_analysis import analyze_fabric
 from .fixtures import capture_device, load_fixture_evidence
 from .health import evaluate_fabric, exit_code_for_severity, severity_rank
 from .inventory import InventoryError, get_default_device_name
@@ -139,6 +143,36 @@ def _cmd_traceroute(args: argparse.Namespace) -> int:
 
 
 def _cmd_analyze(args: argparse.Namespace) -> int:
+    if args.fabric:
+        listed = list_devices()
+        if listed.get("status") != "success":
+            _print(listed)
+            return 1
+        names = [device["name"] for device in listed["data"]["devices"]]
+        evidence_by_device = {name: collect_evidence(name) for name in names}
+        if args.save:
+            for evidence in evidence_by_device.values():
+                path = save_snapshot(evidence)
+                print(f"# Snapshot saved: {path}")
+        if args.show_evidence:
+            print("# Evidence")
+            _print(evidence_by_device)
+            print("\n# Analysis")
+        try:
+            result = analyze_fabric(evidence_by_device)
+        except (LLMAnalysisError, ValueError) as exc:
+            # ValueError covers provider misconfiguration from get_provider().
+            print(f"Analysis error: {exc}")
+            return 1
+        print(result["analysis"])
+        if result["truncated"]:
+            print(
+                f"\n[Note: evidence was truncated for {len(result['truncated'])} "
+                "section(s) to stay within the evidence budget; see the "
+                "programmatic 'truncated' report for details.]"
+            )
+        return 0
+
     device = _resolve_device(args.device)
     evidence = collect_evidence(device)
     if args.save:
@@ -155,6 +189,27 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
         print(f"Analysis error: {exc}")
         return 1
     return 0
+
+
+def _cmd_agent(args: argparse.Namespace) -> int:
+    try:
+        result = run_agent_loop(
+            args.question,
+            device=args.device,
+            max_iterations=args.max_iterations,
+            time_budget_s=args.time_budget,
+        )
+    except (LLMAnalysisError, ValueError) as exc:
+        # ValueError covers provider misconfiguration from get_provider().
+        print(f"Agent error: {exc}")
+        return 1
+
+    print(result["answer"])
+    print(
+        f"\n[{result['iterations']} iteration(s), {len(result['tool_calls'])} tool call(s), "
+        f"stopped_because={result['stopped_because']}]"
+    )
+    return 0 if result["stopped_because"] == "end_turn" else 1
 
 
 def _cmd_demo(args: argparse.Namespace) -> int:
@@ -446,10 +501,28 @@ def build_parser() -> argparse.ArgumentParser:
     p_traceroute.set_defaults(func=_cmd_traceroute)
 
     p_analyze = sub.add_parser("analyze", help="Collect evidence and analyze with the LLM.")
-    p_analyze.add_argument("device", nargs="?", help="Device name; defaults to PE1.")
+    p_analyze.add_argument("device", nargs="?", help="Device name; defaults to PE1. Ignored with --fabric.")
     p_analyze.add_argument("--show-evidence", action="store_true", help="Print evidence first.")
     p_analyze.add_argument("--save", action="store_true", help="Save an evidence snapshot.")
+    p_analyze.add_argument(
+        "--fabric",
+        action="store_true",
+        help="Analyze every inventory device together, correlating findings across devices.",
+    )
     p_analyze.set_defaults(func=_cmd_analyze)
+
+    p_agent = sub.add_parser(
+        "agent", help="Answer a question with a bounded, tool-calling agent loop (Anthropic only)."
+    )
+    p_agent.add_argument("question", help="The question to investigate and answer.")
+    p_agent.add_argument("--device", help="Optional device to focus the investigation on.")
+    p_agent.add_argument(
+        "--max-iterations", type=int, default=8, help="Maximum agent loop iterations (default: 8)."
+    )
+    p_agent.add_argument(
+        "--time-budget", type=float, default=120, help="Wall-clock budget in seconds (default: 120)."
+    )
+    p_agent.set_defaults(func=_cmd_agent)
 
     p_demo = sub.add_parser("demo", help="Run the narrated agent demo.")
     p_demo.add_argument("device", nargs="?", help="Device name; defaults to PE1.")
