@@ -60,7 +60,13 @@ make facts
 
 ## Safety Boundary
 
-Approved read-only commands:
+Commands are declared per platform, so a check runs across a mixed fabric without
+one vendor's syntax ever reaching another's device. The allowlist is exact-match
+and is verified before credentials are loaded or a socket is opened.
+
+Approved read-only commands, by platform:
+
+### cisco_xr
 
 - `show running-config hostname`
 - `show version`
@@ -69,6 +75,26 @@ Approved read-only commands:
 - `show lldp neighbors`
 - `show isis neighbors`
 - `show segment-routing traffic-eng policy`
+
+### cisco_iosxe
+
+- `show version`
+- `show ip interface brief`
+- `show ip bgp summary`
+- `show lldp neighbors`
+- `show isis neighbors`
+
+### juniper_junos
+
+- `show version`
+- `show interfaces terse`
+- `show bgp summary`
+- `show lldp neighbors`
+- `show isis adjacency`
+
+Only `cisco_xr` is verified against a live device and captured in
+`tests/fixtures/`. The other two are declared from vendor documentation and have
+no device to verify against yet.
 
 There is no configuration mode, reload, commit, rollback, shell access, or a
 generic `run_command(device, command)` tool.
@@ -146,7 +172,8 @@ OLLAMA_MODEL=ornith:9b-q8_0
 ## Repository Map
 
 ```text
-src/agent_nettools/lab.py          IOS-XR device inventory (name -> mgmt IP)
+src/agent_nettools/platforms.py    Per-platform allowlist and intent table
+src/agent_nettools/lab.py          Device inventory (name -> mgmt IP) + platform
 src/agent_nettools/inventory.py    Env credentials + lab -> device dicts
 src/agent_nettools/network_tools.py  Allowlist, SSH, evidence, fabric, diff
 src/agent_nettools/llm_analysis.py   Provider selection + analysis

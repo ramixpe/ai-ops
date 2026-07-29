@@ -39,8 +39,11 @@ Two packages, two source roots — `src/agent_nettools` and a top-level
 
 Data flows in one direction through four layers:
 
-1. `lab.py` — static `{device_name: management_ip}`, nothing else. No credentials
-   ever live here.
+0. `platforms.py` — the per-platform allowlist and intent table. Depends on
+   nothing; everything depends on it.
+1. `lab.py` — static `{device_name: management_ip}` plus `platform_for()`. No
+   credentials ever live here, which is what lets platform be resolved before the
+   allowlist check.
 2. `inventory.py` — joins the lab map with env credentials into device dicts.
    Raises `InventoryError` when required env is missing.
 3. `network_tools.py` — the allowlist, SSH transport, evidence collection,
@@ -54,27 +57,66 @@ those copies; `make clean` removes them.
 
 ### The safety boundary (the central invariant)
 
-`APPROVED_COMMANDS` is an exact-match set, checked in `_run_approved_commands`
-*before* credentials are loaded or a connection is opened — so there is no
-injection path and a bad command never reaches the network. There is
-deliberately no `run_command(device, command)`, no config mode, and no shell.
-`tests/test_safety.py` asserts that banned verbs stay out of the allowlist and
-that no generic executor appears in the MCP module's public surface.
+`platforms.APPROVED_COMMANDS[platform]` is an exact-match frozenset, checked in
+`_run_approved_commands` *against the device's own platform* and *before*
+credentials are loaded or a connection is opened. So there is no injection path,
+a bad command never reaches the network, and one vendor's syntax can never reach
+another vendor's device. There is deliberately no `run_command(device, command)`,
+no config mode, and no shell.
 
-Preserve this shape when extending. Adding a read-only command means:
-`APPROVED_COMMANDS` → a section in `EVIDENCE_COMMANDS` → the README list
-(the doc tests below will fail otherwise).
+The ordering matters and is load-bearing: platform resolves via
+`lab.platform_for()`, which reads static data only. **Never make platform
+resolution require credentials** — that would silently move the allowlist check
+after credential access. `test_refuses_unapproved_commands_before_loading_credentials`
+pins it by running with no credentials set at all.
+
+`tests/test_safety.py` iterates *every* platform, so adding a vendor cannot
+smuggle in a state-changing command, a shell metacharacter, or a non-`show` verb.
+
+### Intents: the multi-vendor keystone
+
+`platforms.py` is the single source of truth, structured **platform-major** so
+everything sendable to one vendor is reviewable in one block:
+
+```
+PLATFORM_INTENTS[platform][intent] -> tuple of commands
+```
+
+An *intent* is a vendor-neutral name for a question (`bgp`, `isis`). The same
+intent resolves to different syntax per vendor — `show bgp summary` on IOS-XR,
+`show ip bgp summary` on IOS-XE, `show isis adjacency` on Junos. There is exactly
+**one** intent vocabulary, shared by CLI subcommands, `CHECK_TOOLS`, the fabric
+runner, and the evidence section keys. (Before Phase 1 there were two: `sr` as a
+check name and `sr_policies` as an evidence key.)
+
+Adding a read-only command means: `PLATFORM_INTENTS` → the per-platform README
+block (the doc tests parse `### <platform>` headings) → nothing else. The
+allowlist derives itself.
+
+**`status: "unsupported"`** is a third status alongside `success`/`error`, for a
+platform that has no command for an intent (Junos has no SR-TE policy output).
+It is not a failure: `check_fabric` stays green and lists such devices under
+`data.unsupported`, and `diff_evidence` treats those commands as neither
+`removed` nor `failed`. Evidence always carries one section per *known* intent
+regardless of platform, so the shape is identical across a mixed fabric.
+
+Only `cisco_xr` is verified against a live device. `cisco_iosxe` and
+`juniper_junos` are declared from vendor docs with no device to test against —
+their command strings are unconfirmed, and `juniper_junos` exists mainly to keep
+the abstraction honest (it shares no command words with IOS-XR).
 
 ### Registries that generate behavior
 
-- `CHECK_TOOLS` (name → check function) is the single source of truth for the
+- `CHECK_TOOLS` (intent → check function) is the single source of truth for the
   per-device checks. `cli.py` generates one subcommand per entry, `check_fabric`
   validates its `check` argument against it, and its keys are the `fabric`
   subcommand's choices. Adding an entry adds a CLI subcommand and a fabric
   option for free — but *not* an MCP tool, which must be written by hand in
-  `mcp_server/server.py`.
-- `EVIDENCE_COMMANDS` (section → commands) drives `collect_evidence` and the
-  failure accounting in `diff_evidence`.
+  `mcp_server/server.py`, and *not* commands, which must exist in
+  `PLATFORM_INTENTS`.
+- `run_intent(device, intent)` is the single entry point all six checks delegate
+  to; it resolves platform, handles unsupported, and calls
+  `_run_approved_commands`.
 
 ### One SSH session per collection
 

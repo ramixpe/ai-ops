@@ -10,9 +10,22 @@ import sys
 import types
 from pathlib import Path
 
+from agent_nettools.platforms import commands_for, intents_for
+
 # Captured real-device output, committed under tests/fixtures. Resolved from this
 # file rather than the working directory so tests pass from any cwd.
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
+
+# The lab is all IOS-XR, so this is the platform every live-shaped test uses.
+LAB_PLATFORM = "cisco_xr"
+
+
+def platform_commands(platform: str = LAB_PLATFORM) -> list[str]:
+    """Every approved command for a platform, in evidence-collection order."""
+
+    return [
+        command for intent in intents_for(platform) for command in commands_for(platform, intent)
+    ]
 
 
 def set_device_environment(monkeypatch):

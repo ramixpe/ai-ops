@@ -1,4 +1,4 @@
-"""Read-only Cisco IOS-XR network tools package."""
+"""Read-only, multi-vendor network inspection tools."""
 
 from .fixtures import (
     capture_device,
@@ -13,7 +13,7 @@ from .inventory import (
     get_device,
     load_inventory,
 )
-from .lab import DEVICES, all_devices
+from .lab import DEVICES, all_devices, platform_for
 from .llm_analysis import (
     LLMAnalysisError,
     analyze_evidence,
@@ -21,9 +21,10 @@ from .llm_analysis import (
     get_provider,
 )
 from .network_tools import (
-    APPROVED_COMMANDS,
     CHECK_TOOLS,
-    EVIDENCE_COMMANDS,
+    STATUS_ERROR,
+    STATUS_SUCCESS,
+    STATUS_UNSUPPORTED,
     check_bgp_neighbors,
     check_fabric,
     check_interfaces,
@@ -32,10 +33,26 @@ from .network_tools import (
     check_sr_policies,
     collect_evidence,
     diff_evidence,
+    evidence_intents,
     get_device_facts,
     list_devices,
     load_latest_snapshot,
+    run_intent,
     save_snapshot,
+)
+from .platforms import (
+    ALL_APPROVED_COMMANDS,
+    APPROVED_COMMANDS,
+    DEFAULT_PLATFORM,
+    PLATFORM_INTENTS,
+    UnknownPlatformError,
+    UnsupportedIntentError,
+    all_intents,
+    commands_for,
+    intents_for,
+    is_approved,
+    known_platforms,
+    supports,
 )
 
 __all__ = [
@@ -46,11 +63,27 @@ __all__ = [
     "get_default_device_name",
     "DEVICES",
     "all_devices",
-    # network tools
+    "platform_for",
+    # platforms: the allowlist, keyed by vendor
+    "PLATFORM_INTENTS",
     "APPROVED_COMMANDS",
-    "EVIDENCE_COMMANDS",
+    "ALL_APPROVED_COMMANDS",
+    "DEFAULT_PLATFORM",
+    "UnknownPlatformError",
+    "UnsupportedIntentError",
+    "known_platforms",
+    "all_intents",
+    "intents_for",
+    "commands_for",
+    "supports",
+    "is_approved",
+    # network tools
     "CHECK_TOOLS",
+    "STATUS_SUCCESS",
+    "STATUS_ERROR",
+    "STATUS_UNSUPPORTED",
     "list_devices",
+    "run_intent",
     "get_device_facts",
     "check_interfaces",
     "check_bgp_neighbors",
@@ -59,6 +92,7 @@ __all__ = [
     "check_sr_policies",
     "check_fabric",
     "collect_evidence",
+    "evidence_intents",
     "save_snapshot",
     "load_latest_snapshot",
     "diff_evidence",

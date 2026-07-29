@@ -9,7 +9,13 @@ health-rule work, none of which needs lab access to develop against.
 from __future__ import annotations
 
 import pytest
-from helpers import FIXTURE_DIR, install_fake_netmiko, set_device_environment
+from helpers import (
+    FIXTURE_DIR,
+    LAB_PLATFORM,
+    install_fake_netmiko,
+    platform_commands,
+    set_device_environment,
+)
 
 from agent_nettools.fixtures import (
     QUIET_PAIR_LABELS,
@@ -19,9 +25,11 @@ from agent_nettools.fixtures import (
     scrub_output,
 )
 from agent_nettools.lab import DEVICES
-from agent_nettools.network_tools import EVIDENCE_COMMANDS, diff_evidence
+from agent_nettools.network_tools import diff_evidence
+from agent_nettools.platforms import commands_for, intents_for
 
-ALL_COMMANDS = [command for group in EVIDENCE_COMMANDS.values() for command in group]
+ALL_COMMANDS = platform_commands(LAB_PLATFORM)
+LAB_INTENTS = intents_for(LAB_PLATFORM)
 
 
 def load_pair(device_name):
@@ -77,7 +85,7 @@ def test_fixtures_are_complete_for_every_device(label):
 
     for device_name in DEVICES:
         for command in ALL_COMMANDS:
-            path = FIXTURE_DIR / "cisco_xr" / device_name / label / f"{command_slug(command)}.txt"
+            path = FIXTURE_DIR / LAB_PLATFORM / device_name / label / f"{command_slug(command)}.txt"
             assert path.is_file(), f"missing fixture: {path}"
             assert path.read_text(encoding="utf-8").strip(), f"empty fixture: {path}"
 
@@ -91,9 +99,12 @@ def test_replay_reconstructs_a_full_evidence_bundle(monkeypatch):
     evidence = load_fixture_evidence("PE1", label="t0", base_dir=str(FIXTURE_DIR))
 
     assert evidence["device"] == "PE1"
-    for section, commands in EVIDENCE_COMMANDS.items():
-        assert evidence[section]["status"] == "success"
-        assert list(evidence[section]["data"]["commands"]) == commands
+    assert evidence["platform"] == LAB_PLATFORM
+    for intent in LAB_INTENTS:
+        assert evidence[intent]["status"] == "success"
+        assert list(evidence[intent]["data"]["commands"]) == list(
+            commands_for(LAB_PLATFORM, intent)
+        )
     # Real captured output, not a synthetic echo.
     assert "Cisco IOS XR Software" in evidence["facts"]["data"]["commands"]["show version"]
 
@@ -103,8 +114,8 @@ def test_missing_fixture_surfaces_as_a_structured_error(monkeypatch):
 
     evidence = load_fixture_evidence("PE1", label="does-not-exist", base_dir=str(FIXTURE_DIR))
 
-    for section in EVIDENCE_COMMANDS:
-        assert evidence[section]["status"] == "error"
+    for intent in LAB_INTENTS:
+        assert evidence[intent]["status"] == "error"
 
 
 @pytest.mark.parametrize("device_name", sorted(DEVICES))
