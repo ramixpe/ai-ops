@@ -14,8 +14,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from . import parsers
 from .inventory import InventoryError, get_device, load_inventory
 from .lab import platform_for
+from .normalize import normalize_output
 from .platforms import (
     DEFAULT_PLATFORM,
     all_intents,
@@ -210,6 +212,28 @@ def _run_approved_commands(
     return result
 
 
+def _attach_parsed(section: dict[str, Any], platform: str, intent: str) -> None:
+    """Attach parsed data (or its absence) to one intent's section result.
+
+    Parsing is independent of transport status: an "error" section still gets a
+    parse attempt over whatever commands did return output (usually none, which
+    ``parse_intent`` reports as ``PARSE_FAILED``), while an "unsupported" section
+    always gets ``PARSE_UNAVAILABLE`` with no parse attempt at all -- there is no
+    output to look at. A parser exception never reaches here: ``parse_intent``
+    already guards every parser call.
+    """
+
+    if section.get("status") == STATUS_UNSUPPORTED:
+        section["data"]["parsed"] = None
+        section["data"]["parse_status"] = parsers.PARSE_UNAVAILABLE
+        return
+
+    outputs = section["data"].get("commands", {})
+    parsed, parse_status = parsers.parse_intent(platform, intent, outputs)
+    section["data"]["parsed"] = parsed
+    section["data"]["parse_status"] = parse_status
+
+
 def run_intent(
     device_name: str,
     intent: str,
@@ -228,21 +252,23 @@ def run_intent(
         # A typo'd or not-yet-defined platform is a real error: it approves
         # nothing, so failing closed here gives a clearer message than an empty
         # allowlist would.
-        return _safe_error(
+        result = _safe_error(
             "run_approved_commands",
             device_name,
             f"No command definitions for platform: {platform}.",
         )
+    elif not supports(platform, intent):
+        result = _unsupported_result("run_approved_commands", device_name, intent, platform)
+    else:
+        result = _run_approved_commands(
+            device_name,
+            list(commands_for(platform, intent)),
+            platform=platform,
+            sender=sender,
+        )
 
-    if not supports(platform, intent):
-        return _unsupported_result("run_approved_commands", device_name, intent, platform)
-
-    return _run_approved_commands(
-        device_name,
-        list(commands_for(platform, intent)),
-        platform=platform,
-        sender=sender,
-    )
+    _attach_parsed(result, platform, intent)
+    return result
 
 
 def list_devices() -> dict[str, Any]:
@@ -436,18 +462,18 @@ def collect_evidence(
     platform = platform_for(device_name)
 
     if platform not in known_platforms():
-        failure = _safe_error(
-            "run_approved_commands",
-            device_name,
-            f"No command definitions for platform: {platform}.",
-        )
+        message = f"No command definitions for platform: {platform}."
         evidence: dict[str, Any] = {
             "device": device_name,
             "platform": platform,
             "timestamp": _timestamp(),
         }
         for intent in all_intents():
-            evidence[intent] = dict(failure)
+            # A fresh envelope per intent -- not a shared copy -- so attaching
+            # parsed data to one intent's "data" dict can never leak into another.
+            section = _safe_error("run_approved_commands", device_name, message)
+            _attach_parsed(section, platform, intent)
+            evidence[intent] = section
         return evidence
 
     supported = intents_for(platform)
@@ -457,13 +483,15 @@ def collect_evidence(
     evidence = {"device": device_name, "platform": platform, "timestamp": _timestamp()}
     for intent in all_intents():
         if intent in supported:
-            evidence[intent] = _section_from_combined(
+            section = _section_from_combined(
                 device_name, list(commands_for(platform, intent)), combined
             )
         else:
-            evidence[intent] = _unsupported_result(
+            section = _unsupported_result(
                 "run_approved_commands", device_name, intent, platform
             )
+        _attach_parsed(section, platform, intent)
+        evidence[intent] = section
 
     return evidence
 
@@ -474,40 +502,6 @@ DEFAULT_SNAPSHOT_DIR = "evidence"
 
 def _snapshot_dir(base_dir: str | None) -> Path:
     return Path(base_dir or os.getenv("NETTOOLS_EVIDENCE_DIR") or DEFAULT_SNAPSHOT_DIR)
-
-
-def _evidence_commands(evidence: dict[str, Any]) -> dict[str, str]:
-    """Flatten an evidence dict to ``{command: output}`` for comparison."""
-
-    commands: dict[str, str] = {}
-    for section_result in evidence.values():
-        if not isinstance(section_result, dict):
-            continue
-        for command, output in section_result.get("data", {}).get("commands", {}).items():
-            commands[command] = output
-    return commands
-
-
-def _failed_commands(evidence: dict[str, Any]) -> set[str]:
-    """Commands whose evidence section errored, so no output exists to compare.
-
-    Intents are resolved through the platform the evidence was collected on, so
-    this stays correct for a snapshot taken from any vendor. An ``unsupported``
-    section is skipped: its commands were never expected, so they are neither
-    failed nor removed.
-    """
-
-    platform = str(evidence.get("platform") or DEFAULT_PLATFORM)
-    failed: set[str] = set()
-    for intent, section_result in evidence.items():
-        if not isinstance(section_result, dict):
-            continue
-        if section_result.get("status") != STATUS_ERROR:
-            continue
-        present = section_result.get("data", {}).get("commands", {})
-        expected = commands_for(platform, intent) if supports(platform, intent) else ()
-        failed.update(command for command in expected if command not in present)
-    return failed
 
 
 def save_snapshot(evidence: dict[str, Any], *, base_dir: str | None = None) -> str:
@@ -542,40 +536,226 @@ def load_latest_snapshot(
     return json.loads(snapshots[-1].read_text(encoding="utf-8"))
 
 
-def diff_evidence(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
-    """Compare two evidence collections command-by-command.
+# Sentinel distinguishing "field absent" from "field present with value None"
+# when diffing meta/record dicts -- JSON has no tombstone value of its own.
+_MISSING = object()
 
-    ``changed`` lists commands whose output differs and ``added``/``removed``
-    cover commands genuinely present in only one snapshot. Commands that are
-    absent because their section *errored* are reported separately so a
-    transient failure never masquerades as a removal: ``failed`` (errored in
-    the new collection) and ``recovered`` (errored in the old one, back now).
+
+def _intent_state(section: Any) -> str:
+    """Classify one snapshot's section for an intent.
+
+    One of ``"absent"`` (the intent key is not in the evidence dict at all --
+    the shape hand-built tests use), ``"unsupported"``, ``"error"``, or
+    ``"available"``. A section with no ``status`` key at all (again, common in
+    hand-built test evidence) is treated as available: only an explicit
+    ``STATUS_ERROR``/``STATUS_UNSUPPORTED`` is special-cased, matching the
+    pre-Phase-2 diff, which never inspected ``status`` for command listing.
     """
 
-    old_cmds = _evidence_commands(old)
-    new_cmds = _evidence_commands(new)
-    old_failed = _failed_commands(old)
-    new_failed = _failed_commands(new)
+    if not isinstance(section, dict):
+        return "absent"
+    status = section.get("status")
+    if status == STATUS_UNSUPPORTED:
+        return "unsupported"
+    if status == STATUS_ERROR:
+        return "error"
+    return "available"
 
-    changed = sorted(c for c in old_cmds.keys() & new_cmds.keys() if old_cmds[c] != new_cmds[c])
-    unchanged = sorted(c for c in old_cmds.keys() & new_cmds.keys() if old_cmds[c] == new_cmds[c])
+
+def _diff_fields(
+    old_fields: dict[str, Any], new_fields: dict[str, Any], exclude: frozenset[str]
+) -> dict[str, dict[str, Any]]:
+    """Return ``{field: {"old":.., "new":..}}`` for every differing field.
+
+    A field present on only one side compares against the ``_MISSING``
+    sentinel, so an added or dropped field is reported too, not just a changed
+    value; it surfaces in the result as ``None`` since the envelope is JSON.
+    """
+
+    changes: dict[str, dict[str, Any]] = {}
+    for field in (old_fields.keys() | new_fields.keys()) - exclude:
+        old_value = old_fields.get(field, _MISSING)
+        new_value = new_fields.get(field, _MISSING)
+        if old_value != new_value:
+            changes[field] = {
+                "old": None if old_value is _MISSING else old_value,
+                "new": None if new_value is _MISSING else new_value,
+            }
+    return changes
+
+
+def _compare_parsed(
+    intent: str, old_parsed: dict[str, Any], new_parsed: dict[str, Any], *, platform: str
+) -> dict[str, Any]:
+    """Compare two ``ParseResult``-shaped dicts, matching rows by record key."""
+
+    volatile = parsers.volatile_fields(platform, intent)
+    key_field = parsers.record_key(platform, intent)
+
+    changed_meta = _diff_fields(old_parsed.get("meta") or {}, new_parsed.get("meta") or {}, volatile)
+
+    added_records: list[Any] = []
+    removed_records: list[Any] = []
+    changed_records: list[dict[str, Any]] = []
+
+    if key_field is not None:
+        old_records = {r[key_field]: r for r in (old_parsed.get("records") or []) if key_field in r}
+        new_records = {r[key_field]: r for r in (new_parsed.get("records") or []) if key_field in r}
+
+        added_records = [new_records[key] for key in sorted(new_records.keys() - old_records.keys())]
+        removed_records = [old_records[key] for key in sorted(old_records.keys() - new_records.keys())]
+        for key in sorted(new_records.keys() & old_records.keys()):
+            row_changes = _diff_fields(old_records[key], new_records[key], volatile)
+            if row_changes:
+                changed_records.append({"key": key, "changes": row_changes})
+
+    return {
+        "added_records": added_records,
+        "removed_records": removed_records,
+        "changed_records": changed_records,
+        "changed_meta": changed_meta,
+        "compared_via": "parsed",
+    }
+
+
+def _normalized_intent_text(intent: str, data: dict[str, Any], *, platform: str) -> str:
+    """Join one intent's command outputs after preamble-stripping and masking.
+
+    Each command is normalized on its own before joining -- normalization only
+    strips a preamble from the very top of a string, so joining raw texts first
+    would leave a second command's timestamp line stranded mid-document.
+    """
+
+    commands = data.get("commands") or {}
+    return "\n".join(
+        normalize_output(text, platform=platform, intent=intent) for _, text in sorted(commands.items())
+    )
+
+
+def _compare_intent(
+    intent: str,
+    old_section: dict[str, Any],
+    new_section: dict[str, Any],
+    *,
+    old_platform: str,
+    new_platform: str,
+) -> tuple[dict[str, Any], bool]:
+    """Compare one intent present (successfully or not) on both sides.
+
+    Returns ``(details_entry, changed)``. Parsed comparison is preferred when
+    both sides parsed cleanly; otherwise falls back to normalized text, in
+    which case the details lists stay empty but ``compared_via`` still records
+    which path was used.
+    """
+
+    old_data = old_section.get("data", {}) or {}
+    new_data = new_section.get("data", {}) or {}
+
+    if old_data.get("parse_status") == parsers.PARSE_OK and new_data.get("parse_status") == parsers.PARSE_OK:
+        entry = _compare_parsed(
+            intent, old_data.get("parsed") or {}, new_data.get("parsed") or {}, platform=new_platform
+        )
+        changed = bool(
+            entry["added_records"]
+            or entry["removed_records"]
+            or entry["changed_records"]
+            or entry["changed_meta"]
+        )
+        return entry, changed
+
+    old_text = _normalized_intent_text(intent, old_data, platform=old_platform)
+    new_text = _normalized_intent_text(intent, new_data, platform=new_platform)
+    entry = {
+        "added_records": [],
+        "removed_records": [],
+        "changed_records": [],
+        "changed_meta": {},
+        "compared_via": "normalized_text",
+    }
+    return entry, old_text != new_text
+
+
+def diff_evidence(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
+    """Compare two evidence collections at the intent level.
+
+    Command-level comparison is a dead end: every IOS-XR ``show`` command
+    prefixes its output with the current timestamp, so byte comparison reports
+    every command changed on every run (see ``normalize.py``). Comparing at the
+    intent level instead lets each intent choose its best available comparison:
+    parsed records when both sides parsed cleanly (matched by
+    ``parsers.record_key``, excluding ``parsers.volatile_fields``), falling back
+    to normalized text otherwise.
+
+    An intent missing because its section *errored* lands in ``failed``/
+    ``recovered``, never in ``added``/``removed`` -- a transient failure must
+    never masquerade as a removal. An ``unsupported`` intent (this platform has
+    no command for it) is its own bucket, excluded from every other one.
+    Platform is resolved per snapshot from ``evidence["platform"]``, defaulting
+    to ``DEFAULT_PLATFORM`` for older snapshots that predate it.
+    """
 
     old_platform = old.get("platform")
     new_platform = new.get("platform")
+    old_resolved_platform = str(old_platform or DEFAULT_PLATFORM)
+    new_resolved_platform = str(new_platform or DEFAULT_PLATFORM)
+
+    intents = sorted(
+        {key for key, value in old.items() if isinstance(value, dict)}
+        | {key for key, value in new.items() if isinstance(value, dict)}
+    )
+
+    changed: list[str] = []
+    unchanged: list[str] = []
+    added: list[str] = []
+    removed: list[str] = []
+    failed: list[str] = []
+    recovered: list[str] = []
+    unsupported: list[str] = []
+    details: dict[str, Any] = {}
+
+    for intent in intents:
+        old_section = old.get(intent)
+        new_section = new.get(intent)
+        old_state = _intent_state(old_section)
+        new_state = _intent_state(new_section)
+
+        if new_state == "unsupported":
+            unsupported.append(intent)
+        elif new_state == "error":
+            failed.append(intent)
+        elif new_state == "absent":
+            if old_state == "available":
+                removed.append(intent)
+        elif old_state == "error":
+            recovered.append(intent)
+        elif old_state in ("absent", "unsupported"):
+            added.append(intent)
+        else:
+            entry, is_changed = _compare_intent(
+                intent,
+                old_section,
+                new_section,
+                old_platform=old_resolved_platform,
+                new_platform=new_resolved_platform,
+            )
+            details[intent] = entry
+            (changed if is_changed else unchanged).append(intent)
 
     return {
         "device": new.get("device", old.get("device")),
         "platform": new_platform or old_platform,
-        # A device that changed vendor between snapshots explains every command
+        # A device that changed vendor between snapshots explains every intent
         # appearing and disappearing at once, so surface it rather than leaving
         # the reader to infer it from a wholesale added/removed churn.
         "platform_changed": bool(old_platform and new_platform and old_platform != new_platform),
         "old_timestamp": old.get("timestamp"),
         "new_timestamp": new.get("timestamp"),
-        "changed": changed,
-        "unchanged": unchanged,
-        "added": sorted(new_cmds.keys() - old_cmds.keys() - old_failed),
-        "removed": sorted(old_cmds.keys() - new_cmds.keys() - new_failed),
-        "failed": sorted(new_failed),
-        "recovered": sorted(old_failed & new_cmds.keys()),
+        "changed": sorted(changed),
+        "unchanged": sorted(unchanged),
+        "added": sorted(added),
+        "removed": sorted(removed),
+        "failed": sorted(failed),
+        "recovered": sorted(recovered),
+        "unsupported": sorted(unsupported),
+        "details": details,
     }

@@ -142,27 +142,47 @@ established idiom at the SSH boundary. Errors are formatted as
 `"connection to <host> failed: <detail>"` for session failures; `diff_evidence`
 and `_section_from_combined` parse those prefixes, so keep the shapes.
 
-### Diff semantics
+### Parsing and diff semantics (Phase 2)
 
-`diff_evidence` separates *transient failure* from *real change*: a command
-missing because its section errored lands in `failed` / `recovered`, never in
-`added` / `removed`. Snapshots are timestamped JSON under
-`NETTOOLS_EVIDENCE_DIR` (default `./evidence/<device>/`), and
-`load_latest_snapshot` relies on the ISO timestamp filenames sorting
-lexicographically.
+`parsers.py` turns raw command output into structured records for `cisco_xr`
+(`parse_intent(platform, intent, outputs) -> (parsed, status)`, `status` one of
+`PARSE_OK` / `PARSE_UNAVAILABLE` / `PARSE_FAILED`). It is deliberately strict: a
+parse yielding neither records nor meta from non-empty input is a **failure**,
+never a silent empty success — the ntc-templates library was measured and
+rejected for exactly this failure mode on `show interfaces brief` (see the
+module docstring). A parser exception never propagates; `parse_intent` guards
+every call. `collect_evidence` and `run_intent` attach `data.parsed` and
+`data.parse_status` to every intent's section, independent of transport
+`status` — an `error` section still gets a parse attempt over whatever output
+exists (usually none), and an `unsupported` section always gets
+`PARSE_UNAVAILABLE` with `parsed: None`.
 
-**Known defect (Phase 2 fixes this).** `diff_evidence` compares whole command
-output strings, and every IOS-XR `show` command prefixes its output with the
-current timestamp. Measured against the committed t0/t1 fixture pair: all 63
-command outputs across all 9 devices report `changed` on a quiet fabric — a 100%
-false-positive rate with no true negatives. `show version` (uptime),
+`diff_evidence` compares at the **intent** level, not per-command, and prefers
+parsed data over text: when both snapshots have `PARSE_OK` for an intent, rows
+are matched by `parsers.record_key` and compared excluding
+`parsers.volatile_fields`; otherwise it falls back to
+`normalize.normalize_output` (preamble-stripped, volatile-masked text). It
+separates *transient failure* from *real change*: an intent missing because its
+section errored lands in `failed` / `recovered`, never in `added` / `removed`,
+and an `unsupported` intent is its own bucket — never failed, removed, or
+changed. `details[intent]` carries `added_records` / `removed_records` /
+`changed_records` / `changed_meta` / `compared_via` for every intent actually
+compared. Snapshots are timestamped JSON under `NETTOOLS_EVIDENCE_DIR` (default
+`./evidence/<device>/`), and `load_latest_snapshot` relies on the ISO timestamp
+filenames sorting lexicographically.
+
+**Fixed defect, pinned by test.** Comparing whole command output strings used
+to be useless: every IOS-XR `show` command prefixes its output with the current
+timestamp, so — measured against the committed t0/t1 fixture pair — all 63
+command outputs across all 9 devices reported `changed` on a quiet fabric, a
+100% false-positive rate with no true negatives. `show version` (uptime),
 `show bgp summary` (`MsgRcvd`/`MsgSent`, `Up/Down`), `show isis neighbors`
 (`Holdtime`), and the SR-TE policy `up for`/`down for` durations add their own
-moving fields; `show interfaces brief`, `show lldp neighbors`, and
-`show running-config hostname` differ *only* by the timestamp line. Note LLDP
-`Hold-time` is the advertised TTL and is **stable** — do not treat it as
-volatile. `test_quiet_fabric_pair_diffs_every_command_today` pins this and is
-written to fail loudly when the fix lands.
+moving fields on top of the timestamp. Note LLDP `Hold-time` is the advertised
+TTL and is **stable** — it is not excluded from comparison.
+`test_quiet_fabric_pair_reports_no_change` (parametrized over all 9 devices) now
+pins the fix: `changed` is empty and every parseable intent lands in
+`unchanged`.
 
 ### Testing seams
 
