@@ -737,6 +737,54 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-040 · T-012 · `bgp_neighbor` parser accepted; §0.10 verified by mutation; one volatile-field defect fixed
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5 (judgement) · sonnet-5 (implementation)
+- **What happened:** T-012 delegated to Sonnet 5 against a written spec, and the work is good. All **41** committed `bgp_neighbor` fixtures round-trip with `unaccounted_lines == []` and `unparsed_rows == 0` on the first pass. The three legitimate response shapes are distinguished correctly and all three return **`PARSE_OK`**, which is the crux of the task — "the command succeeded and the answer is no" must never look like "the parser could not read this":
+
+  | Shape | Result |
+  |---|---|
+  | Full neighbor block | `found=True`, 5 address-family records |
+  | `% BGP instance 'default' not active` | `found=False`, `reason="bgp_not_active"` |
+  | `% Neighbor not found` | `found=False`, `reason="neighbor_not_found"` |
+
+  **§0.10 was verified by mutation rather than assumed.** Injecting a plausible future vendor line — `Graceful Restart Extended: negotiated, stale time 300 seconds` — into a real fixture surfaced it in `unaccounted_lines` instead of dropping it silently. **The mechanism fires.** That is the whole justification for OBS-030's conclusion that the accounting had to be ours; had it not fired, §0.10 would have been decoration. A whitespace change also surfaces, which is correct behaviour rather than brittleness — the template genuinely no longer recognises that line.
+
+  The 48 declared `IgnoreRule`s were audited individually: every one is anchored and specific, every one carries a non-empty reason, and **none matches arbitrary text** (tested against three synthetic unknown lines). No catch-all crept in, which was the failure mode §0.10 explicitly warns about.
+- **Evidence:** `make test` 662 passed / 4 skipped, `ruff` clean. Frozen files and `t0`/`t1` untouched, verified by `git diff`. Mutation test output recorded above.
+- **What I did:** Accepted after fixing **one real defect Sonnet correctly flagged as uncertain rather than hiding**. `last_reset_reason` captured the whole text after `Last reset `, giving `'1d23h, due to Address family activated'` — a duration embedded in a field named *reason*, and not declared volatile. Two captures of an unchanged device would therefore diff as changed (`1d23h` → `2d00h`): **exactly the 100%-false-positive failure `CLAUDE.md` records from before Phase 2.**
+
+  Split it into `last_reset_reason` (`"Address family activated"`) and `last_reset_ago` (`"1d23h"`), and declared **only the duration volatile**. The alternative — marking the whole field volatile — would have removed the noise but also thrown away the signal: a reason changing from `Address family activated` to `Peer closing down the session` is a real event worth diffing, and folding them together discards it. Added three tests, including one pinning that `last_reset_reason` is *not* in the volatile set, and one for the `Last reset <duration>` form with no `due to` clause so it is still consumed rather than surfacing as unaccounted.
+- **Needs human review:** no
+- **Blocks:** none — unblocks T-013.
+
+---
+
+## OBS-041 · T-004 → B-206a · Correction: the severity floor is **not** the devices' trap level
+
+- **Kind:** assumption-wrong
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** **This corrects OBS-014 and re-scopes backlog item B-206a.** OBS-014 observed that only `err`(3) and `warning`(4) reach Loki, and reasoned that "the most likely cause is the routers' own `logging trap` level being set to `warning` or higher", explicitly flagging that it was *not confirmed*. The `healthy` capture now contains `show logging` output from every device, and it contradicts that hypothesis:
+
+  ```
+  Trap logging: level informational, 50 messages logged
+  Logging to 172.20.250.101, 50 message lines logged
+  Buffer logging: level debugging, 555 messages logged
+  ```
+
+  **The trap level is already `informational`.** The device buffer holds severity 6 and 7 messages (`%SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL`, `%SYSDB-SYSDB-7-INFO`) that never appear in Loki. Note also the disparity in the device's own counters: **555 messages buffered, 50 shipped.**
+- **Evidence:** `tests/fixtures/cisco_xr/*/healthy/show-logging-last-200.txt`. Mnemonic histogram across those fixtures: `%SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL` ×1169, `%SYSDB-SYSDB-7-INFO` ×447, `%SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL` ×181, `%PKT_INFRA-PQMON-6-QUEUE_DROP` ×3 — against Loki, which holds only severities 3 and 4.
+- **What I did:** Corrected **B-206a** in `BACKLOG.md`: it previously said the devices' trap levels are dropping the events, which is now known to be false and would have sent someone to change a setting that is already correct. The real question is narrower and further down the pipe — **something between the device and Loki drops severity ≥5**, and the candidates are syslog-ng's own handling or the `logging` configuration's destination filtering, neither of which this repository owns. **B-206a's substance is unchanged and it still blocks B-206**: the informational events the historical axis needs are absent. Only the diagnosis moved.
+
+  Worth noting how this was caught: it fell out of capturing `show logging` for T-015's parser, a task whose stated purpose is entirely different. The fixture set is already paying for itself as evidence, before a single parser consumes it.
+- **Needs human review:** no — the backlog item is corrected in place and its blocking relationship is unchanged.
+- **Blocks:** none. Corrects OBS-014's diagnosis; B-206a still blocks B-206.
+
+---
+
 <!--
 Copy this block for each new entry.
 

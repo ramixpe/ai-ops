@@ -66,6 +66,8 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from ttp import ttp
+
 from .parsers import (
     PARSE_FAILED,
     PARSE_OK,
@@ -77,6 +79,7 @@ __all__ = [
     "PARSE_FAILED",
     "PARSE_OK",
     "PARSE_UNAVAILABLE",
+    "BGP_NEIGHBOR_IGNORES",
     "TEMPLATE_PARSERS",
     "TEMPLATE_RECORD_KEYS",
     "TEMPLATE_VOLATILE_FIELDS",
@@ -87,6 +90,7 @@ __all__ = [
     "finalize",
     "has_template_parser",
     "parse_template_output",
+    "parse_xr_bgp_neighbor",
     "template_record_key",
     "template_volatile_fields",
 ]
@@ -190,26 +194,332 @@ def finalize(
 
 
 # --------------------------------------------------------------------------- #
+# cisco_xr: bgp_neighbor  (T-012)
+# --------------------------------------------------------------------------- #
+#
+# ``show bgp neighbor <ip>`` answers one of three shapes, all legitimate:
+#
+# 1. A full ~150-line neighbor block (session state, timers, capabilities,
+#    then one repeated section per negotiated address family).
+# 2. The entire body is ``% BGP instance 'default' not active`` -- this
+#    device has no BGP process at all (the P-routers in this lab).
+# 3. The entire body is ``% Neighbor not found`` -- BGP is active but this
+#    peer is not configured here.
+#
+# Cases 2 and 3 are the device answering correctly, not a parse failure:
+# ``found=False`` with a ``reason`` records *that*, distinguishably from a
+# parser that could not read the output at all (PARSE_FAILED).
+
+_BGP_NOT_ACTIVE = re.compile(r"^% BGP instance '[^']*' not active$")
+_NEIGHBOR_NOT_FOUND = re.compile(r"^% Neighbor not found$")
+
+_NEIGHBOR_IS = re.compile(r"^BGP neighbor is (?P<neighbor>\S+)$")
+_REMOTE_LOCAL_AS = re.compile(r"^Remote AS (?P<remote_as>\d+), local AS (?P<local_as>\d+), \S+ link$")
+_ROUTER_ID = re.compile(r"^Remote router ID (?P<router_id>\S+)$")
+_STATE = re.compile(r"^BGP state = (?P<state>[A-Za-z]+)(?:, up for (?P<up_for>\S+))?$")
+_PREVIOUS_STATE = re.compile(r"^Previous State: (?P<previous_state>.+)$")
+_HOLD_KEEPALIVE = re.compile(
+    r"^Hold time is (?P<hold_time>\d+), keepalive interval is (?P<keepalive>\d+) seconds$"
+)
+_RECEIVED = re.compile(r"^Received (?P<messages_received>\d+) messages, \d+ notifications, \d+ in queue$")
+_SENT = re.compile(r"^Sent (?P<messages_sent>\d+) messages, \d+ notifications, \d+ in queue$")
+# Split deliberately. IOS-XR emits "Last reset 1d23h, due to <reason>", and
+# folding the duration into the reason would make the field change on every
+# capture of an unchanged device -- a false diff of exactly the kind that made
+# whole-output comparison useless before Phase 2. Keeping them apart lets the
+# duration be declared volatile while a genuine change of *reason* still shows
+# up as a real difference, which is the signal worth having.
+_LAST_RESET = re.compile(
+    r"^Last reset (?P<last_reset_ago>\S+?),\s*due to\s+(?P<last_reset_reason>.+)$"
+)
+_LAST_RESET_FALLBACK = re.compile(r"^Last reset (?P<last_reset_ago>.+)$")
+
+# TTP template for the repeated "For Address Family: <afi>" sections -- a
+# shape TTP suits well precisely because it repeats identically five times per
+# fixture. ``best_paths`` is captured only so the matched line can be
+# reconstructed verbatim for the 0.10 accounting below; it is not part of the
+# record schema and is dropped before a record is returned.
+_AF_TEMPLATE = """
+<group name="records*">
+ For Address Family: {{ address_family | ORPHRASE }}
+  BGP neighbor version {{ neighbor_version | DIGIT }}
+  Route-Reflector Client{{ route_reflector_client | set(True) }}
+  Policy for incoming advertisements is {{ policy_in | WORD }}
+  Policy for outgoing advertisements is {{ policy_out | WORD }}
+  {{ accepted_prefixes | DIGIT }} accepted prefixes, {{ best_paths | DIGIT }} are bestpaths
+</group>
+"""
+
+# Section 0.10 accounting for everything the meta/record extraction above does
+# not itself capture. Grouped by what the lines are, per BUILD-PLAN.md 0.10's
+# instruction to keep the accounting reviewable rather than one broad
+# catch-all.
+BGP_NEIGHBOR_IGNORES: tuple[IgnoreRule, ...] = (
+    # Session-header bookkeeping not in the required meta schema.
+    IgnoreRule(r"^Cluster ID \S+$", "route-reflector cluster ID, present only on the RR's own view of a client"),
+    IgnoreRule(r"^Last Received Message: \S+$", "last BGP message type received, not required by the schema"),
+    IgnoreRule(r"^NSR State: .+$", "non-stop routing state detail, not required by the schema"),
+    IgnoreRule(r"^BFD enabled \(.+\)$", "BFD session detail, not required by the schema"),
+    IgnoreRule(r"^Last read \S+, Last read before reset \S+$", "read-activity timestamps, volatile bookkeeping"),
+    IgnoreRule(
+        r"^Configured hold time: \d+, keepalive: \d+, min acceptable hold time: \d+$",
+        "configured (not negotiated) timers restated; the negotiated 'Hold time is' line is captured instead",
+    ),
+    # Write-pulse bookkeeping: several generations of internal "last write"
+    # diagnostics IOS-XR logs for the TCP session, none needed by the schema.
+    IgnoreRule(r"^Last write \S+, attempted \d+, written \d+$", "write-pulse bookkeeping"),
+    IgnoreRule(r"^Second last write \S+, attempted \d+, written \d+$", "write-pulse bookkeeping"),
+    IgnoreRule(r"^Last write before reset \S+, attempted \d+, written \d+$", "write-pulse bookkeeping"),
+    IgnoreRule(r"^Second last write before reset \S+, attempted \d+, written \d+$", "write-pulse bookkeeping"),
+    IgnoreRule(r"^Last write pulse rcvd .*pulse count \d+$", "write-pulse bookkeeping"),
+    IgnoreRule(r"^Last write pulse rcvd before reset \S+$", "write-pulse bookkeeping"),
+    IgnoreRule(r"^Socket not armed for io, armed for read, armed for write$", "socket bookkeeping"),
+    IgnoreRule(r"^Last write thread event before reset \S+, second last \S+$", "write-pulse bookkeeping"),
+    IgnoreRule(r"^Last KA expiry before reset \S+, second last \S+$", "keepalive-timer bookkeeping"),
+    IgnoreRule(r"^Last KA error before reset \S+, KA not sent \S+$", "keepalive-timer bookkeeping"),
+    IgnoreRule(r"^Last KA start before reset \S+, second last \S+$", "keepalive-timer bookkeeping"),
+    IgnoreRule(r"^Precedence: \S+$", "IP precedence of the TCP session, not required by the schema"),
+    IgnoreRule(r"^Non-stop routing is enabled$", "NSR flag, not required by the schema"),
+    IgnoreRule(r"^Multi-protocol capability received$", "capability summary line"),
+    # Capability lines: one header plus one line per negotiated capability,
+    # including the per-AF "Address family <X>: advertised and received"
+    # capability line -- distinct from the " For Address Family:" record
+    # header the TTP template above matches (lowercase "family", no "For").
+    IgnoreRule(r"^Neighbor capabilities:$", "capability list header"),
+    IgnoreRule(r"^Route refresh: .+$", "negotiated capability, not required by the schema"),
+    IgnoreRule(r"^4-byte AS: .+$", "negotiated capability, not required by the schema"),
+    IgnoreRule(
+        r"^Address family [\w /-]+: advertised.*$",
+        "negotiated per-AF capability line (lowercase 'family'), not the address-family record header",
+    ),
+    IgnoreRule(r"^Minimum time between advertisement runs is \d+ secs$", "advertisement pacing, not in the schema"),
+    # Message-logging lines: whether inbound/outbound BGP message logging is
+    # enabled and how many messages are buffered.
+    IgnoreRule(r"^Inbound message logging enabled, \d+ messages buffered$", "message-logging bookkeeping"),
+    IgnoreRule(r"^Outbound message logging enabled, \d+ messages buffered$", "message-logging bookkeeping"),
+    # Per-address-family detail beyond the six required record fields.
+    IgnoreRule(r"^Update group: \S+ Filter-group: \S+.*$", "update-group bookkeeping"),
+    IgnoreRule(r"^NEXT_HOP is always this router$", "next-hop-self policy detail, not required by the schema"),
+    IgnoreRule(r"^Extended Nexthop Encoding: .+$", "negotiated capability, not required by the schema"),
+    IgnoreRule(r"^Route refresh request: received \d+, sent \d+$", "route-refresh counters, not in the schema"),
+    IgnoreRule(r"^Exact no\. of prefixes denied\s*:\s*\d+\.$", "prefix-denial counter, not required by the schema"),
+    IgnoreRule(r"^Cumulative no\. of prefixes denied:\s*\d+\.$", "prefix-denial counter, not required by the schema"),
+    IgnoreRule(r"^Prefix advertised \d+, suppressed \d+, withdrawn \d+$", "advertised-prefix counters, not in the schema"),
+    IgnoreRule(r"^AIGP is enabled$", "AIGP attribute flag, not required by the schema"),
+    IgnoreRule(r"^An EoR was( not)? received during read-only mode$", "end-of-RIB marker, not required by the schema"),
+    IgnoreRule(r"^Last ack version \d+, Last synced ack version \d+$", "version bookkeeping, not required by the schema"),
+    IgnoreRule(r"^Outstanding version objects: current \d+, max \d+, refresh \d+$", "version bookkeeping"),
+    IgnoreRule(r"^Additional-paths operation: \S+$", "add-path setting, not required by the schema"),
+    IgnoreRule(r"^Send Multicast Attributes$", "capability flag, not required by the schema"),
+    IgnoreRule(
+        r"^Advertise routes with local-label via Unicast SAFI$",
+        "label-advertisement flag (IPv4 Unicast only), not required by the schema",
+    ),
+    IgnoreRule(r"^Slow Peer State: \S+$", "slow-peer detection header, not required by the schema"),
+    IgnoreRule(r"^Detected state: \S+, Detection threshold: \d+$", "slow-peer detection detail"),
+    IgnoreRule(r"^Detection Count: \d+, Recovery Count: \d+$", "slow-peer detection detail"),
+    # Tail bookkeeping after the last address-family section.
+    IgnoreRule(r"^Connections established \d+; dropped \d+$", "connection-attempt counters, not in the schema"),
+    IgnoreRule(r"^Local host: \S+, Local port: \d+, IF Handle: \S+$", "local TCP endpoint detail, not in the schema"),
+    IgnoreRule(r"^Foreign host: \S+, Foreign port: \d+$", "remote TCP endpoint detail, not in the schema"),
+    IgnoreRule(
+        r"^Peer reset reason: .+$",
+        "reset-reason detail beyond the required last_reset_reason summary, present only after a remote-initiated reset",
+    ),
+)
+
+_BGP_NEIGHBOR_META_KEYS: tuple[str, ...] = (
+    "found",
+    "reason",
+    "neighbor",
+    "state",
+    "connection_state",
+    "previous_state",
+    "last_reset_reason",
+    "last_reset_ago",
+    "hold_time",
+    "keepalive",
+    "local_as",
+    "remote_as",
+    "router_id",
+    "up_for",
+    "messages_received",
+    "messages_sent",
+)
+
+
+def _empty_bgp_neighbor_meta() -> dict[str, Any]:
+    """Every key present, ``None`` unless known -- never absent.
+
+    A consumer must never have to distinguish "missing" from "not
+    applicable"; cases 2 and 3 (no active BGP process / peer not configured)
+    carry every key with a ``None`` value rather than a smaller dict.
+    """
+
+    meta: dict[str, Any] = dict.fromkeys(_BGP_NEIGHBOR_META_KEYS)
+    meta["found"] = False
+    return meta
+
+
+def _parse_bgp_neighbor_address_families(output: str) -> tuple[list[dict[str, Any]], list[str]]:
+    """Return the address-family records and the raw lines they consumed."""
+
+    ttp_parser = ttp(data=output, template=_AF_TEMPLATE)
+    ttp_parser.parse()
+    result = ttp_parser.result()
+    raw_records: list[dict[str, Any]] = []
+    if result and result[0]:
+        raw_records = result[0][0].get("records", [])
+
+    records: list[dict[str, Any]] = []
+    consumed: list[str] = []
+    for raw in raw_records:
+        address_family = raw.get("address_family")
+        neighbor_version = raw.get("neighbor_version")
+        route_reflector_client = bool(raw.get("route_reflector_client", False))
+        policy_in = raw.get("policy_in")
+        policy_out = raw.get("policy_out")
+        accepted_prefixes = raw.get("accepted_prefixes")
+        best_paths = raw.get("best_paths")
+
+        records.append(
+            {
+                "address_family": address_family,
+                "neighbor_version": neighbor_version,
+                "policy_in": policy_in,
+                "policy_out": policy_out,
+                "accepted_prefixes": accepted_prefixes,
+                "route_reflector_client": route_reflector_client,
+            }
+        )
+
+        # Reconstructed verbatim from the same literal IOS-XR phrasing the TTP
+        # template above matches, so account_lines (which compares stripped
+        # text) recognises these as claimed.
+        consumed.append(f"For Address Family: {address_family}")
+        if neighbor_version is not None:
+            consumed.append(f"BGP neighbor version {neighbor_version}")
+        if route_reflector_client:
+            consumed.append("Route-Reflector Client")
+        if policy_in is not None:
+            consumed.append(f"Policy for incoming advertisements is {policy_in}")
+        if policy_out is not None:
+            consumed.append(f"Policy for outgoing advertisements is {policy_out}")
+        if accepted_prefixes is not None and best_paths is not None:
+            consumed.append(f"{accepted_prefixes} accepted prefixes, {best_paths} are bestpaths")
+
+    return records, consumed
+
+
+def parse_xr_bgp_neighbor(output: str) -> dict[str, Any]:
+    """Parse ``show bgp neighbor <ip>``.
+
+    Three legitimate shapes -- see the section comment above. Raises
+    :class:`ParseError` only when the output is none of them: not a full
+    neighbor block, not "BGP instance ... not active", not "Neighbor not
+    found". That is genuinely unrecognised output, not a lab-topology detail.
+    """
+
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+
+    for line in lines:
+        if _BGP_NOT_ACTIVE.match(line):
+            meta = _empty_bgp_neighbor_meta()
+            meta["reason"] = "bgp_not_active"
+            return finalize(raw=output, meta=meta, records=[], consumed=[line], ignores=BGP_NEIGHBOR_IGNORES)
+        if _NEIGHBOR_NOT_FOUND.match(line):
+            meta = _empty_bgp_neighbor_meta()
+            meta["reason"] = "neighbor_not_found"
+            return finalize(raw=output, meta=meta, records=[], consumed=[line], ignores=BGP_NEIGHBOR_IGNORES)
+
+    meta = _empty_bgp_neighbor_meta()
+    consumed: list[str] = []
+    found_neighbor = False
+
+    for line in lines:
+        if match := _NEIGHBOR_IS.match(line):
+            meta["neighbor"] = match["neighbor"]
+            found_neighbor = True
+            consumed.append(line)
+        elif match := _REMOTE_LOCAL_AS.match(line):
+            meta["remote_as"] = match["remote_as"]
+            meta["local_as"] = match["local_as"]
+            consumed.append(line)
+        elif match := _ROUTER_ID.match(line):
+            meta["router_id"] = match["router_id"]
+            consumed.append(line)
+        elif match := _STATE.match(line):
+            meta["state"] = match["state"]
+            meta["connection_state"] = match["state"]
+            if match["up_for"]:
+                meta["up_for"] = match["up_for"]
+            consumed.append(line)
+        elif match := _PREVIOUS_STATE.match(line):
+            meta["previous_state"] = match["previous_state"]
+            consumed.append(line)
+        elif match := _HOLD_KEEPALIVE.match(line):
+            meta["hold_time"] = match["hold_time"]
+            meta["keepalive"] = match["keepalive"]
+            consumed.append(line)
+        elif match := _RECEIVED.match(line):
+            meta["messages_received"] = match["messages_received"]
+            consumed.append(line)
+        elif match := _SENT.match(line):
+            meta["messages_sent"] = match["messages_sent"]
+            consumed.append(line)
+        elif match := _LAST_RESET.match(line):
+            meta["last_reset_reason"] = match["last_reset_reason"]
+            meta["last_reset_ago"] = match["last_reset_ago"]
+            consumed.append(line)
+        elif match := _LAST_RESET_FALLBACK.match(line):
+            # "Last reset <duration>" with no "due to" clause -- the duration is
+            # still worth recording, and the line must still be consumed rather
+            # than surfacing as unaccounted.
+            meta["last_reset_ago"] = match["last_reset_ago"]
+            consumed.append(line)
+
+    if not found_neighbor:
+        raise ParseError(
+            "output is neither a BGP neighbor block, '% BGP instance ... not active', "
+            "nor '% Neighbor not found'"
+        )
+
+    meta["found"] = True
+
+    records, af_consumed = _parse_bgp_neighbor_address_families(output)
+    consumed.extend(af_consumed)
+
+    return finalize(raw=output, meta=meta, records=records, consumed=consumed, ignores=BGP_NEIGHBOR_IGNORES)
+
+
+# --------------------------------------------------------------------------- #
 # The registry
 # --------------------------------------------------------------------------- #
 
 # Keyed by (platform, template_name), mirroring parsers.PARSERS' (platform,
 # intent) shape. A template parser takes the single rendered command's output.
-#
-# Empty until T-012. The contract, its tests, and the accounting helper above
-# all exist first, deliberately: they are what every parser is then written
-# against, and getting them right is cheaper before there are six
-# implementations to keep in step.
-TEMPLATE_PARSERS: dict[tuple[str, str], Callable[[str], dict[str, Any]]] = {}
+TEMPLATE_PARSERS: dict[tuple[str, str], Callable[[str], dict[str, Any]]] = {
+    ("cisco_xr", "bgp_neighbor"): parse_xr_bgp_neighbor,
+}
 
 # Fields that move on their own between two captures of an unchanged device --
 # uptimes, counters, timestamps. Excluded from comparison by diff_evidence and
 # detect_flaps, exactly as parsers.VOLATILE_FIELDS is.
-TEMPLATE_VOLATILE_FIELDS: dict[tuple[str, str], frozenset[str]] = {}
+TEMPLATE_VOLATILE_FIELDS: dict[tuple[str, str], frozenset[str]] = {
+    # last_reset_ago is volatile; last_reset_reason deliberately is NOT -- a
+    # change of reason ("Address family activated" -> "Peer closing down the
+    # session") is a real signal worth diffing, and folding the two together
+    # would have discarded it along with the noise.
+    ("cisco_xr", "bgp_neighbor"): frozenset(
+        {"up_for", "messages_received", "messages_sent", "last_reset_ago"}
+    ),
+}
 
 # The field identifying a record across two captures. ``None`` means records
 # are positional and cannot be matched by identity.
-TEMPLATE_RECORD_KEYS: dict[tuple[str, str], str | None] = {}
+TEMPLATE_RECORD_KEYS: dict[tuple[str, str], str | None] = {
+    ("cisco_xr", "bgp_neighbor"): "address_family",
+}
 
 
 def has_template_parser(platform: str, template: str) -> bool:

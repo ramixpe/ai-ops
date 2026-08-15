@@ -1,17 +1,17 @@
 """Contract tests for template_parsers.
 
-T-010 ships the contract, the section 0.10 accounting helper, and these tests.
-The registry is deliberately empty until T-012 -- so these assert the *shape*
-holds and that an empty registry behaves correctly, which is what every parser
-from T-012 onward is then written against.
+T-010 ships the contract, the section 0.10 accounting helper, and tests for
+both against an empty registry. T-012 adds the first real parser
+(``cisco_xr``/``bgp_neighbor``) and the tests below it.
 
-The accounting helper is tested properly here rather than waiting for a real
-parser: it is shared by all six, so a defect in it would be six defects.
+The accounting helper is tested properly at T-010 rather than waiting for a
+real parser: it is shared by all six, so a defect in it would be six defects.
 """
 
 from __future__ import annotations
 
 import dataclasses
+from pathlib import Path
 
 import pytest
 
@@ -23,16 +23,20 @@ from agent_nettools import template_parsers as tp
 # --------------------------------------------------------------------------- #
 
 
-def test_registry_is_empty_until_the_parsers_land():
-    """Pins that T-010 ships a contract and no parsers.
+def test_registry_has_the_bgp_neighbor_parser_now_that_t_012_landed():
+    """Was ``test_registry_is_empty_until_the_parsers_land`` (T-010).
 
-    When T-012 adds the first parser this fails, which is the intended signal
-    to update it to the real expectation rather than to delete it.
+    T-010 shipped a contract with no parsers; T-012 adds the first one. The
+    old assertion (an empty registry) failing was the intended signal to
+    update this test to the real expectation, per its own docstring, rather
+    than to delete it.
     """
 
-    assert tp.TEMPLATE_PARSERS == {}
-    assert tp.TEMPLATE_VOLATILE_FIELDS == {}
-    assert tp.TEMPLATE_RECORD_KEYS == {}
+    assert ("cisco_xr", "bgp_neighbor") in tp.TEMPLATE_PARSERS
+    assert tp.TEMPLATE_VOLATILE_FIELDS[("cisco_xr", "bgp_neighbor")] == frozenset(
+        {"up_for", "messages_received", "messages_sent", "last_reset_ago"}
+    )
+    assert tp.TEMPLATE_RECORD_KEYS[("cisco_xr", "bgp_neighbor")] == "address_family"
 
 
 def test_registry_keys_are_platform_template_pairs():
@@ -246,3 +250,209 @@ def test_every_shared_ignore_rule_explains_itself():
 
     for rule in tp.XR_COMMON_IGNORES:
         assert rule.reason.strip()
+
+
+# --------------------------------------------------------------------------- #
+# T-012: the bgp_neighbor parser
+# --------------------------------------------------------------------------- #
+
+from helpers import FIXTURE_DIR  # noqa: E402 -- after the module-level imports by design
+
+_BGP_NEIGHBOR_FIXTURES = sorted(FIXTURE_DIR.glob("cisco_xr/*/healthy/show-bgp-neighbor-*.txt"))
+
+# Every key the meta table in the T-012 spec requires, present in every case
+# (found or not) -- ``None`` rather than absent.
+_BGP_NEIGHBOR_META_KEYS = (
+    "found",
+    "reason",
+    "neighbor",
+    "state",
+    "connection_state",
+    "previous_state",
+    "last_reset_reason",
+    "hold_time",
+    "keepalive",
+    "local_as",
+    "remote_as",
+    "router_id",
+    "up_for",
+    "messages_received",
+    "messages_sent",
+)
+
+
+def test_at_least_one_fixture_of_each_shape_is_on_disk():
+    """A sanity check on the parametrization source below.
+
+    If this ever fails, the round-trip test below would be silently
+    parametrized over an empty or lopsided list -- worth failing loudly on
+    its own rather than only as a mysteriously-shrunk parametrize count.
+    """
+
+    assert len(_BGP_NEIGHBOR_FIXTURES) >= 9  # one full block per device, at minimum
+
+
+@pytest.mark.parametrize("fixture_path", _BGP_NEIGHBOR_FIXTURES, ids=lambda p: str(p.relative_to(FIXTURE_DIR)))
+def test_every_committed_bgp_neighbor_fixture_round_trips_clean(fixture_path: Path):
+    """Section 0.10, pinned against every real fixture on disk.
+
+    Discovered from the filesystem rather than a hardcoded list, so a future
+    ``nettools capture`` run that adds a device or a peer is covered
+    automatically instead of silently going unchecked.
+    """
+
+    raw = fixture_path.read_text()
+    parsed, status = tp.parse_template_output("cisco_xr", "bgp_neighbor", raw)
+    assert status is tp.PARSE_OK, f"{fixture_path}: {status}"
+    assert parsed["meta"]["unaccounted_lines"] == [], f"{fixture_path}: {parsed['meta']['unaccounted_lines']}"
+    assert parsed["meta"]["unparsed_rows"] == 0
+
+
+def _load_fixture(*parts: str) -> str:
+    return FIXTURE_DIR.joinpath(*parts).read_text()
+
+
+def test_rr1_to_pe1_yields_the_full_established_session():
+    """RR1 -> 10.255.0.11 (PE1): a real, healthy, fully-established session."""
+
+    raw = _load_fixture("cisco_xr", "RR1", "healthy", "show-bgp-neighbor-10-255-0-11.txt")
+    parsed, status = tp.parse_template_output("cisco_xr", "bgp_neighbor", raw)
+    assert status is tp.PARSE_OK
+    meta = parsed["meta"]
+    assert meta["found"] is True
+    assert meta["reason"] is None
+    assert meta["neighbor"] == "10.255.0.11"
+    assert meta["state"] == "Established"
+    assert meta["connection_state"] == "Established"
+    assert meta["hold_time"] == "180"
+    assert meta["keepalive"] == "60"
+    assert meta["remote_as"] == "65000"
+    assert meta["local_as"] == "65000"
+    assert meta["router_id"] == "10.255.0.11"
+    assert len(parsed["records"]) == 5
+    assert [r["address_family"] for r in parsed["records"]] == [
+        "IPv4 Unicast",
+        "VPNv4 Unicast",
+        "IPv6 Labeled-unicast",
+        "VPNv6 Unicast",
+        "L2VPN EVPN",
+    ]
+
+
+def test_a_p_router_with_no_bgp_process_is_found_false_but_parse_ok():
+    """The device answering '% BGP instance not active' is a real, well-formed
+    result -- never PARSE_FAILED. That distinction is the crux of T-012."""
+
+    raw = _load_fixture("cisco_xr", "P1", "healthy", "show-bgp-neighbor-10-255-0-12.txt")
+    parsed, status = tp.parse_template_output("cisco_xr", "bgp_neighbor", raw)
+    assert status is tp.PARSE_OK  # asserted explicitly: this is the crux
+    assert parsed["meta"]["found"] is False
+    assert parsed["meta"]["reason"] == "bgp_not_active"
+    assert parsed["records"] == []
+
+
+def test_a_peer_not_configured_on_this_device_is_found_false_but_parse_ok():
+    """'% Neighbor not found' is likewise the device answering correctly."""
+
+    raw = _load_fixture("cisco_xr", "PE1", "healthy", "show-bgp-neighbor-10-255-0-12.txt")
+    parsed, status = tp.parse_template_output("cisco_xr", "bgp_neighbor", raw)
+    assert status is tp.PARSE_OK
+    assert parsed["meta"]["found"] is False
+    assert parsed["meta"]["reason"] == "neighbor_not_found"
+    assert parsed["records"] == []
+
+
+def test_truncated_output_does_not_raise_and_still_accounts_cleanly():
+    """The first 15 lines of a real fixture -- a session block cut off mid-way
+    through the header, before any address-family section. Must not raise,
+    and whatever is captured must still satisfy the 0.10 accounting."""
+
+    raw = _load_fixture("cisco_xr", "RR1", "healthy", "show-bgp-neighbor-10-255-0-11.txt")
+    truncated = "\n".join(raw.splitlines()[:15])
+
+    parsed, status = tp.parse_template_output("cisco_xr", "bgp_neighbor", truncated)
+
+    assert status is tp.PARSE_OK
+    assert parsed["meta"]["unaccounted_lines"] == []
+    assert parsed["meta"]["unparsed_rows"] == 0
+    assert parsed["meta"]["found"] is True
+    assert parsed["records"] == []
+
+
+def test_garbage_input_raises_parse_error_and_reports_parse_failed():
+    """Something clearly not BGP output must not be silently accepted."""
+
+    garbage = "lorem ipsum dolor sit amet\nconsectetur adipiscing"
+
+    with pytest.raises(tp.ParseError):
+        tp.parse_xr_bgp_neighbor(garbage)
+
+    parsed, status = tp.parse_template_output("cisco_xr", "bgp_neighbor", garbage)
+    assert parsed is None
+    assert status is tp.PARSE_FAILED
+
+
+@pytest.mark.parametrize(
+    "device,peer,label",
+    [
+        ("RR1", "10.255.0.11", "found"),
+        ("P1", "10.255.0.12", "bgp_not_active"),
+        ("PE1", "10.255.0.12", "neighbor_not_found"),
+    ],
+)
+def test_every_meta_key_is_present_in_every_case(device, peer, label):
+    """Every key in the T-012 meta table, present for all three shapes --
+    ``None`` rather than absent, so a consumer never has to distinguish
+    'missing' from 'not applicable'."""
+
+    raw = _load_fixture("cisco_xr", device, "healthy", f"show-bgp-neighbor-{peer.replace('.', '-')}.txt")
+    parsed, status = tp.parse_template_output("cisco_xr", "bgp_neighbor", raw)
+    assert status is tp.PARSE_OK
+    for key in _BGP_NEIGHBOR_META_KEYS:
+        assert key in parsed["meta"], f"{label}: missing {key}"
+
+
+def test_record_key_and_volatile_fields_are_registered():
+    assert tp.template_record_key("cisco_xr", "bgp_neighbor") == "address_family"
+    volatile = tp.template_volatile_fields("cisco_xr", "bgp_neighbor")
+    assert {"up_for", "messages_received", "messages_sent"} <= volatile
+
+
+def test_last_reset_splits_the_duration_from_the_reason():
+    """`Last reset 1d23h, due to X` must not fold the duration into the reason.
+
+    The duration changes on every capture of an unchanged device. Folded
+    together, two captures of a quiet fabric would diff as changed -- the
+    100%-false-positive failure CLAUDE.md records from before Phase 2. Split,
+    the duration can be declared volatile while a genuine change of *reason*
+    still surfaces, which is the signal actually worth having.
+    """
+
+    raw = (FIXTURE_DIR / "cisco_xr" / "RR1" / "healthy" / "show-bgp-neighbor-10-255-0-11.txt").read_text()
+    parsed, status = tp.parse_template_output("cisco_xr", "bgp_neighbor", raw)
+
+    assert status is tp.PARSE_OK
+    assert parsed["meta"]["last_reset_reason"] == "Address family activated"
+    assert parsed["meta"]["last_reset_ago"] == "1d23h"
+    # The reason must carry no duration at all.
+    assert "1d23h" not in (parsed["meta"]["last_reset_reason"] or "")
+
+
+def test_last_reset_reason_is_not_volatile_but_the_duration_is():
+    """The point of the split: a changed reason is a real difference."""
+
+    volatile = tp.template_volatile_fields("cisco_xr", "bgp_neighbor")
+    assert "last_reset_ago" in volatile
+    assert "last_reset_reason" not in volatile
+
+
+def test_last_reset_without_a_due_to_clause_is_still_consumed():
+    """A `Last reset <duration>` line with no reason must not go unaccounted."""
+
+    raw = (FIXTURE_DIR / "cisco_xr" / "RR1" / "healthy" / "show-bgp-neighbor-10-255-0-11.txt").read_text()
+    stripped = raw.replace("Last reset 1d23h, due to Address family activated", "Last reset 1d23h")
+    parsed, status = tp.parse_template_output("cisco_xr", "bgp_neighbor", stripped)
+
+    assert status is tp.PARSE_OK
+    assert parsed["meta"]["unaccounted_lines"] == []
+    assert parsed["meta"]["last_reset_ago"] == "1d23h"
