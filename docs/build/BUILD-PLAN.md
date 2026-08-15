@@ -273,7 +273,7 @@ No production code changes in this part. The goal is to replace assumptions with
 
 ---
 
-## T-002 · MiniMax API contract test `[STATUS: TODO]`
+## T-002 · MiniMax API contract test `[STATUS: DONE]`
 
 **Goal.** Prove the model endpoint behaves the way the gate and report prompts will require, before any code depends on it.
 
