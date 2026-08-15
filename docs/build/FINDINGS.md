@@ -422,6 +422,51 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-023 · T-006 · `<vrf>:<rd>` is eliminated by evidence — RD is reused across PEs
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** Three VRFs across four PEs: **CUSTA** (RD `65000:100`, on PE1 and PE3), **CUSTB** (RD `65000:200`, on PE2 and PE4), and **SHARED-SVCS** (RD `65000:300`, PE1 only, IPv4 only). Import RT equals export RT for the two customer VRFs.
+
+  **The RD is not unique across PEs.** PE1 and PE3 both use `65000:100` for CUSTA; PE2 and PE4 both use `65000:200` for CUSTB. So the plan's `<vrf>:<rd>` candidate names two different VRF instances on two different routers and cannot distinguish them — **eliminated by measurement, not by preference.** This is legal configuration (a type-0 RD reused fabric-wide is common), but a subject identifier that silently conflates two devices is worse than a verbose one.
+- **Evidence:** `docs/build/discovery-l3vpn.md` §1 and §4. `show vrf all detail` on all four PEs, read-only, over a manual netmiko session per T-006's sanction. No command was added to the allowlist; no code changed; the probe stayed in the scratchpad, uncommitted.
+- **What I did:** **Recommended `<pe>:<vrf>`** — `PE1:CUSTA`, `PE3:CUSTA`, `PE1:SHARED-SVCS`. Four reasons: it is unique where `<vrf>:<rd>` is not; it **already matches this repository's own convention**, since `glossary.md` keys operational memory as `PE2:GigabitEthernet0/0/0/1` and `PE2:bgp:10.255.0.31` — device first, object second — so a future D14 event store needs no second convention; it carries the device every collect step needs, so no rung re-resolves scope; and it expresses the asymmetric case honestly, since `PE1:SHARED-SVCS` exists and `PE3:SHARED-SVCS` does not. A fabric-wide question becomes a **fan-out** resolved in code (`CUSTA` → `{PE1:CUSTA, PE3:CUSTA}`), not a different naming scheme. **Recommended, not implemented** — T-006 says do not build the flow, and T-022 is where the registry shape is fixed.
+- **Needs human review:** yes — it is the naming decision Q-004 asked for, and T-022 will build on it.
+- **Blocks:** none for MVP-0 (`l3vpn_service` stays a `NotImplementedError` stub). Informs T-022.
+
+---
+
+## OBS-024 · T-006 · The crossed CE attachment is confirmed, and nothing on the PEs records it
+
+- **Kind:** surprise
+- **Escalation:** NOTE
+- **Model:** opus-5
+- **What happened:** The documented crossing is real, verified from both ends by /31 pairing: **CE1→PE1, CE2→PE3, CE3→PE2, CE4→PE4**. So CUSTA (PE1+PE3) serves CE1 and CE2, and CUSTB (PE2+PE4) serves CE3 and CE4.
+
+  The part worth recording is *how* it had to be verified. **No interface on any PE carries a description**, and nothing else on the device names its customer. The attachment is derivable only by arithmetic on the /31 — pairing CE2's `172.16.10.3` with PE3's `172.16.10.2`.
+
+  This sharpens D10's prediction rather than merely confirming it. A model asked "which PE serves CE2?" faces three mutually agreeing wrong signals: the numeric match (CE2→PE2), the `Loopback100` last-octet convention (`.1`=PE1, `.3`=PE3), and the VRF numbering. All three point the same way and all three are wrong, twice out of four. There is no textual clue on PE3 that CE2 is its customer.
+- **Evidence:** `docs/build/discovery-l3vpn.md` §3. PE side from `show running-config interface`; CE side from `ip -4 -o addr` inside the `clab-sota-xrd-CE*` containers.
+- **What I did:** Logged only. Recorded for T-022 that a CE-oriented question ("why can't CE2 reach CE1?") names neither a PE nor a VRF, so **scope resolution — the /31 arithmetic — must exist in code beside the flow registry**, and must never be a model inference. This is D10's "the model names a scope, code resolves the attachment" with a concrete measurement behind it.
+- **Needs human review:** no
+- **Blocks:** none
+
+---
+
+## OBS-025 · T-006 · `SHARED-SVCS` is a failure mode the protocol-stack descent cannot see
+
+- **Kind:** deferred
+- **Escalation:** NOTE
+- **Model:** opus-5
+- **What happened:** PE1 carries a deliberate route-leaking demo, documented in its own config comment: `SHARED-SVCS` (RD `65000:300`) imports *and* exports both `65000:100` and `65000:300`, leaking bidirectionally with CUSTA. Its only interface is `Loopback150` = `172.30.30.1/32`, which should be reachable from CUSTA on **PE3** — a PE that does not carry SHARED-SVCS at all.
+- **Evidence:** `docs/build/discovery-l3vpn.md` §1. Config comment: `Leak path: CUSTA (RT 65000:100) <-> SHARED-SVCS (RT 65000:300); Verify on PE3: show route vrf CUSTA 172.30.30.1`.
+- **What I did:** Logged for whoever designs the `l3vpn_service` descent, well after MVP-0. **This is a reachability failure whose cause lives in RT import/export policy, not in the protocol stack** — the `bgp_session` ladder (transport → route → IGP → interface) would find every rung healthy and still not explain a broken leak. That is a genuinely different descent shape, not the BGP ladder with a VRF attached, and it is worth knowing before someone assumes the ladder generalises. Also noted: SHARED-SVCS is IPv4-only while CUSTA and CUSTB carry both families, so no flow may assume a VRF has both.
+- **Needs human review:** no
+- **Blocks:** none — post-MVP-0.
+
+---
+
 <!--
 Copy this block for each new entry.
 
@@ -450,7 +495,7 @@ Anything logged with `Needs human review: yes` is mirrored here so the review ha
 | Q-013 | T-022 | Does a `Rung` carry its own device scope? The `bgp_session` descent's lower rungs (route, IGP adjacency, interface) concern the *path*, not the subject device — checking RR1's own IS-IS adjacencies would miss that PE2 is the isolated one. | **Yes — blocks T-022/T-023/T-024** | Open (OBS-020) — decide at T-022 |
 | Q-011 | T-004 | Should the devices' `logging trap` level be lowered so severity-5 events (`%BGP-5-ADJCHANGE`, IS-IS transitions) reach Loki? Today only `err`/`warning` arrive, so the events T-028 correlates against are absent entirely. Operator decision — it changes log volume on a pipeline already carrying 97% self-generated noise. | No for MVP-0 · **yes for a useful historical axis** | Open (OBS-014) |
 | Q-003 | T-005 | Does Alertmanager have a webhook receiver, and can it replace n8n as the Stage 2 trigger? | No — Stage 2 | **Resolved (OBS-016)** — yes to both. Gap is that no alert rule carries a device label; that is rule authoring, not infrastructure. |
-| Q-004 | T-006 | What is the subject naming scheme for an L3VPN service object? | No — flow not in MVP-0 | Open |
+| Q-004 | T-006 | What is the subject naming scheme for an L3VPN service object? | No — flow not in MVP-0 | **Answered (OBS-023)** — `<pe>:<vrf>` recommended; `<vrf>:<rd>` eliminated because RD is reused across PEs. Confirm at T-022. |
 | Q-005 | T-020 | What error-counter threshold should `interface_state` treat as broken? | No — default chosen, needs review | Open |
 | Q-006 | T-025 | Does the descent's stopping rung match what a network engineer would conclude by hand from the same fixtures? | **Yes — this validates the architecture** | Open |
 | Q-007 | T-035 | Telegram or Mattermost? Hosted means device names, IPs and RCA text leave the estate; self-hosted keeps them in. Decide before implementing — only one provider gets built. | Yes for T-035 | Open |

@@ -388,7 +388,7 @@ Print, for each check: PASS / FAIL / INFO, plus the raw evidence (truncated to 2
 
 ---
 
-## T-006 · L3VPN discovery `[STATUS: TODO]`
+## T-006 · L3VPN discovery `[STATUS: DONE]`
 
 **Goal.** Establish what L3VPN objects actually exist, so the `l3vpn_service` flow has a real subject naming scheme.
 
