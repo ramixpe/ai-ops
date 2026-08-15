@@ -276,6 +276,62 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-016 · T-005 · Alertmanager can be the Stage 2 trigger; the gap is that no alert names a device
+
+- **Kind:** surprise
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** **Q-003 answered: yes.** A webhook receiver already exists and is the *default* route — `receiver: telegram-bot`, `webhook_configs`, `send_resolved: true`, URL redacted by the API and deliberately not extracted. Grouping (`group_by: [alertname, component]`, `group_wait 30s`, `group_interval 5m`, `repeat_interval 12h`, 1h for `severity="critical"`) and two real inhibition rules are configured. So the four Stage 2 primitives the plan contemplated building — dedupe, group, silence, deliver — already exist, and n8n is not needed for the trigger path.
+
+  **But no alert rule identifies a device.** All six rules are `inactive`, and the only label keys any of them set are `component` and `severity`. `investigate(device, subject, flow)` needs a device and a subject; a `LabRoutersDown` webhook carries neither.
+- **Evidence:** `docs/build/discovery-alerting.md` §2 (full config verbatim, rule table). `GET /api/v2/alerts` → 0 alerts, so the label shape was taken from the rule definitions rather than sampled.
+- **What I did:** Wrote the discovery document. Recorded that the Stage 2 blocker is **rule authoring, not infrastructure** — the telemetry underneath is already per-device and flowing (OBS-018), so a rule that carries a `source` label is cheap to add when Stage 2 arrives. Also recorded the payload shape (standard Alertmanager webhook JSON) so a future receiver can be written against it without re-discovery.
+- **Needs human review:** no
+- **Blocks:** none — informs Stage 2 and T-035 (Telegram is evidently already the team's alert channel, which bears on Q-007's residency question).
+
+---
+
+## OBS-017 · T-005 · **The lab is no longer broken.** The fixtures' ground truth no longer matches the live fabric
+
+- **Kind:** assumption-wrong
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** Cross-checking live gNMI telemetry against the committed fixture ground truth shows the fabric was **rebuilt and fully repaired roughly 48 hours ago**. Every documented symptom this project is built around is gone:
+
+  | Documented ground truth | Live now |
+  |---|---|
+  | RR1 → `10.255.0.12` **Idle** | `bgp-st-estab` |
+  | RR1 → `10.255.0.14` **Idle** | `bgp-st-estab` |
+  | PE2 **0** IS-IS adjacencies | **2** |
+  | PE4 **0** IS-IS adjacencies | **2** |
+
+  All 16 BGP sessions are Established. Every device's IS-IS adjacency count differs from `inventory/lab.yaml`'s `expected:` baseline (P1 5 vs 2, P2 5 vs 4, P3 5 vs 1, P4 5 vs 3, PE1 2 vs 1, RR1 2 vs 1). Every adjacency reports ~47.8h uptime and the `clab-sota-xrd-*` containers report "Up 2 days", so this is a rebuild, not a flap.
+- **Evidence:** `docs/build/discovery-alerting.md` §5. Live: `count by (source) (Cisco_IOS_XR_clns_isis_oper:..._neighbor_uptime)` and `connection_state` on the BGP neighbor series. Baseline: `inventory/lab.yaml` `expected:` blocks. Fixture: `tests/fixtures/cisco_xr/RR1/t0/`.
+- **What I did:** Logged only; changed no code and touched no device. **Establishing precisely what this does and does not break, because the scary reading is wrong:**
+  - **Unaffected — everything fixture-based.** `make test` is still 567 passed / 4 skipped. `test_health.py`, `test_fabric_prompt_contains_pe2_pe4_isolation_and_rr1_idle_peers` and the committed `t0`/`t1` captures all still describe the broken fabric, because a fixture is a recording. **T-025 and the M3 milestone are therefore safe** — the acceptance test runs offline against `t0` and its Idle peer is still Idle there.
+  - **Materially broken — T-011.** Its instruction is "capture `t0` … **against the current broken state**", and that state no longer exists to capture. Worse than merely losing the broken case: capturing template output now would place *healthy* `bgp_neighbor`/`route` captures **under the same `t0` label** as the existing *broken* intent captures. A descent reading both would see `show bgp summary` say Idle and `show bgp neighbor 10.255.0.12` say Established — an internally contradictory fixture set, which is a worse foundation than no fixture at all.
+  - **Affected — T-033.** A live run of `RR1 → 10.255.0.12` will now yield `all_layers_healthy`, not a broken rung. That is still a valid test of the descent; it just no longer demonstrates root-cause finding.
+  - **Note on re-breaking:** deliberately shutting an interface to restore the broken state would be **writing to a network device — a HALT under §0.11**, and is not something I will do or arrange. It is available to the operator, and it is one of the options T-007 should weigh.
+
+  Deferring resolution to **T-007 (fixture gap analysis)**, which is exactly the task for it and is two steps away. Flagging now so it is not discovered at T-011 with capture already underway.
+- **Needs human review:** **yes** — resolving T-011 needs an operator decision (re-break the lab, capture a new consistent healthy label, or construct the broken case synthetically in-test).
+- **Blocks:** T-011 as written. Informs T-007 and T-033.
+
+---
+
+## OBS-018 · T-005 · Telemetry is rich and joins cleanly, but a BGP series carries 192 labels
+
+- **Kind:** risk
+- **Escalation:** NOTE
+- **Model:** opus-5
+- **What happened:** Prometheus holds 570 metric names, 316 of them streamed YANG oper data, all with current samples at 6,891 samples per scrape. The device join key is **exact**: the `source` label carries the bare names `P1`…`RR1`, matching `inventory/lab.yaml` and the CLI with no mapping — strictly better than Loki's `RR1.sota-xrd`. Of the three metrics T-005 asked about: **BGP session state is available but as a *label* (`connection_state`), not a metric name**; **interface error counters are available** (all currently 0); **interface oper-state is not available at all** — the exposed model is `infra_statsd_oper`, which is counters only. The risk: a single BGP neighbor series carries **192 labels**, every YANG leaf promoted to one, including free-text fields like `peer_reset_reason` and `reset_reason` whose values *change on state transitions*, minting a new series each time.
+- **Evidence:** `docs/build/discovery-alerting.md` §3. Label dump of one `..._connection_established_time` series.
+- **What I did:** Nothing — logged only, per §0.11 NOTE; the gnmic/telegraf config is not this repository's. Recorded the `source` join key and the "state is a label, not a metric" nuance so MVP-1 does not re-derive them. Also recorded **why the descent must still not read rungs off Prometheus** despite how convenient it looks: scraped metrics lag and go stale, the design says the device wins on current state (D8), and a stale "Established" would produce a confident wrong verdict — the precise failure `unevaluated` exists to prevent. Corroboration and flap history are the legitimate uses, and those are Stage 2.
+- **Needs human review:** no
+- **Blocks:** none
+
+---
+
 <!--
 Copy this block for each new entry.
 
@@ -302,13 +358,14 @@ Anything logged with `Needs human review: yes` is mirrored here so the review ha
 | Q-001 | T-002 | Does `reasoning_split: true` fully suppress `<think>` in `content`? If not, is a stripping step acceptable, or should the gate use the Anthropic-compatible route instead? | Yes — gate depends on it | **Resolved (OBS-005)** — yes, fully. No stripping step, no route change. Must be set explicitly on every call. |
 | Q-002 | T-004 | Is syslog-ng shipping to Loki, and do IOS-XR mnemonics survive into a queryable label? | No — affects Stage 2 only | **Resolved (OBS-013)** — ships to file *and* Loki; mnemonics survive on 100% of lines but in the body, not as a label. Extraction belongs in T-015's parser. |
 | Q-011 | T-004 | Should the devices' `logging trap` level be lowered so severity-5 events (`%BGP-5-ADJCHANGE`, IS-IS transitions) reach Loki? Today only `err`/`warning` arrive, so the events T-028 correlates against are absent entirely. Operator decision — it changes log volume on a pipeline already carrying 97% self-generated noise. | No for MVP-0 · **yes for a useful historical axis** | Open (OBS-014) |
-| Q-003 | T-005 | Does Alertmanager have a webhook receiver, and can it replace n8n as the Stage 2 trigger? | No — Stage 2 | Open |
+| Q-003 | T-005 | Does Alertmanager have a webhook receiver, and can it replace n8n as the Stage 2 trigger? | No — Stage 2 | **Resolved (OBS-016)** — yes to both. Gap is that no alert rule carries a device label; that is rule authoring, not infrastructure. |
 | Q-004 | T-006 | What is the subject naming scheme for an L3VPN service object? | No — flow not in MVP-0 | Open |
 | Q-005 | T-020 | What error-counter threshold should `interface_state` treat as broken? | No — default chosen, needs review | Open |
 | Q-006 | T-025 | Does the descent's stopping rung match what a network engineer would conclude by hand from the same fixtures? | **Yes — this validates the architecture** | Open |
 | Q-007 | T-035 | Telegram or Mattermost? Hosted means device names, IPs and RCA text leave the estate; self-hosted keeps them in. Decide before implementing — only one provider gets built. | Yes for T-035 | Open |
 | Q-008 | T-035 | Which host runs `nettools` in the target deployment, and does it have outbound egress to the chosen channel? | Yes for T-035 | Open |
 | Q-010 | T-003 | The MiniMax provider uses the OpenAI **Responses** API, not Chat Completions, so `BUILD-PLAN.md` T-003 step 4 (`reasoning_split`, `max_completion_tokens`) does not apply. Both behaviours it targeted are achieved structurally on that route. Confirm the route choice before the MVP-1 gate is built on it. | No for MVP-0 · **yes for the MVP-1 gate** | Open — decided and evidenced (OBS-010) |
+| Q-012 | T-005 | **The lab was rebuilt ~2 days ago and is now healthy** — all 16 BGP sessions Established, PE2/PE4 back to 2 IS-IS adjacencies. T-011 says to capture "against the current broken state", which no longer exists. Re-break the lab, capture a new consistent healthy label, or build the broken case synthetically in-test? | **Yes for T-011** (T-025/M3 unaffected — fixtures still hold the broken state) | Open (OBS-017) — to be resolved at T-007 |
 | Q-009 | T-002 | Should `MINIMAX_API_KEY` be rotated after this build? It was pasted into the session transcript, which no control in this repository can revoke. | No — nothing is blocked on it | Open — recommended (OBS-008) |
 
 ---

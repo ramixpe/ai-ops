@@ -369,7 +369,7 @@ Print, for each check: PASS / FAIL / INFO, plus the raw evidence (truncated to 2
 
 ---
 
-## T-005 · Alertmanager and Prometheus discovery `[NON-BLOCKING]` `[STATUS: TODO]`
+## T-005 · Alertmanager and Prometheus discovery `[NON-BLOCKING]` `[STATUS: DONE]`
 
 **Goal.** Determine whether the existing stack can be the Stage 2 trigger, removing the need for a separate workflow engine.
 
