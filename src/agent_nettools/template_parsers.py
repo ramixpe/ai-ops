@@ -80,6 +80,7 @@ __all__ = [
     "PARSE_OK",
     "PARSE_UNAVAILABLE",
     "BGP_NEIGHBOR_IGNORES",
+    "ROUTE_IGNORES",
     "TEMPLATE_PARSERS",
     "TEMPLATE_RECORD_KEYS",
     "TEMPLATE_VOLATILE_FIELDS",
@@ -91,6 +92,7 @@ __all__ = [
     "has_template_parser",
     "parse_template_output",
     "parse_xr_bgp_neighbor",
+    "parse_xr_route",
     "template_record_key",
     "template_volatile_fields",
 ]
@@ -493,6 +495,177 @@ def parse_xr_bgp_neighbor(output: str) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
+# cisco_xr: route  (T-013)
+# --------------------------------------------------------------------------- #
+#
+# ``show route <prefix>`` answers one of two shapes, both legitimate:
+#
+# 1. A routing entry: the top-level "Known via" line, an optional local
+#    label, an installed-since duration, then one "Routing Descriptor
+#    Blocks" section with one block per installed path.
+# 2. The entire body is ``% Network not in table`` -- the device correctly
+#    reporting that no route exists for this prefix, not a parse failure.
+#
+# Case 2 is the branch ``checks.route_present`` reads to decide ``broken``:
+# it must come back ``found=False`` with ``PARSE_OK``, exactly as the
+# not-active / not-found cases do for bgp_neighbor.
+
+_NOT_IN_TABLE = re.compile(r"^% Network not in table$")
+
+_ROUTING_ENTRY = re.compile(r"^Routing entry for (?P<prefix>\S+)$")
+# Two "Known via" shapes are on disk: a routed protocol ("isis CORE", trailer
+# ", labeled SR") and a directly connected local route ("local", trailer
+# " (connected)", seen on PE4 for its own loopback). distance/metric are
+# extracted identically either way; only the trailing clause differs.
+_KNOWN_VIA = re.compile(
+    r'^Known via "(?P<protocol>[^"]*)", distance (?P<distance>\d+), metric (?P<metric>\d+)'
+    r"(?:, labeled SR| \(connected\))?$"
+)
+_LOCAL_LABEL = re.compile(r"^Local Label (?P<local_label>\d+), type \S+$")
+_INSTALLED = re.compile(r"^Installed \S+ \S+ \S+ for (?P<installed_ago>\S+)$")
+
+# One routing descriptor block per installed path. Two line shapes are on
+# disk: a routed next hop ("<ip>, from <ip>, via <interface>[, <role>]") and
+# a directly connected route ("directly connected, via <interface>", seen
+# only on PE4's own loopback). The latter has no next-hop IP and no "from"
+# address to report -- both are recorded as ``None`` and ``next_hop`` carries
+# the literal string "directly connected" instead, which is exactly as
+# stable an identifier across two captures of an unchanged device as a real
+# next-hop IP would be.
+_DESCRIPTOR_BLOCK = re.compile(
+    r"^(?P<next_hop>[^,]+), from (?P<from>[^,]+), via (?P<interface>[^,]+)(?:, (?P<path_role>.+))?$"
+)
+_DIRECTLY_CONNECTED = re.compile(r"^directly connected, via (?P<interface>[^,]+)$")
+_ROUTE_METRIC = re.compile(r"^Route metric is (?P<route_metric>\d+)$")
+
+# Section 0.10 accounting for everything the meta/record extraction above
+# does not itself capture. A handful of rules, each explained, per
+# BUILD-PLAN.md 0.10's instruction against one broad catch-all.
+ROUTE_IGNORES: tuple[IgnoreRule, ...] = (
+    IgnoreRule(r"^Routing Descriptor Blocks$", "descriptor-block section header, not itself a per-path record"),
+    IgnoreRule(
+        r"^No advertising protos\.$",
+        "tail line noting the route is not being re-advertised, not required by the schema",
+    ),
+    IgnoreRule(
+        r"^Repair Node\(s\): \S+$",
+        "TI-LFA repair-node detail for a backup path, not required by the schema",
+    ),
+    IgnoreRule(
+        r"^Redist Advertisers:$",
+        "redistribution-advertiser section header, present only on a locally originated/connected route",
+    ),
+    IgnoreRule(
+        r"^\d+ \(protoid=\d+, clientid=\d+\)$",
+        "redistribution-advertiser detail line (count plus internal protocol/client IDs), not in the schema",
+    ),
+)
+
+_ROUTE_META_KEYS: tuple[str, ...] = (
+    "found",
+    "prefix",
+    "protocol",
+    "distance",
+    "metric",
+    "local_label",
+    "installed_ago",
+    "path_count",
+)
+
+
+def _empty_route_meta() -> dict[str, Any]:
+    """Every key present, ``None`` unless known -- never absent.
+
+    ``path_count`` is the one exception: per the T-013 spec's meta table it
+    is always a count, ``"0"`` when there are no records, never ``None``.
+    """
+
+    meta: dict[str, Any] = dict.fromkeys(_ROUTE_META_KEYS)
+    meta["found"] = False
+    meta["path_count"] = "0"
+    return meta
+
+
+def parse_xr_route(output: str) -> dict[str, Any]:
+    """Parse ``show route <prefix>``.
+
+    Two legitimate shapes -- see the section comment above. Raises
+    :class:`ParseError` only when the output is neither a routing entry nor
+    ``% Network not in table``: genuinely unrecognised output.
+    """
+
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+
+    for line in lines:
+        if _NOT_IN_TABLE.match(line):
+            meta = _empty_route_meta()
+            return finalize(raw=output, meta=meta, records=[], consumed=[line], ignores=ROUTE_IGNORES)
+
+    meta = _empty_route_meta()
+    records: list[dict[str, Any]] = []
+    consumed: list[str] = []
+    current_record: dict[str, Any] | None = None
+    found_entry = False
+
+    for line in lines:
+        if match := _ROUTING_ENTRY.match(line):
+            meta["prefix"] = match["prefix"]
+            found_entry = True
+            consumed.append(line)
+        elif match := _KNOWN_VIA.match(line):
+            meta["protocol"] = match["protocol"]
+            meta["distance"] = match["distance"]
+            meta["metric"] = match["metric"]
+            consumed.append(line)
+        elif match := _LOCAL_LABEL.match(line):
+            meta["local_label"] = match["local_label"]
+            consumed.append(line)
+        elif match := _INSTALLED.match(line):
+            meta["installed_ago"] = match["installed_ago"]
+            consumed.append(line)
+        elif match := _DESCRIPTOR_BLOCK.match(line):
+            current_record = {
+                "next_hop": match["next_hop"],
+                "from": match["from"],
+                "interface": match["interface"],
+                "path_role": match["path_role"],
+                "route_metric": None,
+                "directly_connected": False,
+            }
+            records.append(current_record)
+            consumed.append(line)
+        elif match := _DIRECTLY_CONNECTED.match(line):
+            current_record = {
+                # The sentinel keeps `next_hop` usable as TEMPLATE_RECORD_KEYS'
+                # identity field -- it is as stable across two captures as a
+                # real next-hop address. But it makes the field polymorphic,
+                # and a consumer calling ipaddress.ip_address() on it would
+                # crash. `directly_connected` is the machine-checkable form of
+                # the same fact, so nothing downstream has to string-match a
+                # sentinel to find out what kind of path this is.
+                "next_hop": "directly connected",
+                "from": None,
+                "interface": match["interface"],
+                "path_role": None,
+                "route_metric": None,
+                "directly_connected": True,
+            }
+            records.append(current_record)
+            consumed.append(line)
+        elif (match := _ROUTE_METRIC.match(line)) and current_record is not None:
+            current_record["route_metric"] = match["route_metric"]
+            consumed.append(line)
+
+    if not found_entry:
+        raise ParseError("output is neither a routing entry nor '% Network not in table'")
+
+    meta["found"] = True
+    meta["path_count"] = str(len(records))
+
+    return finalize(raw=output, meta=meta, records=records, consumed=consumed, ignores=ROUTE_IGNORES)
+
+
+# --------------------------------------------------------------------------- #
 # The registry
 # --------------------------------------------------------------------------- #
 
@@ -500,6 +673,7 @@ def parse_xr_bgp_neighbor(output: str) -> dict[str, Any]:
 # intent) shape. A template parser takes the single rendered command's output.
 TEMPLATE_PARSERS: dict[tuple[str, str], Callable[[str], dict[str, Any]]] = {
     ("cisco_xr", "bgp_neighbor"): parse_xr_bgp_neighbor,
+    ("cisco_xr", "route"): parse_xr_route,
 }
 
 # Fields that move on their own between two captures of an unchanged device --
@@ -513,12 +687,18 @@ TEMPLATE_VOLATILE_FIELDS: dict[tuple[str, str], frozenset[str]] = {
     ("cisco_xr", "bgp_neighbor"): frozenset(
         {"up_for", "messages_received", "messages_sent", "last_reset_ago"}
     ),
+    # installed_ago changes on every capture of an unchanged device -- the
+    # same false-diff class CLAUDE.md records from before Phase 2. metric and
+    # distance are deliberately NOT volatile: a change in either is a real
+    # routing event, not noise.
+    ("cisco_xr", "route"): frozenset({"installed_ago"}),
 }
 
 # The field identifying a record across two captures. ``None`` means records
 # are positional and cannot be matched by identity.
 TEMPLATE_RECORD_KEYS: dict[tuple[str, str], str | None] = {
     ("cisco_xr", "bgp_neighbor"): "address_family",
+    ("cisco_xr", "route"): "next_hop",
 }
 
 

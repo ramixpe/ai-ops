@@ -456,3 +456,197 @@ def test_last_reset_without_a_due_to_clause_is_still_consumed():
     assert status is tp.PARSE_OK
     assert parsed["meta"]["unaccounted_lines"] == []
     assert parsed["meta"]["last_reset_ago"] == "1d23h"
+
+
+# --------------------------------------------------------------------------- #
+# T-013: the route parser
+# --------------------------------------------------------------------------- #
+
+_ROUTE_FIXTURES = sorted(FIXTURE_DIR.glob("cisco_xr/*/healthy/show-route-*.txt"))
+
+# Every key the meta table in the T-013 spec requires, present in both shapes
+# (found or not) -- ``None`` rather than absent, except ``path_count`` which
+# is always a count string.
+_ROUTE_META_KEYS = (
+    "found",
+    "prefix",
+    "protocol",
+    "distance",
+    "metric",
+    "local_label",
+    "installed_ago",
+    "path_count",
+)
+
+
+def test_at_least_one_route_fixture_of_each_shape_is_on_disk():
+    """A sanity check on the parametrization source below.
+
+    If this ever fails, the round-trip test below would be silently
+    parametrized over an empty or lopsided list -- worth failing loudly on
+    its own rather than only as a mysteriously-shrunk parametrize count.
+    """
+
+    assert len(_ROUTE_FIXTURES) == 44
+
+
+@pytest.mark.parametrize("fixture_path", _ROUTE_FIXTURES, ids=lambda p: str(p.relative_to(FIXTURE_DIR)))
+def test_every_committed_route_fixture_round_trips_clean(fixture_path: Path):
+    """Section 0.10, pinned against every real fixture on disk.
+
+    Discovered from the filesystem rather than a hardcoded list, so a future
+    ``nettools capture`` run that adds a device or a prefix is covered
+    automatically instead of silently going unchecked.
+    """
+
+    raw = fixture_path.read_text()
+    parsed, status = tp.parse_template_output("cisco_xr", "route", raw)
+    assert status is tp.PARSE_OK, f"{fixture_path}: {status}"
+    assert parsed["meta"]["unaccounted_lines"] == [], f"{fixture_path}: {parsed['meta']['unaccounted_lines']}"
+    assert parsed["meta"]["unparsed_rows"] == 0
+
+
+def test_rr1_route_to_pe1_loopback_yields_two_paths():
+    """RR1 -> 10.255.0.11/32 (PE1): a real, healthy route with two ECMP paths."""
+
+    raw = _load_fixture("cisco_xr", "RR1", "healthy", "show-route-10-255-0-11-32.txt")
+    parsed, status = tp.parse_template_output("cisco_xr", "route", raw)
+    assert status is tp.PARSE_OK
+    meta = parsed["meta"]
+    assert meta["found"] is True
+    assert meta["prefix"] == "10.255.0.11/32"
+    assert meta["protocol"] == "isis CORE"
+    assert meta["distance"] == "115"
+    assert meta["metric"] == "20"
+    assert len(parsed["records"]) == 2
+    assert [r["next_hop"] for r in parsed["records"]] == ["10.0.1.17", "10.0.1.19"]
+    assert [r["interface"] for r in parsed["records"]] == [
+        "GigabitEthernet0/0/0/0",
+        "GigabitEthernet0/0/0/1",
+    ]
+
+
+def test_route_not_found_is_parse_ok_with_empty_records():
+    """'% Network not in table' is the device answering correctly -- never
+    PARSE_FAILED. This is the branch checks.route_present reads."""
+
+    raw = _load_fixture("cisco_xr", "RR1", "healthy", "show-route-192-0-2-1-32.txt")
+    parsed, status = tp.parse_template_output("cisco_xr", "route", raw)
+    assert status is tp.PARSE_OK  # asserted explicitly: this is the crux
+    assert parsed["meta"]["found"] is False
+    assert parsed["records"] == []
+
+
+@pytest.mark.parametrize(
+    "device,fixture",
+    [
+        ("RR1", "show-route-10-255-0-11-32.txt"),
+        ("RR1", "show-route-192-0-2-1-32.txt"),
+        ("PE4", "show-route-10-255-0-14-32.txt"),  # directly connected loopback
+    ],
+)
+def test_every_route_meta_key_is_present_in_every_case(device, fixture):
+    """Every key in the T-013 meta table, present for both shapes -- ``None``
+    rather than absent, so a consumer never has to distinguish 'missing'
+    from 'not applicable'."""
+
+    raw = _load_fixture("cisco_xr", device, "healthy", fixture)
+    parsed, status = tp.parse_template_output("cisco_xr", "route", raw)
+    assert status is tp.PARSE_OK
+    for key in _ROUTE_META_KEYS:
+        assert key in parsed["meta"], f"{device}/{fixture}: missing {key}"
+
+
+def test_route_volatile_fields_include_installed_ago_but_not_metric_or_distance():
+    """The point of the split: a changed metric or distance is a real
+    routing event, but installed_ago moves on every capture regardless."""
+
+    volatile = tp.template_volatile_fields("cisco_xr", "route")
+    assert "installed_ago" in volatile
+    assert "metric" not in volatile
+    assert "distance" not in volatile
+
+
+def test_route_record_key_is_registered():
+    assert tp.template_record_key("cisco_xr", "route") == "next_hop"
+
+
+def test_route_garbage_input_raises_parse_error_and_reports_parse_failed():
+    """Something clearly not route output must not be silently accepted."""
+
+    garbage = "lorem ipsum\nnot a route"
+
+    with pytest.raises(tp.ParseError):
+        tp.parse_xr_route(garbage)
+
+    parsed, status = tp.parse_template_output("cisco_xr", "route", garbage)
+    assert parsed is None
+    assert status is tp.PARSE_FAILED
+
+
+def test_route_truncated_output_does_not_raise_and_still_accounts_cleanly():
+    """The first 4 lines of a real fixture -- cut off right after the
+    "Routing entry for" header, before any descriptor block. Must not raise,
+    and whatever is captured must still satisfy the 0.10 accounting."""
+
+    raw = _load_fixture("cisco_xr", "RR1", "healthy", "show-route-10-255-0-11-32.txt")
+    truncated = "\n".join(raw.splitlines()[:4])
+
+    parsed, status = tp.parse_template_output("cisco_xr", "route", truncated)
+
+    assert status is tp.PARSE_OK
+    assert parsed["meta"]["unaccounted_lines"] == []
+    assert parsed["meta"]["unparsed_rows"] == 0
+    assert parsed["meta"]["found"] is True
+    assert parsed["records"] == []
+
+
+def test_route_unrecognised_line_surfaces_in_unaccounted_lines():
+    """The 0.10 guardrail: a line the template cannot know about must be
+    surfaced, not silently swallowed. Proves the accounting is not
+    decorative."""
+
+    raw = _load_fixture("cisco_xr", "RR1", "healthy", "show-route-10-255-0-11-32.txt")
+    injected = raw.replace(
+        "  No advertising protos. ",
+        "  No advertising protos. \n  Some New Vendor Field: 42",
+    )
+
+    parsed, status = tp.parse_template_output("cisco_xr", "route", injected)
+
+    assert status is tp.PARSE_OK
+    assert parsed["meta"]["unaccounted_lines"] == ["Some New Vendor Field: 42"]
+
+
+def test_a_connected_route_is_machine_checkable_not_string_matched():
+    """`next_hop` is polymorphic for a connected route, so the fact is also
+    exposed as a boolean.
+
+    The sentinel `"directly connected"` keeps next_hop usable as the record
+    identity, but a consumer calling ipaddress.ip_address() on it would crash.
+    `directly_connected` lets downstream code branch on the fact without
+    string-matching a sentinel.
+    """
+
+    raw = (FIXTURE_DIR / "cisco_xr" / "PE4" / "healthy" / "show-route-10-255-0-14-32.txt").read_text()
+    parsed, status = tp.parse_template_output("cisco_xr", "route", raw)
+
+    assert status is tp.PARSE_OK
+    assert len(parsed["records"]) == 1
+    record = parsed["records"][0]
+    assert record["directly_connected"] is True
+    assert record["next_hop"] == "directly connected"
+    assert record["interface"] == "Loopback0"
+
+
+def test_a_normal_route_is_not_flagged_connected():
+    """The other half: the flag must be present and False on ordinary paths,
+    so a consumer never has to distinguish absent from false."""
+
+    raw = (FIXTURE_DIR / "cisco_xr" / "RR1" / "healthy" / "show-route-10-255-0-11-32.txt").read_text()
+    parsed, _status = tp.parse_template_output("cisco_xr", "route", raw)
+
+    assert parsed["records"], "expected descriptor blocks"
+    for record in parsed["records"]:
+        assert record["directly_connected"] is False
+        assert record["next_hop"] != "directly connected"

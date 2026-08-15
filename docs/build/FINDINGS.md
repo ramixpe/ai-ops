@@ -785,6 +785,33 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-042 · T-013 · `route` parser accepted; the fixtures held a third shape nobody had specified
+
+- **Kind:** surprise
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5 (judgement) · sonnet-5 (implementation)
+- **What happened:** All **44** `route` fixtures round-trip with `unaccounted_lines == []`. But the spec I wrote described **two** output shapes and the fixtures contain **three**. Sonnet found the third and reported it rather than quietly bending the schema around it:
+
+  | Shape | Count | Notes |
+  |---|---|---|
+  | `Known via "isis CORE"`, next-hop paths | 40 | the documented case |
+  | `% Network not in table` | 3 | the not-found case, captured deliberately |
+  | **`Known via "local", … (connected)`** | **1** | **unspecified** |
+
+  The third is PE4 looking up **its own loopback**, which resolves to a directly-connected local route: no `Local Label`, no `labeled SR`, and a descriptor block reading `directly connected, via Loopback0` — **no next-hop address and no `from` address at all**. My spec asserted a record schema (`next_hop`, `from`, …) that this line cannot populate.
+
+  I had actually walked past this. When I surveyed the fixtures for the spec I grouped them by *line 4* and got a single shape, `Routing entry for N.N.N.N/N` — which is identical across all three cases. **The survey was too shallow and I wrote the spec on it.** One fixture in 44 disagreed, and only a parser forced to account for every line found it.
+- **Evidence:** `tests/fixtures/cisco_xr/PE4/healthy/show-route-10-255-0-14-32.txt`. Verified after the fix: `found=True protocol='local' distance=0 metric=0 paths=1`, record `{"next_hop": "directly connected", "from": null, "interface": "Loopback0", "directly_connected": true}`, `unaccounted_lines == []`.
+- **What I did:** Accepted Sonnet's `next_hop="directly connected"` sentinel — its reasoning is right that the string is exactly as stable an identity across two captures as a real address, so `TEMPLATE_RECORD_KEYS`'s `next_hop` role is not compromised. **But a sentinel alone was not good enough**: it makes the field polymorphic, and a consumer calling `ipaddress.ip_address(record["next_hop"])` would crash on it. Added `directly_connected: bool` to **every** record — `True` here, `False` on ordinary paths — so downstream code branches on a boolean instead of string-matching a sentinel, and never has to distinguish "absent" from "false". Two tests pin both directions.
+
+  Only 5 `IgnoreRule`s were needed against `bgp_neighbor`'s 48, which is proportionate: `show route` is a dozen lines, not 150. Re-ran the §0.10 mutation myself — an injected vendor line surfaces as unaccounted.
+
+  **The lesson worth keeping is about my spec, not the parser.** Grouping 44 files by one line and concluding "all the same shape" was a cheap check that produced a confident wrong answer. §0.10 is what caught it — a parser that may not ignore anything undeclared cannot walk past an unfamiliar line. That is the mechanism doing exactly the job OBS-030 argued for, on its second outing.
+- **Needs human review:** no
+- **Blocks:** none — unblocks T-014.
+
+---
+
 <!--
 Copy this block for each new entry.
 
