@@ -26,7 +26,7 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 | Baseline test count | **550 passed, 4 skipped, 0 failed** (554 total; the 4 are `live_lab`, skipped by default) |
 | Run started | 2026-08-15 |
 | Last updated | 2026-08-15 |
-| Current task | T-003 |
+| Current task | T-004 |
 | Halted? | no |
 
 **Baseline environment (T-001).** Python 3.13.11 · Linux 6.8.0-136 x86_64 · ruff 0.16.3 · pytest 9.1.1 · 63 pip packages · `agent-nettools` 0.2.0 · repo at `/home/rami/ai-agent-ops/ios-xr-nettools`. CI pins Python 3.11 — see OBS-004.
@@ -41,7 +41,7 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 |------|-------|--------|-------|--------|----------|-------|
 | T-001 | Baseline verification | DONE | opus-5 | `f309322` | OBS-003, OBS-004 | Green: 550 passed / 4 skipped / lint clean |
 | T-002 | MiniMax API contract test | DONE | opus-5 | `f1ecb55` | OBS-005…008 | **Q-001 resolved**: `reasoning_split` works, no stripping step. 5/5 deterministic; tool calling available |
-| T-003 | Wire MiniMax as a provider | TODO | sonnet-5 | | | |
+| T-003 | Wire MiniMax as a provider | DONE | sonnet-5 (opus-5 spec + review) | _next commit_ | OBS-010…012 | Responses API, not chat/completions — see Q-010. 567 passed |
 | T-004 | Loki discovery | TODO | opus-5 | | | Q-002, non-blocking |
 | T-005 | Alertmanager / Prometheus discovery | TODO | opus-5 | | | Q-003, non-blocking |
 | T-006 | L3VPN discovery | TODO | opus-5 | | | Q-004 |
@@ -134,4 +134,4 @@ One row per working session, so elapsed effort is visible without reading git.
 
 | Date | Tasks attempted | Tasks completed | Halted? | Notes |
 |------|-----------------|-----------------|---------|-------|
-| 2026-08-15 | T-001, T-002 | T-001, T-002 | no | Required reading done; OBS-001/OBS-002 logged for the pre-plan install gap; baseline green; MiniMax contract verified and Q-001 resolved |
+| 2026-08-15 | T-001…T-003 | T-001, T-002, T-003 | no | Required reading done; OBS-001/OBS-002 logged for the pre-plan install gap; baseline green; MiniMax contract verified and Q-001 resolved; MiniMax provider wired (567 tests) |

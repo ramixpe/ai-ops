@@ -323,7 +323,7 @@ Print, for each check: PASS / FAIL / INFO, plus the raw evidence (truncated to 2
 
 ---
 
-## T-003 · Wire MiniMax as a provider `[STATUS: TODO]`
+## T-003 · Wire MiniMax as a provider `[STATUS: DONE]`
 
 **Goal.** Make MiniMax selectable through the existing provider mechanism without touching the other providers.
 

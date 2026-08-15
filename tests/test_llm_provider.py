@@ -5,8 +5,14 @@ import pytest
 
 from agent_nettools.llm_analysis import (
     ANTHROPIC_MAX_OUTPUT_TOKENS,
+    MAX_OUTPUT_TOKENS,
+    MINIMAX_BASE_URL_DEFAULT,
+    MINIMAX_MODEL_DEFAULT,
+    TRUNCATION_NOTICE,
     LLMAnalysisError,
     analyze_with_anthropic,
+    analyze_with_minimax,
+    analyze_with_openai,
     get_provider,
 )
 
@@ -51,6 +57,38 @@ def test_provider_ollama_selected_without_api_key(monkeypatch):
 def test_unsupported_error_lists_ollama(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "offline")
     with pytest.raises(ValueError, match="ollama"):
+        get_provider()
+
+
+def test_provider_minimax_selected_with_api_key(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "minimax")
+    monkeypatch.setenv("MINIMAX_API_KEY", "test-minimax")
+    assert get_provider() == "minimax"
+
+
+def test_provider_minimax_requires_a_key(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "minimax")
+    monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="MINIMAX_API_KEY is required"):
+        get_provider()
+
+
+def test_provider_auto_never_selects_minimax(monkeypatch):
+    """Guardrail for the constraint that LLM_PROVIDER=auto must never pick
+    minimax -- this must fail if minimax is ever added to the auto chain."""
+
+    monkeypatch.setenv("LLM_PROVIDER", "auto")
+    monkeypatch.setenv("MINIMAX_API_KEY", "test-minimax")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    with pytest.raises(ValueError, match="No LLM API key"):
+        get_provider()
+
+
+def test_unsupported_error_lists_minimax(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "offline")
+    with pytest.raises(ValueError, match="minimax"):
         get_provider()
 
 
@@ -288,3 +326,214 @@ def test_anthropic_fallbacks_not_requested_for_non_opus_5_model(monkeypatch):
     analyze_with_anthropic({"device": "PE1"})
 
     assert "fallbacks" not in calls[0]
+
+
+# --------------------------------------------------------------------------- #
+# OpenAI-Responses-API-compatible fake module, shared by the plain OpenAI
+# regression guard and the MiniMax tests below (MiniMax reuses _openai_call).
+# --------------------------------------------------------------------------- #
+
+
+class FakeOpenAIAPIStatusError(Exception):
+    """Stand-in for openai.APIStatusError, which carries status_code/message."""
+
+    def __init__(self, message="upstream failure", status_code=500):
+        super().__init__(message)
+        self.message = message
+        self.status_code = status_code
+
+
+class FakeOpenAIAPIConnectionError(Exception):
+    pass
+
+
+def install_fake_openai(monkeypatch, respond, *, captured_client=None, captured_calls=None):
+    """Install a fake openai module whose ``responses.create(...)`` calls
+    ``respond(**kwargs)`` to get a response (or let it raise).
+
+    If ``captured_client`` is a list, every ``openai.OpenAI(**kwargs)``
+    constructor call's kwargs are appended to it. If ``captured_calls`` is a
+    list, every ``responses.create(**kwargs)`` call's kwargs are appended to
+    it. This mirrors ``install_fake_anthropic`` above.
+    """
+
+    module = types.ModuleType("openai")
+    module.APIStatusError = FakeOpenAIAPIStatusError
+    module.AuthenticationError = type("AuthenticationError", (FakeOpenAIAPIStatusError,), {})
+    module.NotFoundError = type("NotFoundError", (FakeOpenAIAPIStatusError,), {})
+    module.RateLimitError = type("RateLimitError", (FakeOpenAIAPIStatusError,), {})
+    module.APIConnectionError = FakeOpenAIAPIConnectionError
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            if captured_calls is not None:
+                captured_calls.append(kwargs)
+            return respond(**kwargs)
+
+    class FakeOpenAIClient:
+        def __init__(self, **kwargs):
+            if captured_client is not None:
+                captured_client.append(kwargs)
+            self.responses = FakeResponses()
+
+    module.OpenAI = FakeOpenAIClient
+    monkeypatch.setitem(sys.modules, "openai", module)
+    return module
+
+
+def fake_openai_response(text, *, incomplete_reason=None):
+    incomplete_details = (
+        types.SimpleNamespace(reason=incomplete_reason) if incomplete_reason else None
+    )
+    return types.SimpleNamespace(output_text=text, incomplete_details=incomplete_details)
+
+
+def test_default_openai_call_constructs_client_with_no_base_url_kwarg(monkeypatch):
+    """Regression guard for the plain OpenAI path: with no keyword arguments,
+    the client constructor call must carry no ``base_url`` key at all (not
+    even ``base_url=None``), so the SDK's own default applies exactly as
+    before MiniMax support was added."""
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    monkeypatch.delenv("OPENAI_MODEL", raising=False)
+    client_calls = []
+    install_fake_openai(
+        monkeypatch,
+        lambda **kwargs: fake_openai_response("ok"),
+        captured_client=client_calls,
+    )
+
+    analysis = analyze_with_openai({"device": "PE1"})
+
+    assert "base_url" not in client_calls[0]
+    assert client_calls[0]["api_key"] == "test-openai-key"
+    assert analysis == "ok"
+
+
+def test_analyze_with_minimax_wires_the_client_correctly(monkeypatch):
+    monkeypatch.setenv("MINIMAX_API_KEY", "test-minimax-key")
+    monkeypatch.delenv("MINIMAX_BASE_URL", raising=False)
+    monkeypatch.delenv("MINIMAX_MODEL", raising=False)
+    client_calls = []
+    create_calls = []
+    install_fake_openai(
+        monkeypatch,
+        lambda **kwargs: fake_openai_response("## Summary\nAll neighbours are up."),
+        captured_client=client_calls,
+        captured_calls=create_calls,
+    )
+
+    analysis = analyze_with_minimax({"device": "PE1"})
+
+    assert client_calls[0]["base_url"] == MINIMAX_BASE_URL_DEFAULT
+    assert client_calls[0]["api_key"] == "test-minimax-key"
+    assert create_calls[0]["model"] == MINIMAX_MODEL_DEFAULT
+    assert create_calls[0]["max_output_tokens"] == MAX_OUTPUT_TOKENS
+    assert analysis == "## Summary\nAll neighbours are up."
+
+
+def test_minimax_base_url_and_model_overrides_are_honoured(monkeypatch):
+    monkeypatch.setenv("MINIMAX_API_KEY", "test-minimax-key")
+    monkeypatch.setenv("MINIMAX_BASE_URL", "https://custom.minimax.example/v1")
+    monkeypatch.setenv("MINIMAX_MODEL", "MiniMax-Custom")
+    client_calls = []
+    create_calls = []
+    install_fake_openai(
+        monkeypatch,
+        lambda **kwargs: fake_openai_response("ok"),
+        captured_client=client_calls,
+        captured_calls=create_calls,
+    )
+
+    analyze_with_minimax({"device": "PE1"})
+
+    assert client_calls[0]["base_url"] == "https://custom.minimax.example/v1"
+    assert create_calls[0]["model"] == "MiniMax-Custom"
+
+
+def test_minimax_flags_a_truncated_analysis(monkeypatch):
+    monkeypatch.setenv("MINIMAX_API_KEY", "test-minimax-key")
+    install_fake_openai(
+        monkeypatch,
+        lambda **kwargs: fake_openai_response(
+            "## Summary\nPartial", incomplete_reason="max_output_tokens"
+        ),
+    )
+
+    analysis = analyze_with_minimax({"device": "PE1"})
+
+    assert analysis.endswith(TRUNCATION_NOTICE)
+
+
+def test_minimax_auth_error_names_minimax_api_key(monkeypatch):
+    """The error wording must reflect the actual provider -- a MiniMax
+    failure must not tell the operator to check OPENAI_API_KEY."""
+
+    monkeypatch.setenv("MINIMAX_API_KEY", "test-minimax-key")
+
+    def raising_respond(**kwargs):
+        raise sys.modules["openai"].AuthenticationError("bad key")
+
+    install_fake_openai(monkeypatch, raising_respond)
+
+    with pytest.raises(LLMAnalysisError, match="MINIMAX_API_KEY was rejected"):
+        analyze_with_minimax({"device": "PE1"})
+
+
+@pytest.mark.parametrize(
+    ("error_name", "expected"),
+    [
+        ("NotFoundError", "Unknown MiniMax model"),
+        ("RateLimitError", "Rate limited by the MiniMax API"),
+        ("APIStatusError", "MiniMax API error"),
+        ("APIConnectionError", "Could not reach the MiniMax API"),
+    ],
+)
+def test_minimax_errors_name_minimax_not_openai(monkeypatch, error_name, expected):
+    """Every failure path must name the endpoint that actually failed.
+
+    Telling an operator "Could not reach the OpenAI API" when MiniMax is down
+    sends them to the wrong service and the wrong credential. The auth path is
+    covered separately above; these are the other four.
+    """
+
+    monkeypatch.setenv("MINIMAX_API_KEY", "test-minimax-key")
+
+    def raising_respond(**kwargs):
+        raise getattr(sys.modules["openai"], error_name)("upstream failure")
+
+    install_fake_openai(monkeypatch, raising_respond)
+
+    with pytest.raises(LLMAnalysisError, match=expected):
+        analyze_with_minimax({"device": "PE1"})
+    # The OpenAI provider's own wording must be unchanged by the same code.
+    with pytest.raises(LLMAnalysisError) as caught:
+        analyze_with_minimax({"device": "PE1"})
+    assert "OpenAI" not in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    ("error_name", "expected"),
+    [
+        ("NotFoundError", "Unknown OpenAI model"),
+        ("RateLimitError", "Rate limited by the OpenAI API"),
+        ("APIStatusError", "OpenAI API error"),
+        ("APIConnectionError", "Could not reach the OpenAI API"),
+    ],
+)
+def test_openai_error_wording_is_unchanged_by_the_minimax_parameterisation(
+    monkeypatch, error_name, expected
+):
+    """The other half of the guard above: parameterising the provider label
+    must not have altered a single word the plain OpenAI path emits."""
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    monkeypatch.delenv("OPENAI_MODEL", raising=False)
+
+    def raising_respond(**kwargs):
+        raise getattr(sys.modules["openai"], error_name)("upstream failure")
+
+    install_fake_openai(monkeypatch, raising_respond)
+
+    with pytest.raises(LLMAnalysisError, match=expected):
+        analyze_with_openai({"device": "PE1"})

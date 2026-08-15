@@ -55,6 +55,18 @@ other model uses the plain, non-beta streaming path. A network-troubleshooting
 prompt can plausibly trip a cyber-content classifier even though nothing
 here is actually malicious, so ``stop_reason == "refusal"`` is always handled;
 ``stop_details`` is read only in that branch -- it is ``null`` otherwise.
+
+**MiniMax.** Verified live against the real API: MiniMax serves the OpenAI
+Responses API at ``https://api.minimax.io/v1``, so ``analyze_with_minimax``
+reuses ``_openai_call`` (parameterised with ``api_key_env``/``base_url``/
+``model``/``model_env``/``model_default``) instead of adding a fourth client
+-- there is nothing provider-specific left to write once the base URL and
+model name are swapped. It is explicit-only: ``LLM_PROVIDER=minimax`` must be
+set directly, exactly like ``ollama`` -- ``auto`` never selects it. Reasoning
+is already structurally separated from the answer on the Responses API route
+(there is no ``<think>`` block mixed into ``output_text`` the way a raw
+chat-completions call to a reasoning model might produce), so no extra
+stripping step is needed here.
 """
 
 from __future__ import annotations
@@ -63,7 +75,7 @@ import json
 import os
 from typing import Any, Literal
 
-Provider = Literal["anthropic", "openai", "ollama"]
+Provider = Literal["anthropic", "openai", "ollama", "minimax"]
 
 # Generous ceiling so a full four-section analysis is never cut off on the
 # non-Anthropic paths, which have no thinking budget to share with. You are
@@ -77,6 +89,11 @@ ANTHROPIC_MAX_OUTPUT_TOKENS = 32000
 # Applies only when ANTHROPIC_MODEL is unset; this repo's own .env pins an
 # older model on purpose, which is unaffected by this default.
 ANTHROPIC_MODEL_DEFAULT = "claude-opus-5"
+
+# MiniMax serves the OpenAI Responses API -- see the module docstring. These
+# apply only when MINIMAX_BASE_URL/MINIMAX_MODEL are unset.
+MINIMAX_BASE_URL_DEFAULT = "https://api.minimax.io/v1"
+MINIMAX_MODEL_DEFAULT = "MiniMax-M3"
 
 TRUNCATION_NOTICE = (
     "\n\n[Analysis truncated: the model hit the output token limit. "
@@ -143,12 +160,16 @@ def get_provider() -> Provider:
     LLM_PROVIDER may be one of:
     - anthropic
     - openai
+    - minimax
     - ollama
     - auto
 
     auto picks Anthropic first when ANTHROPIC_API_KEY exists, then OpenAI when
-    OPENAI_API_KEY exists. Ollama is local and keyless, so it must be selected
-    explicitly with LLM_PROVIDER=ollama. A clear error is raised when the
+    OPENAI_API_KEY exists. Ollama is local and keyless, and minimax is a
+    separate BYOK provider reusing the OpenAI Responses API plumbing (see the
+    module docstring) -- like ollama, minimax is never chosen by auto, and
+    must be selected explicitly with LLM_PROVIDER=ollama or
+    LLM_PROVIDER=minimax respectively. A clear error is raised when the
     selected cloud provider has no API key.
     """
 
@@ -162,10 +183,14 @@ def get_provider() -> Provider:
         if not os.getenv("OPENAI_API_KEY"):
             raise ValueError("OPENAI_API_KEY is required when LLM_PROVIDER=openai.")
         return "openai"
+    if requested == "minimax":
+        if not os.getenv("MINIMAX_API_KEY"):
+            raise ValueError("MINIMAX_API_KEY is required when LLM_PROVIDER=minimax.")
+        return "minimax"
     if requested == "ollama":
         return "ollama"
     if requested != "auto":
-        raise ValueError("LLM_PROVIDER must be 'auto', 'anthropic', 'openai', or 'ollama'.")
+        raise ValueError("LLM_PROVIDER must be 'auto', 'anthropic', 'openai', 'minimax', or 'ollama'.")
 
     if os.getenv("ANTHROPIC_API_KEY"):
         return "anthropic"
@@ -173,7 +198,8 @@ def get_provider() -> Provider:
         return "openai"
     raise ValueError(
         "No LLM API key is configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY, "
-        "or set LLM_PROVIDER=ollama to use a local Ollama model."
+        "or set LLM_PROVIDER=ollama or LLM_PROVIDER=minimax to use a local "
+        "Ollama model or MiniMax."
     )
 
 
@@ -333,35 +359,64 @@ def analyze_with_anthropic(evidence: dict[str, Any]) -> str:
     return analysis
 
 
-def _openai_call(prompt: str) -> str:
-    """Send one prompt string to OpenAI's Responses API and return the text.
+def _openai_call(
+    prompt: str,
+    *,
+    api_key_env: str = "OPENAI_API_KEY",
+    base_url: str | None = None,
+    model: str | None = None,
+    model_env: str = "OPENAI_MODEL",
+    model_default: str = "gpt-5.5",
+    provider_label: str = "OpenAI",
+) -> str:
+    """Send one prompt string to an OpenAI-Responses-API-compatible endpoint.
 
     Factored out of ``analyze_with_openai`` so ``fabric_analysis.py`` can send
     a differently-built prompt (cross-device correlation, not single-device
-    evidence) through the same provider plumbing.
+    evidence) through the same provider plumbing. Also reused, parameterised,
+    by ``analyze_with_minimax`` -- MiniMax serves this same Responses API, so
+    only ``api_key_env``/``base_url``/``model``/``model_env``/``model_default``/
+    ``provider_label`` need to change (see the module docstring); with no
+    keyword arguments this behaves exactly as the plain OpenAI path always
+    has, including omitting ``base_url`` entirely from the client constructor
+    call so the SDK's own default applies.
+
+    ``provider_label`` exists so a failure names the endpoint that actually
+    failed. Every message here reaches an operator who is deciding where to
+    look, and "Could not reach the OpenAI API" when MiniMax is unreachable
+    sends them to the wrong service and the wrong credential -- the same
+    class of misattribution this package already avoids by formatting per-
+    command errors as ``"<command>: <detail>"``.
     """
 
     import openai
 
-    client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-    model = os.getenv("OPENAI_MODEL", "gpt-5.5")
+    client_kwargs: dict[str, Any] = {"api_key": os.getenv(api_key_env)}
+    if base_url is not None:
+        client_kwargs["base_url"] = base_url
+    client = openai.OpenAI(**client_kwargs)
+    resolved_model = model if model is not None else os.getenv(model_env, model_default)
 
     try:
         response = client.responses.create(
-            model=model,
+            model=resolved_model,
             input=prompt,
             max_output_tokens=MAX_OUTPUT_TOKENS,
         )
     except openai.AuthenticationError as exc:
-        raise LLMAnalysisError("OPENAI_API_KEY was rejected. Check the key in .env.") from exc
+        raise LLMAnalysisError(f"{api_key_env} was rejected. Check the key in .env.") from exc
     except openai.NotFoundError as exc:
-        raise LLMAnalysisError(f"Unknown OpenAI model: {model}. Check OPENAI_MODEL.") from exc
+        raise LLMAnalysisError(
+            f"Unknown {provider_label} model: {resolved_model}. Check {model_env}."
+        ) from exc
     except openai.RateLimitError as exc:
-        raise LLMAnalysisError("Rate limited by the OpenAI API. Retry shortly.") from exc
+        raise LLMAnalysisError(f"Rate limited by the {provider_label} API. Retry shortly.") from exc
     except openai.APIStatusError as exc:
-        raise LLMAnalysisError(f"OpenAI API error {exc.status_code}: {exc.message}") from exc
+        raise LLMAnalysisError(
+            f"{provider_label} API error {exc.status_code}: {exc.message}"
+        ) from exc
     except openai.APIConnectionError as exc:
-        raise LLMAnalysisError(f"Could not reach the OpenAI API: {exc}") from exc
+        raise LLMAnalysisError(f"Could not reach the {provider_label} API: {exc}") from exc
 
     analysis = response.output_text
     incomplete = getattr(response, "incomplete_details", None)
@@ -375,6 +430,36 @@ def analyze_with_openai(evidence: dict[str, Any]) -> str:
     """Analyze evidence with OpenAI Responses API."""
 
     return _openai_call(build_analysis_prompt(evidence))
+
+
+def _minimax_call_kwargs() -> dict[str, Any]:
+    """Keyword arguments routing ``_openai_call`` at the MiniMax endpoint.
+
+    Shared by ``analyze_with_minimax`` here and ``fabric_analysis.py`` so the
+    MiniMax argument set is defined exactly once.
+    """
+
+    return {
+        "api_key_env": "MINIMAX_API_KEY",
+        "base_url": os.getenv("MINIMAX_BASE_URL", MINIMAX_BASE_URL_DEFAULT),
+        "model_env": "MINIMAX_MODEL",
+        "model_default": MINIMAX_MODEL_DEFAULT,
+        "provider_label": "MiniMax",
+    }
+
+
+def analyze_with_minimax(evidence: dict[str, Any]) -> str:
+    """Analyze evidence with MiniMax, over the OpenAI Responses API.
+
+    MiniMax implements the OpenAI Responses API (verified live at
+    ``https://api.minimax.io/v1``), so this reuses ``_openai_call`` rather
+    than adding a fourth client -- see the module docstring. Reasoning is
+    already structurally separated from the answer on this route (there is
+    no ``<think>`` block mixed into ``output_text``), so no stripping step is
+    needed here.
+    """
+
+    return _openai_call(build_analysis_prompt(evidence), **_minimax_call_kwargs())
 
 
 def _ollama_call(prompt: str) -> str:
@@ -449,4 +534,6 @@ def analyze_evidence(evidence: dict[str, Any]) -> str:
         return analyze_with_anthropic(evidence)
     if provider == "ollama":
         return analyze_with_ollama(evidence)
+    if provider == "minimax":
+        return analyze_with_minimax(evidence)
     return analyze_with_openai(evidence)

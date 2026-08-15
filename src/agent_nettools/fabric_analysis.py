@@ -32,6 +32,7 @@ from .llm_analysis import (
     TRUNCATION_NOTICE,
     LLMAnalysisError,
     _call_anthropic_or_raise,
+    _minimax_call_kwargs,
     _ollama_call,
     _openai_call,
     get_provider,
@@ -175,6 +176,10 @@ def analyze_fabric(
         analysis = _analyze_fabric_with_anthropic(user_content)
     elif provider == "ollama":
         analysis = _ollama_call(f"{FABRIC_ANALYSIS_PROMPT}\n\n{user_content}")
+    elif provider == "minimax":
+        analysis = _openai_call(
+            f"{FABRIC_ANALYSIS_PROMPT}\n\n{user_content}", **_minimax_call_kwargs()
+        )
     else:
         analysis = _openai_call(f"{FABRIC_ANALYSIS_PROMPT}\n\n{user_content}")
 
