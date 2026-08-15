@@ -58,7 +58,7 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 | T-011 | Extend capture to templates | **PARTIAL** | opus-5 | `24fc1f4`, `2fd50bf`, `f8c5a9a` | OBS-034…039 | `run_templates` batching done; **`healthy` captured+verified (217 files)**. `broken` NOT captured — one uplink does not isolate PE2 (Q-016) |
 | T-012 | `bgp_neighbor` parser | DONE | sonnet-5 (opus-5 spec + review) | `5360adc` | OBS-040, OBS-041 | 41 fixtures round-trip, unaccounted=[]. §0.10 verified by mutation. 662 passed |
 | T-013 | `route` parser | DONE | sonnet-5 (opus-5 spec + review) | `d690246` | OBS-042 | 44 fixtures; a third output shape found that the spec missed. 719 passed |
-| T-014 | `interface` parser | DONE | sonnet-5 (opus-5 spec + review) | _next commit_ | OBS-043, OBS-044 | 45 fixtures, 3 shapes. Line-down omits error counters — binds T-020. 776 passed |
+| T-014 | `interface` parser | DONE | sonnet-5 (opus-5 spec + review) | `04a0bf1` | OBS-043, OBS-044 | 45 fixtures, 3 shapes. Line-down omits error counters — binds T-020. 776 passed |
 | T-015 | `logging` parser | TODO | sonnet-5 | | | mnemonic field — Stage 2 |
 | T-016 | `ping` parser | TODO | sonnet-5 | | | §0.10 completeness |
 | T-017 | `traceroute` parser | TODO | sonnet-5 | | | §0.10 completeness |
