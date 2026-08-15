@@ -406,7 +406,7 @@ Print, for each check: PASS / FAIL / INFO, plus the raw evidence (truncated to 2
 
 ---
 
-## T-007 · Fixture gap analysis `[STATUS: TODO]`
+## T-007 · Fixture gap analysis `[STATUS: DONE]`
 
 **Goal.** Determine exactly which command outputs are missing for the descent to run offline.
 

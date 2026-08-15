@@ -467,6 +467,45 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-026 · T-007 · Two of five `bgp_session` rungs cannot run at all today
+
+- **Kind:** surprise
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** 126 fixture files exist — 9 devices × 2 labels × 7 files, verified perfectly uniform. **Not one is template output.** `PLATFORM_TEMPLATES` holds six templates and none has a fixture. Mapped against T-023's ladder for `RR1 → 10.255.0.12`, rung 2 (`transport`, `show bgp neighbor 10.255.0.12`) and rung 3 (`route_to_peer`, `show route 10.255.0.12/32`) are **pure template reads with no fixture and no parser**, and rung 5's `interface` template is missing too. Only rung 1 is fully covered by what exists.
+- **Evidence:** `docs/build/capture-manifest.md` §1–§2. Every command in the manifest was verified renderable by calling the real `render_command('cisco_xr', ...)`, and every filename by the real `command_slug` — so the manifest is executable, not aspirational.
+- **What I did:** Wrote the manifest. The one judgement worth recording: **it deliberately over-captures.** Rungs 4 and 5 have no unambiguous device (Q-013/OBS-020), so rather than block on that decision, the manifest captures **every template on all nine devices**. Capture is per-device anyway, so this costs one extra command per device per template and makes the fixture set correct under *every* candidate answer to Q-013. The asymmetry is what decides it: under-capturing means discovering at T-024 that the walker needs output nobody recorded, and `broken` cannot be recaptured without another operator break window. Over-capturing costs a few kilobytes.
+- **Needs human review:** no
+- **Blocks:** none — T-011 now has an executable manifest.
+
+---
+
+## OBS-027 · T-007 · `nettools capture` cannot capture templates, but the read path already can
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** T-007 step 5 asks whether capture can be extended or needs new code. **New code — but much less than expected.** The read/replay half already works untouched: `command_slug` is generic over any command string and produces correct names for rendered template commands (including a `/32` in a prefix and slashes in an interface name); `fixture_path` keys on the *command*, not an intent; and **`run_template()` already accepts `sender=`**, so template fixtures will replay through the existing seam the moment the files exist. What is missing is only the write half — `capture_device()` iterates `collect_evidence()`, which runs static intents only, and there is no code path that runs a template during capture.
+- **Evidence:** `docs/build/capture-manifest.md` §6. `network_tools.py:657` (`run_template`'s `sender=` parameter). `fixtures.py` `capture_device` / `fixture_path` / `command_slug`.
+- **What I did:** Scoped T-011 to four narrow additions — a manifest structure, a capture loop over `run_template` writing through the *existing* `fixture_path`/`scrub_output` pipeline, template selection on the CLI, and honest partial-capture reporting. **Flagged one real hazard for that task:** `capture_device` deliberately uses `collect_evidence` because it is *one SSH session for all seven commands* — IOS-XR rate-limits repeated logins. A naive per-template loop would open 13–16 sessions per device across 9 devices, twice. That is precisely the login pattern the existing design avoids, and it is very likely the source of the `%SECURITY-SSHD_SYSLOG_PRX` churn measured in OBS-014. T-011 should reuse one session per device, and must be measured before it is pointed at the one-shot `broken` window.
+- **Needs human review:** no
+- **Blocks:** none — T-011 is specified.
+
+---
+
+## OBS-028 · T-007 · The `interface` flow's rungs are never specified by the plan
+
+- **Kind:** assumption-wrong
+- **Escalation:** NOTE
+- **Model:** opus-5
+- **What happened:** T-022 requires `interface` to be implemented alongside `bgp_session`, and T-007 step 3 asks me to enumerate the commands its descent needs. But **the plan never defines the `interface` flow's rungs.** T-023 spells out `bgp_session`'s five in full; there is no equivalent anywhere for `interface`, in `BUILD-PLAN.md` or the LLD.
+- **Evidence:** `BUILD-PLAN.md` T-022 ("Implement `bgp_session` and `interface` only") against T-023, which covers only `bgp_session`. LLD §5.3 lists the flow registry but details only the BGP descent.
+- **What I did:** Recorded what the flow *can* read — `show interfaces brief` from the `interfaces` intent for admin/line state, and `show interfaces <name>` from the `interface` template for counters, MTU, description and bandwidth (which is what `interface_state`'s Q-005 error-counter threshold needs) — and captured fixtures for both, so T-022 is not constrained by missing data whichever shape it picks. **Explicitly marking this as inference rather than specification**, so nobody later reads the manifest as if the flow were already defined. T-022 must settle the rungs; the fixtures will already be there.
+- **Needs human review:** no
+- **Blocks:** none. T-022 must define what T-023 defined for `bgp_session`.
+
+---
+
 <!--
 Copy this block for each new entry.
 
