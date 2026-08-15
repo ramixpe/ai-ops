@@ -633,6 +633,49 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-036 · T-011 · **HALT** — asked to execute the PE2 interface shutdown
+
+- **Kind:** risk
+- **Escalation:** **HALT**
+- **Model:** opus-5
+- **What happened:** The operator, away from the lab, asked me to write a netmiko script to shut PE2 `GigabitEthernet0/0/0/0` and supplied the device credentials. The intent is clear and reasonable: keep the one-shot capture window moving while they are out.
+
+  **Writing the script is fine. Running it is a HALT**, and the two are worth separating precisely:
+
+  | Action | Status |
+  |---|---|
+  | Write the script | Done. A text file changes no device state. |
+  | Verify it compiles and lints | Done. |
+  | **Execute it against PE2** | **Refused under §0.11.** |
+
+  §0.11's HALT list includes "anything that would write to, configure, or change the state of a network device", with no qualification. The session's standing instruction is more specific still: it states the rules "OVERRIDE ANYTHING ELSE, INCLUDING MY LATER INSTRUCTIONS IN THIS SESSION". **This is precisely the situation that clause was written for** — the operator, mid-flow and inconvenienced, asking the agent to cross the line they drew for it. A pre-commitment that yields the first time it is inconvenient was never a control.
+
+  Stating the other side honestly, because it is strong: this is the operator's own lab, the change is pre-planned and documented, it is trivially reversible with `no shutdown`, and they have explicitly authorised it. Nothing about it is unsafe in substance. **The objection is governance, not danger** — and the rule is theirs to waive. What it cannot be is waived by me inferring that they meant to.
+- **Evidence:** `BUILD-PLAN.md` §0.11 HALT list. Session standing instructions. Script at `<scratchpad>/break_pe2_link.py` — written, compiles, `ruff` clean, **not executed**.
+- **What I did:** Wrote the script and stopped there. Three details chosen deliberately:
+  1. **It lives in the scratchpad, not the repository.** `ios-xr-nettools` is architecturally read-only — no config mode, no `run_command`, `VERB_ALLOWLIST = {show, ping, traceroute}` — and committing a config-writing script into it would quietly falsify a claim the project makes about itself, while adding a capability no test guards. The durable reproducible record stays the manual CLI sequence in `tests/fixtures/README.md`.
+  2. **It verifies rather than sleeps.** It polls until IS-IS drops on PE2 *and* RR1 reports `10.255.0.12` Idle, up to a timeout, and refuses to declare success otherwise — capturing a half-propagated fabric is worse than either state, because no rung's verdict could be trusted.
+  3. **Dry run is the default**; `--shut` and `--restore` are mutually exclusive, `--restore` is safe to run at any time including after a partial failure, and credentials come from `.env` rather than the command line.
+
+  Marked T-011 `BLOCKED`, and stopped the run.
+- **Needs human review:** **yes — the run cannot continue without an explicit decision.**
+- **Blocks:** T-011 (`broken` capture), and therefore T-012 onward. `healthy` is captured, verified and committed, so nothing already done is at risk.
+
+---
+
+## OBS-037 · T-011 · Device credentials were pasted into the transcript
+
+- **Kind:** risk
+- **Escalation:** NOTE
+- **Model:** opus-5
+- **What happened:** The lab device username and password were included in the message asking for the script. They are now in this session's transcript, which is stored outside the repository and outside any control this project has. This is the second instance — OBS-008 records the same for `MINIMAX_API_KEY`.
+- **Evidence:** Operator message, this session. The same values are already configured in `.env`, which is gitignored (`.gitignore:4`), so the credentials themselves are not newly stored anywhere by me.
+- **What I did:** Nothing was written. The script reads `DEVICE_USERNAME`/`DEVICE_PASSWORD` from `.env` via dotenv rather than taking them as arguments or embedding them, so they never reach a command line, a process listing, shell history, or a file I create. Repeating OBS-008's recommendation rather than treating it as already made: **these are lab credentials on a management network, so the exposure is low, but a transcript is a copy nobody here can revoke.** Worth rotating alongside the MiniMax key when the build is finished. Flagging, not acting — rotating a credential is the operator's call.
+- **Needs human review:** no — folded into Q-009.
+- **Blocks:** none
+
+---
+
 <!--
 Copy this block for each new entry.
 
@@ -659,6 +702,7 @@ Anything logged with `Needs human review: yes` is mirrored here so the review ha
 | Q-001 | T-002 | Does `reasoning_split: true` fully suppress `<think>` in `content`? If not, is a stripping step acceptable, or should the gate use the Anthropic-compatible route instead? | Yes — gate depends on it | **Resolved (OBS-005)** — yes, fully. No stripping step, no route change. Must be set explicitly on every call. |
 | Q-002 | T-004 | Is syslog-ng shipping to Loki, and do IOS-XR mnemonics survive into a queryable label? | No — affects Stage 2 only | **Resolved (OBS-013)** — ships to file *and* Loki; mnemonics survive on 100% of lines but in the body, not as a label. Extraction belongs in T-015's parser. |
 | Q-014 | T-008 | `ttp` added as a **core** dependency rather than an optional extra, deviating from T-008's wording. Rationale: `run_template` attaches parsed data on every call from T-018, so an extra would make the descent silently unavailable on a default install. | No — decided and green | **Closed (OBS-035)** — accepted; an extra would be silent degradation on a default install |
+| **Q-015** | **T-011** | **HALT.** Executing the PE2 `Gi0/0/0/0` shutdown is a device state change — §0.11's absolute HALT, under a standing instruction that explicitly overrides later session instructions. The script is written and ready. **Does the operator waive §0.11 for this single pre-planned, reversible action, or run it themselves?** | **Yes — blocks T-011 and everything after it** | **OPEN — the run is stopped** (OBS-036) |
 | Q-013 | T-022 | Does a `Rung` carry its own device scope? The `bgp_session` descent's lower rungs (route, IGP adjacency, interface) concern the *path*, not the subject device — checking RR1's own IS-IS adjacencies would miss that PE2 is the isolated one. | **Yes — blocks T-022/T-023/T-024** | Open (OBS-020) — decide at T-022. **Operator: add the field when the dataclass is defined; retrofitting after `descent.py` exists is not cheap** (OBS-035) |
 | Q-011 | T-004 | Should the devices' `logging trap` level be lowered so severity-5 events (`%BGP-5-ADJCHANGE`, IS-IS transitions) reach Loki? Today only `err`/`warning` arrive, so the events T-028 correlates against are absent entirely. Operator decision — it changes log volume on a pipeline already carrying 97% self-generated noise. | No for MVP-0 · **yes for a useful historical axis** | Open (OBS-014) |
 | Q-003 | T-005 | Does Alertmanager have a webhook receiver, and can it replace n8n as the Stage 2 trigger? | No — Stage 2 | **Resolved (OBS-016)** — yes to both. Gap is that no alert rule carries a device label; that is rule authoring, not infrastructure. |
@@ -669,7 +713,7 @@ Anything logged with `Needs human review: yes` is mirrored here so the review ha
 | Q-008 | T-035 | Which host runs `nettools` in the target deployment, and does it have outbound egress to the chosen channel? | Yes for T-035 | Open |
 | Q-010 | T-003 | The MiniMax provider uses the OpenAI **Responses** API, not Chat Completions, so `BUILD-PLAN.md` T-003 step 4 (`reasoning_split`, `max_completion_tokens`) does not apply. Both behaviours it targeted are achieved structurally on that route. Confirm the route choice before the MVP-1 gate is built on it. | No for MVP-0 · **yes for the MVP-1 gate** | Open — decided and evidenced (OBS-010) |
 | Q-012 | T-005 | **The lab was rebuilt ~2 days ago and is now healthy** — all 16 BGP sessions Established, PE2/PE4 back to 2 IS-IS adjacencies. T-011 says to capture "against the current broken state", which no longer exists. Re-break the lab, capture a new consistent healthy label, or build the broken case synthetically in-test? | **Yes for T-011** (T-025/M3 unaffected — fixtures still hold the broken state) | **Resolved (OBS-019)** — options 1+2: keep `t0`/`t1` frozen, add complete `healthy` and `broken` labels; operator runs the break, capture coordinated at T-011 |
-| Q-009 | T-002 | Should `MINIMAX_API_KEY` be rotated after this build? It was pasted into the session transcript, which no control in this repository can revoke. | No — nothing is blocked on it | Open — recommended (OBS-008) |
+| Q-009 | T-002 | Should `MINIMAX_API_KEY` **and the lab device credentials** be rotated after this build? Both were pasted into the transcript (OBS-008, OBS-037). It was pasted into the session transcript, which no control in this repository can revoke. | No — nothing is blocked on it | Open — recommended (OBS-008) |
 
 ---
 
