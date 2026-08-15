@@ -22,12 +22,16 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 | Field | Value |
 |---|---|
 | Branch | `feat/investigation-layer` |
-| Baseline commit | _fill at T-001_ |
-| Baseline test count | _fill at T-001_ |
-| Run started | _fill at T-001_ |
-| Last updated | _update every task_ |
-| Current task | _update every task_ |
+| Baseline commit | `6629a2c` — `docs: add design and build documentation pack` |
+| Baseline test count | **550 passed, 4 skipped, 0 failed** (554 total; the 4 are `live_lab`, skipped by default) |
+| Run started | 2026-08-15 |
+| Last updated | 2026-08-15 |
+| Current task | T-002 |
 | Halted? | no |
+
+**Baseline environment (T-001).** Python 3.13.11 · Linux 6.8.0-136 x86_64 · ruff 0.16.3 · pytest 9.1.1 · 63 pip packages · `agent-nettools` 0.2.0 · repo at `/home/rami/ai-agent-ops/ios-xr-nettools`. CI pins Python 3.11 — see OBS-004.
+
+**Regression line.** Fewer than 550 passed, or any skip outside `tests/test_live_lab.py`, is a regression introduced by this build.
 
 ---
 
@@ -35,7 +39,7 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 
 | Task | Title | Status | Model | Commit | Findings | Notes |
 |------|-------|--------|-------|--------|----------|-------|
-| T-001 | Baseline verification | TODO | opus-5 | | | |
+| T-001 | Baseline verification | DONE | opus-5 | `9ba2bbc` | OBS-003, OBS-004 | Green: 550 passed / 4 skipped / lint clean |
 | T-002 | MiniMax API contract test | TODO | opus-5 | | | Q-001 |
 | T-003 | Wire MiniMax as a provider | TODO | sonnet-5 | | | |
 | T-004 | Loki discovery | TODO | opus-5 | | | Q-002, non-blocking |
@@ -130,4 +134,4 @@ One row per working session, so elapsed effort is visible without reading git.
 
 | Date | Tasks attempted | Tasks completed | Halted? | Notes |
 |------|-----------------|-----------------|---------|-------|
-| | | | | |
+| 2026-08-15 | T-001 | T-001 | no | Required reading done; OBS-001/OBS-002 logged for the pre-plan install gap; baseline green |

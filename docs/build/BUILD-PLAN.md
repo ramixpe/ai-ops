@@ -253,7 +253,7 @@ No production code changes in this part. The goal is to replace assumptions with
 
 ---
 
-## T-001 · Baseline verification `[STATUS: TODO]`
+## T-001 · Baseline verification `[STATUS: DONE]`
 
 **Goal.** Establish that the tree is green before anything changes, and record exactly what "green" means today.
 
