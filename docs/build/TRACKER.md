@@ -26,7 +26,7 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 | Baseline test count | **550 passed, 4 skipped, 0 failed** (554 total; the 4 are `live_lab`, skipped by default) |
 | Run started | 2026-08-15 |
 | Last updated | 2026-08-15 |
-| Current task | T-009 |
+| Current task | T-010 |
 | Halted? | no |
 | Operator decisions pending capture | **Lab must stay healthy until T-011** — `healthy` then `broken` captured in one coordinated window (OBS-019) |
 
@@ -47,8 +47,8 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 | T-005 | Alertmanager / Prometheus discovery | DONE | opus-5 | `199d027` | OBS-016…018 | **Q-003 resolved**; new **Q-012 — lab is no longer broken** (OBS-017), resolve at T-007 |
 | T-006 | L3VPN discovery | DONE | opus-5 | `bb5786a` | OBS-023…025 | **Q-004 answered**: `<pe>:<vrf>`; `<vrf>:<rd>` eliminated — RD reused across PEs |
 | T-007 | Fixture gap analysis | DONE | opus-5 | `92bf1d6` | OBS-026…028 | Manifest written; ~370-400 files over 2 labels. Over-captures to be Q-013-proof |
-| T-008 | Parser library decision | DONE | opus-5 | _next commit_ | OBS-029, OBS-030 | **TTP**, 18/18 equivalence. Genie rejected. New Q-014 (core dep, not extra) |
-| T-009 | Docs scaffold | TODO | sonnet-5 | | | |
+| T-008 | Parser library decision | DONE | opus-5 | `8875b4c` | OBS-029, OBS-030 | **TTP**, 18/18 equivalence. Genie rejected. New Q-014 (core dep, not extra) |
+| T-009 | Docs scaffold | DONE | opus-5 (see OBS-031) | _next commit_ | OBS-031 | Already built by install-docs.sh; fixed a stale map. All 23 doc links resolve |
 
 ## Part 2 — Parsing
 
@@ -99,7 +99,7 @@ T-035 is optional and does not gate the definition of done.
 
 | Milestone | Gate | Reached |
 |---|---|---|
-| **M1 — Discovery complete** | T-009 done; all discovery docs written; Open Questions populated | ☐ |
+| **M1 — Discovery complete** | T-009 done; all discovery docs written; Open Questions populated | ☑ **2026-08-15** |
 | **M2 — Parsing unblocked** | T-018 done; template results carry parsed data; all §0.10 completeness tests green | ☐ |
 | **M3 — Architecture validated** | T-025 green offline, no model call, no lab, no API key | ☐ |
 | **M4 — MVP-0 shipped** | Part 7 definition of done satisfied in full (T-001…T-034) | ☐ |
@@ -135,4 +135,4 @@ One row per working session, so elapsed effort is visible without reading git.
 
 | Date | Tasks attempted | Tasks completed | Halted? | Notes |
 |------|-----------------|-----------------|---------|-------|
-| 2026-08-15 | T-001…T-008 | T-001…T-008 | no | Required reading done; OBS-001/OBS-002 logged for the pre-plan install gap; baseline green; MiniMax contract verified and Q-001 resolved; MiniMax provider wired (567 tests); Loki + alerting discovery done; found the lab has been repaired (Q-012); L3VPN mapped; capture manifest written; TTP chosen |
+| 2026-08-15 | T-001…T-009 | T-001…T-009 | no | Required reading done; OBS-001/OBS-002 logged for the pre-plan install gap; baseline green; MiniMax contract verified and Q-001 resolved; MiniMax provider wired (567 tests); Loki + alerting discovery done; found the lab has been repaired (Q-012); L3VPN mapped; capture manifest written; TTP chosen; **M1 reached** |

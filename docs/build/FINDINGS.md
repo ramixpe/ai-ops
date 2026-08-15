@@ -551,6 +551,23 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-031 · T-009 · The scaffold was already built; the work was fixing what had gone stale
+
+- **Kind:** surprise
+- **Escalation:** NOTE
+- **Model:** opus-5
+- **What happened:** T-009 asks for the `PART 5` structure to be created, the design documents moved into `docs/design/`, `FINDINGS.md` created from the template, a Design documents section added to `CLAUDE.md`, and `docs/README.md` written. **All five were already done** — by `install-docs.sh` before this run started, and recorded in OBS-001. Auditing against `PART 5` found every required path present: `docs/README.md`, `docs/design/`, `docs/build/`, `prompts/tests/cases/`, `scripts/`, and the three pre-existing `docs/` files.
+
+  What was genuinely wrong was **staleness in the map itself**. `docs/README.md` listed `docs/design/architecture.md`, which does not exist and never has — `install-docs.sh` places it only "if present" and it was never written. A documentation map whose own entries do not resolve is worse than no map: it is the file a newcomer trusts first.
+- **Evidence:** Audit of all eight `PART 5` paths — all present. Link check across `CLAUDE.md` and `docs/README.md`: **23 distinct `.md` references, all resolving** after the fix; `architecture.md` was the one broken entry before it.
+- **What I did:** Rewrote `docs/README.md` rather than patching it: corrected the tree to what actually exists, stated plainly that `architecture.md` is referenced by `install-docs.sh` but unwritten and that nothing depends on it (`CLAUDE.md` carries the architecture today), added the four discovery documents with one-line descriptions of what each answers, added `prompts/` and `scripts/` — both part of `PART 5` and both previously unmentioned — and added **`tests/fixtures/README.md`**, which did not exist when the map was written and is now the file someone must read before capturing anything. Also added the `TRACKER.md`-wins rule to the map, since that precedence is easy to miss and is exactly the kind of thing a map should surface.
+
+  **Deviation from §0.9's suggested allocation, logged deliberately:** T-009 is listed as sonnet-5's. I did it myself. The task turned out to be an audit plus one file rewrite, and writing a specification precise enough to delegate would have been longer than the work. §0.9's table is explicitly a *suggested* allocation and rule 1 gives Opus 5 the plan; this is not a case of taking implementation work back from Sonnet, it is a case of the task not being what the plan expected.
+- **Needs human review:** no
+- **Blocks:** none — **M1 reached.**
+
+---
+
 <!--
 Copy this block for each new entry.
 

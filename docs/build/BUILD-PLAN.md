@@ -445,7 +445,7 @@ Print, for each check: PASS / FAIL / INFO, plus the raw evidence (truncated to 2
 
 ---
 
-## T-009 · Docs scaffold `[STATUS: TODO]`
+## T-009 · Docs scaffold `[STATUS: DONE]`
 
 **Goal.** Put the reference documents where they can be found, and point `CLAUDE.md` at them.
 
