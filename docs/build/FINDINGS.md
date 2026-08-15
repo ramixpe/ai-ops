@@ -506,6 +506,51 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-029 · T-008 · TTP for every new parser; Genie rejected on weight, and on a requirement neither library meets
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** **Decision: TTP for all six new parsers. Genie is not adopted, not even for `bgp_neighbor`** — the exception the plan explicitly left open.
+
+  **Equivalence, measured rather than assumed.** A throwaway TTP template for `show bgp summary` was run against **every committed fixture — all 9 devices × both labels, 18 files — and produced records byte-identical to the hand-written `parse_xr_bgp` in 18 of 18 cases.** That includes the eight files where the correct answer is *no records*: P1–P4 and PE4 answer `% BGP instance 'default' not active`, and TTP returns empty exactly as the hand parser does, rather than inventing a row.
+
+  **Footprint, measured from PyPI without installing Genie:**
+
+  | | `ttp` 0.10.1 | `genie` 26.7 | `pyats` 26.7 |
+  |---|---|---|---|
+  | Largest distribution | **0.1 MB** | **31.4 MB** | 5.6 MB |
+  | Installed size | **1.1 MB** | — | — |
+  | Runtime dependencies pulled | **zero** | 7 × `genie.libs.*` + PrettyTable, tqdm, dill, jsonpickle, netaddr | 14 × `pyats.*` |
+  | `requires_python` | `<4.0,>=3.9` | `>=3.8` | `>=3.8` |
+
+  TTP declares 20 dependencies in `requires_dist`, but **every one sits behind its `full` or `docs` extras** — the base install pulled exactly one new package and `pip show` reports `Requires:` empty. Genie, by contrast, depends on seven `genie.libs.*` subpackages which each pull more, and on pyATS itself; adopting it means adopting the whole pyATS ecosystem.
+- **Evidence:** Trial script in the scratchpad (uncommitted). PyPI JSON metadata for all three packages. `pip install ttp` → `Successfully installed ttp-0.10.1`, site-packages grew 1,124 KiB, package count 63 → 64.
+- **What I did:** Three reasons, in the order that decided it.
+
+  1. **Neither library satisfies §0.10, so Genie's main selling point evaporates.** §0.10 requires that every non-blank line be either matched or matched by a *declared* ignore rule, with the remainder surfaced in `unaccounted_lines`. **TTP's result contains only matches — it cannot report what it skipped**, and Genie's parsers likewise return a structured dict with no accounting. I verified §0.10 is achievable by hand-building the accounting over the same input (`unaccounted_lines == []` for RR1/t0), but **that code is ours either way.** The argument for Genie was "the parsers are already written and maintained"; a pre-written parser that cannot meet the plan's own completeness requirement is not actually less work.
+  2. **Weight, against this repository's established practice.** `evidence_store.py` uses stdlib `sqlite3` rather than an ORM; `metrics.py` hand-writes Prometheus exposition rather than adding `prometheus_client`; `output.py` renders tables with no dependency. A 31.4 MB wheel plus the pyATS ecosystem would be the largest dependency in the project by roughly two orders of magnitude, for six parsers that are a few lines each.
+  3. **Genie's parsers are version-keyed to specific `show` output.** Where they disagree with XRd 7.11.2, the work becomes debugging someone else's regex against a device we cannot change — strictly worse than owning a small template.
+
+  Added `ttp>=0.9,<1.0` to `pyproject.toml` as a **core dependency, not an extra**, deviating from T-008's phrasing ("added under the right extra") deliberately: `run_template` will attach parsed data on every call from T-018 onward, so the package cannot do its job without it. An optional extra would make the descent silently unavailable on a default install. Upper bound pinned at `<1.0` because TTP is pre-1.0 and its template syntax is the API. Confirmed `pip install -e .` resolves it and the suite stays green at **567 passed / 4 skipped**, lint clean. The `<4.0,>=3.9` range covers both CI's 3.11 and the local 3.13, so OBS-004's split-interpreter risk does not apply here.
+- **Needs human review:** yes — it adds the first new runtime dependency of this build, and the core-vs-extra placement departs from the task's wording.
+- **Blocks:** none — unblocks T-010 and T-012–T-017.
+
+---
+
+## OBS-030 · T-008 · §0.10's line accounting is our code, and it shapes T-010's contract
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** The most consequential thing T-008 turned up is not about library choice. **No parsing library provides §0.10's line accounting.** TTP's `result()` returns matched groups only; there is no channel through which it reports lines it ignored. So `unaccounted_lines` and `unparsed_rows` cannot be delegated — they are a discipline `template_parsers.py` has to implement itself.
+- **Evidence:** TTP result keys for the RR1/t0 parse are exactly `['meta', 'records']` — matches only. A hand-built accounting pass over the same input, subtracting matched neighbours plus nine *declared* ignore patterns (blank, IOS-XR timestamp banner, six preamble forms, two table headers), yielded `unaccounted_lines == []`, confirming the requirement is satisfiable this way.
+- **What I did:** Recorded the concrete consequence for **T-010**, which defines the contract every parser then implements: each parser needs (a) its TTP template, (b) **a named constant holding its declared ignore patterns**, each commented with what it is — §0.10 requires the accounting be reviewable in one place, and a regex that quietly swallows unrecognised lines defeats the entire mechanism — and (c) a shared accounting helper that walks the raw input, subtracts matched and declared-ignored lines, and reports the remainder. Building that helper **once in T-010** rather than six times in T-012–T-017 is the difference between a contract and a convention. Also noted that `unaccounted_lines` and `unparsed_rows` must stay separate keys: the first means "the template does not know what this line is", the second means "the template knows and it did not fit", and collapsing them would hide a vendor output change behind a malformed-row count.
+- **Needs human review:** no
+- **Blocks:** none — directly shapes T-010.
+
+---
+
 <!--
 Copy this block for each new entry.
 
@@ -531,6 +576,7 @@ Anything logged with `Needs human review: yes` is mirrored here so the review ha
 |----|-----------|----------|-----------|--------|
 | Q-001 | T-002 | Does `reasoning_split: true` fully suppress `<think>` in `content`? If not, is a stripping step acceptable, or should the gate use the Anthropic-compatible route instead? | Yes — gate depends on it | **Resolved (OBS-005)** — yes, fully. No stripping step, no route change. Must be set explicitly on every call. |
 | Q-002 | T-004 | Is syslog-ng shipping to Loki, and do IOS-XR mnemonics survive into a queryable label? | No — affects Stage 2 only | **Resolved (OBS-013)** — ships to file *and* Loki; mnemonics survive on 100% of lines but in the body, not as a label. Extraction belongs in T-015's parser. |
+| Q-014 | T-008 | `ttp` added as a **core** dependency rather than an optional extra, deviating from T-008's wording. Rationale: `run_template` attaches parsed data on every call from T-018, so an extra would make the descent silently unavailable on a default install. | No — decided and green | Open — confirm (OBS-029) |
 | Q-013 | T-022 | Does a `Rung` carry its own device scope? The `bgp_session` descent's lower rungs (route, IGP adjacency, interface) concern the *path*, not the subject device — checking RR1's own IS-IS adjacencies would miss that PE2 is the isolated one. | **Yes — blocks T-022/T-023/T-024** | Open (OBS-020) — decide at T-022 |
 | Q-011 | T-004 | Should the devices' `logging trap` level be lowered so severity-5 events (`%BGP-5-ADJCHANGE`, IS-IS transitions) reach Loki? Today only `err`/`warning` arrive, so the events T-028 correlates against are absent entirely. Operator decision — it changes log volume on a pipeline already carrying 97% self-generated noise. | No for MVP-0 · **yes for a useful historical axis** | Open (OBS-014) |
 | Q-003 | T-005 | Does Alertmanager have a webhook receiver, and can it replace n8n as the Stage 2 trigger? | No — Stage 2 | **Resolved (OBS-016)** — yes to both. Gap is that no alert rule carries a device label; that is rule authoring, not infrastructure. |

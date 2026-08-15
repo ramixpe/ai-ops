@@ -427,7 +427,7 @@ Print, for each check: PASS / FAIL / INFO, plus the raw evidence (truncated to 2
 
 ---
 
-## T-008 · Parser library decision `[STATUS: TODO]`
+## T-008 · Parser library decision `[STATUS: DONE]`
 
 **Goal.** Confirm TTP is the right parsing library for template output before writing six parsers with it.
 
