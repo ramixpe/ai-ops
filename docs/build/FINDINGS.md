@@ -601,6 +601,38 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-034 · T-011 · `BUILD-PLAN.md` was overwritten by an `install-docs.sh` re-run, and restored
+
+- **Kind:** environment
+- **Escalation:** NOTE
+- **Model:** opus-5 (recording an operator report)
+- **What happened:** `docs/build/BUILD-PLAN.md` was accidentally overwritten by a re-run of `install-docs.sh`, which reinstalls the upstream pack over the repository's copy. It was restored from git with **all ten `DONE` statuses intact**, so no task state was lost.
+- **Evidence:** Operator report, this session. `install-docs.sh` `place BUILD-PLAN.md docs/build/BUILD-PLAN.md` — the script backs up before overwriting but does treat the installed copy as replaceable, which is true of the design documents and **not** true of the build documents.
+- **What I did:** Recorded the ownership rule, which was implicit and is now explicit: **`BUILD-PLAN.md`, `TRACKER.md`, `FINDINGS.md` and `BACKLOG.md` are owned by this repository and are never re-installed.** They accumulate state — task statuses, findings, backlog items — that exists nowhere upstream, so an install overwrites work rather than refreshing a reference. The `docs/design/` documents are the opposite: they are reference copies and reinstalling them is harmless (verified byte-identical at OBS-001). Worth noting the near-miss: had this happened without the statuses being recoverable from git, the run would have silently lost its record of which tasks were complete, and `TRACKER.md` — which is authoritative on status — would then have disagreed with the plan, which §0.11 makes a finding in its own right.
+- **Needs human review:** no
+- **Blocks:** none
+
+---
+
+## OBS-035 · T-011 · Operator decisions recorded: Q-013 deferral confirmed, Q-014 and OBS-023 accepted
+
+- **Kind:** decision-made
+- **Escalation:** NOTE
+- **Model:** opus-5 (recording operator decisions)
+- **What happened:** Three of the open items were settled.
+
+  **Q-013 (rung device scope) — deferral to T-022 confirmed, with a constraint.** The operator agreed the concrete case is decisive: a descent checking RR1's own IS-IS adjacencies finds them healthy and walks past PE2's isolation. The instruction adds something the finding did not say: **add the device-scope field when the `Rung` dataclass is defined, because retrofitting it after `descent.py` exists is not cheap.** The four options in OBS-020 are to be brought to T-022 as a decision, not implemented ahead of it.
+
+  **Q-014 — closed. `ttp` stays a core dependency.** The operator's reasoning is sharper than the finding's: an optional extra would make the descent silently unavailable on a default install, and **silent degradation is the failure mode this project rejects** — the same reason `parsers.py` treats an empty parse as a failure and `health.py` refuses to read a failed intent as healthy. They also identified the more valuable half of OBS-029: that **neither library provides line accounting**, so §0.10 is a genuine addition rather than a re-specification of something TTP already did.
+
+  **OBS-023 — accepted. `<pe>:<vrf>`.** Noted approvingly that `<vrf>:<rd>` was *killed by measurement* rather than by argument, and that matching the operational-memory key convention is a real bonus rather than a coincidence.
+- **Evidence:** Operator instruction, this session. OBS-020/Q-013, OBS-029/Q-014, OBS-023.
+- **What I did:** Updated the Open Questions table: Q-014 closed, Q-013 annotated with the "define it with the dataclass, do not retrofit" constraint, Q-004 marked accepted. No code changed — all three were already implemented or deliberately deferred in line with these answers.
+- **Needs human review:** no
+- **Blocks:** none. Q-013 still blocks T-022/T-023/T-024 by design.
+
+---
+
 <!--
 Copy this block for each new entry.
 
@@ -626,11 +658,11 @@ Anything logged with `Needs human review: yes` is mirrored here so the review ha
 |----|-----------|----------|-----------|--------|
 | Q-001 | T-002 | Does `reasoning_split: true` fully suppress `<think>` in `content`? If not, is a stripping step acceptable, or should the gate use the Anthropic-compatible route instead? | Yes — gate depends on it | **Resolved (OBS-005)** — yes, fully. No stripping step, no route change. Must be set explicitly on every call. |
 | Q-002 | T-004 | Is syslog-ng shipping to Loki, and do IOS-XR mnemonics survive into a queryable label? | No — affects Stage 2 only | **Resolved (OBS-013)** — ships to file *and* Loki; mnemonics survive on 100% of lines but in the body, not as a label. Extraction belongs in T-015's parser. |
-| Q-014 | T-008 | `ttp` added as a **core** dependency rather than an optional extra, deviating from T-008's wording. Rationale: `run_template` attaches parsed data on every call from T-018, so an extra would make the descent silently unavailable on a default install. | No — decided and green | Open — confirm (OBS-029) |
-| Q-013 | T-022 | Does a `Rung` carry its own device scope? The `bgp_session` descent's lower rungs (route, IGP adjacency, interface) concern the *path*, not the subject device — checking RR1's own IS-IS adjacencies would miss that PE2 is the isolated one. | **Yes — blocks T-022/T-023/T-024** | Open (OBS-020) — decide at T-022 |
+| Q-014 | T-008 | `ttp` added as a **core** dependency rather than an optional extra, deviating from T-008's wording. Rationale: `run_template` attaches parsed data on every call from T-018, so an extra would make the descent silently unavailable on a default install. | No — decided and green | **Closed (OBS-035)** — accepted; an extra would be silent degradation on a default install |
+| Q-013 | T-022 | Does a `Rung` carry its own device scope? The `bgp_session` descent's lower rungs (route, IGP adjacency, interface) concern the *path*, not the subject device — checking RR1's own IS-IS adjacencies would miss that PE2 is the isolated one. | **Yes — blocks T-022/T-023/T-024** | Open (OBS-020) — decide at T-022. **Operator: add the field when the dataclass is defined; retrofitting after `descent.py` exists is not cheap** (OBS-035) |
 | Q-011 | T-004 | Should the devices' `logging trap` level be lowered so severity-5 events (`%BGP-5-ADJCHANGE`, IS-IS transitions) reach Loki? Today only `err`/`warning` arrive, so the events T-028 correlates against are absent entirely. Operator decision — it changes log volume on a pipeline already carrying 97% self-generated noise. | No for MVP-0 · **yes for a useful historical axis** | Open (OBS-014) |
 | Q-003 | T-005 | Does Alertmanager have a webhook receiver, and can it replace n8n as the Stage 2 trigger? | No — Stage 2 | **Resolved (OBS-016)** — yes to both. Gap is that no alert rule carries a device label; that is rule authoring, not infrastructure. |
-| Q-004 | T-006 | What is the subject naming scheme for an L3VPN service object? | No — flow not in MVP-0 | **Answered (OBS-023)** — `<pe>:<vrf>` recommended; `<vrf>:<rd>` eliminated because RD is reused across PEs. Confirm at T-022. |
+| Q-004 | T-006 | What is the subject naming scheme for an L3VPN service object? | No — flow not in MVP-0 | **Accepted (OBS-035)** — `<pe>:<vrf>` recommended; `<vrf>:<rd>` eliminated because RD is reused across PEs. Confirm at T-022. |
 | Q-005 | T-020 | What error-counter threshold should `interface_state` treat as broken? | No — default chosen, needs review | Open |
 | Q-006 | T-025 | Does the descent's stopping rung match what a network engineer would conclude by hand from the same fixtures? | **Yes — this validates the architecture** | Open |
 | Q-007 | T-035 | Telegram or Mattermost? Hosted means device names, IPs and RCA text leave the estate; self-hosted keeps them in. Decide before implementing — only one provider gets built. | Yes for T-035 | Open |

@@ -26,7 +26,7 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 | Baseline test count | **550 passed, 4 skipped, 0 failed** (554 total; the 4 are `live_lab`, skipped by default) |
 | Run started | 2026-08-15 |
 | Last updated | 2026-08-15 |
-| Current task | **T-011 — needs the operator's capture window** |
+| Current task | **T-011 — `healthy` done; awaiting the operator's break for `broken`** |
 | Halted? | no |
 | Operator decisions pending capture | **Lab must stay healthy until T-011** — `healthy` then `broken` captured in one coordinated window (OBS-019) |
 
@@ -54,8 +54,8 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 
 | Task | Title | Status | Model | Commit | Findings | Notes |
 |------|-------|--------|-------|--------|----------|-------|
-| T-010 | `template_parsers.py` skeleton and contract | DONE | opus-5 | _next commit_ | OBS-032, OBS-033 | Contract + §0.10 accounting helper. 27 new tests, 594 passed |
-| T-011 | Extend capture to templates | TODO | sonnet-5 | | | HALT if lab unreachable |
+| T-010 | `template_parsers.py` skeleton and contract | DONE | opus-5 | `6a56734` | OBS-032, OBS-033 | Contract + §0.10 accounting helper. 27 new tests, 594 passed |
+| T-011 | Extend capture to templates | IN-PROGRESS | opus-5 | `24fc1f4`, `2fd50bf` | OBS-034, OBS-035 | `run_templates` batching done; **`healthy` captured+verified (217 files)**; awaiting operator break for `broken` |
 | T-012 | `bgp_neighbor` parser | TODO | sonnet-5 | | | §0.10 completeness |
 | T-013 | `route` parser | TODO | sonnet-5 | | | §0.10 completeness |
 | T-014 | `interface` parser | TODO | sonnet-5 | | | §0.10 completeness |
