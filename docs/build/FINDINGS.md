@@ -812,6 +812,27 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-043 · T-016/T-017 · A read timeout produces a truncated capture reported as success
+
+- **Kind:** defect
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** Capturing the negative branch for `ping` and `traceroute` (both absent — every existing fixture is a 100% success and a completed trace), I probed `192.0.2.1`, which is unroutable here.
+
+  **`ping` worked and revealed a shape difference worth having:** at 0% success the device emits `.....` and `Success rate is 0 percent (0/5)` — and **omits the `round-trip min/avg/max` line entirely.** A parser assuming that line always follows would fail on exactly the case that matters. Captured and kept.
+
+  **`traceroute` produced a truncated artifact.** The template's 60s `read_timeout` expired mid-probe against an unreachable destination, and the result was an **8-byte file containing a single line, ` 10  * `** — no `Tracing the route to` header, no earlier hops. **`run_templates` reported `errors: []` and `status: success`.**
+- **Evidence:** `tests/fixtures/cisco_xr/PE1/healthy/ping-192-0-2-1.txt` (164 bytes, complete, kept). The traceroute artifact: 8 bytes, 1 line, deleted rather than committed.
+- **What I did:** **Deleted the traceroute artifact.** A bad fixture is worse than no fixture: committed, it would have been enshrined by T-017's round-trip test and the parser would have been shaped partly by a truncation. The fixtures README already says review by eye before committing, and this is what that is for.
+
+  **Logged the underlying defect rather than fixing it — it is outside T-016/T-017's scope but it is real.** A read timeout at the transport boundary yields *partial output with no error*, so a caller cannot distinguish "the device said this" from "we stopped listening". That is the same failure shape as OBS-006 (MiniMax returning empty content with `finish_reason: length` and no error), and this project rejects it in both places on the same grounds. The right fix is for `_netmiko_send_commands` to mark a timed-out command as an error rather than returning what arrived; that touches the transport path and belongs in its own task, not smuggled into a parser task.
+
+  T-017 is not blocked. Every one of the 9 good traceroute fixtures already contains a `*` hop, so partial-loss parsing has real coverage; only the never-completes case lacks a fixture, and the plan already requires a synthetic truncated-output test that covers the same parsing path.
+- **Needs human review:** yes — the silent-truncation defect deserves a backlog item; I have not created one because backlog IDs are the operator's to assign.
+- **Blocks:** none.
+
+---
+
 <!--
 Copy this block for each new entry.
 
