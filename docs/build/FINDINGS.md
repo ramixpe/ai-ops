@@ -568,6 +568,39 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-032 · T-010 · Contract shipped; the accounting helper is the real content, and it adds a fourth failure mode
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** `src/agent_nettools/template_parsers.py` and `tests/test_template_parsers.py` exist. **27 new tests, 594 passed / 4 skipped, lint clean.** The registry is deliberately empty until T-012.
+
+  T-010 step 3 anticipated possibly needing to refactor `parsers.py` to export its constants. **Not needed** — `ParseError`, `PARSE_OK`, `PARSE_UNAVAILABLE` and `PARSE_FAILED` are already importable, so they are imported rather than re-declared. A test asserts them by **identity**, not equality: a copied string constant would compare equal today and drift the first time one was edited.
+
+  Two shape decisions worth recording:
+
+  1. **A template parser takes a single `str`, not a `dict[str, str]`.** `parsers.parse_intent` takes a dict because one intent can run several commands (`facts` runs two). A template always renders exactly one command. Matching `parsers`' signature here would have meant every parser carrying a shape it never uses — this is why the module is separate rather than more entries in `PARSERS`.
+  2. **`parse_template_output` adds a fourth failure mode that `parse_intent` does not have: a result missing its §0.10 accounting is `PARSE_FAILED`.** A parser that bypassed `finalize()` has unmeasurable coverage, and evidence whose completeness is unknown must not be presented as parsed. That is `health.py`'s `unevaluated` reasoning one layer down — "I could not tell" must never render as "fine". Pinned by a test that fails if the check is removed, per D19's bar.
+- **Evidence:** `pytest tests/test_template_parsers.py -q` → 27 passed. Full suite 594 passed / 4 skipped (567 baseline + 27), `ruff check .` clean.
+- **What I did:** Built §0.10's accounting **once, here**, as OBS-030 required: a frozen `IgnoreRule(pattern, reason)`, a shared `XR_COMMON_IGNORES` covering blank lines and the IOS-XR timestamp banner (present in every `show` response, so no parser should re-declare it), `account_lines()` and `finalize()`. `finalize()` is the only function that builds a well-formed result, which is what makes the accounting **a contract rather than a convention** — a parser cannot produce a valid result without declaring what it ignored. Three details chosen deliberately: comparison is on the *stripped* line, because captured fixtures carry trailing whitespace that would otherwise create phantom unaccounted lines; `include_common=False` lets a parser with genuinely different framing opt out and declare everything itself, still explicitly; and `IgnoreRule.reason` is required and tested non-empty, because §0.10's purpose is that a reviewer can see the whole accounting in one place, which a bare regex does not provide.
+- **Needs human review:** no
+- **Blocks:** none — unblocks T-011 onward. T-012 will fail `test_registry_is_empty_until_the_parsers_land`, which is the intended signal to update that test rather than delete it.
+
+---
+
+## OBS-033 · T-010 → T-019 · The package `__init__` eagerly imports the device layer, which will trap T-019's acceptance test
+
+- **Kind:** risk
+- **Escalation:** NOTE
+- **Model:** opus-5
+- **What happened:** Checking that `template_parsers` stayed free of device-layer dependencies, `sys.modules` showed `agent_nettools.inventory` and `agent_nettools.network_tools` loaded after importing it. **The module is clean** — it imports only `re`, `dataclasses`, `typing`, `collections.abc` and `.parsers`, and `netmiko` never loads. The loading comes from `agent_nettools/__init__.py`, which eagerly imports `agent_loop`, which pulls in `network_tools` → `inventory`. Importing *any* submodule imports the package, so it happens regardless.
+- **Evidence:** `import agent_nettools.template_parsers` → `agent_nettools.network_tools` in `sys.modules`; `netmiko` not in `sys.modules`. `src/agent_nettools/__init__.py` lines 11-12 (`from .agent_loop import ...`). `grep '^from\|^import' src/agent_nettools/template_parsers.py` shows five stdlib imports and one from `.parsers`.
+- **What I did:** Nothing to the code — the eager `__init__` is pre-existing and out of scope. **Recording it because it is a trap laid directly across T-019's acceptance criterion**, which reads "no import of `inventory`, `network_tools`, or anything that touches a device". The obvious way to test that — asserting those names are absent from `sys.modules` — **will fail for `checks.py` no matter how pure `checks.py` is.** The test must instead inspect the module's own imports (its AST, or `grep`-equivalent over its source), which is what actually expresses the intent. Flagging now so T-019 does not lose time to it, or worse, weaken the criterion to make a badly-written test pass.
+- **Needs human review:** no
+- **Blocks:** none — informs T-019.
+
+---
+
 <!--
 Copy this block for each new entry.
 

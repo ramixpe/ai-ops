@@ -466,7 +466,7 @@ Implements LLD Phase 9. Nothing downstream is possible without this part.
 
 ---
 
-## T-010 · `template_parsers.py` skeleton and contract `[STATUS: TODO]`
+## T-010 · `template_parsers.py` skeleton and contract `[STATUS: DONE]`
 
 **Goal.** Establish the module and its contract before writing any parser.
 
