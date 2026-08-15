@@ -676,6 +676,67 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-038 · T-011 · Waiver granted, exercised, and discharged — one scoped device write
+
+- **Kind:** decision-made
+- **Escalation:** **HALT-waived**
+- **Model:** opus-5
+- **What happened:** The operator waived §0.11 for **one specific action**, authorising a single scoped device write for the purpose of capturing the `broken` fixture set. Their scope, verbatim in effect: run `--shut` against PE2 `GigabitEthernet0/0/0/0`, verify propagation, capture `broken`, verify against the 217-file shape of `healthy`, then `--restore` and confirm the fabric is back. **"The waiver expires the moment you report the restore. §0.11 is unchanged for anything after that — do not treat this as precedent for any other device write."**
+
+  Timeline, UTC:
+
+  | Time | Event |
+  |---|---|
+  | 23:01:19 | `--shut` issued against PE2 `Gi0/0/0/0` |
+  | 23:01:21 | Commit accepted; interface `admin-down` |
+  | 23:05:19 | Propagation predicate failed after 240s — script exited 1, refused to declare success |
+  | ~23:06 | Read-only diagnostic (see OBS-039) |
+  | 23:07:19 | `--restore` issued |
+  | 23:07:37 | Adjacencies back after ~8s; exit 0 |
+  | 23:08+ | Restoration verified independently, twice |
+
+  **The waiver is now discharged.** `broken` was not captured; the reason is OBS-039, and it is a property of the fabric rather than a failure of the window.
+- **Evidence:** Restoration verified three ways, deliberately not trusting the script that had just proven it contained a defect: PE2 reports `Total adjacency count: 2` and `Gi0/0/0/0 up/up` on a direct read; gNMI telemetry reports PE2 = 2 adjacencies and **all 16 BGP sessions `bgp-st-estab`**; and P1/P2 confirm 5 adjacencies each on direct reads, matching the pre-shut baseline exactly.
+- **What I did:** Executed only what was scoped, and stopped when it did not work rather than improvising. **Specifically, I did not shut `Gi0/0/0/1`** — which is what isolating PE2 would actually have required (OBS-039). That is a second device write, outside the waiver's scope, and "the obvious next step" is exactly the reasoning a scoped waiver exists to refuse. Followed the operator's failure rule on the letter: the verification failed, so I restored immediately rather than capturing a state I could not vouch for.
+
+  One transient anomaly, chased down rather than left: immediately after restoration, telemetry showed only 8 devices reporting and P1 at 4 adjacencies, then briefly **6** — while the device itself said 5. That was scrape lag plus stale series, not damage; ground truth from P1 and P2 directly is 5 and 5. Worth recording because it is unplanned live evidence for OBS-018's argument that **the descent must not read rungs off Prometheus**: for roughly a minute after a real topology change, the telemetry was confidently wrong in both directions.
+- **Needs human review:** no — the waiver is discharged and the fabric is verified back.
+- **Blocks:** none. `broken` remains uncaptured; see OBS-039 for what it would take.
+
+---
+
+## OBS-039 · T-011 · Shutting one uplink does not isolate PE2 — the fabric routed around it
+
+- **Kind:** assumption-wrong
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** The `broken` scenario assumed that shutting PE2's `Gi0/0/0/0` would isolate it and drive RR1's session to `10.255.0.12` Idle. **It does not. PE2 has two core uplinks**, and losing one changes nothing above the link layer:
+
+  | | Before | After the shut |
+  |---|---|---|
+  | PE2 `Gi0/0/0/0` (→ P1) | up/up | **admin-down** |
+  | PE2 `Gi0/0/0/1` (→ P3) | up/up | up/up |
+  | PE2 IS-IS adjacencies | 2 (P1, P3) | **1 (P3)** |
+  | PE2 → RR1 BGP | Established 2d04h | **Established 2d04h, undisturbed** |
+  | RR1 → `10.255.0.12` | Established | **Established** |
+
+  The IGP reconverged over the remaining path and the BGP session never noticed. This is a resilient design working exactly as designed — the scenario, not the fabric, was wrong.
+
+  **Two independent defects surfaced, and the second nearly hid the first.**
+
+  1. **The scenario defect.** Isolating PE2 requires shutting **both** `Gi0/0/0/0` and `Gi0/0/0/1`. `t0`'s brokenness was total isolation; one link down is a different and much milder condition.
+  2. **A defect in my own script.** `pe2_adjacencies()` reported **0** immediately after the commit, when the true value was 1. netmiko's `cisco_xr` `.commit()` leaves the session in config mode — the device echoed `PE2(config-if)#` — so every subsequent `show` on that connection ran in config mode and returned nothing. The propagation wait was measuring an artifact of my own SSH session, not the fabric. Fixed with an explicit `exit_config_mode()`; the restore then verified correctly in ~8s.
+
+  The two together produced a misleading picture: "IS-IS dropped to 0 but BGP is still up" looked like a half-propagated fabric, when the truth was "IS-IS dropped to 1 and BGP is correctly unaffected". **Had I trusted the script's numbers and captured, `broken` would have been mislabelled** — the exact hazard OBS-017 warned about, arriving from a direction nobody anticipated.
+- **Evidence:** `show isis adjacency` on PE2 after the shut: `P3 Gi0/0/0/1 ... Up`, `Total adjacency count: 1`. `show interfaces brief`: `Gi0/0/0/0 admin-down admin-down`. RR1's `show bgp summary`: all four peers with `2d04h` uptime and numeric prefix counts.
+- **What I did:** Restored, and did **not** shut the second interface — outside the waiver. Recorded what a future window needs: **both uplinks, shut in one commit** so the fabric never sees a transient single-link state, followed by the same verified propagation wait.
+
+  Also recording why this costs less than it appears. **T-025's acceptance test does not need the `broken` label.** It runs `run_descent(bgp_session, RR1, 10.255.0.12)` against `t0`, where `show bgp summary` already reports the peer Idle — so rung 1 (`bgp_session_state`) is broken and the descent *stops there by definition*, never collecting rungs 2–5. The template fixtures matter for the opposite case: walking all the way down and reaching `all_layers_healthy`, which the `healthy` label covers completely. So the milestone that matters, M3, is not blocked by this.
+- **Needs human review:** yes — whether to schedule a second window for a two-interface break, or accept `healthy` + `t0` as sufficient for MVP-0.
+- **Blocks:** the `broken` label only. Not T-012 (parsers work from `healthy`), not T-025.
+
+---
+
 <!--
 Copy this block for each new entry.
 
@@ -702,7 +763,8 @@ Anything logged with `Needs human review: yes` is mirrored here so the review ha
 | Q-001 | T-002 | Does `reasoning_split: true` fully suppress `<think>` in `content`? If not, is a stripping step acceptable, or should the gate use the Anthropic-compatible route instead? | Yes — gate depends on it | **Resolved (OBS-005)** — yes, fully. No stripping step, no route change. Must be set explicitly on every call. |
 | Q-002 | T-004 | Is syslog-ng shipping to Loki, and do IOS-XR mnemonics survive into a queryable label? | No — affects Stage 2 only | **Resolved (OBS-013)** — ships to file *and* Loki; mnemonics survive on 100% of lines but in the body, not as a label. Extraction belongs in T-015's parser. |
 | Q-014 | T-008 | `ttp` added as a **core** dependency rather than an optional extra, deviating from T-008's wording. Rationale: `run_template` attaches parsed data on every call from T-018, so an extra would make the descent silently unavailable on a default install. | No — decided and green | **Closed (OBS-035)** — accepted; an extra would be silent degradation on a default install |
-| **Q-015** | **T-011** | **HALT.** Executing the PE2 `Gi0/0/0/0` shutdown is a device state change — §0.11's absolute HALT, under a standing instruction that explicitly overrides later session instructions. The script is written and ready. **Does the operator waive §0.11 for this single pre-planned, reversible action, or run it themselves?** | **Yes — blocks T-011 and everything after it** | **OPEN — the run is stopped** (OBS-036) |
+| **Q-015** | **T-011** | **HALT.** Executing the PE2 `Gi0/0/0/0` shutdown is a device state change — §0.11's absolute HALT, under a standing instruction that explicitly overrides later session instructions. The script is written and ready. **Does the operator waive §0.11 for this single pre-planned, reversible action, or run it themselves?** | **Yes — blocks T-011 and everything after it** | **Resolved (OBS-038)** — waiver granted, exercised, discharged. Fabric verified restored. |
+| **Q-016** | **T-011** | Shutting one uplink does not isolate PE2 — it has two, and the IGP routed around it (OBS-039). Isolating it needs **both** `Gi0/0/0/0` and `Gi0/0/0/1` shut in one commit. Schedule a second window, or accept `healthy` + `t0` as sufficient for MVP-0? **T-025/M3 are not blocked either way.** | No — nothing downstream is blocked | Open (OBS-039) |
 | Q-013 | T-022 | Does a `Rung` carry its own device scope? The `bgp_session` descent's lower rungs (route, IGP adjacency, interface) concern the *path*, not the subject device — checking RR1's own IS-IS adjacencies would miss that PE2 is the isolated one. | **Yes — blocks T-022/T-023/T-024** | Open (OBS-020) — decide at T-022. **Operator: add the field when the dataclass is defined; retrofitting after `descent.py` exists is not cheap** (OBS-035) |
 | Q-011 | T-004 | Should the devices' `logging trap` level be lowered so severity-5 events (`%BGP-5-ADJCHANGE`, IS-IS transitions) reach Loki? Today only `err`/`warning` arrive, so the events T-028 correlates against are absent entirely. Operator decision — it changes log volume on a pipeline already carrying 97% self-generated noise. | No for MVP-0 · **yes for a useful historical axis** | Open (OBS-014) |
 | Q-003 | T-005 | Does Alertmanager have a webhook receiver, and can it replace n8n as the Stage 2 trigger? | No — Stage 2 | **Resolved (OBS-016)** — yes to both. Gap is that no alert rule carries a device label; that is rule authoring, not infrastructure. |

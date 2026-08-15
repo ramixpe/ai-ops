@@ -20,7 +20,7 @@ Nine devices: `P1 P2 P3 P4 PE1 PE2 PE3 PE4 RR1`. One platform so far: `cisco_xr`
 | `t0` | **Partly broken** (original) | 7 static intents | Committed — **frozen** |
 | `t1` | **Partly broken**, ~90s after `t0` | 7 static intents | Committed — **frozen** |
 | `healthy` | **Clean** — the rebuilt fabric | intents **+ templates** | Planned, T-011 |
-| `broken` | **PE2 `GigabitEthernet0/0/0/0` shut** — its uplink to P1 | intents **+ templates** | Planned, T-011 |
+| `broken` | **PE2 isolated — `Gi0/0/0/0` *and* `Gi0/0/0/1` shut** | intents **+ templates** | **Not captured.** See below and FINDINGS OBS-039 |
 
 ### `t0` / `t1` — frozen, do not recapture
 
@@ -45,14 +45,22 @@ Its job is to be the **negative** case. A descent whose whole purpose is finding
 
 ### `broken` — a deliberate, known-cause fault
 
-**PE2's `GigabitEthernet0/0/0/0` — its uplink to P1 — shut by the operator**, captured while down, then restored.
+**PE2 isolated from the core**, captured while down, then restored.
+
+> **Attempted 2026-08-15 and not achieved.** The first attempt shut only
+> `Gi0/0/0/0`. **That does not isolate PE2**: it has two core uplinks, and the
+> IGP reconverged over `Gi0/0/0/1` → P3 with the BGP session to RR1 completely
+> undisturbed. Measured: adjacencies 2 → 1, `RR1 → 10.255.0.12` still
+> Established at `2d04h`. The link was restored and nothing was captured.
+> Isolating PE2 requires **both** uplinks shut, ideally in a single commit so
+> the fabric never sees a transient single-link state. See FINDINGS OBS-039.
 
 This is a better test subject than `t0`'s brokenness even though both look similar, because **the cause is known exactly rather than inferred**. With `t0` we observe that PE2 is isolated and reason backwards about why. With `broken` we know precisely which interface was shut and at what time, so a descent's verdict can be checked against ground truth rather than against an interpretation of ground truth.
 
 Expected causal chain, which is exactly the `bgp_session` descent's ladder:
 
 ```
-PE2 Gi0/0/0/0 (uplink to P1) down
+PE2 isolated (both uplinks down)
   → PE2 loses its IS-IS adjacency
   → RR1 loses its route to 10.255.0.12 (PE2's loopback)
   → the TCP session to that loopback cannot establish
@@ -71,9 +79,12 @@ Run by the operator against `PE2`. Recorded here so the state can be recreated a
 # The interface: PE2 GigabitEthernet0/0/0/0, PE2's uplink to P1.
 ssh <user>@172.20.250.22
 
-# 1. Shut it
+# 1. Shut BOTH uplinks in one commit -- one is not enough, the IGP simply
+#    reconverges over the other and nothing above the link layer changes.
 configure terminal
   interface GigabitEthernet0/0/0/0
+    shutdown
+  interface GigabitEthernet0/0/0/1
     shutdown
   commit
 end
@@ -91,9 +102,11 @@ show bgp summary             # on RR1: 10.255.0.12 should read Idle
 configure terminal
   interface GigabitEthernet0/0/0/0
     no shutdown
+  interface GigabitEthernet0/0/0/1
+    no shutdown
   commit
 end
-show isis adjacency          # adjacency back
+show isis adjacency          # both adjacencies back (Total adjacency count: 2)
 ```
 
 **Record the capture timestamp here once the break is run**, so the fixture set
