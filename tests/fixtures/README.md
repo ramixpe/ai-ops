@@ -19,7 +19,7 @@ Nine devices: `P1 P2 P3 P4 PE1 PE2 PE3 PE4 RR1`. One platform so far: `cisco_xr`
 |---|---|---|---|
 | `t0` | **Partly broken** (original) | 7 static intents | Committed — **frozen** |
 | `t1` | **Partly broken**, ~90s after `t0` | 7 static intents | Committed — **frozen** |
-| `healthy` | **Clean** — the rebuilt fabric | intents **+ templates** | Planned, T-011 |
+| `healthy` | **Clean** — the rebuilt fabric | intents **+ templates** | **Captured 2026-08-15. 220 files** |
 | `broken` | **PE2 isolated — `Gi0/0/0/0` *and* `Gi0/0/0/1` shut** | intents **+ templates** | **Not captured.** See below and FINDINGS OBS-039 |
 
 ### `t0` / `t1` — frozen, do not recapture
@@ -40,6 +40,18 @@ What they record:
 ### `healthy` — the clean fabric
 
 The rebuilt fabric with nothing wrong: every IS-IS adjacency up, all 16 BGP sessions `Established`, all interface error counters at zero.
+
+**220 files.** Per-device counts differ by design — the manifest is derived from
+each device's own reported interface list, and a device with a `router_id`
+skips its own loopback as a BGP subject. P1–P4 26, PE1/PE3 23, PE4 24, PE2 22,
+RR1 21, plus three `show-route-192-0-2-1-32.txt` captures (see below).
+
+**Three deliberate extras.** `192.0.2.1/32` is TEST-NET-1 (RFC 5737) and is
+absent from any real routing table, so asking for it captures the device's
+genuine *not-found* answer — `% Network not in table`. Nothing else in this
+fabric is unreachable, so without it the `route` parser's `found: False`
+branch, and `checks.route_present`'s entire `broken` path, would have had to be
+written against invented output. Captured on RR1, P1 and PE1.
 
 Its job is to be the **negative** case. A descent whose whole purpose is finding the lowest broken rung must also be shown to walk all the way down and report `all_layers_healthy` when nothing is wrong. Without this label, "stops at the right rung" is untested against the possibility that it stops everywhere.
 
