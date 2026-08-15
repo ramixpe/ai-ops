@@ -55,8 +55,8 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 | Task | Title | Status | Model | Commit | Findings | Notes |
 |------|-------|--------|-------|--------|----------|-------|
 | T-010 | `template_parsers.py` skeleton and contract | DONE | opus-5 | `6a56734` | OBS-032, OBS-033 | Contract + §0.10 accounting helper. 27 new tests, 594 passed |
-| T-011 | Extend capture to templates | **PARTIAL** | opus-5 | `24fc1f4`, `2fd50bf` | OBS-034…039 | `run_templates` batching done; **`healthy` captured+verified (217 files)**. `broken` NOT captured — one uplink does not isolate PE2 (Q-016) |
-| T-012 | `bgp_neighbor` parser | DONE | sonnet-5 (opus-5 spec + review) | _next commit_ | OBS-040, OBS-041 | 41 fixtures round-trip, unaccounted=[]. §0.10 verified by mutation. 662 passed |
+| T-011 | Extend capture to templates | **PARTIAL** | opus-5 | `24fc1f4`, `2fd50bf`, `f8c5a9a` | OBS-034…039 | `run_templates` batching done; **`healthy` captured+verified (217 files)**. `broken` NOT captured — one uplink does not isolate PE2 (Q-016) |
+| T-012 | `bgp_neighbor` parser | DONE | sonnet-5 (opus-5 spec + review) | `5360adc` | OBS-040, OBS-041 | 41 fixtures round-trip, unaccounted=[]. §0.10 verified by mutation. 662 passed |
 | T-013 | `route` parser | TODO | sonnet-5 | | | §0.10 completeness |
 | T-014 | `interface` parser | TODO | sonnet-5 | | | §0.10 completeness |
 | T-015 | `logging` parser | TODO | sonnet-5 | | | mnemonic field — Stage 2 |
