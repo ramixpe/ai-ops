@@ -28,6 +28,7 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 | Last updated | 2026-08-15 |
 | Current task | T-006 |
 | Halted? | no |
+| Operator decisions pending capture | **Lab must stay healthy until T-011** — `healthy` then `broken` captured in one coordinated window (OBS-019) |
 
 **Baseline environment (T-001).** Python 3.13.11 · Linux 6.8.0-136 x86_64 · ruff 0.16.3 · pytest 9.1.1 · 63 pip packages · `agent-nettools` 0.2.0 · repo at `/home/rami/ai-agent-ops/ios-xr-nettools`. CI pins Python 3.11 — see OBS-004.
 
@@ -43,7 +44,7 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 | T-002 | MiniMax API contract test | DONE | opus-5 | `f1ecb55` | OBS-005…008 | **Q-001 resolved**: `reasoning_split` works, no stripping step. 5/5 deterministic; tool calling available |
 | T-003 | Wire MiniMax as a provider | DONE | sonnet-5 (opus-5 spec + review) | `c754900` | OBS-010…012 | Responses API, not chat/completions — see Q-010. 567 passed |
 | T-004 | Loki discovery | DONE | opus-5 | `c4cc236` | OBS-013…015 | **Q-002 resolved**; new Q-011. Historical axis much weaker than assumed — see OBS-014 |
-| T-005 | Alertmanager / Prometheus discovery | DONE | opus-5 | _next commit_ | OBS-016…018 | **Q-003 resolved**; new **Q-012 — lab is no longer broken** (OBS-017), resolve at T-007 |
+| T-005 | Alertmanager / Prometheus discovery | DONE | opus-5 | `199d027` | OBS-016…018 | **Q-003 resolved**; new **Q-012 — lab is no longer broken** (OBS-017), resolve at T-007 |
 | T-006 | L3VPN discovery | TODO | opus-5 | | | Q-004 |
 | T-007 | Fixture gap analysis | TODO | opus-5 | | | |
 | T-008 | Parser library decision | TODO | opus-5 | | | TTP vs Genie |

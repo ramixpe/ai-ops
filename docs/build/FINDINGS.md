@@ -332,6 +332,96 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-019 · T-005 → T-011 · Q-012 resolved by the operator: four fixture labels, and a coordinated capture window
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5 (recording an operator decision)
+- **What happened:** The operator resolved Q-012 (OBS-017, the lab having been rebuilt healthy) by combining options 1 and 2 rather than choosing between them. The fixture set becomes four labels, not two:
+
+  | Label | State | Status |
+  |---|---|---|
+  | `t0`, `t1` | The original partly-broken fabric, ~90s apart | **Committed. Untouched — do not recapture, do not extend.** |
+  | `healthy` | The current clean fabric, all 16 BGP sessions Established, PE2/PE4 at 2 IS-IS adjacencies | Not yet captured — T-011 |
+  | `broken` | A deliberate PE2 core-interface shutdown | Not yet captured — T-011 |
+
+  This is a better answer than either option alone. Keeping `t0`/`t1` frozen preserves the ground truth that `test_health.py`, `test_fabric_prompt_contains_pe2_pe4_isolation_and_rr1_idle_peers` and the T-025 acceptance test are all pinned to. Adding two *complete* new labels — every intent **and** every template, captured in one pass per label — avoids the contradiction OBS-017 warned about, where healthy template output would have sat beside broken intent output under one label. And a deliberate, documented break is a far better test subject than the original accidental brokenness, because its cause is known exactly rather than inferred.
+- **Evidence:** Operator instruction, this session. Current layout: `tests/fixtures/cisco_xr/<device>/<label>/`, 9 devices × 2 labels × 7 files.
+- **What I did:** Recorded the decision and the **capture protocol**, since this needs the lab to change state under operator control while I capture:
+  1. T-007 produces the capture manifest — until it exists I do not know which templates and parameters to capture, so capturing early would capture the wrong things.
+  2. T-010 fixes the parser contract; T-011 extends `nettools capture` to templates.
+  3. At T-011 I capture **`healthy`** against the current clean fabric and then signal the operator to run the break.
+  4. Operator shuts the PE2 core interface. I capture **`broken`** — every device, every intent, every template — then signal that capture is complete.
+  5. Operator restores.
+
+  **The lab must stay in its current healthy state until T-011.** If anything rebuilds or changes it before then, the `healthy` label will not match what the rest of this analysis measured, and I need to be told. Also writing `tests/fixtures/README.md` now, ahead of T-011, at the operator's request — its stated purpose is reproducibility after the *next* rebuild, which is a reason to write it before the fixtures exist rather than after.
+- **Needs human review:** no — this records their decision.
+- **Blocks:** none. T-011 now has a defined shape; the capture window is the only step needing operator presence.
+
+---
+
+## OBS-020 · T-022 / T-023 · The `bgp_session` descent crosses devices below the transport rung
+
+- **Kind:** risk
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5 (operator-raised)
+- **What happened:** The operator raised a design problem the LLD and the plan both gloss over. `run_descent(flow, device, subject)` takes **one** device, and `Rung` as specified in T-022 carries `name`, `collect`, `check`, `finding` — no device scope. But the `bgp_session` descent's own rungs are not all about the same device:
+
+  | Rung | Whose state is it actually about? |
+  |---|---|
+  | `bgp_session` | RR1 — the local session FSM |
+  | `transport` | RR1 — the local TCP connection |
+  | `route_to_peer` | RR1's RIB — still local, but the *answer* is about the path |
+  | `igp_adjacency` | **Not RR1.** RR1 having adjacencies says nothing about why `10.255.0.12` is unreachable |
+  | `interface` | **Which interface, on which device?** |
+
+  The concrete case makes it sharp. For `RR1 → 10.255.0.12`, the original fault was **PE2** being IS-IS isolated. A descent that checks *RR1's* IS-IS adjacencies finds them healthy and either continues past the real fault or stops with a wrong verdict. The lowest broken layer is the root cause (D6) — but only if the descent is looking at the device where the layer is actually broken.
+- **Evidence:** `BUILD-PLAN.md` T-022 `Rung` dataclass; T-023's five-rung ladder; LLD §5.3–5.4. Ground truth in `t0`: PE2/PE4 isolated, RR1's own adjacencies fine, RR1 reporting both sessions Idle from the far side.
+- **What I did:** Logged for decision **at T-022**, which is where the `Rung` dataclass is defined and therefore the last cheap moment to add a device-scope field. Deliberately not deciding now — T-022 is a contract task I own, and the choice wants the fixtures in hand. The options as they stand:
+  - **(a) `Rung.device_scope`** — an enum like `subject_device` / `local_device` / `path`, resolved by the walker. Keeps one descent, makes the shift explicit and testable.
+  - **(b) Resolve the subject to a device first**, then run the lower rungs against *that* device. Simple, and matches the failure mode — but needs a subject→device mapping (`10.255.0.12` → PE2) that only the inventory can supply, which pulls inventory into a layer the LLD wants pure.
+  - **(c) Stop the descent at `route_to_peer`** and report "unreachable, cause is off-device" — honest, terminal, and much less useful.
+  - **(d) Two-phase**: descend locally on RR1, then re-enter the same flow with the peer as subject on PE2.
+
+  Option (a) plus a subject→device resolution step looks strongest, but this is a T-022 decision and the alternatives deserve the fixtures. Raising it as **Q-013** so it cannot be quietly skipped.
+- **Needs human review:** yes — it changes the `Rung` contract and possibly `run_descent`'s signature, both of which T-024 and T-025 build on.
+- **Blocks:** T-022 (contract), T-023 (descent definition), T-024 (walker signature).
+
+---
+
+## OBS-021 · T-003 · OBS-010 accepted: the Responses API is confirmed
+
+- **Kind:** decision-made
+- **Escalation:** NOTE
+- **Model:** opus-5 (recording an operator decision)
+- **What happened:** The operator accepted OBS-010's route choice and confirmed the reasoning, singling out the failure mode as decisive: **Chat Completions returning empty `content` with `finish_reason: "length"` and no error is disqualifying on its own.** That is the OBS-006 measurement — at a small budget, reasoning consumes the whole allowance and "the model never got to answer" becomes indistinguishable from "the model answered with nothing".
+- **Evidence:** OBS-006 (the measurement), OBS-010 (the decision and the route comparison). Operator instruction, this session.
+- **What I did:** Marked **Q-010 accepted**. The MVP-1 gate is now cleared to build on the Responses API rather than waiting on that confirmation. OBS-010's revisit condition still stands and is worth restating: if anything later moves a call to Chat Completions, OBS-006 and `BUILD-PLAN.md` T-003 step 4 both come back into force, and that path must then treat empty content with `finish_reason: "length"` as a structured error.
+- **Needs human review:** no
+- **Blocks:** none — unblocks the MVP-1 gate design.
+
+---
+
+## OBS-022 · T-028 · OBS-014 accepted: `show logging` fallback for MVP-0, and two platform items blocking B-206
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5 (recording an operator decision)
+- **What happened:** The operator accepted OBS-014 for MVP-0: **T-028 takes the `show logging` template-output fallback** rather than querying Loki. They also classified both root causes correctly — these are **platform fixes, not Loki limitations**. Loki is working; it is faithfully storing what it is sent. Two backlog items were raised, both **blocking B-206**:
+
+  | Item | Problem | Why it is a platform fix |
+  |---|---|---|
+  | **1 — severity floor** | Device `logging trap` levels are dropping the informational events the investigation layer needs. Only `err`(3) and `warning`(4) reach the collector; `%BGP-5-ADJCHANGE` and IS-IS transitions are severity 5 and never arrive. | The filter is on the routers, upstream of syslog-ng. syslog-ng applies no severity filter of its own — its config filters on source address only. |
+  | **2 — collector SSH churn** | The collector's own SSH sessions are 97% of the corpus: 1,187 of 1,219 lines are `%SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL`, peer `172.20.250.2`, from netmiko sessions closing abruptly. Amplified by re-delivery — one event stored 1,346 times. | Fixing it means changing how the collector closes sessions (clean disconnect), not changing Loki. |
+
+  Both must be fixed before the historical axis carries signal. Until then, "when did it change, and how often" — the D8 historical axis and the whole point of T-028 — cannot be answered from Loki, whatever query is written against it.
+- **Evidence:** OBS-014 and `docs/build/discovery-loki.md` §6 carry the measurements. Operator instruction, this session.
+- **What I did:** Recorded both as backlog items blocking **B-206**. **B-206 is not tracked in this repository** — no backlog file or reference exists anywhere in the tree, so these are logged here with the blocking relationship stated rather than filed against the real item. If they should live in an external tracker, I need its location; otherwise this entry is the record. Confirmed T-028's direction: use the `logging` template output from T-015, with OBS-014 as the recorded reason rather than a silent substitution — and note that the T-015 parser must extract the **in-body** device timestamp, because Loki's own timestamp is ingest time (`timestamp("current")`) and `show logging` output carries the device clock directly.
+- **Needs human review:** no
+- **Blocks:** B-206 (external). T-028 now has a settled source.
+
+---
+
 <!--
 Copy this block for each new entry.
 
@@ -357,6 +447,7 @@ Anything logged with `Needs human review: yes` is mirrored here so the review ha
 |----|-----------|----------|-----------|--------|
 | Q-001 | T-002 | Does `reasoning_split: true` fully suppress `<think>` in `content`? If not, is a stripping step acceptable, or should the gate use the Anthropic-compatible route instead? | Yes — gate depends on it | **Resolved (OBS-005)** — yes, fully. No stripping step, no route change. Must be set explicitly on every call. |
 | Q-002 | T-004 | Is syslog-ng shipping to Loki, and do IOS-XR mnemonics survive into a queryable label? | No — affects Stage 2 only | **Resolved (OBS-013)** — ships to file *and* Loki; mnemonics survive on 100% of lines but in the body, not as a label. Extraction belongs in T-015's parser. |
+| Q-013 | T-022 | Does a `Rung` carry its own device scope? The `bgp_session` descent's lower rungs (route, IGP adjacency, interface) concern the *path*, not the subject device — checking RR1's own IS-IS adjacencies would miss that PE2 is the isolated one. | **Yes — blocks T-022/T-023/T-024** | Open (OBS-020) — decide at T-022 |
 | Q-011 | T-004 | Should the devices' `logging trap` level be lowered so severity-5 events (`%BGP-5-ADJCHANGE`, IS-IS transitions) reach Loki? Today only `err`/`warning` arrive, so the events T-028 correlates against are absent entirely. Operator decision — it changes log volume on a pipeline already carrying 97% self-generated noise. | No for MVP-0 · **yes for a useful historical axis** | Open (OBS-014) |
 | Q-003 | T-005 | Does Alertmanager have a webhook receiver, and can it replace n8n as the Stage 2 trigger? | No — Stage 2 | **Resolved (OBS-016)** — yes to both. Gap is that no alert rule carries a device label; that is rule authoring, not infrastructure. |
 | Q-004 | T-006 | What is the subject naming scheme for an L3VPN service object? | No — flow not in MVP-0 | Open |
@@ -365,7 +456,7 @@ Anything logged with `Needs human review: yes` is mirrored here so the review ha
 | Q-007 | T-035 | Telegram or Mattermost? Hosted means device names, IPs and RCA text leave the estate; self-hosted keeps them in. Decide before implementing — only one provider gets built. | Yes for T-035 | Open |
 | Q-008 | T-035 | Which host runs `nettools` in the target deployment, and does it have outbound egress to the chosen channel? | Yes for T-035 | Open |
 | Q-010 | T-003 | The MiniMax provider uses the OpenAI **Responses** API, not Chat Completions, so `BUILD-PLAN.md` T-003 step 4 (`reasoning_split`, `max_completion_tokens`) does not apply. Both behaviours it targeted are achieved structurally on that route. Confirm the route choice before the MVP-1 gate is built on it. | No for MVP-0 · **yes for the MVP-1 gate** | Open — decided and evidenced (OBS-010) |
-| Q-012 | T-005 | **The lab was rebuilt ~2 days ago and is now healthy** — all 16 BGP sessions Established, PE2/PE4 back to 2 IS-IS adjacencies. T-011 says to capture "against the current broken state", which no longer exists. Re-break the lab, capture a new consistent healthy label, or build the broken case synthetically in-test? | **Yes for T-011** (T-025/M3 unaffected — fixtures still hold the broken state) | Open (OBS-017) — to be resolved at T-007 |
+| Q-012 | T-005 | **The lab was rebuilt ~2 days ago and is now healthy** — all 16 BGP sessions Established, PE2/PE4 back to 2 IS-IS adjacencies. T-011 says to capture "against the current broken state", which no longer exists. Re-break the lab, capture a new consistent healthy label, or build the broken case synthetically in-test? | **Yes for T-011** (T-025/M3 unaffected — fixtures still hold the broken state) | **Resolved (OBS-019)** — options 1+2: keep `t0`/`t1` frozen, add complete `healthy` and `broken` labels; operator runs the break, capture coordinated at T-011 |
 | Q-009 | T-002 | Should `MINIMAX_API_KEY` be rotated after this build? It was pasted into the session transcript, which no control in this repository can revoke. | No — nothing is blocked on it | Open — recommended (OBS-008) |
 
 ---
