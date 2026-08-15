@@ -1,0 +1,184 @@
+<mxfile host="app.diagrams.net" agent="GitHub Copilot" version="24.0.0">
+  <diagram id="nettools-architecture" name="Current Architecture">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1320" pageHeight="1180" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="title" value="IOS-XR Read-Only NetTools — Current Architecture (Phases 0–8)" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=20;fontStyle=1;fontColor=#1F2933;" vertex="1" parent="1">
+          <mxGeometry x="320" y="18" width="680" height="34" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== BAND BACKGROUNDS ===================== -->
+        <mxCell id="bandEntry" value="Front Ends (Layer 5)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EAF1FB;strokeColor=#6C8EBF;verticalAlign=top;align=left;fontStyle=1;fontColor=#3B5A82;spacingLeft=10;spacingTop=6;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="66" width="1240" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="bandReason" value="Reasoning &amp; Analysis" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E6;strokeColor=#D6B656;verticalAlign=top;align=left;fontStyle=1;fontColor=#9A7B15;spacingLeft=10;spacingTop=6;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="206" width="1240" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="bandCore" value="Core Tools (Layer 4)  +  Safety Boundary (Layer 0)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EDF7EC;strokeColor=#82B366;verticalAlign=top;align=left;fontStyle=1;fontColor=#4B7A3A;spacingLeft=10;spacingTop=6;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="376" width="1240" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="bandInv" value="Inventory &amp; Credentials (Layers 1–3)  +  derived docs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3EEF7;strokeColor=#9673A6;verticalAlign=top;align=left;fontStyle=1;fontColor=#6B4B84;spacingLeft=10;spacingTop=6;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="596" width="1240" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="bandExt" value="External Systems" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#999999;verticalAlign=top;align=left;fontStyle=1;fontColor=#555555;spacingLeft=10;spacingTop=6;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="766" width="1240" height="190" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== ENTRY (Layer 5) ===================== -->
+        <mxCell id="cli" value="CLI — nettools&#10;(cli.py)&#10;facts · interfaces · bgp · lldp · isis · sr&#10;route · ping · analyze · agent · diff&#10;health · fabric · metrics · capture" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="70" y="96" width="300" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="mcp" value="MCP Server — nettools-mcp&#10;(mcp_server/server.py)&#10;22 read-only tools · 2 resources · 1 prompt&#10;readOnlyHint annotations" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="400" y="96" width="320" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="docker" value="Docker&#10;(stdio container)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="750" y="106" width="150" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="output" value="output.py&#10;json / table / summary&#10;+ exit codes" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=11;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="930" y="106" width="200" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== REASONING ===================== -->
+        <mxCell id="llm" value="llm_analysis.py&#10;provider layer:&#10;Anthropic · OpenAI · Ollama&#10;(prompt caching, refusals)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="240" width="200" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="fabricAn" value="fabric_analysis.py&#10;fabric-wide&#10;correlation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="280" y="250" width="180" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="agent" value="agent_loop.py&#10;bounded tool-calling&#10;loop (6 read-only tools)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="480" y="250" width="180" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="health" value="health.py&#10;deterministic verdicts&#10;role invariants + baseline&#10;drift (ok/info/warn/crit)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="680" y="245" width="200" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="parsers" value="parsers.py + normalize.py&#10;raw show → records&#10;(PARSE_OK/UNAVAIL/FAILED)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="900" y="245" width="200" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="budget" value="evidence_budget.py&#10;char budgeting /&#10;mid-truncation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=11;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="250" width="140" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== CORE + SAFETY ===================== -->
+        <mxCell id="ntools" value="network_tools.py&#10;— allowlist enforcement&#10;— SSH transport (1 session / collection,&#10;   timeouts + bounded retries)&#10;— evidence · snapshots · diff · flaps&#10;— run_intent / run_template / check_fabric" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=11;align=left;spacingLeft=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="70" y="410" width="360" height="140" as="geometry" />
+        </mxCell>
+
+        <!-- Safety boundary sub-group -->
+        <mxCell id="safetyBox" value="Safety Boundary — checked BEFORE credentials load or a socket opens" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;verticalAlign=top;align=center;fontStyle=1;fontColor=#96550A;fontSize=11;dashed=0;" vertex="1" parent="1">
+          <mxGeometry x="470" y="400" width="440" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="platforms" value="platforms.py&#10;APPROVED_COMMANDS (exact-match)&#10;PLATFORM_INTENTS · VERB_ALLOWLIST" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFCC99;strokeColor=#D79B00;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="486" y="440" width="200" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="templates" value="templates.py&#10;validated parameterized cmds&#10;canonicalize by reconstruction&#10;(IPv4 / int / iface types)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFCC99;strokeColor=#D79B00;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="698" y="440" width="196" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="metrics" value="metrics.py&#10;per-device latency /&#10;retries / verdicts" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=11;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="940" y="410" width="200" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="store" value="evidence_store.py&#10;File  /  SQLite backends (prune, golden)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="940" y="485" width="300" height="55" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== INVENTORY ===================== -->
+        <mxCell id="inventory" value="inventory.py&#10;joins creds → device dicts" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="70" y="626" width="200" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="lab" value="lab.py&#10;credential-free read path&#10;all_devices · platform_for" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="290" y="620" width="210" height="72" as="geometry" />
+        </mxCell>
+        <mxCell id="invModel" value="inventory_model.py&#10;pydantic schema + YAML loader&#10;(extra=forbid)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="520" y="620" width="220" height="72" as="geometry" />
+        </mxCell>
+        <mxCell id="creds" value="credential_resolver.py&#10;env  /  file providers" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="760" y="626" width="190" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="topology" value="topology.py&#10;expected counts + anomalies" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=11;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="970" y="612" width="270" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="devdoc" value="devices_doc.py → docs/devices.md" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=11;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="970" y="668" width="270" height="48" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== EXTERNAL ===================== -->
+        <mxCell id="devices" value="IOS-XR Devices&#10;9 nodes · 172.20.250.0/24&#10;(P / PE / RR)" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=14;fillColor=#F5F5F5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="90" y="800" width="200" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="anthropic" value="Anthropic API" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="330" y="800" width="150" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="openai" value="OpenAI API" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="330" y="856" width="150" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="ollama" value="Ollama&#10;(local, keyless)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="510" y="828" width="150" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="yaml" value="inventory/lab.yaml&#10;declarative inventory + expected" style="shape=note;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="700" y="800" width="220" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="evdir" value="evidence/  snapshots&#10;(files or SQLite)" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=12;fillColor=#F5F5F5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="720" y="864" width="180" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="secrets" value="env vars /&#10;secret files" style="shape=note;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#999999;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="960" y="800" width="140" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== EDGES ===================== -->
+        <!-- entry -> core / reasoning -->
+        <mxCell id="e_cli_nt" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#6C8EBF;" edge="1" parent="1" source="cli" target="ntools"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_cli_llm" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#6C8EBF;dashed=1;" edge="1" parent="1" source="cli" target="llm"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_cli_health" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#6C8EBF;dashed=1;" edge="1" parent="1" source="cli" target="health"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_cli_out" value="renders" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#6C8EBF;dashed=1;fontColor=#6C8EBF;" edge="1" parent="1" source="cli" target="output"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_mcp_nt" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#6C8EBF;" edge="1" parent="1" source="mcp" target="ntools"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_mcp_health" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#6C8EBF;dashed=1;" edge="1" parent="1" source="mcp" target="health"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_docker_mcp" value="hosts" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#6C8EBF;dashed=1;fontColor=#6C8EBF;" edge="1" parent="1" source="docker" target="mcp"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- reasoning wiring -->
+        <mxCell id="e_agent_llm" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#D6B656;dashed=1;" edge="1" parent="1" source="agent" target="llm"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_agent_nt" value="tool calls" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#D6B656;fontColor=#9A7B15;" edge="1" parent="1" source="agent" target="ntools"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_fab_llm" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#D6B656;dashed=1;" edge="1" parent="1" source="fabricAn" target="llm"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_fab_budget" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#D6B656;dashed=1;" edge="1" parent="1" source="fabricAn" target="budget"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_health_parsers" value="reads parsed" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#D6B656;fontColor=#9A7B15;" edge="1" parent="1" source="health" target="parsers"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- core -> safety (ordering) -->
+        <mxCell id="e_nt_platforms" value="1. allowlist check" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#D79B00;fontColor=#96550A;fontStyle=1;" edge="1" parent="1" source="ntools" target="platforms"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_nt_templates" value="validate params" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#D79B00;fontColor=#96550A;" edge="1" parent="1" source="ntools" target="templates"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_nt_parsers" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#82B366;dashed=1;" edge="1" parent="1" source="ntools" target="parsers"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_nt_metrics" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#82B366;dashed=1;" edge="1" parent="1" source="ntools" target="metrics"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_nt_store" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#82B366;" edge="1" parent="1" source="ntools" target="store"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- core -> inventory (creds AFTER allowlist) -->
+        <mxCell id="e_nt_inv" value="2. resolve device + creds" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#9673A6;fontColor=#6B4B84;fontStyle=1;" edge="1" parent="1" source="ntools" target="inventory"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- core -> devices -->
+        <mxCell id="e_nt_dev" value="Netmiko SSH (read-only show/ping/traceroute)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#666666;fontColor=#444444;" edge="1" parent="1" source="ntools" target="devices"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- inventory chain -->
+        <mxCell id="e_inv_lab" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#9673A6;" edge="1" parent="1" source="inventory" target="lab"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_inv_creds" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#9673A6;" edge="1" parent="1" source="inventory" target="creds"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_lab_model" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#9673A6;" edge="1" parent="1" source="lab" target="invModel"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_model_yaml" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#9673A6;" edge="1" parent="1" source="invModel" target="yaml"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_creds_secrets" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#9673A6;dashed=1;" edge="1" parent="1" source="creds" target="secrets"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_topo_model" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#9673A6;dashed=1;" edge="1" parent="1" source="topology" target="invModel"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- store -> evidence dir -->
+        <mxCell id="e_store_dir" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#666666;" edge="1" parent="1" source="store" target="evdir"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- llm -> providers -->
+        <mxCell id="e_llm_anthropic" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#D6B656;" edge="1" parent="1" source="llm" target="anthropic"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_llm_openai" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#D6B656;" edge="1" parent="1" source="llm" target="openai"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_llm_ollama" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#D6B656;" edge="1" parent="1" source="llm" target="ollama"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- invariant note -->
+        <mxCell id="note" value="Central invariant: the exact-match allowlist is checked against the device's own platform BEFORE credentials are resolved or a socket is opened. Platform resolves via lab.platform_for() (static data only). No config mode, no shell, no generic run_command()." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF5F5;strokeColor=#B85450;fontSize=11;align=left;spacingLeft=8;fontColor=#7A2E2E;" vertex="1" parent="1">
+          <mxGeometry x="40" y="966" width="1240" height="54" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

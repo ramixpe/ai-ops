@@ -14,10 +14,13 @@ clab-*/
 images/
 evidence/
 *.egg-info/
-build/
+/build/
 .DS_Store
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
 .coverage
 htmlcov/
+
+# install-docs.sh backups
+.docs-backup-*/
