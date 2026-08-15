@@ -39,8 +39,8 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 
 | Task | Title | Status | Model | Commit | Findings | Notes |
 |------|-------|--------|-------|--------|----------|-------|
-| T-001 | Baseline verification | DONE | opus-5 | `9ba2bbc` | OBS-003, OBS-004 | Green: 550 passed / 4 skipped / lint clean |
-| T-002 | MiniMax API contract test | DONE | opus-5 | `843d5fa` | OBS-005…008 | **Q-001 resolved**: `reasoning_split` works, no stripping step. 5/5 deterministic; tool calling available |
+| T-001 | Baseline verification | DONE | opus-5 | `f309322` | OBS-003, OBS-004 | Green: 550 passed / 4 skipped / lint clean |
+| T-002 | MiniMax API contract test | DONE | opus-5 | `f1ecb55` | OBS-005…008 | **Q-001 resolved**: `reasoning_split` works, no stripping step. 5/5 deterministic; tool calling available |
 | T-003 | Wire MiniMax as a provider | TODO | sonnet-5 | | | |
 | T-004 | Loki discovery | TODO | opus-5 | | | Q-002, non-blocking |
 | T-005 | Alertmanager / Prometheus discovery | TODO | opus-5 | | | Q-003, non-blocking |
