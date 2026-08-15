@@ -16,7 +16,7 @@ Exposed as the ``nettools`` console script. Subcommands:
     nettools agent "QUESTION" [--device DEVICE] [--max-iterations N] [--time-budget SECONDS]
     nettools demo [DEVICE]
     nettools diff [DEVICE] [--against golden|latest]
-    nettools capture [DEVICE ...] [--all] [--label t0] [--out DIR] [--no-scrub]
+    nettools capture [DEVICE ...] [--all] [--label t0] [--out DIR] [--no-scrub] [--templates]
     nettools learn-topology [--from-fixtures|--live] [--label t0] [--out PATH] [--write]
     nettools health [DEVICE ...] [--all] [--from-fixtures] [--label t0] [--min-severity S]
     nettools baseline pin [DEVICE] [--from-latest]
@@ -478,6 +478,7 @@ def _cmd_capture(args: argparse.Namespace) -> int:
             label=args.label,
             base_dir=args.out,
             scrub=not args.no_scrub,
+            templates=args.templates,
         )
         for name in devices
     ]
@@ -731,6 +732,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_capture.add_argument("--all", action="store_true", help="Capture every inventory device.")
     p_capture.add_argument("--label", default="t0", help="Capture label (default: t0).")
     p_capture.add_argument("--out", help="Fixture root; defaults to tests/fixtures.")
+    p_capture.add_argument(
+        "--templates",
+        action="store_true",
+        help=(
+            "Also capture parameterized template output (show bgp neighbor, show route, "
+            "show interfaces <name>, show logging, ping, traceroute). Off by default so the "
+            "existing intent-only capture is unchanged. Adds one SSH session per device, not "
+            "one per command."
+        ),
+    )
     p_capture.add_argument(
         "--no-scrub",
         action="store_true",

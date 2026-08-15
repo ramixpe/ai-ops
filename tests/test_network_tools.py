@@ -1092,3 +1092,176 @@ def test_audit_actor_is_never_treated_as_an_authorization_check(monkeypatch):
 
     assert result["status"] == "error"
     assert "Refusing unapproved commands" in result["errors"][0]
+
+
+# --------------------------------------------------------------------------- #
+# run_templates -- batched capture over one session (T-011)
+# --------------------------------------------------------------------------- #
+
+
+def test_run_templates_opens_one_session_for_the_whole_batch(monkeypatch):
+    """The reason this function exists.
+
+    run_template opens a session per call; fourteen templates on one device
+    opened fourteen logins. IOS-XR rate-limits repeated logins, and every
+    abrupt close is logged by the device as %SECURITY-SSHD_SYSLOG_PRX -- so a
+    per-command loop manufactures the very log noise a capture is trying to
+    record cleanly.
+    """
+
+    from agent_nettools.network_tools import run_templates
+
+    set_device_environment(monkeypatch)
+    sessions = install_fake_netmiko(monkeypatch)
+
+    manifest = [
+        ("bgp_neighbor", {"address": "10.255.0.12"}),
+        ("bgp_neighbor", {"address": "10.255.0.31"}),
+        ("route", {"prefix": "10.255.0.12/32"}),
+        ("interface", {"interface": "GigabitEthernet0/0/0/0"}),
+        ("logging", {"count": "200"}),
+    ]
+    result = run_templates("PE1", manifest)
+
+    assert result["status"] == "success"
+    assert len(sessions) == 1, f"expected one login for the batch, got {len(sessions)}"
+    assert len(result["data"]["commands"]) == len(manifest)
+
+
+def test_run_templates_refuses_every_bad_parameter_before_loading_credentials(monkeypatch):
+    """The ordering invariant, mirroring
+    test_run_template_refuses_a_bad_parameter_before_loading_credentials.
+
+    The credentials are deleted *explicitly* rather than assumed absent. That
+    matters: tests/test_mcp_server.py imports mcp_server.server, which calls
+    load_dotenv() at import time, so this repository's real .env populates
+    DEVICE_USERNAME for the rest of the process. A test that merely assumes
+    the variable is unset passes for the wrong reason in a full-suite run --
+    with credentials present, an inverted ordering would load them and *then*
+    refuse, producing the same structured error and the same green tick.
+    Deleting them is what makes this fail if the ordering is ever inverted.
+    """
+
+    from agent_nettools.network_tools import run_templates
+
+    for name in ("DEVICE_USERNAME", "DEVICE_PASSWORD", "DEVICE_SSH_KEYFILE"):
+        monkeypatch.delenv(name, raising=False)
+
+    manifest = [
+        ("bgp_neighbor", {"address": "10.0.0.1 | reload"}),
+        ("route", {"prefix": "01.1.1.1/32"}),
+        ("interface", {"interface": "Gi0/0/0/0; shutdown"}),
+        ("logging", {"count": "9999"}),
+        ("bgp_neighbor", {"address": "１０.0.0.1"}),
+    ]
+    result = run_templates("PE1", manifest)
+
+    assert result["status"] == "error"
+    assert len(result["errors"]) == len(manifest)
+    assert result["data"]["commands"] == {}
+    assert not any("DEVICE_USERNAME" in e for e in result["errors"])
+
+
+def test_run_templates_never_opens_a_socket_for_an_all_invalid_manifest(monkeypatch):
+    """Stronger than the refusal test: asserts on the transport itself."""
+
+    from agent_nettools.network_tools import run_templates
+
+    set_device_environment(monkeypatch)
+    sessions = install_fake_netmiko(monkeypatch)
+
+    result = run_templates("PE1", [("bgp_neighbor", {"address": "10.0.0.1 | reload"})])
+
+    assert result["status"] == "error"
+    assert sessions == [], "a rejected manifest must never reach the transport"
+
+
+def test_run_templates_drops_one_bad_entry_and_still_collects_the_rest(monkeypatch):
+    """A one-shot capture window must not lose the whole set to one typo."""
+
+    from agent_nettools.network_tools import run_templates
+
+    set_device_environment(monkeypatch)
+    install_fake_netmiko(monkeypatch)
+
+    result = run_templates(
+        "PE1",
+        [
+            ("bgp_neighbor", {"address": "10.255.0.12"}),
+            ("bgp_neighbor", {"address": "not-an-ip"}),
+            ("route", {"prefix": "10.255.0.31/32"}),
+        ],
+    )
+
+    assert result["data"]["commands"].keys() == {
+        "show bgp neighbor 10.255.0.12",
+        "show route 10.255.0.31/32",
+    }
+    assert any("not-an-ip" in e for e in result["errors"])
+
+
+def test_run_templates_reports_validation_errors_even_when_credentials_are_missing(monkeypatch):
+    """Two independent problems must both be reported.
+
+    _safe_error would have built a fresh envelope and discarded the per-entry
+    validation errors, sending the operator round the loop twice.
+    """
+
+    from agent_nettools.network_tools import run_templates
+
+    for name in ("DEVICE_USERNAME", "DEVICE_PASSWORD", "DEVICE_SSH_KEYFILE"):
+        monkeypatch.delenv(name, raising=False)
+
+    result = run_templates(
+        "PE1",
+        [
+            ("bgp_neighbor", {"address": "10.255.0.12"}),
+            ("bgp_neighbor", {"address": "10.0.0.1 | reload"}),
+        ],
+    )
+
+    assert result["status"] == "error"
+    assert any("reload" in e or "whitespace" in e for e in result["errors"])
+    assert any("DEVICE_USERNAME" in e for e in result["errors"])
+
+
+def test_run_templates_honours_the_active_probe_gate(monkeypatch):
+    from agent_nettools.network_tools import run_templates
+
+    set_device_environment(monkeypatch)
+    monkeypatch.setenv("NETTOOLS_ALLOW_ACTIVE_PROBES", "0")
+    install_fake_netmiko(monkeypatch)
+
+    result = run_templates(
+        "PE1",
+        [("ping", {"address": "10.255.0.31"}), ("route", {"prefix": "10.255.0.31/32"})],
+    )
+
+    assert "show route 10.255.0.31/32" in result["data"]["commands"]
+    assert not any(c.startswith("ping") for c in result["data"]["commands"])
+    assert any("active probes are disabled" in e for e in result["errors"])
+
+
+def test_run_templates_uses_the_longest_read_timeout_in_the_batch(monkeypatch):
+    """read_timeout applies per command in one batch, so it must be the max.
+
+    It is a ceiling, not a delay: batching a 60s traceroute beside a 10s show
+    costs nothing when nothing hangs.
+    """
+
+    from agent_nettools import network_tools as nt
+
+    set_device_environment(monkeypatch)
+    captured = {}
+
+    def fake_send(device, commands, **kwargs):
+        captured.update(kwargs)
+        return {c: "out" for c in commands}, [], {}
+
+    monkeypatch.setattr(nt, "_netmiko_send_commands", fake_send)
+    nt.run_templates(
+        "PE1",
+        [("route", {"prefix": "10.255.0.31/32"}), ("traceroute", {"address": "10.255.0.31"})],
+    )
+
+    assert captured["read_timeout"] == 60.0

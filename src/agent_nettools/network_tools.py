@@ -718,6 +718,126 @@ def run_template(
     )
 
 
+def run_templates(
+    device_name: str,
+    manifest: list[tuple[str, dict[str, str]]],
+    *,
+    platform: str | None = None,
+    sender: Callable[[dict[str, Any], str], str] | None = None,
+) -> dict[str, Any]:
+    """Run many validated template commands over **one** SSH session.
+
+    ``run_template`` opens a session per call, which is right for a single
+    interactive question and wrong for a batch: measured against the fixture
+    capture manifest, fourteen templates on one device opened fourteen logins,
+    where ``collect_evidence`` opens one for all seven of its commands. IOS-XR
+    rate-limits repeated logins, and every abrupt session close is logged by the
+    device as ``%SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL`` -- so a per-command
+    loop does not merely cost time, it manufactures the very log noise that
+    already dominates this fabric's syslog corpus, and would contaminate the
+    ``show logging`` output being captured alongside it.
+
+    **The safety ordering is identical to ``run_template``'s, and that is the
+    load-bearing property of this function.** Every command in the manifest is
+    rendered by reconstruction and re-checked with ``is_safe_rendered_command``
+    *before* ``get_device`` is called even once -- so credentials are still
+    loaded only after the whole batch has been authorized, exactly as they are
+    for a single template. A manifest entry that fails validation is reported
+    and dropped; it never reaches the batch, and one bad entry never stops the
+    others from being collected.
+
+    ``read_timeout`` is the maximum over the batch, since it applies per
+    command in one ``_netmiko_send_commands`` call. It is a ceiling, not a
+    delay: a ``show`` command that answers immediately still returns
+    immediately, so batching a 60s ``traceroute`` alongside a 10s ``show``
+    costs nothing when nothing hangs.
+
+    Returns one envelope for the whole batch. ``data.commands`` maps each
+    rendered command to its output, matching ``run_intent`` and
+    ``run_template`` so every generic consumer keeps working.
+    """
+
+    platform = platform or platform_for(device_name)
+    result = _base_result("run_templates", device_name)
+    result["data"] = {"platform": platform, "templates": []}
+
+    if platform not in known_platforms():
+        return _safe_error("run_templates", device_name, f"Unknown platform: {platform}")
+
+    # ---- Phase 1: authorize everything. No credentials, no socket. ----
+    rendered: list[tuple[str, str]] = []  # (template_name, rendered command)
+    read_timeouts: list[float] = []
+    for template_name, params in manifest:
+        template = template_for(platform, template_name)
+        if template is None:
+            result["errors"].append(f"{template_name}: no such template for {platform}")
+            continue
+        if template.active_probe and not _active_probes_allowed():
+            result["errors"].append(
+                f"{template_name}: active probes are disabled by "
+                f"{NETTOOLS_ALLOW_ACTIVE_PROBES_ENV}"
+            )
+            continue
+        try:
+            command = render_command(platform, template_name, **params)
+        except TemplateValidationError as exc:
+            result["errors"].append(f"{template_name}: {exc}")
+            continue
+        # Re-checked here for the same reason _run_rendered_command re-checks
+        # it: the boundary validates regardless of what the caller filtered.
+        if not is_safe_rendered_command(command):
+            result["errors"].append(f"{template_name}: refusing unsafe rendered command")
+            continue
+        rendered.append((template_name, command))
+        if template.read_timeout is not None:
+            read_timeouts.append(template.read_timeout)
+
+    result["data"]["templates"] = [name for name, _ in rendered]
+    if not rendered:
+        result["status"] = STATUS_ERROR
+        result["data"]["commands"] = {}
+        return result
+
+    commands = [command for _, command in rendered]
+
+    # ---- Phase 2: only now are credentials and a socket touched. ----
+    try:
+        device = get_device(device_name)
+    except InventoryError as exc:
+        # Append rather than returning _safe_error, which would build a fresh
+        # envelope and silently discard the per-template validation errors
+        # collected above. A malformed manifest entry and a missing credential
+        # are two independent problems, and reporting only the second would
+        # send the operator round the loop twice.
+        result["status"] = STATUS_ERROR
+        result["errors"].append(str(exc))
+        result["data"]["commands"] = {}
+        return result
+
+    if sender is not None:
+        outputs: dict[str, str] = {}
+        for command in commands:
+            try:
+                outputs[command] = sender(device, command)
+            except Exception as exc:  # noqa: BLE001 - structured errors, not exceptions.
+                result["errors"].append(f"{command}: {exc}")
+        result["data"]["commands"] = outputs
+        if result["errors"]:
+            result["status"] = STATUS_ERROR
+        return result
+
+    outputs, errors, retries = _netmiko_send_commands(
+        device, commands, read_timeout=max(read_timeouts) if read_timeouts else None
+    )
+    result["data"]["commands"] = dict(outputs)
+    if retries:
+        result["data"]["retries"] = retries
+    if errors:
+        result["errors"].extend(errors)
+        result["status"] = STATUS_ERROR
+    return result
+
+
 # Named single-parameter template tools, one per registered template, kept
 # alongside CHECK_TOOLS's per-intent functions so the CLI and MCP server call
 # the same thing: a thin, typed wrapper over run_template(). The parameter is

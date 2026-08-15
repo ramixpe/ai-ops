@@ -20,7 +20,7 @@ Nine devices: `P1 P2 P3 P4 PE1 PE2 PE3 PE4 RR1`. One platform so far: `cisco_xr`
 | `t0` | **Partly broken** (original) | 7 static intents | Committed — **frozen** |
 | `t1` | **Partly broken**, ~90s after `t0` | 7 static intents | Committed — **frozen** |
 | `healthy` | **Clean** — the rebuilt fabric | intents **+ templates** | Planned, T-011 |
-| `broken` | **Deliberate PE2 core-interface shutdown** | intents **+ templates** | Planned, T-011 |
+| `broken` | **PE2 `GigabitEthernet0/0/0/0` shut** — its uplink to P1 | intents **+ templates** | Planned, T-011 |
 
 ### `t0` / `t1` — frozen, do not recapture
 
@@ -45,14 +45,14 @@ Its job is to be the **negative** case. A descent whose whole purpose is finding
 
 ### `broken` — a deliberate, known-cause fault
 
-A PE2 core-interface shutdown, run by the operator, captured while down, then restored.
+**PE2's `GigabitEthernet0/0/0/0` — its uplink to P1 — shut by the operator**, captured while down, then restored.
 
 This is a better test subject than `t0`'s brokenness even though both look similar, because **the cause is known exactly rather than inferred**. With `t0` we observe that PE2 is isolated and reason backwards about why. With `broken` we know precisely which interface was shut and at what time, so a descent's verdict can be checked against ground truth rather than against an interpretation of ground truth.
 
 Expected causal chain, which is exactly the `bgp_session` descent's ladder:
 
 ```
-PE2 core interface down
+PE2 Gi0/0/0/0 (uplink to P1) down
   → PE2 loses its IS-IS adjacency
   → RR1 loses its route to 10.255.0.12 (PE2's loopback)
   → the TCP session to that loopback cannot establish
@@ -68,36 +68,36 @@ Run by the operator against `PE2`. Recorded here so the state can be recreated a
 > **Not runnable by the build agent.** Configuring a device is a state change, and `BUILD-PLAN.md` §0.11 makes that an absolute HALT. The tool's allowlist cannot express it either — there is no config mode, no `run_command`, and `VERB_ALLOWLIST` is `{show, ping, traceroute}`. This is an operator action, deliberately outside anything `nettools` can do.
 
 ```bash
-# 1. Identify PE2's core-facing interface (the one carrying the IS-IS adjacency)
+# The interface: PE2 GigabitEthernet0/0/0/0, PE2's uplink to P1.
 ssh <user>@172.20.250.22
-  show isis adjacency
-  show interfaces brief
 
-# 2. Shut it
+# 1. Shut it
 configure terminal
-  interface <core-interface>
+  interface GigabitEthernet0/0/0/0
     shutdown
   commit
 end
 
-# 3. Let the fault propagate before capturing.
-#    IS-IS holdtime must expire and BGP must fall back to Idle -- allow ~60s
-#    and confirm rather than assume:
-show isis adjacency          # the adjacency should be gone
+# 2. Let the fault propagate before capturing. IS-IS holdtime must expire and
+#    BGP must then fall back to Idle -- allow ~90s, and CONFIRM rather than
+#    assume. Capturing early records a half-propagated fabric, which is worse
+#    than either state because no rung's verdict can be trusted.
+show isis adjacency          # on PE2: the adjacency should be gone
 show bgp summary             # on RR1: 10.255.0.12 should read Idle
 
-# 4. Capture happens here (build agent, `nettools capture ... --label broken`)
+# 3. Capture happens here (build agent, `nettools capture --all --label broken`)
 
-# 5. Restore
+# 4. Restore
 configure terminal
-  interface <core-interface>
+  interface GigabitEthernet0/0/0/0
     no shutdown
   commit
 end
 show isis adjacency          # adjacency back
 ```
 
-**Fill in the exact interface name and the capture timestamp once the break is run** — `<core-interface>` is a placeholder until then, and this file is only reproducible when it names the real one.
+**Record the capture timestamp here once the break is run**, so the fixture set
+can be dated against the fabric's own logs.
 
 ### Capture protocol
 
@@ -108,9 +108,14 @@ This matters more than it sounds. Mixing states inside one label is the specific
 Sequence:
 
 1. Build agent captures `healthy` against the current clean fabric.
-2. Build agent signals ready; **operator runs the break** (above) and confirms it propagated.
+2. Build agent signals ready; **operator runs the break** (above) and confirms it propagated (~90s: IS-IS holdtime, then BGP falling back).
 3. Build agent captures `broken`.
 4. Build agent signals capture complete; **operator restores**.
+
+`broken` additionally captures **PE2's own view** — `show isis neighbors`,
+`show interfaces brief`, and `show interfaces Gi0/0/0/0` on PE2. Those are the
+bottom rungs of the descent, they are the only direct evidence of the root
+cause, and they exist only while the window is open.
 
 ---
 

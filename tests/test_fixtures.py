@@ -318,3 +318,133 @@ def test_diff_falls_back_to_normalized_text_when_parsing_unavailable(monkeypatch
     assert diff["details"]["bgp"]["compared_via"] == "normalized_text"
     assert "bgp" not in diff["changed"]
     assert "bgp" in diff["unchanged"]
+
+
+# --------------------------------------------------------------------------- #
+# Template capture (T-011)
+# --------------------------------------------------------------------------- #
+
+
+def test_template_manifest_skips_the_devices_own_loopback():
+    """A device is never its own BGP peer."""
+
+    from agent_nettools.fixtures import template_manifest_for
+
+    manifest = template_manifest_for("RR1", interfaces=[], router_id="10.255.0.31")
+    addresses = [p.get("address") for _n, p in manifest if _n == "bgp_neighbor"]
+
+    assert "10.255.0.31" not in addresses
+    assert len(addresses) == 4
+
+
+def test_template_manifest_probes_a_different_target_from_rr1():
+    """RR1 cannot usefully ping itself, so it probes PE1 instead."""
+
+    from agent_nettools.fixtures import template_manifest_for
+
+    rr1 = dict(template_manifest_for("RR1", interfaces=[], router_id="10.255.0.31"))
+    pe1 = dict(template_manifest_for("PE1", interfaces=[], router_id="10.255.0.11"))
+
+    assert rr1["ping"] == {"address": "10.255.0.11"}
+    assert pe1["ping"] == {"address": "10.255.0.31"}
+
+
+def test_capturable_interfaces_ignores_dynamic_tunnels():
+    """srte_* tunnels are dynamic; capturing them would churn the fixture set
+    for reasons unrelated to any fault."""
+
+    from agent_nettools import parsers
+    from agent_nettools.fixtures import _capturable_interfaces
+
+    evidence = {
+        "interfaces": {
+            "data": {
+                "parse_status": parsers.PARSE_OK,
+                "parsed": {
+                    "records": [
+                        {"interface": "Lo0"},
+                        {"interface": "Lo100"},
+                        {"interface": "Gi0/0/0/0"},
+                        {"interface": "Gi0/0/0/1"},
+                        {"interface": "Nu0"},
+                        {"interface": "srte_c_10_ep"},
+                    ]
+                },
+            }
+        }
+    }
+
+    assert _capturable_interfaces(evidence) == ["Lo0", "Gi0/0/0/0", "Gi0/0/0/1"]
+
+
+def test_capturable_interfaces_is_empty_when_the_parse_failed():
+    """A failed parse must not silently yield an empty manifest that looks
+    like a device with no interfaces."""
+
+    from agent_nettools import parsers
+    from agent_nettools.fixtures import _capturable_interfaces
+
+    assert _capturable_interfaces({}) == []
+    assert (
+        _capturable_interfaces(
+            {"interfaces": {"data": {"parse_status": parsers.PARSE_FAILED, "parsed": None}}}
+        )
+        == []
+    )
+
+
+def test_capture_device_without_templates_is_unchanged(monkeypatch, tmp_path):
+    """The default must be exactly the pre-T-011 behaviour."""
+
+    from agent_nettools.fixtures import capture_device
+
+    set_device_environment(monkeypatch)
+    sessions = install_fake_netmiko(monkeypatch)
+
+    result = capture_device("PE1", label="unit", base_dir=str(tmp_path))
+
+    assert len(sessions) == 1
+    assert all("show-bgp-neighbor" not in w for w in result["written"])
+
+
+def test_capture_device_with_templates_opens_two_sessions_not_fifteen(monkeypatch, tmp_path):
+    """One session for the intents, one for the whole template batch.
+
+    The number that matters is that it does not scale with the manifest --
+    OBS-027 measured fourteen logins for fourteen templates.
+    """
+
+    from agent_nettools.fixtures import capture_device
+
+    set_device_environment(monkeypatch)
+    sessions = install_fake_netmiko(monkeypatch)
+
+    result = capture_device("PE1", label="unit", base_dir=str(tmp_path), templates=True)
+
+    assert len(sessions) == 2
+    written = [w.rsplit("/", 1)[-1] for w in result["written"]]
+    assert "show-bgp-neighbor-10-255-0-12.txt" in written
+    assert "show-route-10-255-0-12-32.txt" in written
+    assert "show-logging-last-200.txt" in written
+
+
+def test_captured_template_files_replay_through_the_existing_sender(monkeypatch, tmp_path):
+    """The read path needs no change: run_template with a fixture sender finds
+    the file the capture wrote, because both key on the rendered command."""
+
+    from agent_nettools.fixtures import capture_device, fixture_sender
+    from agent_nettools.network_tools import run_template
+
+    set_device_environment(monkeypatch)
+    install_fake_netmiko(monkeypatch)
+    capture_device("PE1", label="unit", base_dir=str(tmp_path), templates=True)
+
+    replayed = run_template(
+        "PE1",
+        "bgp_neighbor",
+        address="10.255.0.12",
+        sender=fixture_sender(label="unit", base_dir=str(tmp_path)),
+    )
+
+    assert replayed["status"] == "success"
+    assert "show bgp neighbor 10.255.0.12" in replayed["data"]["commands"]
