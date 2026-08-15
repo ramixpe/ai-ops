@@ -650,3 +650,204 @@ def test_a_normal_route_is_not_flagged_connected():
     for record in parsed["records"]:
         assert record["directly_connected"] is False
         assert record["next_hop"] != "directly connected"
+
+
+# --------------------------------------------------------------------------- #
+# T-014: the interface parser
+# --------------------------------------------------------------------------- #
+
+# Excludes show-interfaces-brief.txt deliberately: that is a different,
+# static-intent command already handled by parsers.py, not this template.
+_INTERFACE_FIXTURES = sorted(
+    p
+    for p in FIXTURE_DIR.glob("cisco_xr/*/healthy/show-interfaces-*.txt")
+    if p.name != "show-interfaces-brief.txt"
+)
+
+# Every key the T-014 spec's meta table requires, present for all three
+# shapes (physical / loopback / VLAN subinterface) -- ``None`` where not
+# applicable, never absent.
+_INTERFACE_META_KEYS = (
+    "interface",
+    "admin_state",
+    "line_state",
+    "description",
+    "mtu",
+    "bandwidth_kbps",
+    "mac_address",
+    "encapsulation",
+    "ip_address",
+    "state_transitions",
+    "last_link_flapped",
+    "hardware_type",
+)
+
+
+def test_at_least_one_interface_fixture_of_each_shape_is_on_disk():
+    """A sanity check on the parametrization source below.
+
+    45 fixtures: 34 physical GigabitEthernet, 9 Loopback, 2 VLAN
+    subinterface. If this ever fails, the round-trip test below would be
+    silently parametrized over an empty or lopsided list -- worth failing
+    loudly on its own rather than only as a mysteriously-shrunk parametrize
+    count.
+    """
+
+    assert len(_INTERFACE_FIXTURES) == 45
+
+
+@pytest.mark.parametrize("fixture_path", _INTERFACE_FIXTURES, ids=lambda p: str(p.relative_to(FIXTURE_DIR)))
+def test_every_committed_interface_fixture_round_trips_clean(fixture_path: Path):
+    """Section 0.10, pinned against every real fixture on disk.
+
+    Discovered from the filesystem rather than a hardcoded list, so a future
+    ``nettools capture`` run that adds a device or an interface is covered
+    automatically instead of silently going unchecked.
+    """
+
+    raw = fixture_path.read_text()
+    parsed, status = tp.parse_template_output("cisco_xr", "interface", raw)
+    assert status is tp.PARSE_OK, f"{fixture_path}: {status}"
+    assert parsed["meta"]["unaccounted_lines"] == [], f"{fixture_path}: {parsed['meta']['unaccounted_lines']}"
+    assert parsed["meta"]["unparsed_rows"] == 0
+
+
+def test_a_physical_interface_yields_the_full_counter_block():
+    """P1's Gi0/0/0/0: a real, healthy physical interface."""
+
+    raw = _load_fixture("cisco_xr", "P1", "healthy", "show-interfaces-gi0-0-0-0.txt")
+    parsed, status = tp.parse_template_output("cisco_xr", "interface", raw)
+    assert status is tp.PARSE_OK
+    meta = parsed["meta"]
+    assert meta["interface"] == "GigabitEthernet0/0/0/0"
+    assert meta["admin_state"] == "up"
+    assert meta["line_state"] == "up"
+    assert meta["mtu"] == "1514"
+    assert meta["bandwidth_kbps"] == "1000000"
+    assert meta["encapsulation"] == "ARPA"
+    assert meta["description"] == "TO-P2"
+    counters = {r["counter"] for r in parsed["records"]}
+    assert "input_errors" in counters
+    assert "carrier_transitions" in counters
+
+
+def test_pe1_gi0_0_0_2_300_is_the_only_line_down_interface_fixture():
+    """PE1's Gi0/0/0/2.300: admin up, line protocol down.
+
+    This is the only broken-state interface fixture that exists anywhere in
+    the committed set -- every other one of the 45 is line-up. T-020's
+    ``interface_state`` check depends on this exact fixture to exercise its
+    "admin up, line down" branch, so the admin/line state split is asserted
+    explicitly here rather than folded into a generic meta-keys check.
+    """
+
+    raw = _load_fixture("cisco_xr", "PE1", "healthy", "show-interfaces-gi0-0-0-2-300.txt")
+    parsed, status = tp.parse_template_output("cisco_xr", "interface", raw)
+    assert status is tp.PARSE_OK
+    assert parsed["meta"]["admin_state"] == "up"
+    assert parsed["meta"]["line_state"] == "down"
+
+
+def test_a_loopback_has_no_counter_block_but_still_parses_ok():
+    """A Loopback reports no rate, no duplex/ARP detail, and IOS-XR emits no
+    counter block for it at all -- ``records == []`` is the correct, healthy
+    outcome, never a parse failure."""
+
+    raw = _load_fixture("cisco_xr", "P1", "healthy", "show-interfaces-lo0.txt")
+    parsed, status = tp.parse_template_output("cisco_xr", "interface", raw)
+    assert status is tp.PARSE_OK
+    assert parsed["records"] == []
+    assert parsed["meta"]["mac_address"] is None
+    assert parsed["meta"]["encapsulation"] == "Loopback"
+
+
+@pytest.mark.parametrize(
+    "device,fixture",
+    [
+        ("P1", "show-interfaces-gi0-0-0-0.txt"),  # physical
+        ("P1", "show-interfaces-lo0.txt"),  # loopback
+        ("PE1", "show-interfaces-gi0-0-0-2-300.txt"),  # VLAN subinterface, line down
+    ],
+)
+def test_every_interface_meta_key_is_present_in_every_shape(device, fixture):
+    """Every key in the T-014 meta table, present for all three shapes --
+    ``None`` rather than absent, so a consumer never has to distinguish
+    'missing' from 'not applicable'."""
+
+    raw = _load_fixture("cisco_xr", device, "healthy", fixture)
+    parsed, status = tp.parse_template_output("cisco_xr", "interface", raw)
+    assert status is tp.PARSE_OK
+    for key in _INTERFACE_META_KEYS:
+        assert key in parsed["meta"], f"{device}/{fixture}: missing {key}"
+
+
+def test_interface_volatile_fields_split_noisy_counters_from_error_counters():
+    """The point of the split: packets/bytes counters grow on any live,
+    healthy link and are pure noise, but a change in an error/quality
+    counter is exactly the signal interface_state (T-020) exists to catch.
+    Both directions are asserted -- the negative half is the point."""
+
+    volatile = tp.template_volatile_fields("cisco_xr", "interface")
+
+    assert "last_link_flapped" in volatile
+    assert "packets_input" in volatile
+    assert "bytes_input" in volatile
+    assert "total_input_drops" in volatile
+    assert "packets_output" in volatile
+    assert "bytes_output" in volatile
+    assert "total_output_drops" in volatile
+
+    assert "input_errors" not in volatile
+    assert "crc" not in volatile
+    assert "carrier_transitions" not in volatile
+
+
+def test_interface_record_key_is_registered():
+    assert tp.template_record_key("cisco_xr", "interface") == "counter"
+
+
+def test_interface_garbage_input_raises_parse_error_and_reports_parse_failed():
+    """Something clearly not interface output must not be silently accepted."""
+
+    garbage = "lorem ipsum\nnot an interface"
+
+    with pytest.raises(tp.ParseError):
+        tp.parse_xr_interface(garbage)
+
+    parsed, status = tp.parse_template_output("cisco_xr", "interface", garbage)
+    assert parsed is None
+    assert status is tp.PARSE_FAILED
+
+
+def test_interface_truncated_output_does_not_raise_and_still_accounts_cleanly():
+    """The first 3 lines of a real fixture -- cut off right after the header,
+    before any hardware/address detail. Must not raise, and whatever is
+    captured must still satisfy the 0.10 accounting."""
+
+    raw = _load_fixture("cisco_xr", "P1", "healthy", "show-interfaces-gi0-0-0-0.txt")
+    truncated = "\n".join(raw.splitlines()[:3])
+
+    parsed, status = tp.parse_template_output("cisco_xr", "interface", truncated)
+
+    assert status is tp.PARSE_OK
+    assert parsed["meta"]["unaccounted_lines"] == []
+    assert parsed["meta"]["unparsed_rows"] == 0
+    assert parsed["meta"]["interface"] == "GigabitEthernet0/0/0/0"
+    assert parsed["records"] == []
+
+
+def test_interface_unrecognised_line_surfaces_in_unaccounted_lines():
+    """The 0.10 guardrail: a line the template cannot know about must be
+    surfaced, not silently swallowed. Proves the accounting is not
+    decorative."""
+
+    raw = _load_fixture("cisco_xr", "P1", "healthy", "show-interfaces-gi0-0-0-0.txt")
+    injected = raw.replace(
+        "  Last link flapped 2d00h",
+        "  Last link flapped 2d00h\n  Some New Vendor Field: 42",
+    )
+
+    parsed, status = tp.parse_template_output("cisco_xr", "interface", injected)
+
+    assert status is tp.PARSE_OK
+    assert parsed["meta"]["unaccounted_lines"] == ["Some New Vendor Field: 42"]

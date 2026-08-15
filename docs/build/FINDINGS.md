@@ -833,6 +833,36 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-044 · T-014 → T-020 · A line-down interface omits its error counters entirely — absent is not zero
+
+- **Kind:** surprise
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5 (judgement) · sonnet-5 (implementation)
+- **What happened:** T-014 accepted with no correction — all 45 fixtures round-trip clean, 14 declared ignore rules, the volatile judgement implemented exactly as specified, §0.10 mutation verified independently. **776 passed.**
+
+  The valuable part is a shape neither the LLD nor my spec anticipated, which Sonnet surfaced rather than working around. **While line protocol is down, IOS-XR does not emit the error counters at all:**
+
+  | | Healthy `Gi0/0/0/0` | Line-down `Gi0/0/0/2.300` |
+  |---|---|---|
+  | Counters emitted | **22** | **6** |
+  | `input_errors`, `crc`, `frame`, `overrun`, `abort` | present | **absent** |
+  | `carrier_transitions` | present | **absent** |
+  | `runts`, `giants`, `throttles`, `parity` | present | **absent** |
+
+  They are not reported as zero. The lines do not exist.
+- **Evidence:** `tests/fixtures/cisco_xr/PE1/healthy/show-interfaces-gi0-0-0-2-300.txt` — the counter block ends after `Output 0 broadcast packets, 0 multicast packets`. Parsed: `admin_state="up"`, `line_state="down"`, records `['packets_input','bytes_input','total_input_drops','packets_output','bytes_output','total_output_drops']`.
+- **What I did:** Accepted the parser — its per-line independent matching handles the short block correctly without special-casing, and a fixture missing counter lines simply yields fewer records, which is the honest representation.
+
+  **Recording a binding requirement for T-020, because this is a trap with a wrong answer that looks right.** `interface_state`'s specified broken condition is "admin up + line down, **or error counters above threshold**". On this fixture the first half fires, so the check reaches the right verdict by luck. But a check that evaluates the counter half by reading `input_errors` from the records and finding nothing **must return `unevaluated`, never "0 errors, therefore healthy"** — the counters are unknown, not zero. Defaulting absent-to-zero would report an interface whose error state cannot be determined as clean, which is precisely the failure `health.py`'s `unevaluated` discipline exists to prevent and which `glossary.md` states as "a failed collection must never look like a verdict".
+
+  What makes this worth flagging loudly: the fixtures contain **exactly one** line-down interface, so a check written against the healthy 44 would never encounter a missing counter, pass its tests, and carry the defect into production. Q-005 (the threshold value) is already open; this adds a second question to settle with it — what the check does when the counter is absent. The answer is `unevaluated`, and T-020 needs a test pinning it against this specific fixture.
+
+  One honest gap Sonnet flagged: `admin_state` normalisation of IOS-XR's literal `"administratively down"` to `"admin-down"` is implemented but **untested against real output**, because all 45 fixtures are `admin_state == "up"`. The one capture that would have exercised it was the PE2 window, where `Gi0/0/0/0` did read `admin-down` — but that was the interface we shut, and no `show interfaces <name>` capture was taken before the restore.
+- **Needs human review:** yes — folded into Q-005, which T-020 must answer.
+- **Blocks:** none. Binds T-020.
+
+---
+
 <!--
 Copy this block for each new entry.
 
@@ -865,7 +895,7 @@ Anything logged with `Needs human review: yes` is mirrored here so the review ha
 | Q-011 | T-004 | Should the devices' `logging trap` level be lowered so severity-5 events (`%BGP-5-ADJCHANGE`, IS-IS transitions) reach Loki? Today only `err`/`warning` arrive, so the events T-028 correlates against are absent entirely. Operator decision — it changes log volume on a pipeline already carrying 97% self-generated noise. | No for MVP-0 · **yes for a useful historical axis** | Open (OBS-014) |
 | Q-003 | T-005 | Does Alertmanager have a webhook receiver, and can it replace n8n as the Stage 2 trigger? | No — Stage 2 | **Resolved (OBS-016)** — yes to both. Gap is that no alert rule carries a device label; that is rule authoring, not infrastructure. |
 | Q-004 | T-006 | What is the subject naming scheme for an L3VPN service object? | No — flow not in MVP-0 | **Accepted (OBS-035)** — `<pe>:<vrf>` recommended; `<vrf>:<rd>` eliminated because RD is reused across PEs. Confirm at T-022. |
-| Q-005 | T-020 | What error-counter threshold should `interface_state` treat as broken? | No — default chosen, needs review | Open |
+| Q-005 | T-020 | What error-counter threshold should `interface_state` treat as broken? **And what does it do when the counters are absent?** A line-down interface omits them entirely (OBS-044) — the answer must be `unevaluated`, never "0 errors, healthy". | No — but the absent-counter half is a correctness trap | Open — two parts now (OBS-044) |
 | Q-006 | T-025 | Does the descent's stopping rung match what a network engineer would conclude by hand from the same fixtures? | **Yes — this validates the architecture** | Open |
 | Q-007 | T-035 | Telegram or Mattermost? Hosted means device names, IPs and RCA text leave the estate; self-hosted keeps them in. Decide before implementing — only one provider gets built. | Yes for T-035 | Open |
 | Q-008 | T-035 | Which host runs `nettools` in the target deployment, and does it have outbound egress to the chosen channel? | Yes for T-035 | Open |

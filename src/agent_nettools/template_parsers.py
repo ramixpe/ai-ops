@@ -80,6 +80,7 @@ __all__ = [
     "PARSE_OK",
     "PARSE_UNAVAILABLE",
     "BGP_NEIGHBOR_IGNORES",
+    "INTERFACE_IGNORES",
     "ROUTE_IGNORES",
     "TEMPLATE_PARSERS",
     "TEMPLATE_RECORD_KEYS",
@@ -92,6 +93,7 @@ __all__ = [
     "has_template_parser",
     "parse_template_output",
     "parse_xr_bgp_neighbor",
+    "parse_xr_interface",
     "parse_xr_route",
     "template_record_key",
     "template_volatile_fields",
@@ -666,6 +668,270 @@ def parse_xr_route(output: str) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
+# cisco_xr: interface  (T-014)
+# --------------------------------------------------------------------------- #
+#
+# ``show interfaces <name>`` answers one of three shapes on this fabric, all
+# legitimate:
+#
+# 1. A physical interface (GigabitEthernet): header, hardware/description/
+#    address block, then a full counter block -- input/output packet and
+#    byte counts, drop/error/quality counters, and carrier transitions.
+# 2. A Loopback: the same header and hardware/address block, but IOS-XR
+#    reports no rate, no duplex/flow-control/ARP detail, and **no counter
+#    block at all** -- ``records`` is legitimately empty, never a parse
+#    failure.
+# 3. A VLAN subinterface: the only line-protocol-down case in this fabric's
+#    fixtures. It *does* carry a counter block, but a **shorter** one than a
+#    physical interface's -- only the six input/output packet-byte-drop
+#    counters are present; the quality/error counters (runts/giants/
+#    throttles/parity, input errors/CRC/frame/overrun/ignored/abort, output
+#    errors/underruns/applique/resets, output buffer failures) and carrier
+#    transitions are not emitted by the device at all while the line is
+#    down. This is a real shape the initial task spec did not anticipate
+#    (it described only "the counter block" as if it were uniform); handled
+#    here by matching each counter line independently rather than assuming
+#    the full block is always present, exactly as ``parse_xr_route`` already
+#    treats a directly-connected path as a distinct, independently-matched
+#    shape rather than a variant requiring special-casing.
+#
+# Unlike ``bgp_neighbor``/``route``, there is no fixture of ``show
+# interfaces`` answering with a device-level error (e.g. an unknown
+# interface name), so no "not found" meta shape is modelled here -- output
+# that does not contain a recognisable header line raises ``ParseError``,
+# exactly like any other genuinely unrecognised output.
+
+_HEADER = re.compile(
+    r"^(?P<interface>\S+) is (?P<admin_state>administratively down|up|down), "
+    r"line protocol is (?P<line_state>up|down)$"
+)
+_STATE_TRANSITIONS = re.compile(r"^Interface state transitions: (?P<n>\d+)$")
+# Three ``Hardware is`` shapes are on disk: a physical interface (hardware
+# type, then an address with a redundant "(bia <mac>)" burned-in-address
+# clause), a Loopback (hardware type only, no address at all), and a VLAN
+# subinterface (hardware type and an address, but no "(bia ...)" clause).
+# One pattern covers all three via optional groups.
+_HARDWARE = re.compile(
+    r"^Hardware is (?P<hardware_type>[^,]+)(?:, address is (?P<mac>\S+)(?: \(bia \S+\))?)?$"
+)
+_DESCRIPTION = re.compile(r"^Description: (?P<description>.+)$")
+_INTERNET_ADDRESS = re.compile(r"^Internet address is (?P<ip>\S+)$")
+_MTU_BW = re.compile(r"^MTU (?P<mtu>\d+) bytes, BW (?P<bw>\d+) Kbit(?: \(Max: \d+ Kbit\))?$")
+# Three encapsulation shapes are on disk: a physical interface's "Encapsulation
+# ARPA," with "loopback not set," reported as its own separate line further
+# down, and Loopback/VLAN subinterfaces, which fold "  loopback not set,"
+# onto the same line instead. The trailing clause carries no information a
+# physical interface's separate line doesn't already carry, so it is matched
+# here and discarded rather than captured into a field.
+_ENCAPSULATION = re.compile(r"^Encapsulation (?P<encap>ARPA|Loopback|802\.1Q Virtual LAN),(?:\s+loopback not set,)?$")
+_LAST_LINK_FLAPPED = re.compile(r"^Last link flapped (?P<flap>\S+)$")
+
+# Counter-block lines. Each is matched independently -- see the shape note
+# above -- so a fixture missing some of them (Loopback: none; a down VLAN
+# subinterface: only the first two) still round-trips clean; whichever
+# counters are actually present in the output are exactly the records
+# produced, in the document order the lines appear.
+_PACKETS_INPUT = re.compile(
+    r"^(?P<packets_input>\d+) packets input, (?P<bytes_input>\d+) bytes, "
+    r"(?P<total_input_drops>\d+) total input drops$"
+)
+_PACKETS_OUTPUT = re.compile(
+    r"^(?P<packets_output>\d+) packets output, (?P<bytes_output>\d+) bytes, "
+    r"(?P<total_output_drops>\d+) total output drops$"
+)
+_RUNTS = re.compile(
+    r"^(?P<runts>\d+) runts, (?P<giants>\d+) giants, (?P<throttles>\d+) throttles, (?P<parity>\d+) parity$"
+)
+_INPUT_ERRORS = re.compile(
+    r"^(?P<input_errors>\d+) input errors, (?P<crc>\d+) CRC, (?P<frame>\d+) frame, "
+    r"(?P<overrun>\d+) overrun, (?P<ignored>\d+) ignored, (?P<abort>\d+) abort$"
+)
+_OUTPUT_ERRORS = re.compile(
+    r"^(?P<output_errors>\d+) output errors, (?P<underruns>\d+) underruns, "
+    r"(?P<applique>\d+) applique, (?P<resets>\d+) resets$"
+)
+# "output buffers swapped out" shares this line with the required
+# output_buffer_failures counter but is not itself part of the schema, so the
+# whole line is matched (and consumed) while only the first count becomes a
+# record -- the same "one regex, partial field use" pattern _KNOWN_VIA uses
+# above for the route parser's trailing clause.
+_OUTPUT_BUFFER_FAILURES = re.compile(
+    r"^(?P<output_buffer_failures>\d+) output buffer failures, \d+ output buffers swapped out$"
+)
+_CARRIER_TRANSITIONS = re.compile(r"^(?P<carrier_transitions>\d+) carrier transitions$")
+
+# Ordered (regex, counter names) pairs, walked in the order the lines appear
+# in real output so records come out in document order. A tuple of names
+# because three of these lines pack more than one counter.
+_COUNTER_LINES: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = (
+    (_PACKETS_INPUT, ("packets_input", "bytes_input", "total_input_drops")),
+    (_RUNTS, ("runts", "giants", "throttles", "parity")),
+    (_INPUT_ERRORS, ("input_errors", "crc", "frame", "overrun", "ignored", "abort")),
+    (_PACKETS_OUTPUT, ("packets_output", "bytes_output", "total_output_drops")),
+    (_OUTPUT_ERRORS, ("output_errors", "underruns", "applique", "resets")),
+    (_OUTPUT_BUFFER_FAILURES, ("output_buffer_failures",)),
+    (_CARRIER_TRANSITIONS, ("carrier_transitions",)),
+)
+
+# Section 0.10 accounting for everything the meta/record extraction above
+# does not itself capture. Anchored and specific per BUILD-PLAN.md 0.10's
+# instruction against a broad catch-all; each carries the line shape it
+# covers and why it is not part of the schema.
+INTERFACE_IGNORES: tuple[IgnoreRule, ...] = (
+    IgnoreRule(
+        r"^reliability (?:\d+/\d+|Unknown), txload (?:\d+/\d+|Unknown), rxload (?:\d+/\d+|Unknown)$",
+        "link-quality/load snapshot, not required by the schema",
+    ),
+    IgnoreRule(
+        r"^loopback not set,$",
+        "loopback-test state flag on a physical interface; folded onto the Encapsulation "
+        "line instead for Loopback/VLAN shapes, not required by the schema",
+    ),
+    IgnoreRule(
+        r"^Full-duplex, \S+, \S+, link type is \S+$",
+        "duplex/speed/link-type summary, not required by the schema",
+    ),
+    IgnoreRule(
+        r"^output flow control is \S+, input flow control is \S+$",
+        "flow-control negotiation state, not required by the schema",
+    ),
+    IgnoreRule(
+        r"^Carrier delay \(up\) is \d+ msec$",
+        "carrier-delay timer configuration, not required by the schema",
+    ),
+    IgnoreRule(
+        r"^ARP type ARPA, ARP timeout \d{2}:\d{2}:\d{2}$",
+        "ARP encapsulation/timeout setting, not required by the schema",
+    ),
+    IgnoreRule(
+        r"^Last input (?:never|Unknown|\d{2}:\d{2}:\d{2}), output (?:never|Unknown|\d{2}:\d{2}:\d{2})$",
+        "last-input/output activity timestamps; last_link_flapped is the field captured instead",
+    ),
+    IgnoreRule(
+        r'^Last clearing of "show interface" counters (?:never|Unknown)$',
+        "counter-clear timestamp, not required by the schema",
+    ),
+    IgnoreRule(
+        r"^\d+ minute input rate \d+ bits/sec, \d+ packets/sec$",
+        "5-minute smoothed input rate; the raw packet/byte counters are captured instead",
+    ),
+    IgnoreRule(
+        r"^\d+ minute output rate \d+ bits/sec, \d+ packets/sec$",
+        "5-minute smoothed output rate; the raw packet/byte counters are captured instead",
+    ),
+    IgnoreRule(
+        r"^Input/output data rate is disabled\.$",
+        "loopback rate-disabled notice -- a Loopback has no counter block at all -- "
+        "not required by the schema",
+    ),
+    IgnoreRule(
+        r"^\d+ drops for unrecognized upper-level protocol$",
+        "unrecognized-protocol drop counter, not required by the schema",
+    ),
+    IgnoreRule(
+        r"^Received \d+ broadcast packets, \d+ multicast packets$",
+        "input broadcast/multicast packet counts, not required by the schema",
+    ),
+    IgnoreRule(
+        r"^Output \d+ broadcast packets, \d+ multicast packets$",
+        "output broadcast/multicast packet counts, not required by the schema",
+    ),
+)
+
+_INTERFACE_META_KEYS: tuple[str, ...] = (
+    "interface",
+    "admin_state",
+    "line_state",
+    "description",
+    "mtu",
+    "bandwidth_kbps",
+    "mac_address",
+    "encapsulation",
+    "ip_address",
+    "state_transitions",
+    "last_link_flapped",
+    "hardware_type",
+)
+
+
+def parse_xr_interface(output: str) -> dict[str, Any]:
+    """Parse ``show interfaces <name>``.
+
+    Three legitimate shapes -- see the section comment above. Raises
+    :class:`ParseError` only when no recognisable header line
+    (``<name> is <admin_state>, line protocol is <line_state>``) is found:
+    genuinely unrecognised output.
+    """
+
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+
+    meta: dict[str, Any] = dict.fromkeys(_INTERFACE_META_KEYS)
+    records: list[dict[str, Any]] = []
+    consumed: list[str] = []
+    found_interface = False
+
+    for line in lines:
+        if match := _HEADER.match(line):
+            meta["interface"] = match["interface"]
+            raw_admin_state = match["admin_state"]
+            # IOS-XR's own wording is "administratively down"; normalised to
+            # the compact "admin-down" the spec's admin_state vocabulary uses.
+            meta["admin_state"] = (
+                "admin-down" if raw_admin_state == "administratively down" else raw_admin_state
+            )
+            meta["line_state"] = match["line_state"]
+            found_interface = True
+            consumed.append(line)
+            continue
+        if match := _STATE_TRANSITIONS.match(line):
+            meta["state_transitions"] = match["n"]
+            consumed.append(line)
+            continue
+        if match := _HARDWARE.match(line):
+            meta["hardware_type"] = match["hardware_type"]
+            meta["mac_address"] = match["mac"]
+            consumed.append(line)
+            continue
+        if match := _DESCRIPTION.match(line):
+            meta["description"] = match["description"]
+            consumed.append(line)
+            continue
+        if match := _INTERNET_ADDRESS.match(line):
+            ip = match["ip"]
+            meta["ip_address"] = None if ip == "Unknown" else ip
+            consumed.append(line)
+            continue
+        if match := _MTU_BW.match(line):
+            meta["mtu"] = match["mtu"]
+            meta["bandwidth_kbps"] = match["bw"]
+            consumed.append(line)
+            continue
+        if match := _ENCAPSULATION.match(line):
+            meta["encapsulation"] = match["encap"]
+            consumed.append(line)
+            continue
+        if match := _LAST_LINK_FLAPPED.match(line):
+            meta["last_link_flapped"] = match["flap"]
+            consumed.append(line)
+            continue
+
+        for pattern, counter_names in _COUNTER_LINES:
+            if match := pattern.match(line):
+                for counter_name in counter_names:
+                    records.append({"counter": counter_name, "value": match[counter_name]})
+                consumed.append(line)
+                break
+
+    if not found_interface:
+        raise ParseError(
+            "output does not contain a recognisable 'show interfaces' header line "
+            "('<name> is <admin_state>, line protocol is <line_state>')"
+        )
+
+    return finalize(raw=output, meta=meta, records=records, consumed=consumed, ignores=INTERFACE_IGNORES)
+
+
+# --------------------------------------------------------------------------- #
 # The registry
 # --------------------------------------------------------------------------- #
 
@@ -674,6 +940,7 @@ def parse_xr_route(output: str) -> dict[str, Any]:
 TEMPLATE_PARSERS: dict[tuple[str, str], Callable[[str], dict[str, Any]]] = {
     ("cisco_xr", "bgp_neighbor"): parse_xr_bgp_neighbor,
     ("cisco_xr", "route"): parse_xr_route,
+    ("cisco_xr", "interface"): parse_xr_interface,
 }
 
 # Fields that move on their own between two captures of an unchanged device --
@@ -692,6 +959,27 @@ TEMPLATE_VOLATILE_FIELDS: dict[tuple[str, str], frozenset[str]] = {
     # distance are deliberately NOT volatile: a change in either is a real
     # routing event, not noise.
     ("cisco_xr", "route"): frozenset({"installed_ago"}),
+    # Split deliberately, unlike bgp_neighbor/route's single volatile set.
+    # last_link_flapped and the four raw traffic counters grow/move on any
+    # live, healthy link and are pure noise. The error/quality counters
+    # (input_errors, crc, frame, overrun, ignored, abort, output_errors,
+    # underruns, carrier_transitions) are the opposite: they sit at zero on a
+    # healthy link, and a change in any of them is exactly the signal
+    # interface_state (T-020) exists to catch -- so they are deliberately
+    # left OUT of this set. Do not "tidy" this into an all-or-nothing
+    # volatile set; the asymmetry between noisy and error counters is the
+    # entire point.
+    ("cisco_xr", "interface"): frozenset(
+        {
+            "last_link_flapped",
+            "packets_input",
+            "bytes_input",
+            "total_input_drops",
+            "packets_output",
+            "bytes_output",
+            "total_output_drops",
+        }
+    ),
 }
 
 # The field identifying a record across two captures. ``None`` means records
@@ -699,6 +987,7 @@ TEMPLATE_VOLATILE_FIELDS: dict[tuple[str, str], frozenset[str]] = {
 TEMPLATE_RECORD_KEYS: dict[tuple[str, str], str | None] = {
     ("cisco_xr", "bgp_neighbor"): "address_family",
     ("cisco_xr", "route"): "next_hop",
+    ("cisco_xr", "interface"): "counter",
 }
 
 
