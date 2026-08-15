@@ -346,7 +346,7 @@ Print, for each check: PASS / FAIL / INFO, plus the raw evidence (truncated to 2
 
 ---
 
-## T-004 · Loki discovery `[NON-BLOCKING]` `[STATUS: TODO]`
+## T-004 · Loki discovery `[NON-BLOCKING]` `[STATUS: DONE]`
 
 **Goal.** Determine how device logs are stored and labelled, so `get_logs` can be specified against reality.
 
