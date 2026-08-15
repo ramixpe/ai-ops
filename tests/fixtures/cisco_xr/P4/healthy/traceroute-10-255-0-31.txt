@@ -1,0 +1,7 @@
+
+Sat Aug 15 18:07:08.942 UTC
+
+Type escape sequence to abort.
+Tracing the route to 10.255.0.31
+
+ 1  10.0.1.18 1 msec  *  1 msec 

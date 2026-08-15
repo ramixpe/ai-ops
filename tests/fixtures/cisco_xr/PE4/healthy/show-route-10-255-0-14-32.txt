@@ -1,0 +1,11 @@
+
+Sat Aug 15 18:08:38.154 UTC
+
+Routing entry for 10.255.0.14/32
+  Known via "local", distance 0, metric 0 (connected)
+  Installed Aug 13 17:17:53.992 for 2d00h
+  Routing Descriptor Blocks
+    directly connected, via Loopback0
+      Route metric is 0
+  Redist Advertisers:
+    7 (protoid=7, clientid=28)

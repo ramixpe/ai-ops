@@ -1,0 +1,8 @@
+
+Sat Aug 15 18:08:39.327 UTC
+
+Type escape sequence to abort.
+Tracing the route to 10.255.0.31
+
+ 1  10.0.1.15 [MPLS: Label 24008 Exp 0] 2 msec  2 msec  3 msec 
+ 2  10.0.1.18 3 msec  *  4 msec 

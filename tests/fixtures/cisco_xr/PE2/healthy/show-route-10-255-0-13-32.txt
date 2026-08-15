@@ -1,0 +1,13 @@
+
+Sat Aug 15 18:07:55.235 UTC
+
+Routing entry for 10.255.0.13/32
+  Known via "isis CORE", distance 115, metric 30, labeled SR
+  Local Label 16013, type level-2
+  Installed Aug 13 17:18:26.469 for 2d00h
+  Routing Descriptor Blocks
+    10.0.1.5, from 10.255.0.13, via GigabitEthernet0/0/0/0, Protected, ECMP-Backup (Local-LFA)
+      Route metric is 30
+    10.0.1.7, from 10.255.0.13, via GigabitEthernet0/0/0/1, Protected, ECMP-Backup (Local-LFA)
+      Route metric is 30
+  No advertising protos. 

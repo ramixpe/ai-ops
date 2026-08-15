@@ -1,0 +1,211 @@
+
+Sat Aug 15 18:09:00.730 UTC
+Syslog logging: enabled (0 messages dropped, 0 flushes, 0 overruns)
+    Console logging: level warnings, 60 messages logged
+    Monitor logging: level debugging, 0 messages logged
+    Trap logging: level informational, 42 messages logged
+    Logging to 172.20.250.101, 42 message lines logged
+    Buffer logging: level debugging, 590 messages logged
+
+Log Buffer (4194303 bytes):
+
+RP/0/RP0/CPU0:Aug 14 08:21:49.412 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 08:21:49.739 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL : sshd[56181]: Read error from remote host 172.20.250.6 port 55160: Connection reset by peer 
+RP/0/RP0/CPU0:Aug 14 08:21:50.572 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[56229]: Accepted authentication for clab from 172.20.250.6 port 55168 ssh2 
+RP/0/RP0/CPU0:Aug 14 08:21:50.827 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 08:21:51.142 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[56233]: Connection closed by 172.20.250.6 port 55168 
+RP/0/RP0/CPU0:Aug 14 08:21:51.305 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[56271]: Accepted authentication for clab from 172.20.250.6 port 55180 ssh2 
+RP/0/RP0/CPU0:Aug 14 08:21:51.834 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[56275]: Connection closed by 172.20.250.6 port 55180 
+RP/0/RP0/CPU0:Aug 14 08:21:51.982 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[56312]: Accepted authentication for clab from 172.20.250.6 port 55182 ssh2 
+RP/0/RP0/CPU0:Aug 14 08:21:52.285 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 08:21:52.554 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[56316]: Connection closed by 172.20.250.6 port 55182 
+RP/0/RP0/CPU0:Aug 14 08:21:52.608 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[56354]: Accepted authentication for clab from 172.20.250.6 port 55186 ssh2 
+RP/0/RP0/CPU0:Aug 14 08:21:53.091 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[56358]: Connection closed by 172.20.250.6 port 55186 
+RP/0/RP0/CPU0:Aug 14 08:21:53.139 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[56395]: Accepted authentication for clab from 172.20.250.6 port 55192 ssh2 
+RP/0/RP0/CPU0:Aug 14 08:21:53.322 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL : sshd[56399]: Read error from remote host 172.20.250.6 port 55192: Connection reset by peer 
+RP/0/RP0/CPU0:Aug 14 08:21:58.924 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[56436]: Accepted authentication for clab from 172.20.250.6 port 40206 ssh2 
+RP/0/RP0/CPU0:Aug 14 08:21:59.239 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 08:21:59.413 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[56440]: Connection closed by 172.20.250.6 port 40206 
+RP/0/RP0/CPU0:Aug 14 08:36:21.213 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL : sshd[57196]: kex_exchange_identification: Connection closed by remote host 
+RP/0/RP0/CPU0:Aug 14 08:36:35.146 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[57198]: Accepted authentication for clab from 172.20.250.2 port 60232 ssh2 
+RP/0/RP0/CPU0:Aug 14 08:36:35.633 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[57202]: Connection closed by 172.20.250.2 port 60232 
+RP/0/RP0/CPU0:Aug 14 08:36:44.410 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[57250]: Accepted authentication for clab from 172.20.250.2 port 39412 ssh2 
+RP/0/RP0/CPU0:Aug 14 08:36:44.664 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 08:36:45.795 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[57254]: Connection closed by 172.20.250.2 port 39412 
+RP/0/RP0/CPU0:Aug 14 08:36:54.013 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[57293]: Accepted authentication for clab from 172.20.250.2 port 39426 ssh2 
+RP/0/RP0/CPU0:Aug 14 08:36:54.165 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 08:36:54.214 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[57299]: Connection closed by 172.20.250.2 port 39426 
+RP/0/RP0/CPU0:Aug 14 08:37:21.623 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[57375]: Accepted authentication for clab from 172.20.250.2 port 52858 ssh2 
+RP/0/RP0/CPU0:Aug 14 08:37:21.786 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 08:37:21.856 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL : sshd[57379]: Read error from remote host 172.20.250.2 port 52858: Connection reset by peer 
+RP/0/RP0/CPU0:Aug 14 08:37:29.987 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[57418]: Accepted authentication for clab from 172.20.250.2 port 48648 ssh2 
+RP/0/RP0/CPU0:Aug 14 08:37:30.210 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 08:37:30.351 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[57422]: Connection closed by 172.20.250.2 port 48648 
+RP/0/RP0/CPU0:Aug 14 08:37:30.548 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[57459]: Accepted authentication for clab from 172.20.250.2 port 48658 ssh2 
+RP/0/RP0/CPU0:Aug 14 08:37:30.880 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[57463]: Connection closed by 172.20.250.2 port 48658 
+RP/0/RP0/CPU0:Aug 14 08:37:49.621 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[57501]: Accepted authentication for clab from 172.20.250.2 port 58540 ssh2 
+RP/0/RP0/CPU0:Aug 14 08:37:49.943 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 08:37:50.179 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[57505]: Connection closed by 172.20.250.2 port 58540 
+RP/0/RP0/CPU0:Aug 14 08:37:59.483 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL : sshd[57543]: kex_exchange_identification: Connection closed by remote host 
+RP/0/RP0/CPU0:Aug 14 08:38:21.013 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[57605]: Accepted authentication for clab from 172.20.250.2 port 40970 ssh2 
+RP/0/RP0/CPU0:Aug 14 08:38:21.143 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 08:38:21.318 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[57609]: Connection closed by 172.20.250.2 port 40970 
+RP/0/RP0/CPU0:Aug 14 08:38:22.854 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[57660]: Accepted authentication for clab from 172.20.250.2 port 40974 ssh2 
+RP/0/RP0/CPU0:Aug 14 08:38:23.140 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 08:38:24.088 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[57702]: Accepted authentication for clab from 172.20.250.2 port 40982 ssh2 
+RP/0/RP0/CPU0:Aug 14 08:38:24.839 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 08:38:25.025 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[57706]: Connection closed by 172.20.250.2 port 40982 
+RP/0/RP0/CPU0:Aug 14 08:38:45.938 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[57795]: Accepted authentication for clab from 172.20.250.2 port 44428 ssh2 
+RP/0/RP0/CPU0:Aug 14 08:38:46.242 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 08:38:46.508 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[57799]: Connection closed by 172.20.250.2 port 44428 
+RP/0/RP0/CPU0:Aug 14 08:38:50.725 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[57664]: Connection closed by 172.20.250.2 port 40974 
+RP/0/RP0/CPU0:Aug 14 08:38:54.155 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[57837]: Accepted authentication for clab from 172.20.250.2 port 44442 ssh2 
+RP/0/RP0/CPU0:Aug 14 08:38:54.300 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 08:38:54.387 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[57842]: Connection closed by 172.20.250.2 port 44442 
+RP/0/RP0/CPU0:Aug 14 08:39:02.673 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[57880]: Accepted authentication for clab from 172.20.250.2 port 52694 ssh2 
+RP/0/RP0/CPU0:Aug 14 08:39:02.812 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 08:39:02.877 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[57884]: Connection closed by 172.20.250.2 port 52694 
+RP/0/RP0/CPU0:Aug 14 08:39:26.115 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[57955]: Accepted authentication for clab from 172.20.250.2 port 51340 ssh2 
+RP/0/RP0/CPU0:Aug 14 08:39:26.396 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 08:39:27.489 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[57959]: Connection closed by 172.20.250.2 port 51340 
+RP/0/RP0/CPU0:Aug 14 08:41:54.552 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL : sshd[58119]: kex_exchange_identification: Connection closed by remote host 
+RP/0/RP0/CPU0:Aug 14 08:42:11.501 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[58156]: Accepted authentication for clab from 172.20.250.2 port 44140 ssh2 
+RP/0/RP0/CPU0:Aug 14 08:42:11.796 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL : sshd[58161]: Read error from remote host 172.20.250.2 port 44140: Connection reset by peer 
+RP/0/RP0/CPU0:Aug 14 08:42:25.093 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[58212]: Accepted authentication for clab from 172.20.250.2 port 37596 ssh2 
+RP/0/RP0/CPU0:Aug 14 08:42:25.385 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 08:42:31.598 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[58254]: Accepted authentication for clab from 172.20.250.2 port 37608 ssh2 
+RP/0/RP0/CPU0:Aug 14 08:42:34.095 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 08:42:38.052 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[58259]: Connection closed by 172.20.250.2 port 37608 
+RP/0/RP0/CPU0:Aug 14 08:42:49.215 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[58297]: Accepted authentication for clab from 172.20.250.2 port 36310 ssh2 
+RP/0/RP0/CPU0:Aug 14 08:42:49.504 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 08:42:50.463 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[58301]: Connection closed by 172.20.250.2 port 36310 
+RP/0/RP0/CPU0:Aug 14 08:42:57.264 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[58339]: Accepted authentication for clab from 172.20.250.2 port 36314 ssh2 
+RP/0/RP0/CPU0:Aug 14 08:42:57.431 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 08:42:57.524 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[58343]: Connection closed by 172.20.250.2 port 36314 
+RP/0/RP0/CPU0:Aug 14 08:43:09.798 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[58440]: Accepted authentication for clab from 172.20.250.2 port 38732 ssh2 
+RP/0/RP0/CPU0:Aug 14 08:43:09.949 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 08:43:10.030 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[58444]: Connection closed by 172.20.250.2 port 38732 
+RP/0/RP0/CPU0:Aug 14 08:43:15.745 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[58481]: Accepted authentication for clab from 172.20.250.2 port 38742 ssh2 
+RP/0/RP0/CPU0:Aug 14 08:43:16.052 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 08:43:25.601 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL : sshd[58216]: Read error from remote host 172.20.250.2 port 37596: Connection reset by peer 
+RP/0/RP0/CPU0:Aug 14 08:43:44.093 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[58485]: Connection closed by 172.20.250.2 port 38742 
+RP/0/RP0/CPU0:Aug 14 11:09:48.384 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[65889]: Accepted authentication for clab from 172.20.250.2 port 38510 ssh2 
+RP/0/RP0/CPU0:Aug 14 11:09:48.866 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[65893]: Connection closed by 172.20.250.2 port 38510 
+RP/0/RP0/CPU0:Aug 14 11:09:49.287 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[65931]: Accepted authentication for clab from 172.20.250.2 port 38520 ssh2 
+RP/0/RP0/CPU0:Aug 14 11:09:49.561 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 11:09:49.882 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[65935]: Connection closed by 172.20.250.2 port 38520 
+RP/0/RP0/CPU0:Aug 14 11:09:50.104 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[65972]: Accepted authentication for clab from 172.20.250.2 port 38532 ssh2 
+RP/0/RP0/CPU0:Aug 14 11:09:50.638 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[65976]: Connection closed by 172.20.250.2 port 38532 
+RP/0/RP0/CPU0:Aug 14 11:09:50.735 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[66014]: Accepted authentication for clab from 172.20.250.2 port 38544 ssh2 
+RP/0/RP0/CPU0:Aug 14 11:09:50.965 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 11:09:51.109 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[66018]: Connection closed by 172.20.250.2 port 38544 
+RP/0/RP0/CPU0:Aug 14 11:09:51.232 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[66055]: Accepted authentication for clab from 172.20.250.2 port 38556 ssh2 
+RP/0/RP0/CPU0:Aug 14 11:09:51.460 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL : sshd[66059]: Read error from remote host 172.20.250.2 port 38556: Connection reset by peer 
+RP/0/RP0/CPU0:Aug 14 11:53:21.946 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL : sshd[68276]: kex_exchange_identification: Connection closed by remote host 
+RP/0/RP0/CPU0:Aug 14 11:53:22.677 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[68278]: Accepted authentication for clab from 172.20.250.2 port 42258 ssh2 
+RP/0/RP0/CPU0:Aug 14 11:53:23.144 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[68282]: Connection closed by 172.20.250.2 port 42258 
+RP/0/RP0/CPU0:Aug 14 11:53:24.049 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[68333]: Accepted authentication for clab from 172.20.250.2 port 42262 ssh2 
+RP/0/RP0/CPU0:Aug 14 11:53:24.306 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 11:53:24.490 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[68337]: Connection closed by 172.20.250.2 port 42262 
+RP/0/RP0/CPU0:Aug 14 11:53:24.752 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[68375]: Accepted authentication for clab from 172.20.250.2 port 42276 ssh2 
+RP/0/RP0/CPU0:Aug 14 11:53:25.278 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[68379]: Connection closed by 172.20.250.2 port 42276 
+RP/0/RP0/CPU0:Aug 14 11:53:25.433 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[68416]: Accepted authentication for clab from 172.20.250.2 port 42286 ssh2 
+RP/0/RP0/CPU0:Aug 14 11:53:25.762 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 11:53:25.909 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL : sshd[68420]: Read error from remote host 172.20.250.2 port 42286: Connection reset by peer 
+RP/0/RP0/CPU0:Aug 14 11:53:26.133 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[68458]: Accepted authentication for clab from 172.20.250.2 port 42288 ssh2 
+RP/0/RP0/CPU0:Aug 14 11:53:26.520 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[68462]: Connection closed by 172.20.250.2 port 42288 
+RP/0/RP0/CPU0:Aug 14 11:53:26.723 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[68499]: Accepted authentication for clab from 172.20.250.2 port 42302 ssh2 
+RP/0/RP0/CPU0:Aug 14 11:53:26.917 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 11:53:27.104 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[68503]: Connection closed by 172.20.250.2 port 42302 
+RP/0/RP0/CPU0:Aug 14 11:53:32.711 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[68574]: Accepted authentication for clab from 172.20.250.2 port 51452 ssh2 
+RP/0/RP0/CPU0:Aug 14 11:53:32.998 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 11:53:33.238 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[68578]: Connection closed by 172.20.250.2 port 51452 
+RP/0/RP0/CPU0:Aug 14 11:59:59.763 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[68896]: Accepted authentication for clab from 172.20.250.2 port 39354 ssh2 
+RP/0/RP0/CPU0:Aug 14 11:59:59.957 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL : sshd[68900]: Read error from remote host 172.20.250.2 port 39354: Connection reset by peer 
+RP/0/RP0/CPU0:Aug 14 16:54:52.294 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL : sshd[83820]: kex_exchange_identification: Connection closed by remote host 
+RP/0/RP0/CPU0:Aug 14 16:55:00.532 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[83822]: Accepted authentication for clab from 172.20.250.2 port 48668 ssh2 
+RP/0/RP0/CPU0:Aug 14 16:55:01.015 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[83826]: Connection closed by 172.20.250.2 port 48668 
+RP/0/RP0/CPU0:Aug 14 16:55:01.791 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[83874]: Accepted authentication for clab from 172.20.250.2 port 48682 ssh2 
+RP/0/RP0/CPU0:Aug 14 16:55:01.999 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 16:55:02.154 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[83878]: Connection closed by 172.20.250.2 port 48682 
+RP/0/RP0/CPU0:Aug 14 16:55:03.657 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[83923]: Accepted authentication for clab from 172.20.250.2 port 48688 ssh2 
+RP/0/RP0/CPU0:Aug 14 16:55:04.265 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 16:55:05.328 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[83927]: Connection closed by 172.20.250.2 port 48688 
+RP/0/RP0/CPU0:Aug 14 16:55:22.498 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[83998]: Accepted authentication for clab from 172.20.250.2 port 49830 ssh2 
+RP/0/RP0/CPU0:Aug 14 16:55:22.791 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 16:55:30.377 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[84040]: Accepted authentication for clab from 172.20.250.2 port 49840 ssh2 
+RP/0/RP0/CPU0:Aug 14 16:55:30.543 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 16:55:30.667 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[84046]: Connection closed by 172.20.250.2 port 49840 
+RP/0/RP0/CPU0:Aug 14 16:55:36.798 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[84002]: Connection closed by 172.20.250.2 port 49830 
+RP/0/RP0/CPU0:Aug 14 16:55:37.144 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[84084]: Accepted authentication for clab from 172.20.250.2 port 41116 ssh2 
+RP/0/RP0/CPU0:Aug 14 16:55:37.277 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 16:55:37.342 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[84088]: Connection closed by 172.20.250.2 port 41116 
+RP/0/RP0/CPU0:Aug 14 16:55:47.056 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[84127]: Accepted authentication for clab from 172.20.250.2 port 47446 ssh2 
+RP/0/RP0/CPU0:Aug 14 16:55:47.310 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 16:55:47.539 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[84131]: Connection closed by 172.20.250.2 port 47446 
+RP/0/RP0/CPU0:Aug 14 16:55:59.153 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL : sshd[84169]: kex_exchange_identification: Connection closed by remote host 
+RP/0/RP0/CPU0:Aug 14 16:56:07.364 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[84176]: Accepted authentication for clab from 172.20.250.2 port 58406 ssh2 
+RP/0/RP0/CPU0:Aug 14 16:56:07.497 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 16:56:07.853 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[84180]: Connection closed by 172.20.250.2 port 58406 
+RP/0/RP0/CPU0:Aug 14 16:56:22.033 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[84264]: Accepted authentication for clab from 172.20.250.2 port 58556 ssh2 
+RP/0/RP0/CPU0:Aug 14 16:56:22.299 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 16:56:22.572 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[84268]: Connection closed by 172.20.250.2 port 58556 
+RP/0/RP0/CPU0:Aug 14 16:56:22.704 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[84306]: Accepted authentication for clab from 172.20.250.2 port 58570 ssh2 
+RP/0/RP0/CPU0:Aug 14 16:56:23.192 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[84310]: Connection closed by 172.20.250.2 port 58570 
+RP/0/RP0/CPU0:Aug 14 16:56:34.337 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[84347]: Accepted authentication for clab from 172.20.250.2 port 58576 ssh2 
+RP/0/RP0/CPU0:Aug 14 16:56:34.985 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 16:56:35.230 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL : sshd[84352]: Read error from remote host 172.20.250.2 port 58576: Connection reset by peer 
+RP/0/RP0/CPU0:Aug 14 16:56:57.256 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[84392]: Accepted authentication for clab from 172.20.250.2 port 39740 ssh2 
+RP/0/RP0/CPU0:Aug 14 16:56:57.405 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 16:56:57.488 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[84397]: Connection closed by 172.20.250.2 port 39740 
+RP/0/RP0/CPU0:Aug 14 16:56:58.048 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[84435]: Accepted authentication for clab from 172.20.250.2 port 39406 ssh2 
+RP/0/RP0/CPU0:Aug 14 16:56:58.249 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[84439]: Connection closed by 172.20.250.2 port 39406 
+RP/0/RP0/CPU0:Aug 14 16:57:03.753 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[84476]: Accepted authentication for clab from 172.20.250.2 port 39410 ssh2 
+RP/0/RP0/CPU0:Aug 14 16:57:04.006 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 16:57:18.173 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[84480]: Connection closed by 172.20.250.2 port 39410 
+RP/0/RP0/CPU0:Aug 14 17:01:32.382 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL : sshd[84776]: kex_exchange_identification: Connection closed by remote host 
+RP/0/RP0/CPU0:Aug 14 17:01:40.721 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[84778]: Accepted authentication for clab from 172.20.250.2 port 49070 ssh2 
+RP/0/RP0/CPU0:Aug 14 17:01:41.026 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL : sshd[84782]: Read error from remote host 172.20.250.2 port 49070: Connection reset by peer 
+RP/0/RP0/CPU0:Aug 14 17:01:56.833 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[84832]: Accepted authentication for clab from 172.20.250.2 port 57028 ssh2 
+RP/0/RP0/CPU0:Aug 14 17:01:57.040 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 17:01:57.174 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[84836]: Connection closed by 172.20.250.2 port 57028 
+RP/0/RP0/CPU0:Aug 14 17:02:04.700 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[84874]: Accepted authentication for clab from 172.20.250.2 port 57042 ssh2 
+RP/0/RP0/CPU0:Aug 14 17:02:04.860 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 17:02:04.950 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[84878]: Connection closed by 172.20.250.2 port 57042 
+RP/0/RP0/CPU0:Aug 14 17:02:19.928 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[84949]: Accepted authentication for clab from 172.20.250.2 port 43710 ssh2 
+RP/0/RP0/CPU0:Aug 14 17:02:20.163 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 17:02:27.822 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[84992]: Accepted authentication for clab from 172.20.250.2 port 43726 ssh2 
+RP/0/RP0/CPU0:Aug 14 17:02:27.975 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 17:02:28.055 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[84996]: Connection closed by 172.20.250.2 port 43726 
+RP/0/RP0/CPU0:Aug 14 17:02:46.118 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[85033]: Accepted authentication for clab from 172.20.250.2 port 59916 ssh2 
+RP/0/RP0/CPU0:Aug 14 17:02:46.259 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 17:02:46.327 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[85037]: Connection closed by 172.20.250.2 port 59916 
+RP/0/RP0/CPU0:Aug 14 17:02:48.926 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[84953]: Connection closed by 172.20.250.2 port 43710 
+RP/0/RP0/CPU0:Aug 14 17:02:51.935 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[85075]: Accepted authentication for clab from 172.20.250.2 port 44634 ssh2 
+RP/0/RP0/CPU0:Aug 14 17:02:52.247 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 14 17:03:06.334 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[85079]: Connection closed by 172.20.250.2 port 44634 
+RP/0/RP0/CPU0:Aug 15 13:49:49.340 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL : sshd[147956]: kex_exchange_identification: Connection closed by remote host 
+RP/0/RP0/CPU0:Aug 15 13:50:04.492 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[147965]: Accepted authentication for clab from 172.20.250.2 port 44744 ssh2 
+RP/0/RP0/CPU0:Aug 15 13:50:04.771 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[147969]: Connection closed by 172.20.250.2 port 44744 
+RP/0/RP0/CPU0:Aug 15 13:50:13.148 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[148017]: Accepted authentication for clab from 172.20.250.2 port 44748 ssh2 
+RP/0/RP0/CPU0:Aug 15 13:50:13.283 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 15 13:50:13.330 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[148022]: Connection closed by 172.20.250.2 port 44748 
+RP/0/RP0/CPU0:Aug 15 13:50:16.006 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[148061]: Accepted authentication for clab from 172.20.250.2 port 51206 ssh2 
+RP/0/RP0/CPU0:Aug 15 13:50:16.222 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 15 13:50:16.331 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[148065]: Connection closed by 172.20.250.2 port 51206 
+RP/0/RP0/CPU0:Aug 15 13:50:30.065 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[148102]: Accepted authentication for clab from 172.20.250.2 port 51218 ssh2 
+RP/0/RP0/CPU0:Aug 15 13:50:30.217 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 15 13:50:30.684 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[148141]: Connection closed by 172.20.250.2 port 51218 
+RP/0/RP0/CPU0:Aug 15 13:50:38.807 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[148213]: Accepted authentication for clab from 172.20.250.2 port 51524 ssh2 
+RP/0/RP0/CPU0:Aug 15 13:50:38.975 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 15 13:50:39.084 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[148217]: Connection closed by 172.20.250.2 port 51524 
+RP/0/RP0/CPU0:Aug 15 13:50:46.783 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[148254]: Accepted authentication for clab from 172.20.250.2 port 51530 ssh2 
+RP/0/RP0/CPU0:Aug 15 13:50:46.898 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 15 13:50:46.954 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL : sshd[148258]: Read error from remote host 172.20.250.2 port 51530: Connection reset by peer 
+RP/0/RP0/CPU0:Aug 15 13:51:17.162 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[148301]: Accepted authentication for clab from 172.20.250.2 port 41720 ssh2 
+RP/0/RP0/CPU0:Aug 15 13:51:17.386 UTC: sysdb_svr_local[229]: %SYSDB-SYSDB-7-INFO : client 'exec' attempted duplicate registration for 'oper/tty/gl/________/________/vty/0/stats/conn-out/' from active node: rc 0x0 (Success) 
+RP/0/RP0/CPU0:Aug 15 13:51:17.831 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[148305]: Connection closed by 172.20.250.2 port 41720 
+RP/0/RP0/CPU0:Aug 15 18:05:36.070 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL : sshd[161152]: kex_exchange_identification: Connection closed by remote host 
+RP/0/RP0/CPU0:Aug 15 18:08:47.304 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[161305]: Accepted authentication for clab from 172.20.250.1 port 37836 ssh2 
+RP/0/RP0/CPU0:Aug 15 18:08:50.628 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL : sshd[161309]: Read error from remote host 172.20.250.1 port 37836: Connection reset by peer 
+RP/0/RP0/CPU0:Aug 15 18:08:51.749 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[161390]: Accepted authentication for clab from 172.20.250.1 port 51372 ssh2 
