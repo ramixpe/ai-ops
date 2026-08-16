@@ -133,11 +133,11 @@ The corollary is the more uncomfortable one. The design documents were not slopp
 
 Listed as questions rather than risks, because each has a specific experiment attached.
 
-**Can the descent conclude health at all?** (B-428, Q-019) It has no mechanism for it. The walk finds the lowest broken thing; *"nothing that matters is broken"* is the one answer it cannot reach, and the true-negative case is where a dependency-descent architecture is structurally weakest. Round 4 is a **prediction** (OBS-082): `cause: interface`, empty chain, exit 1, on a healthy session.
+**Can the descent conclude health at all?** ~~(B-428, Q-019) It has no mechanism for it.~~ **No, and it is now measured rather than predicted (OBS-094).** Round 4 reproduced all nine predicted values on live hardware, no falsifier firing: BGP Established and carrying traffic, `cause: interface on PE2`, empty causal chain, `trustworthy: true`, **exit code 1**. The failure is louder than predicted — the system does not merely fail to conclude health, it **asserts a fault and marks the assertion trustworthy.** B-428 is no longer a hypothesis; it is a defect with a demonstrated reproduction and a known-sufficient information source.
 
 **Is the descent's behaviour under two faults acceptable?** (Q-019) A single interface fault and an interface fault plus a BGP shut produce **byte-identical rung tables**. The masking is structural. Two candidate signals — a second unexplained commit in the timeline, and forward consistency — neither validated, and the corpus contains no two-fault capture.
 
-**Is Q-006's agreement a pattern or a data point?** One match, on one rung. Four rounds landing on four *different* rungs is the minimum before this is called a property. Four rounds of one fault shape would be one data point sampled four times.
+**Is Q-006's agreement a pattern or a data point?** ~~One match, on one rung.~~ **Answered 2026-08-16 by four rounds (OBS-095).** Provisionally a pattern **for fault localisation on the dependency path — 3 of 3, on three different rungs, with rounds 1 and 2 exercising the walk rule in opposite directions.** Three caveats keep it provisional: the rounds were designed by someone who knows the ladder (selection effect), every fault was single (Q-019 untouched), and round 3 matched via its declared refutation branch with an answer weaker than the evidence supported. **Not a pattern for concluding health — 0 of 1, and structurally 0 of *n* until B-428.** Do not report the combined 3/4; the denominator hides a class failure.
 
 **Does the model layer degrade gracefully under a model that is worse, or busier, or changed?** One live run, one provider, one prompt version. The grounding gate refused a fabricated timestamp, which is evidence that the gate works — not evidence about the failure rate it is protecting against. Nothing measures how often the model produces something the gate must catch.
 
@@ -171,7 +171,9 @@ For an operations engineer deciding whether to point this at something.
 
 **One vendor verified.** IOS-XR. The other two are unverified command strings.
 
-**It cannot tell you nothing is wrong.** This is the sharpest limitation and it is not a gap in coverage — it is structural (B-428). One down interface on a device with redundancy produces a reported cause on a session that is working perfectly. **Do not wire this to anything that pages on exit 1 until B-428 is settled.**
+**It cannot tell you nothing is wrong.** The sharpest limitation, structural rather than a coverage gap (B-428), and **measured on live hardware** at round 4: one down interface on a device with redundancy produced `cause: interface on PE2`, `trustworthy: true` and **exit code 1** on a BGP session that was Established and carrying traffic throughout. **Do not wire this to anything that pages on exit 1 until B-428 is settled.**
+
+Worth knowing if you read the reports rather than the exit codes: the model's prose *did* catch it — *"because higher layers are healthy, the broken interface state observed here is not on the dependency path"* — and recommended clarifying scope. That is correct, and it is in the one layer this architecture deliberately treats as non-authoritative. **A human reading the report is warned. A script reading the exit code is not.**
 
 **It cannot see a second fault.** If two things are broken it reports the lower one, correctly and incompletely, and the output is indistinguishable from the single-fault case. Fix what it names, and the session may still be down.
 
@@ -181,7 +183,7 @@ For an operations engineer deciding whether to point this at something.
 
 **Its timelines are bounded by what a device buffer holds.** 200 of 684 records on the measured run, and it says so — a negative over incomplete coverage is reported as `unevaluated`, never as "nothing happened".
 
-**It has produced one correct blind diagnosis.** One. Treat it as promising, not as reliable.
+**It has produced three correct blind diagnoses out of four rounds** (OBS-095), on three different rungs — and the fourth was a **false positive on a working session**, predicted in advance and reproduced exactly. Treat fault localisation as promising; treat "it reported nothing wrong" as unverified and "it reported something wrong" as needing a human until B-428 lands.
 
 ### The honest summary
 

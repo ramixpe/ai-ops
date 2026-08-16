@@ -2478,6 +2478,120 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-094 · round 4 · **The predicted failure occurred, exactly** — and the model caught what the descent could not
+
+- **Kind:** defect-found
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5 (descent) · MiniMax (report, correlation)
+- **What happened:** The true negative. One uplink shut on PE2, IGP reconverged over the survivor, **BGP session Established and carrying traffic throughout**. The correct answer is that nothing is wrong.
+
+  No hand diagnosis this round — the operator had left. **OBS-082 serves instead, and is a stronger instrument: it was committed before the fault existed**, not merely before the run.
+
+  | | OBS-082 predicted | Actual |
+  |---|---|---|
+  | rung 1 `bgp_session` | HEALTHY | **HEALTHY** — Established |
+  | rung 2 `transport` | HEALTHY | **HEALTHY** |
+  | rung 3 `route_to_peer` | HEALTHY | **HEALTHY** — 2 paths |
+  | rung 4 `igp_adjacency` | HEALTHY | **HEALTHY** — 1 adjacency, all Up |
+  | rung 5 `interface` | **BROKEN** | **BROKEN** — 2 of 3 members |
+  | `finding` | `interface_line_down` | **`interface_line_down`** |
+  | `cause` | `interface` | **`interface` on PE2** |
+  | `causal_chain` | **empty** | **empty** |
+  | exit code | **1** | **1** |
+
+  **Nine of nine.** None of the three stated falsifiers fired.
+
+  > **A fault reported, with exit code 1, on a BGP session that is Established and carrying traffic.**
+
+  | | |
+  |---|---|
+  | Wall clock | **113.7 s** (rounds 1–3: 114.2, 121.7, 118.8) |
+  | Report | emitted, grounded: 7 observations, 14 citations, **5/5 rungs cited**, all resolving |
+  | Correlation | emitted |
+  | Coverage | PE2, 200 of 701, incomplete |
+  | Repairs | none |
+- **Evidence:** OBS-082, committed 2026-08-16 before the fault was applied. Payload captured.
+- **What I did:** Scored it, and then found the thing I was not looking for.
+
+  ### The model did forward consistency, unprompted, and got it right
+
+  From the same payload the descent produced, MiniMax wrote:
+
+  > *"Because higher layers are healthy, the broken interface state observed here is **not on the dependency path** between RR1 and 10.255.0.12, and the descent did not reach a rung that would link this local interface…"*
+
+  and recommended:
+
+  > *"**Clarify the intended scope of the investigation:** the descent did not localise a cause on the dependency path to 10.255.0.12 (RR1's BGP session is Established with valid transport, route, and IGP)."*
+
+  **That is B-428.** The model performed the check the descent lacks — comparing the cause against what the upper rungs actually show — and reached the correct conclusion in prose, from an empty `causal_chain` beside five healthy-above-broken rungs.
+
+  Three things follow, and the third is the one that matters.
+
+  **1. The information was sufficient.** B-428 is not blocked on collecting anything. The empty chain plus the rung table is enough to detect the condition, and something reading only that reached the right answer on its first attempt. The fix is a predicate, not an evidence-gathering exercise.
+
+  **2. It is shape 7 with the polarity reversed.** Round 3 was *the system held the answer and reported something weaker*. Here the system held the answer, **the model read it**, and the deterministic layer that owns the verdict did not.
+
+  **3. The prose is correct and everything a machine consumes is wrong.** `finding: interface_line_down`. `cause: interface on PE2`. `trustworthy: true`. **Exit code 1.** A human reading the report is correctly warned; a cron job reading the exit code pages for a healthy session. The model's caveat lives in exactly the layer this architecture deliberately treats as non-authoritative — and it is right, and it does not count.
+
+  **This sharpens MVP0-REVIEW §5's warning rather than softening it.** *"Do not wire this to anything that pages on exit 1 until B-428 is settled"* was written from an offline construction. It is now measured against a live fabric, and the failure is louder than predicted: the system does not merely fail to conclude health, it **asserts a fault** and marks the assertion trustworthy.
+- **Needs human review:** **yes** — B-428 is now demonstrated on live hardware
+- **Blocks:** the four rounds are complete. Scoring in OBS-095.
+
+---
+
+## OBS-095 · B-427 · The four rows, and whether agreement is a pattern
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** The four manual rounds are complete. These are B-427's first four rows, scored on the columns the round-3 review added: rung match, **how** it matched, and whether the answer was as strong as the evidence supported.
+
+  | # | Fault | Predicted | Actual | Rung | Via | Answer ≥ evidence | Diagnosis correct |
+  |---|---|---|---|---|---|---|---|
+  | 1 | IS-IS shut on PE3's uplinks | `igp_adjacency` | `igp_adjacency` | ✅ | primary | ✅ | ✅ |
+  | 2 | transport block, RR1↔PE1 | `transport` | `transport` | ✅ | primary | ✅ | ✅ |
+  | 3 | BGP admin-shut on PE2 | `cause_not_localised` / *`transport_blocked`* | `transport_blocked` | ✅ | **refutation branch** | ❌ **weaker** | ⚠️ correct, impoverished |
+  | 4 | one uplink shut, IGP absorbs | `interface`, empty chain, exit 1 | `interface`, empty chain, exit 1 | ✅ | primary *(predicted failure)* | n/a | ❌ **wrong** |
+
+  Four distinct rungs. Four distinct outcomes. No round repeated another's pressure on the walk rule.
+- **Evidence:** OBS-076/077, OBS-087/088, OBS-091/092, OBS-082/094. Every prediction committed to git before its run.
+- **What I did:** Two scores, and they must not be combined.
+
+  ### Prediction accuracy: 4 of 4. Diagnostic accuracy: 3 of 4.
+
+  **Do not report 75%.** The denominator hides the structure:
+
+  | Class | Rounds | Correct |
+  |---|---|---|
+  | A fault exists **on the dependency path** | 1, 2, 3 | **3 / 3** |
+  | No fault on the dependency path | 4 | **0 / 1**, and structurally 0 / *n* until B-428 |
+
+  Round 4 is not a miss that better luck avoids. It is a **class failure**: every true negative under redundancy produces the same false positive, by construction. Averaging it with the other three produces a number that is wrong in both directions — it understates the fault-localisation result and wildly overstates the health result.
+
+  ### Is agreement a pattern?
+
+  **On fault localisation, provisionally yes — and this is the strongest form the evidence can take at n=3.** Three rounds, three different rungs, and rounds 1 and 2 exercised the walk rule in *opposite directions*: one required descending past a healthy rung, the other required not descending into three. A walk defective in either direction fails one of them. Both passed.
+
+  **Three caveats that keep it provisional.**
+
+  - **Selection effect.** The rounds were designed by someone who knows the ladder, to land on specific rungs. A fault chosen without reference to it might not land on a rung at all — and nothing here measures that.
+  - **Every fault was single.** Q-019 is untouched; the two-fault case remains unmeasured and the rung tables are byte-identical to the single-fault case.
+  - **Round 3's match was via the refutation branch**, and the answer was weaker than the evidence supported. Counting it as a plain match is the mistake the new column exists to prevent.
+
+  **On concluding health, no — and no amount of additional rounds will change it.** That is B-428, now demonstrated live.
+
+  ### The uncomfortable observation
+
+  **We predicted the tool's behaviour more accurately than the tool diagnosed the network — 4 of 4 against 3 of 4.**
+
+  That is the right direction and not a comfortable one. It means the *understanding* of the failure modes is ahead of the implementation, which is to say **the backlog is currently a more accurate model of this system than the code is.** Round 4 is the clearest case: the defect was constructed offline, written down with its falsifiers, and reproduced exactly on live hardware weeks of reasoning before anyone fixed it.
+
+  The practical consequence for track A: **B-428 is no longer a hypothesis to validate.** It is a measured defect with a demonstrated reproduction and a known-sufficient information source. It should be implemented, not investigated.
+- **Needs human review:** **yes** — this is the pattern assessment the four rounds were run to produce
+- **Blocks:** nothing started. Stopping here as instructed.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**
