@@ -2439,6 +2439,45 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-093 · pattern · Shape 7 — the system held the answer and reported something weaker
+
+- **Kind:** insight
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5 · raised by the operator from OBS-092
+- **What happened:** A seventh silent-failure shape, and the first with this polarity.
+
+  **Every shape so far concerns what the evidence could not tell you. This one is the opposite: the evidence told you, and nothing listened.**
+
+  > **Shape 7 — evidence collected, parsed, carried in the envelope, and never read.**
+
+  The instance is round 3. `bgp_transport` reads `connection_state` and reports `transport_blocked`. The same parsed record, same envelope, same command, same device, also carried `last_reset_reason: "BGP Notification received: administrative shutdown"`. The far end had said why; the parser captured it; the check read the field beside it. **The independent diagnostician logged into the far device to learn what the local device had already reported.**
+- **Evidence:** OBS-092. Audit measured below.
+- **What I did:** Recorded it in §0.13, and turned the detection method into a measurement rather than an aspiration.
+
+  **Why no existing mechanism can catch it.** Everything this build has constructed — §0.12's vacuity companions, §0.13's independent specification, grounding's citation gate, T-029a's absence coverage, T-029c's contradiction check — is aimed at output that claims **too much**. Shape 7 is output that claims **too little**, and it passes every one of them for the right reasons: nothing is fabricated, nothing is uncited, nothing is overstated. `transport_blocked` is *true*.
+
+  > **It cannot be caught by grading the output, because the output is correct.**
+
+  **The detection method is mechanizable, so I ran it.** Enumerate the fields each parser emits from a real fixture; grep the check module for each:
+
+  | Template | Parsed | Read by any check |
+  |---|---|---|
+  | `bgp_neighbor` | 23 | **5** |
+  | `interface` | 14 | **5** |
+  | `route` | 8 | **2** |
+
+  **The honest caveat first: 33 unread fields are not 33 defects.** `mac_address`, `bandwidth_kbps` and `description` are not diagnostic for these checks, and treating every unread field as a finding would reproduce precisely the noise-generating over-correction T-029c refused — a rule against unread evidence that generates unread warnings has defeated itself in the same way.
+
+  **What is in the list anyway.** `bgp_neighbor`'s unread fields include `state_reason`, `previous_state`, `remote_as`, `hold_time`, `keepalive`. **An AS mismatch and a hold-timer mismatch both produce exactly the `Active` state round 3 produced.** The tool cannot currently distinguish either from an administrative shutdown — while parsing, carrying and discarding the fields that would. `interface` discards `last_link_flapped` and `state_transitions`, which are flap evidence; `route` discards `distance`, `metric` and `protocol`.
+
+  So round 3 did not expose one wasted field. It exposed a **class**, and the class is measurable in twenty lines. Filed as **B-433**, to run as a test so it fails when a parser gains a field nothing reads.
+
+  **One structural observation about where this shape comes from.** Parsers were built to §0.10 — *every non-blank line must be accounted for* — which is a completeness rule on **extraction**. Checks were built to their own predicate. Nothing ever connected the two. §0.10 guarantees the parser captures everything; **nothing guarantees anyone uses it.** The two disciplines meet nowhere, and shape 7 lives exactly in that gap. That is worth stating because it predicts where the next instance will be: any place a thorough extractor feeds a narrow consumer.
+- **Needs human review:** no
+- **Blocks:** none, but B-433 should precede any new flow — B-107's checks will be written against the same parsers.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**

@@ -326,9 +326,9 @@ Two practical consequences:
 - **When a design document arrives for code that already exists, read the document against the code.** The other direction finds nothing — every line of code justifies itself, and the reading converges on "yes, that is what it does".
 - **Do not treat a passing suite as acceptance for a component that encodes a judgement.** Parsers, filters, checks and thresholds all make a claim about the world.
 
-### The six silent-failure shapes
+### The seven silent-failure shapes
 
-A different taxonomy, and worth keeping beside the family: these are the *symptoms*, §0.13 is a *cause* several of them share. All six are green things that verify nothing.
+A different taxonomy, and worth keeping beside the family: these are the *symptoms*, §0.13 is a *cause* several of them share. Shapes 1–6 are green things that verify nothing. Shape 7 is a green thing that verifies correctly and **under-reports**.
 
 | # | Shape | Instances |
 |---|---|---|
@@ -338,6 +338,7 @@ A different taxonomy, and worth keeping beside the family: these are the *sympto
 | 4 | A rule generalised from one instance | OBS-021, OBS-062, OBS-063, OBS-069 |
 | 5 | A test agreeing with the code by construction | OBS-064 |
 | 6 | **Wrong evidence read as right evidence** | OBS-071, OBS-072, OBS-089, and the buffer/trap trap |
+| 7 | **Evidence collected, parsed, carried, and never read** | OBS-092 — see below |
 
 **Shape 6 is not a variant of the others.** Shapes 1–5 are all *absence* presented as presence: something was not measured and the gap is invisible. Shape 6 is *presence of the wrong thing* — the evidence is real, correctly read, internally consistent, and **answers a different question than the one being asked of it.**
 
@@ -357,6 +358,44 @@ Two of those four are human inferences with no tool involved, and one — OBS-08
 **Why nothing downstream detects it.** Every consistency check it could face, it passes: the data is real, the timestamps are ordered, the address is correctly formatted, the runs genuinely succeeded. An empty result announces its own incompleteness; a *wrong-question* result does not. The only defences are stating what the source could not have carried (coverage metadata, T-029a) and, for the human case, the hedging protocol in `chaos-harness.md` §6.
 
 Note the relationship to §0.13's **setup** face without collapsing them: they are orthogonal axes. The faces classify *what the evidence could not show you*; the shapes classify *what the failure looks like*. OBS-072 appears under both, and that is correct rather than duplication.
+
+### Shape 7 — evidence collected, parsed, carried, and never read
+
+| # | Shape | Instances |
+|---|---|---|
+| 7 | **The system held the answer and reported something weaker** | OBS-092 (B-430) |
+
+**Every shape above concerns what the evidence could not tell you. This one is the opposite: the evidence told you, and nothing listened.**
+
+The instance. Round 3's fault was a BGP neighbour administratively shut on the far end. `bgp_transport` reads `meta["connection_state"]` — `Active` — and reports `transport_blocked`. The same parsed record, in the same envelope, from the same command on the same device, also carried:
+
+```
+last_reset_reason : BGP Notification received: administrative shutdown
+```
+
+The far end had said why. The parser captured it. The check read the field next to it. **The independent diagnostician logged into the far device to learn what the local device had already reported.**
+
+#### Why it is invisible to every check in this build
+
+> **It cannot be caught by grading the output, because the output is correct.**
+
+`transport_blocked` is true. The citations resolve. The chain is sound. Grounding passes it, and should — nothing is fabricated, nothing is uncited, nothing is overstated. Every mechanism in §0.12, §0.13 and the grounding gate is aimed at output that claims *too much*, and this is output that claims **too little**.
+
+#### Detection — and it is mechanizable
+
+> **Audit what a check reads against what its inputs contain.**
+
+Not a discipline; a script. Enumerate the fields each parser emits from a real fixture, and grep the check module for each one. Measured on this codebase:
+
+| Template | Fields parsed | Fields any check reads |
+|---|---|---|
+| `bgp_neighbor` | 23 | **5** |
+| `interface` | 14 | **5** |
+| `route` | 8 | **2** |
+
+**Not all 33 unread fields are defects** — `mac_address` and `bandwidth_kbps` are not diagnostic here, and saying otherwise would turn this shape into the same noise-generating over-correction T-029c refused. But the unread list on `bgp_neighbor` alone includes `state_reason`, `previous_state`, `remote_as`, `hold_time` and `keepalive` — an AS mismatch and a timer mismatch both produce exactly the `Active` state seen in round 3, and **the tool currently cannot distinguish either of them from an administrative shutdown**, while holding the fields that would.
+
+Tracked as **B-433**. The audit is the deliverable; deciding which fields are load-bearing is per-check judgement and belongs with whoever owns the check.
 
 ---
 
