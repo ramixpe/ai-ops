@@ -2779,6 +2779,42 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-100 · B-432 · The independent signal was already in the output, filed as an ignore rule
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** B-432 offered two options: **(A)** make rung 2 test something rung 1 cannot see — a TCP probe, which is an **active probe with its own allowlist class** and therefore a change to the safety boundary — or **(B)** collapse the flow to four rungs. The operator chose A, with `show tcp brief` named as a passive middle ground worth evaluating first.
+
+  **Neither was needed.** Before adding a command I read what `show bgp neighbor` already emits, and the TCP-layer signal was there:
+
+  ```
+  healthy : Socket not armed for io, armed for read, armed for write
+  broken  : Socket not armed for io, not armed for read, not armed for write
+  ```
+
+  **It was already being parsed — as two declared `IgnoreRule`s**, labelled *"socket bookkeeping"* and *"the down-session variant of the armed-for-read line above"*. §0.10's discipline had captured it, named it, and recorded a decision not to read it.
+
+  So option A was implemented with **no new command, no new template, no `VERB_ALLOWLIST` change, and no fixture capture** — the corpus already contained the evidence on every device and every label.
+- **Evidence:** Measured across every committed `show bgp neighbor` fixture: **armed on 14 of 14 Established sessions, not armed on 2 of 2 Idle ones.** `test_the_socket_field_discriminates_across_the_whole_corpus` pins it. `1442 passed`; the four round vectors are byte-identical.
+- **What I did:** Four things worth recording.
+
+  **1. `cause_not_localised` is reachable now, and the composed fixture is no longer structurally composed.** Rung 1 reads the FSM from `show bgp summary`; rung 2 reads the socket, which is a different subsystem. Rung 1 broken with a live TCP transport beneath it is an ordinary fault — an AS mismatch, a capability mismatch, an MD5 failure *after* TCP establishes. The golden case stays composed only because no such fault has been captured, which is a gap in the corpus rather than an impossibility. Annotated in place, and it is now a candidate for a future injection round.
+
+  **2. The honest limit on the independence claim.** Socket-armed correlates *perfectly* with Established across the corpus. That is not evidence they are the same field — it is evidence the corpus contains no fault that separates them, which is precisely the gap this change opens. Stated in the code comment rather than left for someone to infer a stronger claim than the data supports.
+
+  **3. `state_reason` came along, and it points down the ladder.** `BGP state = Idle (No route to multi-hop neighbor)` — the device naming the layer beneath it. Unlike `last_reset_reason` this is *current*, so it is stated without a staleness caveat. Two of `bgp_neighbor`'s explanatory fields are now read; four remain.
+
+  **4. A second population for shape 7, which the B-433 audit does not see.** The audit compares *parsed* fields against *read* fields. This signal was in neither: it was an **ignored line**. Every `IgnoreRule` in `template_parsers.py` is a documented decision not to extract something, and that set has never been reviewed for diagnostic value.
+
+  > **§0.10's ignore rules are shape 7's other reservoir. The audit measures what was parsed and discarded; it cannot see what was never parsed.**
+
+  Filed as **B-434**. Worth noting the mechanism worked exactly as designed even so — the rule was *declared and reviewable*, which is why re-reading it took one grep. An undeclared regex would have swallowed the line invisibly.
+- **Needs human review:** no — the operator chose option A and this is option A, reached more cheaply
+- **Blocks:** none
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**

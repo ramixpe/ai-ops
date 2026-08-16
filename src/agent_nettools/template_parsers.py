@@ -294,7 +294,6 @@ BGP_NEIGHBOR_IGNORES: tuple[IgnoreRule, ...] = (
     IgnoreRule(r"^Second last write before reset \S+, attempted \d+, written \d+$", "write-pulse bookkeeping"),
     IgnoreRule(r"^Last write pulse rcvd .*pulse count \d+$", "write-pulse bookkeeping"),
     IgnoreRule(r"^Last write pulse rcvd before reset \S+$", "write-pulse bookkeeping"),
-    IgnoreRule(r"^Socket not armed for io, armed for read, armed for write$", "socket bookkeeping"),
     IgnoreRule(r"^Last write thread event before reset \S+, second last \S+$", "write-pulse bookkeeping"),
     IgnoreRule(r"^Last KA expiry before reset \S+, second last \S+$", "keepalive-timer bookkeeping"),
     IgnoreRule(r"^Last KA error before reset \S+, KA not sent \S+$", "keepalive-timer bookkeeping"),
@@ -354,10 +353,6 @@ BGP_NEIGHBOR_IGNORES: tuple[IgnoreRule, ...] = (
     # mid-stream to chase adjacent detail is how a contract stops being
     # reviewable.
     IgnoreRule(
-        r"^Socket not armed for io, not armed for read, not armed for write$",
-        "socket bookkeeping, the down-session variant of the armed-for-read line above",
-    ),
-    IgnoreRule(
         r"^Error Code: .+$",
         "error code from the last BGP notification; state_reason carries the current cause",
     ),
@@ -367,6 +362,24 @@ BGP_NEIGHBOR_IGNORES: tuple[IgnoreRule, ...] = (
         r"^Time since last notification sent to neighbor: \S+$",
         "volatile notification bookkeeping",
     ),
+)
+
+# B-432. Promoted from two `IgnoreRule`s ("socket bookkeeping") to a parsed
+# field, because it is the one line in this output that reports the **TCP
+# layer** rather than the BGP state machine.
+#
+# Rung 1 reads the session state from `show bgp summary`; rung 2 read
+# `connection_state` from here -- two commands reporting the same FSM, which is
+# why `cause_not_localised` was unreachable (OBS-092). The socket's arming is a
+# different subsystem: whether the stack is polling a socket for this peer at
+# all.
+#
+# Measured across every committed fixture: armed on 14 of 14 Established
+# sessions, not armed on 2 of 2 Idle ones.
+_BGP_SOCKET = re.compile(
+    r"^Socket (?P<io>not armed|armed) for io, "
+    r"(?P<read>not armed|armed) for read, "
+    r"(?P<write>not armed|armed) for write$"
 )
 
 _BGP_NEIGHBOR_META_KEYS: tuple[str, ...] = (
@@ -379,6 +392,8 @@ _BGP_NEIGHBOR_META_KEYS: tuple[str, ...] = (
     "last_reset_reason",
     "last_reset_ago",
     "state_reason",
+    "socket_armed_read",
+    "socket_armed_write",
     "hold_time",
     "keepalive",
     "local_as",
@@ -496,6 +511,10 @@ def parse_xr_bgp_neighbor(output: str) -> dict[str, Any]:
             meta["state_reason"] = match["state_reason"]
             if match["up_for"]:
                 meta["up_for"] = match["up_for"]
+            consumed.append(line)
+        elif match := _BGP_SOCKET.match(line):
+            meta["socket_armed_read"] = match["read"] == "armed"
+            meta["socket_armed_write"] = match["write"] == "armed"
             consumed.append(line)
         elif match := _PREVIOUS_STATE.match(line):
             meta["previous_state"] = match["previous_state"]

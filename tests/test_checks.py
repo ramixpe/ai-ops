@@ -301,7 +301,10 @@ def test_bgp_transport_idle_peer_is_broken(monkeypatch):
     evidence = _with_template(evidence, "PE2", "bgp_neighbor", label="broken", address="10.255.0.31")
     result = checks.bgp_transport(evidence, "10.255.0.31")
     assert result.status == checks.BROKEN
-    assert "Idle" in result.reason
+    # B-432: the signal is the socket, not the FSM. `Idle` came from
+    # `connection_state`, which is what rung 1 already reads.
+    assert "the socket is not armed for read" in result.reason
+    assert "No route to multi-hop neighbor" in result.reason, "the device's own reason"
     assert result.evidence_keys == ("PE2:bgp_neighbor:10.255.0.31",)
 
 
@@ -527,7 +530,7 @@ def test_a_broken_transport_carries_the_device_s_own_reset_reason():
     result = checks.bgp_transport(evidence, "10.255.0.12")
 
     assert result.status == checks.BROKEN
-    assert "connection_state: Idle" in result.reason
+    assert "the socket is not armed for read" in result.reason  # B-432
     assert "hold time expired" in result.reason, "the device's own account of why"
     assert "history, not current state" in result.reason
 
@@ -593,4 +596,143 @@ def test_a_session_with_no_recorded_reset_reads_normally():
 
     assert result.status == checks.BROKEN
     assert "history" not in (result.reason or "")
-    assert result.reason.endswith("(connection_state: Active)")
+    # No socket line in this synthetic meta, so the FSM fallback runs -- and
+    # says so, rather than implying a socket was observed.
+    assert "no socket state reported" in result.reason
+
+
+# --------------------------------------------------------------------------- #
+# B-432 -- rung 2 tests the TCP layer, not the BGP state machine
+# --------------------------------------------------------------------------- #
+
+
+def _neighbor_meta(**overrides):
+    meta = {"found": True, "connection_state": "Idle"}
+    meta.update(overrides)
+    return {
+        "device": "RR1",
+        "bgp_neighbor:10.255.0.12": {
+            "status": "success",
+            "data": {"parse_status": "ok", "parsed": {"meta": meta}},
+        },
+    }
+
+
+def test_the_transport_rung_reads_the_socket_not_the_session_state():
+    """The whole of B-432 in one assertion pair.
+
+    Rung 1 reads the session state from `show bgp summary`. Rung 2 used to read
+    `connection_state` from `show bgp neighbor` -- **two commands reporting the
+    same finite state machine**, so rung 2 could never disagree with rung 1 and
+    `cause_not_localised` was unreachable in practice (OBS-092).
+
+    The socket's arming is a different subsystem: whether the stack is polling a
+    socket for this peer at all.
+    """
+
+    tcp_up_bgp_down = _neighbor_meta(connection_state="Active", socket_armed_read=True)
+    result = checks.bgp_transport(tcp_up_bgp_down, "10.255.0.12")
+
+    assert result.status == checks.HEALTHY, (
+        "TCP is up. The BGP session is not, and that is rung 1's business."
+    )
+    assert "socket is armed" in result.reason
+
+
+def test_that_is_what_makes_cause_not_localised_reachable():
+    """The finding that was dead in practice, alive.
+
+    An AS mismatch, a capability mismatch or an MD5 failure after TCP
+    establishes all produce exactly this shape: a socket that is up and a
+    session that will not come up. Before B-432 the descent could not represent
+    it, because rung 2 restated rung 1.
+    """
+
+    from agent_nettools import flows
+    from agent_nettools.checks import BROKEN, HEALTHY, CheckResult
+    from agent_nettools.descent import RungOutcome, _finding_for
+
+    flow = flows.flow_for("bgp_session")
+    statuses = [BROKEN, HEALTHY, HEALTHY, HEALTHY, HEALTHY]
+    outcomes = [
+        RungOutcome(r.name, "RR1", CheckResult(s, reason=r.name, subject="p",
+                                               evidence_keys=(f"RR1:{r.name}",)))
+        for r, s in zip(flow.descent, statuses, strict=True)
+    ]
+
+    assert _finding_for(flow, outcomes, None) == flows.CAUSE_NOT_LOCALISED
+
+
+def test_no_socket_means_no_transport_regardless_of_what_the_fsm_says():
+    """The other direction. A stale `connection_state` cannot make a dead
+    transport look alive."""
+
+    result = checks.bgp_transport(
+        _neighbor_meta(connection_state="Established", socket_armed_read=False),
+        "10.255.0.12",
+    )
+
+    assert result.status == checks.BROKEN
+    assert "not armed" in result.reason
+
+
+def test_the_fsm_fallback_says_that_it_is_a_fallback():
+    """No socket line -- an older XR release, or output shaped differently.
+
+    A weaker signal is still a signal, so this falls back rather than returning
+    `unevaluated`. It says which signal it used, so a reader is not misled into
+    thinking a socket was observed.
+    """
+
+    result = checks.bgp_transport(_neighbor_meta(connection_state="Established"), "10.255.0.12")
+
+    assert result.status == checks.HEALTHY
+    assert "no socket state reported" in result.reason
+
+
+def test_the_current_state_reason_is_stated_without_a_staleness_caveat():
+    """`state_reason` is the device's *current* explanation --
+    `BGP state = Idle (No route to multi-hop neighbor)` -- so unlike
+    `last_reset_reason` it needs no "history, not current state" hedge."""
+
+    result = checks.bgp_transport(
+        _neighbor_meta(socket_armed_read=False, state_reason="No route to multi-hop neighbor"),
+        "10.255.0.12",
+    )
+
+    assert "reports the session state as 'No route to multi-hop neighbor'" in result.reason
+    assert "history" not in result.reason
+
+
+def test_the_socket_field_discriminates_across_the_whole_corpus():
+    """Anti-vacuity for the claim the change rests on.
+
+    Measured: armed on every Established session in the corpus, not armed on
+    every Idle one. If that ever stops holding, the field is not the signal this
+    check believes it is.
+    """
+
+    import glob
+
+    from agent_nettools import template_parsers
+
+    established_armed = down_unarmed = 0
+    for path in glob.glob("tests/fixtures/cisco_xr/*/*/show-bgp-neighbor-*.txt"):
+        parsed, status = template_parsers.parse_template_output(
+            "cisco_xr", "bgp_neighbor", open(path).read()
+        )
+        if status is not template_parsers.PARSE_OK:
+            continue
+        meta = parsed["meta"]
+        armed, state = meta.get("socket_armed_read"), meta.get("state")
+        if armed is None or state is None:
+            continue
+        if state == "Established":
+            assert armed, f"{path}: Established but socket not armed"
+            established_armed += 1
+        else:
+            assert not armed, f"{path}: {state} but socket armed"
+            down_unarmed += 1
+
+    assert established_armed >= 14, established_armed
+    assert down_unarmed >= 2, down_unarmed

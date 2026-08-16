@@ -343,21 +343,75 @@ def bgp_transport(evidence: dict[str, Any], peer: str) -> CheckResult:
             subject=peer,
         )
 
+    # B-432. The socket first, `connection_state` only as a fallback.
+    #
+    # `connection_state` is the BGP finite state machine, which is what rung 1
+    # already reads from `show bgp summary` -- two commands reporting the same
+    # thing, so rung 2 could never disagree with rung 1 and `cause_not_localised`
+    # was unreachable in practice (OBS-092). The socket's arming is a different
+    # subsystem: whether the stack is polling a socket for this peer at all.
+    #
+    # Measured across every committed fixture: armed on 14 of 14 Established
+    # sessions, not armed on 2 of 2 Idle ones. That the two agree on this corpus
+    # is not evidence they are the same field -- the corpus contains no fault
+    # that separates them, which is precisely the gap this change opens.
+    armed = meta.get("socket_armed_read")
+    if armed is not None:
+        if armed:
+            return healthy(
+                subject=peer,
+                evidence_keys=(key,),
+                reason=(
+                    f"TCP transport to {peer} is up (the socket is armed for read)"
+                    + _state_note(meta)
+                ),
+            )
+        return broken(
+            reason=(
+                f"no TCP transport to {peer} (the socket is not armed for read)"
+                + _state_note(meta) + _last_reset_note(meta)
+            ),
+            subject=peer,
+            evidence_keys=(key,),
+        )
+
+    # No socket line: an older XR release, or output shaped differently. Fall
+    # back to the FSM rather than returning `unevaluated` -- a weaker signal is
+    # still a signal, and the reason says which one was used so a reader is not
+    # misled about what was observed.
     connection_state = meta.get("connection_state")
     if connection_state == "Established":
         return healthy(
             subject=peer,
             evidence_keys=(key,),
-            reason=f"BGP transport session to {peer} is Established",
+            reason=(
+                f"BGP transport session to {peer} is Established "
+                f"(no socket state reported; read from the session state)"
+            ),
         )
     return broken(
         reason=(
             f"BGP transport session to {peer} is not Established "
-            f"(connection_state: {connection_state})" + _last_reset_note(meta)
+            f"(connection_state: {connection_state}; no socket state reported)"
+            + _last_reset_note(meta)
         ),
         subject=peer,
         evidence_keys=(key,),
     )
+
+
+def _state_note(meta: dict[str, Any]) -> str:
+    """The device's parenthesised reason for the current BGP state, if any.
+
+    `BGP state = Idle (No route to multi-hop neighbor)` -- the device naming the
+    layer beneath it. Distinct from `_last_reset_note`, which is history: this
+    is *current*, so it can be stated without a staleness caveat.
+    """
+
+    reason = meta.get("state_reason")
+    if not reason:
+        return ""
+    return f"; the device reports the session state as {reason!r}"
 
 
 def _last_reset_note(meta: dict[str, Any]) -> str:

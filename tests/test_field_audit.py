@@ -52,7 +52,9 @@ SOURCES = {
 #: read. When a number changes, update it **and** say which field moved and why
 #: in the commit.
 EXPECTED = {
-    "bgp_neighbor": (23, 7),   # 5 -> 7 at B-430: last_reset_reason + last_reset_ago
+    # 23 -> 25 at B-432: socket_armed_read/write promoted from IgnoreRule to
+    # parsed. 7 -> 9 read: those two, plus state_reason, minus none.
+    "bgp_neighbor": (25, 9),
     "route": (8, 2),
     "interface": (14, 5),
 }
@@ -69,8 +71,10 @@ EXPLANATORY = {
     # `last_reset_reason` and `last_reset_ago` left this set at B-430 -- the
     # audit caught the move, which is what it is for. They now qualify the
     # transport finding and have their own tests.
+    # `state_reason` left this set at B-432 -- it now qualifies the transport
+    # finding with the device's own current reason.
     "bgp_neighbor": {
-        "state_reason", "previous_state",
+        "previous_state",
         "remote_as", "local_as", "hold_time", "keepalive",
     },
     "interface": {"last_link_flapped", "state_transitions"},
