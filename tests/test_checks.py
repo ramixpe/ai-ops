@@ -486,3 +486,111 @@ def test_interface_state_evidence_keys_are_non_empty_for_a_conclusive_verdict(mo
     result = checks.interface_state(evidence, "Gi0/0/0/0")
     assert result.status == checks.BROKEN
     assert result.evidence_keys
+
+
+# --------------------------------------------------------------------------- #
+# B-430 -- the device's own account of why, read at last
+# --------------------------------------------------------------------------- #
+
+
+def _neighbor_evidence(device, fixture):
+    """One real `show bgp neighbor` capture, in the shape a check reads."""
+
+    import pathlib
+
+    from agent_nettools import template_parsers
+
+    raw = (
+        pathlib.Path(__file__).resolve().parent
+        / "fixtures" / "cisco_xr" / device / "broken" / fixture
+    ).read_text()
+    parsed, status = template_parsers.parse_template_output("cisco_xr", "bgp_neighbor", raw)
+    assert status is template_parsers.PARSE_OK
+    return {
+        "device": device,
+        "bgp_neighbor:10.255.0.12": {
+            "status": "success",
+            "data": {"parsed": parsed, "parse_status": template_parsers.PARSE_OK},
+        },
+    }
+
+
+def test_a_broken_transport_carries_the_device_s_own_reset_reason():
+    """Round 3's wasted answer, now read (OBS-092, shape 7).
+
+    The check reported `transport_blocked` -- true -- while the same parsed
+    record carried the far end's stated reason. The diagnostician logged into
+    the far device to learn what the local device had already reported.
+    """
+
+    evidence = _neighbor_evidence("RR1", "show-bgp-neighbor-10-255-0-12.txt")
+    result = checks.bgp_transport(evidence, "10.255.0.12")
+
+    assert result.status == checks.BROKEN
+    assert "connection_state: Idle" in result.reason
+    assert "hold time expired" in result.reason, "the device's own account of why"
+    assert "history, not current state" in result.reason
+
+
+def test_the_reset_reason_is_dated_so_staleness_is_the_reader_s_to_judge():
+    """`last_reset_ago` travels with it. A reason from an hour ago says nothing
+    certain about a session that is down now, and the check does not pretend
+    otherwise -- it hands over both and lets the reader decide."""
+
+    evidence = _neighbor_evidence("RR1", "show-bgp-neighbor-10-255-0-12.txt")
+    result = checks.bgp_transport(evidence, "10.255.0.12")
+
+    assert "ago with reason" in result.reason
+
+
+def test_the_reset_reason_never_becomes_the_verdict():
+    """The care point, asserted.
+
+    `last_reset_reason` is history and appears on **healthy** sessions too --
+    measured across this corpus, seven Established sessions carry 'Peer closing
+    down the session'. Promoting it to a finding would trade a shape-7
+    under-report for a confident wrong answer, which is the worse trade.
+    """
+
+    healthy_evidence = {
+        "device": "RR1",
+        "bgp_neighbor:10.255.0.11": {
+            "status": "success",
+            "data": {
+                "parse_status": "ok",
+                "parsed": {"meta": {
+                    "found": True,
+                    "connection_state": "Established",
+                    "last_reset_reason": "Peer closing down the session",
+                    "last_reset_ago": "2d20h",
+                }},
+            },
+        },
+    }
+    result = checks.bgp_transport(healthy_evidence, "10.255.0.11")
+
+    assert result.status == checks.HEALTHY, "a reset reason cannot make a live session broken"
+    assert "Peer closing down" not in (result.reason or ""), (
+        "and it is not repeated on a healthy session, where it is noise"
+    )
+
+
+def test_a_session_with_no_recorded_reset_reads_normally():
+    """The companion. Without it the note could be unconditional and every test
+    above would still pass."""
+
+    evidence = {
+        "device": "RR1",
+        "bgp_neighbor:10.255.0.99": {
+            "status": "success",
+            "data": {
+                "parse_status": "ok",
+                "parsed": {"meta": {"found": True, "connection_state": "Active"}},
+            },
+        },
+    }
+    result = checks.bgp_transport(evidence, "10.255.0.99")
+
+    assert result.status == checks.BROKEN
+    assert "history" not in (result.reason or "")
+    assert result.reason.endswith("(connection_state: Active)")

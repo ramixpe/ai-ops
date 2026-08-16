@@ -52,7 +52,7 @@ SOURCES = {
 #: read. When a number changes, update it **and** say which field moved and why
 #: in the commit.
 EXPECTED = {
-    "bgp_neighbor": (23, 5),
+    "bgp_neighbor": (23, 7),   # 5 -> 7 at B-430: last_reset_reason + last_reset_ago
     "route": (8, 2),
     "interface": (14, 5),
 }
@@ -66,8 +66,11 @@ EXPECTED = {
 #: round 3 produced. The tool cannot distinguish either from an administrative
 #: shutdown, while parsing and discarding the fields that would.
 EXPLANATORY = {
+    # `last_reset_reason` and `last_reset_ago` left this set at B-430 -- the
+    # audit caught the move, which is what it is for. They now qualify the
+    # transport finding and have their own tests.
     "bgp_neighbor": {
-        "last_reset_reason", "state_reason", "previous_state",
+        "state_reason", "previous_state",
         "remote_as", "local_as", "hold_time", "keepalive",
     },
     "interface": {"last_link_flapped", "state_transitions"},

@@ -353,10 +353,47 @@ def bgp_transport(evidence: dict[str, Any], peer: str) -> CheckResult:
     return broken(
         reason=(
             f"BGP transport session to {peer} is not Established "
-            f"(connection_state: {connection_state})"
+            f"(connection_state: {connection_state})" + _last_reset_note(meta)
         ),
         subject=peer,
         evidence_keys=(key,),
+    )
+
+
+def _last_reset_note(meta: dict[str, Any]) -> str:
+    """The device's own account of why the session last went down (B-430).
+
+    Round 3 is why this exists. The fault was a BGP neighbour administratively
+    shut on the far end; the check read ``connection_state`` and reported
+    ``transport_blocked``, which is true. **The same parsed record carried**
+
+        last_reset_reason: BGP Notification received: administrative shutdown
+
+    The far end had said why, the parser captured it, and the check read the
+    field beside it. The diagnostician logged into the far device to learn what
+    the local device had already reported (OBS-092, silent-failure shape 7).
+
+    **It qualifies the finding; it never becomes one.** ``last_reset_reason`` is
+    *history* and it is present on healthy sessions too -- measured across this
+    corpus, seven Established sessions carry ``'Peer closing down the session'``
+    and seven carry ``'Address family activated'``. A reset reason from an hour
+    ago says nothing certain about a session that is down now, so promoting it
+    to a verdict would trade a shape-7 under-report for a confident wrong
+    answer, which is the worse trade.
+
+    So: appended to the reason, marked as history, and paired with
+    ``last_reset_ago`` where the device gives it, so the reader can judge
+    staleness rather than being asked to trust it.
+    """
+
+    reason = meta.get("last_reset_reason")
+    if not reason:
+        return ""
+    ago = meta.get("last_reset_ago")
+    when = f" {ago} ago" if ago else ""
+    return (
+        f"; the device last recorded a reset{when} with reason {reason!r} "
+        f"(history, not current state)"
     )
 
 
