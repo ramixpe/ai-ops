@@ -1923,6 +1923,8 @@ transport path disappearing rather than a direct session teardown.
 
 ## OBS-079 · design · Forward consistency is a general architectural gap — and the corpus already contains an instance
 
+> **Operator ranking: this finding outranks the task it was found in.** A cause reported on an Established session carrying traffic is precisely the outcome `chaos-harness.md` §4.3 says a fault-only corpus can never surface — found before the harness existed, and now a *predicted* adverse result for round 4 (OBS-082) rather than a hoped-for silence.
+
 - **Kind:** defect
 - **Escalation:** DECIDE-AND-LOG
 - **Model:** opus-5
@@ -1981,6 +1983,8 @@ transport path disappearing rather than a direct session teardown.
 
 ## OBS-081 · T-029b · Presence checking for correlations — and the flag that was reporting the gap all along
 
+> **Operator ranking: the second finding here outranks the task.** Not the fix — the observation that a guard reported the gap honestly in every payload and nobody read it. Promoted to **T-029c**.
+
 - **Kind:** defect-found
 - **Escalation:** DECIDE-AND-LOG
 - **Model:** opus-5
@@ -2003,6 +2007,45 @@ transport path disappearing rather than a direct session teardown.
   **2. Scoping held.** The fabricated timeline withholds only the correlation. The descent is untouched — it is deterministic and has no model in it — and the report still grounds and emits. That is the two-gate design doing what it was built for, and the runner test asserts all three facts together so a future change that collapses them fails.
 - **Needs human review:** no
 - **Blocks:** none — T-034 next.
+
+---
+
+## OBS-082 · round 4 · **PREDICTION, recorded before the round runs** — the true negative will fail
+
+- **Kind:** risk
+- **Escalation:** NOTE
+- **Model:** opus-5
+- **What happened:** Round 4 of the manual injection sequence is a **true negative**: a real change the fabric correctly absorbs. Recorded here **before** the round runs, on the same protocol as the T-033 hand diagnosis (OBS-076) and for the same reason — *a predicted failure that then occurs is worth more than a discovered one*, because only the first distinguishes understanding the defect from noticing it.
+
+  **Setup.** One core-facing uplink administratively shut on a device that has two. The IGP reconverges over the survivor. The BGP session to that device's loopback stays **Established and carries traffic** throughout. Nothing about the service is affected; the correct answer is that nothing is wrong.
+
+  **Predicted agent output:**
+
+  | | Predicted |
+  |---|---|
+  | rung 1 `bgp_session` | HEALTHY |
+  | rung 2 `transport` | HEALTHY |
+  | rung 3 `route_to_peer` | HEALTHY |
+  | rung 4 `igp_adjacency` | HEALTHY |
+  | rung 5 `interface` | **BROKEN** — `ALL_HEALTHY` over `EACH_PHYSICAL_INTERFACE` |
+  | `finding` | `interface_line_down` |
+  | `cause` | **`interface`** |
+  | `causal_chain` | **empty** |
+  | exit code | **1** — a fault reported on a working session |
+
+  > **A cause with no chain is a cause explaining nothing.**
+
+  **Confidence: high.** This is not a guess about model behaviour — the descent is deterministic and model-free, and the outcome was already produced offline against the real `bgp_session` ladder (OBS-079). The live round tests that the *fabric* behaves as expected (the IGP does reconverge, the session does stay up), not that the descent does. If the session drops, the round is invalid as a true negative and must be re-set with the redundancy verified first.
+
+  **What would falsify the prediction**, stated so it is not unfalsifiable: rung 5 returning HEALTHY (the aggregation is not what I believe), or the finding coming back `all_layers_healthy` (something downstream already suppresses a chainless cause), or exit 0. Any of those means B-428 is wrong about the mechanism and the finding needs rewriting rather than confirming.
+- **Evidence:** OBS-079's offline construction against the real ladder. `chaos-harness.md` §4.3.
+- **What I did:** Recorded and committed before the round. Two notes on why this round is worth running at all given the outcome is already known offline.
+
+  **1. Offline construction proves the descent's arithmetic; the round proves the premise.** I constructed rungs 1–4 healthy and rung 5 broken *by hand*. Whether a real one-uplink shutdown actually produces that state — whether the IGP reconverges fast enough, whether the session survives the reconvergence, whether `interface_state` reads a shut interface the way I assumed — is a fact about the fabric that only the fabric can supply. The offline result would be worthless if the premise were wrong.
+
+  **2. It is the round most likely to be quietly skipped.** Three rounds that find faults feel productive; a round designed to find nothing feels like a formality, and it is the one where this architecture is structurally weakest — the walk is built to find the lowest broken thing, and *"nothing that matters is broken"* is the one answer it has no mechanism for reaching. Writing the prediction down in advance is partly to make skipping it visibly a choice.
+- **Needs human review:** no — but the round is now specified and should not be run before B-428 is settled or deliberately deferred
+- **Blocks:** none
 
 ---
 

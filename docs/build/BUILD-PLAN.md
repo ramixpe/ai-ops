@@ -327,6 +327,34 @@ An empty result is honest and visibly incomplete. A partial result is neither, a
 
 ---
 
+## 0.14 Ask what kind of claim you are acting on
+
+> **Four corrections in one session shared a shape: a rule of method filed as a rule of safety, an incompleteness filed as a detectability problem, a partial signal filed as primary, an impossibility filed as a property of fabrics. Every original statement was true. The classification is what misled.**
+>
+> **Before acting on a statement, ask what kind of claim it is** — a rule of method and a rule of safety are waived on different grounds, and a primary signal and a corner detector are trusted to different degrees.
+
+A separate section from §0.13 because **the remedy is different**. §0.13 asks *what could the evidence not have shown you* — it is about the reach of the observation. This asks *what kind of thing is this* — it is about the category of the claim, and it bites even when the observation is complete and correct.
+
+### The four, and what the misclassification cost
+
+| Claim | Filed as | Actually | What the misfiling would have caused |
+|---|---|---|---|
+| "The agent must never run the injector" | a §0.11 safety rule | **a rule of method** | §0.11 rules get waived on reversibility and supervision — twice in this build, both times correctly. Every one of those arguments applies to a drill, and every one is beside the point. The rule would have been waived by sound reasoning |
+| Two-fault output is "true but incomplete" | a completeness problem | **a detectability problem** — the rung tables are byte-identical | "Incomplete" invites a fix inside the descent. Nothing inside it can help: the signal is not in the rung verdicts |
+| Non-contiguity of broken rungs | the primary two-fault signal | **a corner detector** | It cannot fire on the canonical case. Pointing the harness at it first would have produced a clean result and no information |
+| "No consistently-behaving fabric can produce `cause_not_localised`" | a fact about fabrics | **a fact about *single* faults** | Left the build's only synthetic fixture permanently synthetic. An administratively shut session with a healthy underlay produces it directly |
+
+Note what all four have in common: **the statement was accurate and the action it licensed was wrong.** No amount of re-checking the evidence corrects a misclassification, because the evidence supports the statement. Only asking what kind of claim it is does.
+
+### The checks, cheap enough to be habits
+
+- **A rule** — is it waived on safety grounds, or does waiving it destroy something that is not safety? A rule of method survives every reversibility argument, because reversibility was never what it was about.
+- **A defect** — is it wrong, or is it *undetectably* wrong? The second is strictly worse and usually needs a signal from outside the component.
+- **A signal** — does it fire on the central case, or on a corner of it? A detector's value is where it fires, not that it fires.
+- **An impossibility** — is it impossible, or impossible *under the conditions you have so far*? This one is the most common and the easiest to check: name the condition and ask whether it can be lifted.
+
+---
+
 ### The three tracking documents
 
 All three live in `docs/build/` and are maintained continuously, not at the end.

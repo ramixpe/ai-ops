@@ -182,6 +182,26 @@ Organised by the rung they should surface. **Coverage of every rung is the goal*
 
 Target at least **25% of trials** with a correct answer of "nothing is wrong." A false-positive rate is as important as a hit rate, and cannot be measured without them.
 
+#### The concrete case, found before the harness existed
+
+This section argued from principle until T-029b, when the true-negative scenario was constructed offline and **the descent failed it** (OBS-079). One uplink down on a device with two, IGP reconverging over the survivor:
+
+```
+rung 1  bgp_session    HEALTHY     <- Established, carrying traffic
+rung 2  transport      HEALTHY
+rung 3  route_to_peer  HEALTHY
+rung 4  igp_adjacency  HEALTHY
+rung 5  interface      BROKEN      <- ALL_HEALTHY over EACH_PHYSICAL_INTERFACE
+```
+
+`cause: interface`, `causal_chain: []`. **A cause reported on an Established session carrying traffic.**
+
+That is exactly the outcome a fault-only corpus can never surface — every label in `tests/fixtures/` was produced by a deliberate change, so every one of them *has* an answer, and a system that always finds one scores perfectly against all of them. The failure was invisible to 1,365 passing tests and to two design documents, and it took thirty seconds to find once the question "what does a *correct absorption* look like" was asked.
+
+**Round 4 is therefore a prediction rather than an observation.** The predicted agent output is recorded in `FINDINGS.md` before the round runs (OBS-082), on the same protocol as the T-033 hand diagnosis: **a predicted failure that then occurs is worth more than a discovered one**, because only the first distinguishes understanding the defect from noticing it.
+
+Which sharpens the rule this section states. It is not merely that true negatives let a false-positive rate be *measured*. It is that **the true-negative case is where a dependency-descent architecture is structurally weakest** — the walk is built to find the lowest broken thing, and "nothing that matters is broken" is the one answer it has no mechanism for reaching. Fix tracked as **B-428**.
+
 ---
 
 ## 5. Scoring
