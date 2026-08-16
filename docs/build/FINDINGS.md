@@ -2155,6 +2155,56 @@ transport path disappearing rather than a direct session teardown.
 
 ---
 
+## OBS-087 · round 2 · The independent hand diagnosis, recorded before the agent run
+
+- **Kind:** decision-made
+- **Escalation:** NOTE
+- **Model:** — (human operator)
+- **What happened:** Round 2 of the manual injection sequence (track A). Subject `RR1 10.255.0.11`. Fault live, ground truth sealed. Recorded verbatim and committed **before** the agent runs, on the protocol established at OBS-076: the ordering is a fact in git history rather than a claim in a document.
+
+  Recorded without comment or evaluation.
+
+```
+---- BEGIN INDEPENDENT DIAGNOSIS (round 2, recorded 15:42 UTC, before agent run) ----
+Rung: transport.  Finding: transport_blocked.  Subject: the RR1<->10.255.0.11 session.
+
+Evidence:
+  - rung 1 broken: 10.255.0.11 is Active, up/down 00:03:28
+  - rung 3 HEALTHY: show route 10.255.0.11 returns a /32 via isis CORE, distance 115,
+    metric 20, labeled SR, primary via Gi0/0/0/0 plus an LFA backup, installed 2d22h.
+    The route never went away.
+  - rung 4 HEALTHY: RR1 IS-IS to P1 and P4 both Up for 2d22h, unchanged
+  - rung 5 HEALTHY: all physical interfaces up/up on the device inspected.
+    Gi0/0/0/2.300 is the pre-existing subinterface; srte_c_20_ep is a tunnel.
+
+Reasoning: the route is present and stable, the IGP never flapped, and the session
+still will not establish. "Active" means the local speaker is retrying the TCP
+connection — a transport failure, not a reachability one. Nothing beneath rung 2 is
+broken, so the descent should stop at rung 2 rather than descend to a healthy rung.
+
+Not determinable from this evidence: whether the far end is rejecting the connection
+(MD5 mismatch or an administratively shut neighbour) or something is blocking port 179.
+Same rung either way.
+
+Caveat: 10.255.0.11 appears to be P1's loopback, not PE1's — RR1 has no direct link to
+PE1, and the route resolves via 10.0.1.17 toward P1. If so, the faulted device and the
+subject device are different machines, which is not the round that was planned. If the
+agent finds every rung healthy and reports all_layers_healthy, that mismatch is the
+finding, not a diagnostic error.
+---- END INDEPENDENT DIAGNOSIS ----
+```
+
+- **Evidence:** This entry, committed before the agent run. The agent's result is OBS-088.
+- **What I did:** Recorded and committed, before running anything.
+
+  **This round is scored on a rung the corpus has never localised to.** Round 1 landed on `igp_adjacency`; the captured `broken` label lands on `interface`. `transport` would be the third distinct rung, which is the point of sequencing four rounds across four rungs rather than repeating one.
+
+  **And it carries a second question the sequence had not yet reached.** The operator's caveat flags that the subject may not resolve to the device that was changed — the first trial where those differ. That is recorded and scored **separately** from the diagnostic result (OBS-089), because conflating them would let a device-resolution defect read as a diagnostic failure, or the reverse. Which of the two it is cannot be decided before the run, and deciding it after is exactly the judgement the blind protocol protects.
+- **Needs human review:** no
+- **Blocks:** none — OBS-088 is the agent run.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**
