@@ -326,9 +326,9 @@ Two practical consequences:
 - **When a design document arrives for code that already exists, read the document against the code.** The other direction finds nothing — every line of code justifies itself, and the reading converges on "yes, that is what it does".
 - **Do not treat a passing suite as acceptance for a component that encodes a judgement.** Parsers, filters, checks and thresholds all make a claim about the world.
 
-### The seven silent-failure shapes
+### The eight silent-failure shapes
 
-A different taxonomy, and worth keeping beside the family: these are the *symptoms*, §0.13 is a *cause* several of them share. Shapes 1–6 are green things that verify nothing. Shape 7 is a green thing that verifies correctly and **under-reports**.
+A different taxonomy, and worth keeping beside the family: these are the *symptoms*, §0.13 is a *cause* several of them share. Shapes 1–6 are green things that verify nothing. Shape 7 verifies correctly and **under-reports**. Shape 8 is a green suite that **stopped verifying something it used to**.
 
 | # | Shape | Instances |
 |---|---|---|
@@ -339,6 +339,7 @@ A different taxonomy, and worth keeping beside the family: these are the *sympto
 | 5 | A test agreeing with the code by construction | OBS-064 |
 | 6 | **Wrong evidence read as right evidence** | OBS-071, OBS-072, OBS-089, and the buffer/trap trap |
 | 7 | **Evidence collected, parsed, carried, and never read** | OBS-092 — see below |
+| 8 | **A fix silently deletes coverage of behaviour that was always correct** | OBS-097 — see below |
 
 **Shape 6 is not a variant of the others.** Shapes 1–5 are all *absence* presented as presence: something was not measured and the gap is invisible. Shape 6 is *presence of the wrong thing* — the evidence is real, correctly read, internally consistent, and **answers a different question than the one being asked of it.**
 
@@ -397,6 +398,28 @@ Not a discipline; a script. Enumerate the fields each parser emits from a real f
 
 Tracked as **B-433**. The audit is the deliverable; deciding which fields are load-bearing is per-check judgement and belongs with whoever owns the check.
 
+### Shape 8 — a fix silently deletes coverage of behaviour that was always correct
+
+> **Converting a test to a new case removes the old case. The suite stays green, and the deletion looks like a routine update.**
+
+**This is not §0.13's tests face, and filing it there would lose what makes it findable.** In the tests face the test was *wrong* — it encoded the same premise as the code, so it never verified anything. Here **the original test was correct**. It covered real behaviour, it would have caught a real regression, and it was repurposed out of existence by a change that was itself right.
+
+The instance (OBS-097). `test_a_healthy_rung_does_not_stop_the_walk_either` used a rung-1-healthy ladder and asserted the descent named the lowest broken rung. B-428 made that ladder produce `no_fault_on_path`, so the test was updated to expect the new finding — correctly. **That left "descend past a healthy rung to a broken one below and name it" with no coverage at all**, because its only test had just become a test of something else. That property is what round 1 depends on.
+
+Nothing was red at any point. The suite went from 1377 green to 1378 green.
+
+#### The tell
+
+> **A test whose *inputs* had to change, rather than its expectations.**
+
+An expectation changing is the normal shape of a fix: the same scenario now yields a different answer. **Inputs changing means the scenario itself moved**, and the scenario that left is no longer covered by anything unless someone notices.
+
+When it happens, one question: **what were the old inputs covering, and does anything still cover it?** If not, the companion is part of the fix, not a follow-up. In OBS-097 the companion was three lines.
+
+#### Why it belongs in this list rather than in a style guide
+
+It produces the same end state as every other shape here — a green suite over an unverified property — by a route none of the others take. §0.12's vacuity companions do not catch it, because nothing is empty. §0.13's independent specification does not catch it, because the specification is satisfied. Only the diff catches it, and only if someone reads it asking this question.
+
 ---
 
 ## 0.14 Ask what kind of claim you are acting on
@@ -424,6 +447,16 @@ Note what all four have in common: **the statement was accurate and the action i
 - **A defect** — is it wrong, or is it *undetectably* wrong? The second is strictly worse and usually needs a signal from outside the component.
 - **A signal** — does it fire on the central case, or on a corner of it? A detector's value is where it fires, not that it fires.
 - **An impossibility** — is it impossible, or impossible *under the conditions you have so far*? This one is the most common and the easiest to check: name the condition and ask whether it can be lifted.
+
+### Deleting a stated limitation asserts a capability
+
+A corollary, and the case that prompted it (OBS-097). `MVP0-REVIEW.md` §5 said *"it cannot tell you nothing is wrong."* B-428 made that false. The tempting edit is to delete the sentence.
+
+**Deleting it is not neutral.** A review that once named a limitation and no longer does is read as saying the limitation is gone — which is a *different claim* from the one the fix supports. B-428 lets the tool say *"no fault on the path between these two endpoints"*. It does not let it say *"this device is healthy"*, which was never the question a flow asks.
+
+> **When a fix invalidates a stated limitation, narrow the statement to what is still true. Deleting it swaps a true limitation for an implied capability, and the implied one is never written down where anyone can check it.**
+
+So §5 now reads *"read exit 0 as **not on this path**, not as **all clear**"* — shorter than the original warning and still a warning. The general form: **an absence of stated limits is itself a claim**, and it is the one kind of claim nobody reviews, because there is no sentence to review.
 
 ---
 

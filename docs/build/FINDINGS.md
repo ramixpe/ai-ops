@@ -2678,6 +2678,57 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-098 · principles · Four judgements from B-428, promoted out of the task writeup
+
+- **Kind:** insight
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5 · promoted at the operator's direction
+- **What happened:** Four judgements made while implementing B-428 are recorded as standing rules rather than as notes about one task. Each is filed where it will be read by someone who has never seen B-428.
+
+  ### 1. Shape 8 — a fix silently deletes coverage of behaviour that was always correct
+
+  `BUILD-PLAN.md` §0.13, its own entry. **Not the tests face**, and filing it there would lose what makes it findable: in the tests face the test was *wrong*, encoding the same premise as the code. Here the original test was **right** — it covered real behaviour and would have caught a real regression — and a correct fix repurposed it out of existence.
+
+  The suite went 1377 green → 1378 green. Nothing was ever red.
+
+  > **The tell: a test whose *inputs* had to change, rather than its expectations.**
+
+  An expectation changing is the normal shape of a fix — same scenario, different answer. **Inputs changing means the scenario moved**, and the scenario that left is uncovered unless someone notices. It produces the same end state as every other shape in that list by a route none of them take: §0.12's vacuity companions do not fire because nothing is empty, and §0.13's independent specification does not fire because the specification is satisfied. **Only the diff catches it**, and only if read with that question in mind.
+
+  ### 2. Corpus integrity, binding on B-427
+
+  > *A corpus records what the system did at the time, not what it does now. Scores are never rewritten after a fix. Corrections are appended as new rows with the fix referenced.*
+
+  Made binding rather than left as a decision about round 4, and the reason is when the pressure arrives: **the urge to tidy a corpus is strongest exactly when a fix has just landed and the old score reads as an embarrassment rather than as evidence.** A rule that has to be re-argued at that moment is a rule that loses.
+
+  ### 3. Deleting a stated limitation asserts a capability
+
+  `BUILD-PLAN.md` §0.14, as a corollary. B-428 made *"it cannot tell you nothing is wrong"* false, and the tempting edit was to delete the sentence.
+
+  **Deleting it is not neutral.** A review that once named a limitation and no longer does reads as saying the limitation is gone — a *different* claim from the one the fix supports. B-428 lets the tool say *"no fault on the path between these two endpoints"*; it does not let it say *"this device is healthy"*, which was never the question a flow asks.
+
+  > **An absence of stated limits is itself a claim, and it is the one kind nobody reviews, because there is no sentence to review.**
+
+  So §5 was narrowed to *"read exit 0 as **not on this path**, not as **all clear**"* — shorter than the original warning, and still a warning.
+
+  ### 4. A compound requirement where half is worse than none
+
+  *"Broken rungs recorded as observations rather than as a cause"* is **two** requirements: suppress the cause, **and** report the rungs. Implementing only the first passes any test that checks `cause is None`, and produces a run that **silently drops a real interface fault** — quieter than the false positive it replaced, and therefore worse.
+
+  > **When a requirement is phrased as *"X rather than Y"*, it contains two obligations. Satisfying only the negative one is often worse than satisfying neither, because the failure it produces is silent where the original was loud.**
+
+  Guarded by `off_path` in the payload, rendering in all three formats, and a test asserting every renderer shows the broken rung. `no_fault_on_path` must never read as *"nothing found"*.
+- **Evidence:** `BUILD-PLAN.md` §0.13 (shape 8), §0.14 (the corollary); `BACKLOG.md` B-427; `MVP0-REVIEW.md` §5.
+- **What I did:** Recorded all four, and noticed what they have in common — which is worth one sentence, because it is not what I expected.
+
+  **Three of the four are about what happens *after* a defect is fixed**, not about finding one. Shape 8 is a fix removing coverage. Corpus integrity is a fix tempting a rewrite of the record. The narrowing rule is a fix tempting the deletion of a warning. Only the fourth is about reading a specification.
+
+  The build's rules up to §0.14 are almost entirely about **detection** — how a green thing verifies nothing, how evidence bounds conclusion, how a claim gets misfiled. These three are about the moment immediately after detection succeeds, which until now had no rules at all and is where the pressure to tidy is highest.
+- **Needs human review:** no
+- **Blocks:** none. Nothing further started.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**

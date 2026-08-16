@@ -33,11 +33,19 @@ All six pinned in `tests/test_rounds_regression.py` (13 tests) — the four roun
 
 **Read exit 0 as "not on this path", not as "all clear".** The tool still cannot say *"this device is healthy"* — that was never the question it answers.
 
-### Two things from the implementation worth carrying
+### Four judgements from it, now standing rules (OBS-098)
 
-**A failing test that was the change working.** `test_a_healthy_rung_does_not_stop_the_walk_either` asserted the old finding. Its stated property — the walk visits every rung — is asserted by `rung_path` and was untouched. OBS-083's rule: *a change that tightens a rule fails exactly the tests that encoded the old rule as correct, and those failures are findings.*
+Recorded where someone who never sees B-428 will read them.
 
-**And a hazard that is not one of the seven shapes.** Converting that test left *"descend past a healthy rung to a broken one below and name it"* — the property round 1 depends on — with **no coverage at all**. **Fixing a defect can silently delete coverage of behaviour that was always correct, and the deletion looks like a routine test update.** The tell is a test whose *inputs* had to change rather than its expectations. Companion added.
+**Shape 8 — a fix silently deletes coverage of behaviour that was always correct** (§0.13). Converting `test_a_healthy_rung_does_not_stop_the_walk_either` to the new finding left *"descend past a healthy rung to a broken one below and name it"* — the property round 1 depends on — with **no coverage at all**. The suite went 1377 green → 1378 green; nothing was ever red. **Not §0.13's tests face**: there the test was wrong; here it was right and got repurposed out of existence. **The tell is a test whose *inputs* had to change rather than its expectations.**
+
+**Corpus integrity, binding on B-427.** *Scores are never rewritten after a fix; corrections are appended as new rows referencing it.* Binding rather than a judgement about round 4, because the urge to tidy a corpus is strongest exactly when a fix has just landed and the old score reads as an embarrassment rather than as evidence.
+
+**Deleting a stated limitation asserts a capability** (§0.14). Removing *"it cannot tell you nothing is wrong"* would have read as *the limitation is gone*, which is a different claim from the one B-428 supports. Narrowed instead. **An absence of stated limits is itself a claim, and the one kind nobody reviews.**
+
+**"X rather than Y" contains two obligations.** *"Observations rather than as a cause"* means suppress the cause **and** report the rungs. Half of it passes any `cause is None` test and silently drops a real interface fault — quieter than the defect it replaced, therefore worse.
+
+Three of those four are about what happens *after* a defect is fixed. Every rule before §0.14 is about detection; these cover the moment immediately after detection succeeds, which had no rules and is where the pressure to tidy is highest.
 
 ---
 
@@ -91,7 +99,7 @@ Row 4 keeps its ❌ deliberately. **A corpus records what the system did at the 
 
 ## 4. What a new session most needs to know
 
-**Read in this order:** `BUILD-PLAN.md` Part 0 (§0.9a–§0.14 are the rules this build learned), then `MVP0-REVIEW.md`, then this file.
+**Read in this order:** `BUILD-PLAN.md` Part 0 (§0.9a–§0.14 are the rules this build learned — §0.13 now carries **eight** silent-failure shapes), then `MVP0-REVIEW.md`, then this file.
 
 **The four things most likely to be got wrong by someone picking this up:**
 
