@@ -2852,6 +2852,45 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-102 · B-421 · A faithful implementation of a specification that was wrong
+
+- **Kind:** assumption-wrong
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5 (spec, review) · sonnet-5 (implementation)
+- **What happened:** First delegated item of the session, and the first acceptance review. **The implementation was faithful and the specification was wrong.**
+
+  My spec said: *"reorder so all static text precedes all volatile text — and the reordering must not change what the model is being asked."* Sonnet did exactly that, mechanically and correctly. The result:
+
+  ```
+  COVERAGE
+  --------
+  What this source was able to tell us, measured by code:
+                              <- the payload that was here is now at the end
+  **Read `gaps` before you conclude anything negative.** ...
+  ```
+
+  with the volatile half being **three anonymous JSON documents** separated by blank lines. `correlate` substitutes three payloads — coverage, finding, window — and their only remaining distinguisher was internal shape.
+
+  Every character of the prompt still existed. Nothing was reworded. It satisfied the letter of *"must not change what the model is being asked"* and violated it entirely.
+
+  > **The association between a heading and its payload is content.** Text-preservation is not meaning-preservation, and a check for one reads exactly like a check for the other.
+- **Evidence:** Rendered both prompts and read them. `1464 passed`. Two tests pin the corrected property, including the cost of the correction (<100 uncached characters).
+- **What I did:** Merged the agent's work first, then corrected on top as a separate commit, so both the faithful implementation and the specification defect are visible in history rather than one silently absorbing the other.
+
+  The fix: each payload carries its section heading into the volatile half. A few dozen tokens of static text now live on the uncached side. **That is the right trade every time** — B-421 is explicitly *cost, not correctness*, and a cheaper prompt that says something slightly different is not the thing being optimised.
+
+  **Three things about the delegation itself, since this is the first one.**
+
+  **1. The spec's own words were the trap.** *"Must not change what the model is being asked"* is unfalsifiable as written — it invites checking that the text survived, which it did. A spec that had said *"each payload must remain identifiable as the section it belongs to"* would have been checkable and would have produced the right implementation first time.
+
+  **2. The agent flagged it and I nearly missed it.** Its report mentioned *"the orphaned 'DESCENT RESULT' heading"* in passing, as an observation about mechanics rather than a concern. It had seen the thing; the framing carried no alarm, and a faster review would have read past it. **A subordinate reporting a fact neutrally is not the same as a subordinate raising a problem**, and the reviewer owns the difference.
+
+  **3. Acceptance had to be judged by looking at the artefact, not the tests.** 1462 tests passed, including eleven the agent added, one of which asserts *"system + user retains every GRACE slot and the payload"* — true, and blind to the defect, because concatenating the halves restores an adjacency the model never sees. §0.13's tests face, arriving through a delegation: **the tests encoded the same premise as the specification.**
+- **Needs human review:** no
+- **Blocks:** none
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**

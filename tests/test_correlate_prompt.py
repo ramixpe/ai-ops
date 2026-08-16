@@ -529,3 +529,65 @@ def test_the_anchor_example_is_valid_json():
 @pytest.mark.parametrize("case", ["correlating_events", "no_correlating_events"])
 def test_both_golden_cases_are_declared(case):
     assert _case(case)["expect"]
+
+
+def test_each_payload_keeps_its_heading_when_the_prompt_is_split():
+    """The correction B-421's first version needed.
+
+    Splitting static from volatile moved three payloads to the end of the
+    prompt and left their headings behind, so the cached half read
+
+        COVERAGE
+        --------
+        What this source was able to tell us, measured by code:
+
+        **Read `gaps` before you conclude anything negative.** ...
+
+    -- a heading promising content that had gone -- while the volatile half was
+    three anonymous JSON documents whose only distinguisher was their internal
+    shape. Every character survived, so it looked text-preserving.
+
+    **The association between a heading and its payload is content.** Three
+    unlabelled blobs is a different prompt from three labelled sections, and
+    `correlate` is the case that proves it because it substitutes three.
+    """
+
+    from agent_nettools.prompt_library import build_correlate_prompt
+
+    rendered = build_correlate_prompt(_finding(), log_window.shape_window(
+        _records("PE2", "broken"),
+        coverage=log_window.coverage_from_logging(
+            template_parsers.parse_template_output(
+                "cisco_xr", "logging",
+                (FIXTURES / "PE2" / "broken" / "show-logging-last-200.txt").read_text(),
+            )[0], "PE2"),
+    ))
+
+    for heading in ("COVERAGE", "FINDING", "LOG WINDOW (device timestamps)"):
+        assert heading in rendered.user, f"{heading} must travel with its payload"
+
+    # In template order, so the volatile half reads as the same three sections.
+    assert (
+        rendered.user.index("COVERAGE")
+        < rendered.user.index("FINDING")
+        < rendered.user.index("LOG WINDOW")
+    )
+
+
+def test_the_headings_cost_the_cache_almost_nothing():
+    """The trade, stated as a number so it stays a trade and not a regret.
+
+    A few dozen tokens of static text now live on the volatile side. B-421 is
+    explicitly *cost, not correctness* -- a cheaper prompt that says something
+    slightly different is not the thing being optimised.
+    """
+
+    from agent_nettools.prompt_library import build_correlate_prompt
+
+    rendered = build_correlate_prompt(_finding(), log_window.shape_window(_records("PE2", "broken")))
+    headings = len("COVERAGE\n--------\n") + len("FINDING\n-------\n") + len(
+        "LOG WINDOW (device timestamps)\n" + "-" * 30 + "\n"
+    )
+
+    assert headings < 100, "the uncached cost of keeping the prompt coherent"
+    assert len(rendered.system) > 5000, "and the cacheable prefix is still most of it"

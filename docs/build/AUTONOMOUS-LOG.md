@@ -32,6 +32,7 @@ Purpose: a running record of **what was done, what was asked, and what was answe
 | Item | Outcome | Tests | Notes |
 |---|---|---|---|
 | — | session opened | 1391 | 64 backlog items; 13 defect-class targeted |
+| **B-421** | ✅ closed | 1464 | Sonnet 5, **corrected on review**: payloads had lost their headings. Cacheable prefix 4,432 / 6,446 chars |
 | **B-403** | 🚫 **won't do** | 1451 | Closed with reasoning, not implemented. Consolidation makes one module worse either direction; the overlap is 3 of 15 rules and already has a witness |
 | **B-402** | ✅ closed | 1451 | Schema + 12 seeded notes. `revisit_when` added beyond the spec — a fact with no expiry becomes folklore |
 | **B-434** | ✅ closed | 1446 | 74 ignore rules classified; **15 deferred** and now visible. `NOT_NEEDED_YET` vs `NO_EXTRACTABLE_FIELD` |

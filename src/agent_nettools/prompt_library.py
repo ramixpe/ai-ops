@@ -131,10 +131,12 @@ class RenderedPrompt:
     user: str
 
 
-def _split_template(template: str, substitutions: list[tuple[str, str]]) -> RenderedPrompt:
+def _split_template(
+    template: str, substitutions: list[tuple[str, str, str]]
+) -> RenderedPrompt:
     """Partition one rendered template into its static and volatile halves.
 
-    ``substitutions`` is an ordered list of ``(placeholder, value)`` pairs, in
+    ``substitutions`` is an ordered list of ``(placeholder, label, value)``, in
     the order the placeholders actually appear in ``template`` -- required,
     because this walks the template left to right with `str.partition`,
     consuming one placeholder at a time from what is left of the text. Getting
@@ -144,10 +146,29 @@ def _split_template(template: str, substitutions: list[tuple[str, str]]) -> Rend
     Every span of literal template text between (or before/after) a
     placeholder is static -- identical on every call at this template version
     -- and is appended to ``system`` in the template's own order. Every
-    substituted value is volatile and is appended to ``user``, also in order,
-    separated by a blank line for readability where more than one payload is
-    substituted (`correlate` substitutes three; the blank line is whitespace
-    only, not a change to any value's content).
+    substituted value is volatile and is appended to ``user``, also in order.
+
+    **Each value carries its section heading with it into ``user``**, and that
+    is the correction the first version of this needed. Moving payloads to the
+    end without their headings left the static half reading
+
+        COVERAGE
+        --------
+        What this source was able to tell us, measured by code:
+
+        **Read `gaps` before you conclude anything negative.** ...
+
+    -- a heading promising content that had gone -- while the volatile half was
+    three anonymous JSON documents separated by blank lines. Every character of
+    the prompt still existed, so the reordering looked text-preserving. It was
+    not: **the association between a heading and its payload is content**, and
+    `correlate` substitutes three payloads whose only remaining distinguisher
+    would have been their internal shape.
+
+    The headings are a few dozen tokens of static text living on the volatile
+    side, so they are not cached. That is the right trade every time: B-421 is
+    explicitly *cost, not correctness*, and a cheaper prompt that says something
+    slightly different is not the thing being optimised.
 
     This is why the reordering the module docstring describes is safe: no
     template character and no substituted value is ever dropped, duplicated,
@@ -159,12 +180,12 @@ def _split_template(template: str, substitutions: list[tuple[str, str]]) -> Rend
     static_parts: list[str] = []
     volatile_parts: list[str] = []
     remaining = template
-    for placeholder, value in substitutions:
+    for placeholder, label, value in substitutions:
         before, found, remaining = remaining.partition(placeholder)
         if not found:
             raise ValueError(f"placeholder {placeholder!r} not found in template")
         static_parts.append(before)
-        volatile_parts.append(value)
+        volatile_parts.append(f"{label}\n{'-' * len(label)}\n{value}")
     static_parts.append(remaining)
     return RenderedPrompt(system="".join(static_parts), user="\n\n".join(volatile_parts))
 
@@ -225,7 +246,7 @@ def build_report_prompt(result: DescentResult, *, version: int | None = None) ->
 
     template = load_prompt("report", version or CURRENT_VERSION["report"])
     payload = json.dumps(descent_payload(result), indent=2)
-    return _split_template(template, [("{descent_json}", payload)])
+    return _split_template(template, [("{descent_json}", "DESCENT RESULT", payload)])
 
 
 def finding_payload(result: DescentResult) -> dict:
@@ -290,8 +311,12 @@ def build_correlate_prompt(
         else {"complete": False,
               "gaps": ["no coverage record was produced for this window"]}
     )
+    # Labels match the headings these payloads sit under in the template, so a
+    # reader of the volatile half sees the same three sections in the same
+    # order. Template order matters -- see `_split_template`.
     return _split_template(template, [
-        ("{coverage_json}", json.dumps(coverage, indent=2)),
-        ("{finding_json}", json.dumps(finding_payload(result), indent=2)),
-        ("{window_json}", json.dumps(window_payload, indent=2)),
+        ("{coverage_json}", "COVERAGE", json.dumps(coverage, indent=2)),
+        ("{finding_json}", "FINDING", json.dumps(finding_payload(result), indent=2)),
+        ("{window_json}", "LOG WINDOW (device timestamps)",
+         json.dumps(window_payload, indent=2)),
     ])
