@@ -69,12 +69,17 @@ from typing import Any
 
 from ttp import ttp
 
-from .parsers import (
-    PARSE_FAILED,
-    PARSE_OK,
-    PARSE_UNAVAILABLE,
-    ParseError,
-)
+# B-404 note: the ``from .parsers import (...)`` this module has always needed
+# (PARSE_FAILED/PARSE_OK/PARSE_UNAVAILABLE/ParseError -- see the module
+# docstring's "one status vocabulary" rule) now sits *after* the line-accounting
+# section below, not here. B-404 makes ``parsers.py`` import IgnoreRule/
+# IgnoreKind/XR_COMMON_IGNORES/account_lines/finalize back from this module, so
+# the two modules import each other. Python tolerates that only if neither
+# module reaches into the other before the other has defined what is being
+# asked for; IgnoreKind/IgnoreRule/XR_COMMON_IGNORES/account_lines/finalize
+# carry no dependency on parsers.py at all, so they can -- and now must --
+# be fully defined before this module reaches back into parsers.py for
+# anything. See the matching note beside parsers.py's own import.
 
 __all__ = [
     "PARSE_FAILED",
@@ -231,6 +236,20 @@ def finalize(
         "records": list(records or []),
     }
 
+
+# Deliberately placed here rather than beside the other imports at the top of
+# the file -- see the B-404 note up there. Nothing above this point (IgnoreKind,
+# IgnoreRule, XR_COMMON_IGNORES, account_lines, finalize) needs anything from
+# ``parsers``; everything below it does (ParseError, and the PARSE_* status
+# constants ``parse_template_output`` returns). That ordering is what lets
+# ``parsers.py`` import the accounting primitives back from this module
+# without either side seeing a partially-initialized module.
+from .parsers import (  # noqa: E402 - see the ordering note immediately above
+    PARSE_FAILED,
+    PARSE_OK,
+    PARSE_UNAVAILABLE,
+    ParseError,
+)
 
 # --------------------------------------------------------------------------- #
 # cisco_xr: bgp_neighbor  (T-012)
