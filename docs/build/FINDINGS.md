@@ -2815,6 +2815,43 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-101 · B-403 · Closed as **won't do** — the two modules answer different questions, and merging makes one worse
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** B-403 proposed consolidating `checks.py` and `health.py`, filed with the caveat *"merging is a later decision with real risk to a large passing suite"*. Examined and **closed without implementing**. The risk is not the reason; the reason is that consolidation makes something worse whichever direction it goes.
+
+  | | `checks.py` | `health.py` |
+  |---|---|---|
+  | Question | is *this rung* broken for *this subject* | is *this device* healthy given its role |
+  | Unit | one object — a peer, an interface, a prefix | one device, rolled up |
+  | Verdict | `healthy` / `broken` / `unevaluated`, unordered | severity `ok < info < warning < critical` |
+  | Inputs | **parsed records only** — no I/O, no inventory, no clock | parsed records **plus `inventory/lab.yaml`'s `expected:` blocks** |
+  | Count | 5 predicates | 10 rules across 3 tables |
+
+  **Three of ten health rules overlap three of five checks** (`isis_isolated`, `bgp_session_down`, `interface_admin_up_line_down`). Everything else does not, and the non-overlapping parts are the ones that resist merging:
+
+  * **Baseline rules need the inventory.** `checks.py`'s docstring states its purity as an invariant — *"no I/O, no device access, no inventory reads, no clock, no environment"* — and gives the reason: it is what makes every rung of a descent reproducible from a fixture. Absorbing baseline drift would break that, and the property it buys is load-bearing for the whole offline corpus.
+  * **`suspicious_baseline` has no rung.** It is a rule *about the baseline*, not about a device or an object. There is nowhere in a ladder for it to live.
+  * **Severity has no meaning per-subject**, and the tri-state has no ordering. Neither vocabulary survives translation into the other.
+
+  So the two directions are: `checks` absorbs `health` and loses fixture reproducibility, or `health` absorbs `checks` and loses either the device roll-up or the severity ordering. **Both trade a working property for tidiness.**
+- **Evidence:** `tests/test_checks_agree_with_health.py`, 92 passed. Its own docstring already recorded the decision: *"The LLD keeps them separate on purpose."*
+- **What I did:** Closed it, and checked the two things that would have changed the answer.
+
+  **1. Is the duplication actually guarded?** Yes, and thoroughly. The agreement test compares every overlapping pairing across **all four labels** — `t0`, `t1`, `healthy`, `broken` — on the rule that neither may say `healthy` where the other says `broken`. It carries its own anti-vacuity companion (`test_the_agreement_comparison_is_not_vacuous`), which exists because the first version of that test **did** pass vacuously. The risk consolidation would remove is already removed by something cheaper.
+
+  **2. Is there a narrower win — having the three overlapping health rules delegate to `checks`?** No. Health rules take a `RuleContext` of pre-extracted per-device records; checks take an evidence dict keyed by convention (`bgp_neighbor:<peer>`). The shapes differ enough that the adapter would be more code than it deletes, and it would put an inventory-free module in the import path of one that is not.
+
+  **The general point, which is why this is worth a finding rather than a one-line closure.** Two modules that overlap in *three of fifteen* rules are not duplicated — **they are two views of one evidence set, and the overlap is where the views happen to coincide.** Merging on the strength of an overlap that size optimises for the appearance of tidiness over two properties that are each doing work. The right response to a partial overlap is a test that pins the agreement, which is what exists.
+
+  > **Duplication guarded by a test that compares the duplicates is not duplication worth removing. It is a redundancy with a witness.**
+- **Needs human review:** **yes** — this closes an item rather than implementing it, and the operator asked for all three killed
+- **Blocks:** none
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**

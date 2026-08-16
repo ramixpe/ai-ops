@@ -24,3 +24,6 @@ htmlcov/
 
 # install-docs.sh backups
 .docs-backup-*/
+
+# Agent worktrees and session scratch (never committed)
+.claude/
