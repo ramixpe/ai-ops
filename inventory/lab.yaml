@@ -47,6 +47,25 @@ devices:
     expected:
       isis_adjacencies: 2
 
+    notes:
+      - applies_to: lldp
+        note: >-
+          This fabric's LLDP data contradicts itself: P1 reports Gi0/0/0/0 facing P2's
+          Gi0/0/0/0 while P2 reports that same port facing LEAF05_DHCP_SERVER. Do not assert a
+          link from LLDP alone; `nettools learn-topology` reports the disagreement rather than
+          picking a side.
+        author: operator
+        recorded: "2026-08-16"
+        revisit_when: >-
+          the lab's LLDP neighbours agree, or a topology source of truth exists
+      - applies_to: bgp
+        note: >-
+          Every BGP session on this lab carries 0 prefixes -- nothing is advertised into it.
+          `bgp_no_prefixes` is the normal state here and is not a fault.
+        author: operator
+        recorded: "2026-08-16"
+        revisit_when: >-
+          the lab starts advertising real prefixes
   - name: P2
     mgmt_ip: 172.20.250.12
     role: core
@@ -54,6 +73,15 @@ devices:
     expected:
       isis_adjacencies: 4
 
+    notes:
+      - applies_to: bgp
+        note: >-
+          Every BGP session on this lab carries 0 prefixes -- nothing is advertised into it.
+          `bgp_no_prefixes` is the normal state here and is not a fault.
+        author: operator
+        recorded: "2026-08-16"
+        revisit_when: >-
+          the lab starts advertising real prefixes
   - name: P3
     mgmt_ip: 172.20.250.13
     role: core
@@ -61,6 +89,15 @@ devices:
     expected:
       isis_adjacencies: 1
 
+    notes:
+      - applies_to: bgp
+        note: >-
+          Every BGP session on this lab carries 0 prefixes -- nothing is advertised into it.
+          `bgp_no_prefixes` is the normal state here and is not a fault.
+        author: operator
+        recorded: "2026-08-16"
+        revisit_when: >-
+          the lab starts advertising real prefixes
   - name: P4
     mgmt_ip: 172.20.250.14
     role: core
@@ -68,6 +105,15 @@ devices:
     expected:
       isis_adjacencies: 3
 
+    notes:
+      - applies_to: bgp
+        note: >-
+          Every BGP session on this lab carries 0 prefixes -- nothing is advertised into it.
+          `bgp_no_prefixes` is the normal state here and is not a fault.
+        author: operator
+        recorded: "2026-08-16"
+        revisit_when: >-
+          the lab starts advertising real prefixes
   - name: PE1
     mgmt_ip: 172.20.250.21
     role: edge
@@ -78,6 +124,15 @@ devices:
       isis_adjacencies: 1
       bgp_peers: 1
 
+    notes:
+      - applies_to: bgp
+        note: >-
+          Every BGP session on this lab carries 0 prefixes -- nothing is advertised into it.
+          `bgp_no_prefixes` is the normal state here and is not a fault.
+        author: operator
+        recorded: "2026-08-16"
+        revisit_when: >-
+          the lab starts advertising real prefixes
   # Isolated: 0 LLDP neighbours and 0 IS-IS adjacencies, yet it carries a BGP
   # router-id and one (idle) peer toward RR1. Recorded as observed, not smoothed
   # over -- see the caution above about derived baselines.
@@ -91,6 +146,24 @@ devices:
       isis_adjacencies: 0
       bgp_peers: 1
 
+    notes:
+      - applies_to: isis
+        note: >-
+          The expected: isis_adjacencies value here was learned by `nettools learn-topology`
+          while this device was isolated, so the baseline records 0 and matching it does not
+          mean healthy. health.py's suspicious_baseline meta rule exists for exactly this.
+        author: operator
+        recorded: "2026-08-16"
+        revisit_when: >-
+          the expected: block is re-derived against a fabric verified healthy first
+      - applies_to: bgp
+        note: >-
+          Every BGP session on this lab carries 0 prefixes -- nothing is advertised into it.
+          `bgp_no_prefixes` is the normal state here and is not a fault.
+        author: operator
+        recorded: "2026-08-16"
+        revisit_when: >-
+          the lab starts advertising real prefixes
   - name: PE3
     mgmt_ip: 172.20.250.23
     role: edge
@@ -101,6 +174,15 @@ devices:
       isis_adjacencies: 2
       bgp_peers: 1
 
+    notes:
+      - applies_to: bgp
+        note: >-
+          Every BGP session on this lab carries 0 prefixes -- nothing is advertised into it.
+          `bgp_no_prefixes` is the normal state here and is not a fault.
+        author: operator
+        recorded: "2026-08-16"
+        revisit_when: >-
+          the lab starts advertising real prefixes
   # No BGP process configured at all ("% BGP instance 'default' not active"),
   # like the P-routers. bgp_peers is absent rather than zero: zero would claim a
   # BGP process that produced no peers, which is not what this device reports.
@@ -111,6 +193,23 @@ devices:
     expected:
       isis_adjacencies: 0
 
+    notes:
+      - applies_to: isis
+        note: >-
+          Same as PE2: the recorded isis_adjacencies baseline of 0 was learned from a broken
+          fabric. Role invariants, not the baseline, are what catch isolation here.
+        author: operator
+        recorded: "2026-08-16"
+        revisit_when: >-
+          the expected: block is re-derived against a fabric verified healthy first
+      - applies_to: bgp
+        note: >-
+          Every BGP session on this lab carries 0 prefixes -- nothing is advertised into it.
+          `bgp_no_prefixes` is the normal state here and is not a fault.
+        author: operator
+        recorded: "2026-08-16"
+        revisit_when: >-
+          the lab starts advertising real prefixes
   - name: RR1
     mgmt_ip: 172.20.250.31
     role: route-reflector
@@ -120,3 +219,12 @@ devices:
     expected:
       isis_adjacencies: 1
       bgp_peers: 4
+    notes:
+      - applies_to: bgp
+        note: >-
+          Every BGP session on this lab carries 0 prefixes -- nothing is advertised into it.
+          `bgp_no_prefixes` is the normal state here and is not a fault.
+        author: operator
+        recorded: "2026-08-16"
+        revisit_when: >-
+          the lab starts advertising real prefixes

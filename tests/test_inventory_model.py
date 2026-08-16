@@ -201,3 +201,88 @@ def test_resolve_inventory_path_falls_back_to_packaged_default(monkeypatch, tmp_
 
     assert resolved.name == "lab.yaml"
     assert resolved.is_file()
+
+
+# --------------------------------------------------------------------------- #
+# B-402 -- operator knowledge notes
+# --------------------------------------------------------------------------- #
+
+
+def test_the_lab_carries_the_facts_this_build_had_to_rediscover():
+    """The point of B-402: stop the agent re-deriving known local truth.
+
+    Every seeded note is something this build proved and then had to keep
+    re-explaining -- a baseline learned from a broken fabric, self-contradictory
+    LLDP, and a lab where zero prefixes is normal.
+    """
+
+    from agent_nettools.inventory_model import load_inventory_file
+
+    devices = {d.name: d for d in load_inventory_file().devices}
+
+    assert all(d.notes for d in devices.values()), "every device says something"
+
+    pe2 = " ".join(n.note for n in devices["PE2"].notes)
+    assert "learned by" in pe2 and "isolated" in pe2
+    assert "suspicious_baseline" in pe2
+
+    p1 = " ".join(n.note for n in devices["P1"].notes)
+    assert "contradicts itself" in p1, "the LLDP disagreement, recorded once"
+
+    assert all(
+        any("0 prefixes" in n.note for n in d.notes) for d in devices.values()
+    ), "bgp_no_prefixes is normal here, and every device should say so"
+
+
+def test_every_note_says_who_wrote_it_and_when():
+    """Provenance, not authorisation. A note about a lab that has since been
+    rebuilt is worth less than a fresh one, and a reader cannot tell without
+    the date."""
+
+    from agent_nettools.inventory_model import load_inventory_file
+
+    for device in load_inventory_file().devices:
+        for note in device.notes:
+            assert note.author, f"{device.name}: a note with no author"
+            assert note.recorded, f"{device.name}: a note with no date"
+
+
+def test_every_seeded_note_states_what_would_make_it_wrong():
+    """The most valuable field when present.
+
+    An operator fact with no expiry condition becomes folklore, and folklore
+    outlives the thing it described. Not enforced by the schema -- a note may
+    legitimately be timeless -- but every note seeded here has one, because
+    every one of them describes a condition that will change.
+    """
+
+    from agent_nettools.inventory_model import load_inventory_file
+
+    for device in load_inventory_file().devices:
+        for note in device.notes:
+            assert note.revisit_when, f"{device.name}/{note.applies_to}: no revisit condition"
+
+
+def test_notes_are_optional_and_a_note_must_say_something():
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    from agent_nettools.inventory_model import Note
+
+    assert Note(note="x").applies_to is None, "a device-wide note needs no subject"
+    with _pytest.raises(ValidationError):
+        Note(note="   ")
+
+
+def test_a_typo_in_a_note_is_a_load_failure_not_a_silent_no_op():
+    """`extra="forbid"` everywhere, including here. A misspelled key in a note
+    would otherwise be dropped and the operator would believe they had recorded
+    something."""
+
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    from agent_nettools.inventory_model import Note
+
+    with _pytest.raises(ValidationError):
+        Note(note="x", applies__to="bgp")

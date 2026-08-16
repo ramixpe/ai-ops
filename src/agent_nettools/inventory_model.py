@@ -83,6 +83,51 @@ class Expected(BaseModel):
     bgp_peers: int | None = None
 
 
+class Note(BaseModel):
+    """One operator-authored fact about this estate (B-402).
+
+    **Human-written, never model-written.** D-something the whole architecture
+    refuses: a model writing memory reads its own hallucinations back as
+    evidence and compounds them. A note is a claim by a person, and it carries
+    who made it and when so a reader can weigh it.
+
+    What a note is *for*: stopping the agent rediscovering known local truth on
+    every run. This fabric has several, all of them proven during the build and
+    all of them things a fresh investigation would otherwise re-derive or, worse,
+    report as findings.
+
+    `applies_to` is deliberately free text rather than an enum. The things an
+    operator needs to say something about -- an interface, a peer, a protocol, a
+    whole device -- do not share a vocabulary, and forcing one would either
+    exclude the note or distort it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: What the note is about. Free text: `"Gi0/0/0/2.300"`, `"bgp"`, `"lldp"`,
+    #: or omitted for a device-wide fact.
+    applies_to: str | None = None
+    #: The fact itself, in a sentence an engineer would recognise.
+    note: str
+    #: Who wrote it. Provenance, not authorisation -- the same distinction
+    #: `_resolve_actor` makes in the audit log.
+    author: str | None = None
+    #: ISO date. A note about a lab that has since been rebuilt is worth less
+    #: than a fresh one, and a reader cannot tell without this.
+    recorded: str | None = None
+    #: What would make this note wrong. **Optional, and the most valuable field
+    #: here when present** -- an operator fact with no expiry condition becomes
+    #: folklore, and folklore outlives the thing it described.
+    revisit_when: str | None = None
+
+    @field_validator("note")
+    @classmethod
+    def _non_empty(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("a note must say something")
+        return value
+
+
 class Device(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -99,6 +144,9 @@ class Device(BaseModel):
     local_as: int | None = None
     tags: list[str] = Field(default_factory=list)
     expected: Expected | None = None
+    #: Operator-authored facts about this device (B-402). Empty by default;
+    #: an estate with nothing worth saying about a device says nothing.
+    notes: list[Note] = Field(default_factory=list)
 
     @field_validator("mgmt_ip")
     @classmethod
