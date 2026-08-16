@@ -96,7 +96,7 @@ T-035 is optional and does not gate the definition of done.
 | T-031 | CLI wiring | DONE | opus-5 | a85ead6 | OBS-072, OBS-073 | Exit 1 = network problem, 2 = answer problem, decided in the open. `--from-fixtures` needed a password until OBS-072. 19 tests, 1338 passed |
 | T-032 | End-to-end offline test | DONE | opus-5 | 13b58ae | OBS-074 | Both labels, opposite answers, grounded reports. Mock model reads its own prompt. netmiko replaced with a module that raises. 10 tests, 1348 passed |
 | T-033 | Live lab run | DONE | opus-5 | eb33e18 | OBS-076, OBS-077 | **Q-006 resolved: agent and engineer reached the same rung.** 114.2s, exit 1, report grounded 5/5. Run found 2 defects the suite could not (B-424, `_log_window`) |
-| T-034 | Documentation update | DONE | opus-5 | _next commit_ | OBS-084 | README leads with --from-fixtures and reports the T-033 failure honestly. CLAUDE.md gains the layer table. 1377 passed |
+| T-034 | Documentation update | DONE | opus-5 | d8c8e4b | OBS-084 | README leads with --from-fixtures and reports the T-033 failure honestly. CLAUDE.md gains the layer table. 1377 passed |
 | T-035 | Report relay — outbound only | TODO | sonnet-5 | | | **optional fast-follow**; residency decision first |
 
 ---
@@ -108,7 +108,7 @@ T-035 is optional and does not gate the definition of done.
 | **M1 — Discovery complete** | T-009 done; all discovery docs written; Open Questions populated | ☑ **2026-08-15** |
 | **M2 — Parsing unblocked** | T-018 done; template results carry parsed data; all §0.10 completeness tests green | ☑ **2026-08-16** |
 | **M3 — Architecture validated** | T-025 green offline, no model call, no lab, no API key | ☑ **2026-08-16** |
-| **M4 — MVP-0 shipped** | Part 7 definition of done satisfied in full (T-001…T-034) | ☐ |
+| **M4 — MVP-0 shipped** | Part 7 definition of done satisfied in full (T-001…T-034) | **☑ 2026-08-16** — 1377 pass / 22 skip, lint clean; four frozen files byte-identical against `6629a2c`; offline demo runs with no lab, credentials or API key; live run produced a grounded report matching an independent hand diagnosis (Q-006). T-035 is optional and does not gate. **Review: `MVP0-REVIEW.md`** |
 | **M5 — Team can see output** | T-035 done; a real investigation report reaches the team channel | ☐ |
 
 **M3 is the one that matters.** It is the point at which the central claim — that the diagnostic ladder is deterministic end to end — is demonstrated rather than argued.

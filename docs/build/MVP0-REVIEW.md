@@ -1,0 +1,200 @@
+# MVP-0 Review
+
+**Written 2026-08-16, at M4, before any MVP-1 work begins.** Part 7 specifies this review as the gate. It is written now rather than reconstructed later because the most valuable thing in it — why the design documents were wrong — is the part that fades first.
+
+| | |
+|---|---|
+| Tasks | T-001 … T-034, plus T-029a/b/c pulled forward from the backlog |
+| Commits | 97 on `feat/investigation-layer` |
+| Tests | **1377 pass, 22 skipped**, no network, no credentials, no API key |
+| Findings | **86** |
+| Backlog | 63 items |
+| Investigation layer | ~5,100 lines across 9 modules |
+| Frozen files | `test_safety.py`, `test_template_security.py`, `platforms.py`, `templates.py` — **byte-identical** against `6629a2c`, the commit before T-001 |
+
+---
+
+## 1. What the log book says as a whole
+
+86 findings is too many to read as a list, and the list is not where the value is. Three families account for most of them, and the interesting question is not how many but **how they were found**.
+
+### The families
+
+| Family | Rule | Instances |
+|---|---|---|
+| **Silent failure** — a green thing that verifies nothing | §0.12, §0.13 | 6 shapes, ~14 instances |
+| **Classification** — a true statement filed as the wrong kind | §0.14 | 4 instances, all in one session |
+| **Tests face** — a test agreeing with the code by construction | §0.13 | 4 instances |
+
+By declared kind: 37 `decision-made`, 10 `risk`, 9 `surprise`, 13 `defect`/`defect-found`, 6 `assumption-wrong`, 5 `environment`, 3 `insight`, 2 `deferred`.
+
+The `decision-made` count is the one worth pausing on. **Forty-three percent of the log book is decisions the plan did not specify.** That is not plan failure — a plan that specified them all would be the implementation — but it does say that the ratio of judgement to typing in this build was much higher than a 34-task list suggests, and that a future plan of this shape should budget for it explicitly rather than discovering it.
+
+### The six silent-failure shapes, and their polarity
+
+| # | Shape | Found by |
+|---|---|---|
+| 1 | Green flag over a degraded read | incident (OBS-006, OBS-043, OBS-044) |
+| 2 | Absence read as a healthy value | incident, then rule (`unevaluated`) |
+| 3 | A guardrail passing over an empty set | one caught by a companion test, two by inspection |
+| 4 | A rule generalised from one instance | each caught by the *next* instance arriving |
+| 5 | A test agreeing with the code by construction | independent specification, live run, and once **prospectively** |
+| 6 | Wrong evidence read as right evidence | re-deriving a claim during a document merge |
+
+Shapes 1–5 are all **absence** presented as presence. Shape 6 is the only one with the opposite polarity — the evidence is real, correctly timestamped, internally consistent, and about a different event — which is why no consistency check can catch it and coverage metadata is the only thing that can.
+
+### Did the rate fall as the rules landed?
+
+**No, and the question cannot be answered cleanly. What changed is how instances were found, not how often.**
+
+Being honest about why the number is not measurable: the taxonomy was built retrospectively, the tasks are not uniform in size, and the later tasks were deliberately the judgement-dense ones. Any rate computed across that is an artefact of the denominator.
+
+What *is* measurable is the detection mechanism, and it moved in one direction:
+
+| Era | How instances surfaced |
+|---|---|
+| T-001 → T-020 | **Incident.** Something produced a wrong answer and the cause was traced back |
+| T-021 → T-026 | **Companion tests.** §0.12 made vacuity checkable, and it caught the agreement test |
+| T-028 → T-033 | **Independent specification.** `evidence-reduction.md`, written from the problem rather than from the code, found a defect sixteen passing tests could not |
+| T-029c | **Prospectively.** A change made on principle failed three tests that had encoded the defect as correct — before any incident |
+
+The last row is the only one that represents the rules working as intended rather than as post-mortems, and it happened once. **One prospective catch out of roughly fourteen instances is the honest score.**
+
+So: we did not get fewer bugs of this kind. We got better at finding them, and slowly. The rules are worth having, and nothing in this log book supports a claim that they prevent the failures — only that they make them findable and give them names.
+
+### The one thing the log book shows that no single finding does
+
+**Every defect that mattered was found by evidence from outside the artefact that had it.** Sixteen passing tests did not find the noise filter; an independently-written specification did. 1,365 passing tests did not find `_log_window`; a live run did. Two design documents and the whole suite did not find the false positive on a working session; asking "what does correct absorption look like" did. A human watching a device console found the harness defect that the harness's own verification missed.
+
+That is one observation with three rule-numbers attached (§0.12, §0.13, §0.14) and it is the single most transferable thing in the build.
+
+---
+
+## 2. Every open question
+
+**19 raised. 13 resolved or accepted. 6 open. One turned out to be the wrong question.**
+
+### Resolved, and load-bearing
+
+| Q | Question | Outcome |
+|---|---|---|
+| **Q-006** | Does the descent's stopping rung match what an engineer concludes by hand? | **Yes.** Blind trial, hand diagnosis committed to git 12 seconds before the run. Identical: `igp_adjacency` on PE3, `igp_isolated`, interface rung healthy. **This is the validation the architecture rests on** |
+| **Q-017** | The specified walk semantics make four of five findings unreachable | **A defect in the plan.** Corrected: `broken` → continue, result is the *lowest* broken rung. Without this the tool restates the alert |
+| **Q-013** | Does a rung carry its own device scope? | **Yes** — `DeviceScope`, plus `SubjectRule`, which was not in the plan at all |
+| **Q-005** | What does `interface_state` do when the counters are absent? | **`unevaluated`.** Generalised into a stated rule in `checks.py` |
+| **Q-012** | The lab was rebuilt and is now healthy — capture against what? | Keep `t0`/`t1`, add `healthy` and `broken`. The `broken` label caught four parser defects, Q-017, and the subject-vocabulary gap |
+| **Q-015 / Q-016** | §0.11 waivers for the capture windows | Granted, exercised, discharged. Fabric verified restored three ways each time |
+| Q-001, Q-002, Q-003, Q-004, Q-010, Q-014 | Provider, Loki, Alertmanager, L3VPN naming, Responses API, `ttp` dependency | Resolved or accepted; none blocked MVP-0 |
+
+### Still open
+
+| Q | Question | Blocks |
+|---|---|---|
+| **Q-019** | Is "lowest broken rung" right under **two** simultaneous faults? | Nothing in MVP-0 — every corpus label is a single fault. **Only injection answers it** |
+| **Q-011** | Should the devices' trap level change so severity-5 reaches Loki? | Not MVP-0. Yes for a useful historical axis |
+| **Q-009** | Should the MiniMax key and lab credentials be rotated? | Nothing — but they were pasted into a transcript no control here can revoke. **Recommended** |
+| **Q-010** | Confirm the Responses-API route before the MVP-1 gate is built on it | The MVP-1 gate |
+| **Q-007 / Q-008** | Telegram or Mattermost; which host has egress | T-035 only, which is optional |
+
+### The wrong question
+
+**Q-006 as originally framed** — *"does the stopping rung match what an engineer would conclude **from the same fixtures**?"* Answering it that way would have compared two readings of a corpus the code was written against. It would have agreed, and the agreement would have meant nothing.
+
+The version that was answered is a different question: a **live fault the agent had never seen, chosen so its symptom is identical to a captured fault with a different cause**, with the hand diagnosis committed before the run. The reframing came from the operator and it is the difference between a demonstration and a test.
+
+---
+
+## 3. What the build changed about the design
+
+**Six design decisions were wrong and measurement corrected them.** This is the list, and it is the argument.
+
+| # | The design said | Measurement said | Cost of not measuring |
+|---|---|---|---|
+| 1 | **Walk semantics** (D6, T-024): `broken` → stop | Rungs 1–3 are *all* broken; stopping reports `peer_not_established` — where the investigation started. **Four of five declared findings unreachable** | The tool would restate alerts and be called working |
+| 2 | **Device scope** (Q-013): rungs run on the local device | RR1's own IS-IS was healthy while the far end had zero adjacencies. A rung must run where the *subject* lives | Every cross-device fault read as healthy |
+| 3 | **Subject vocabulary**: one subject per descent | The ladder crosses four vocabularies — peer address, host prefix, device, each physical interface. `SubjectRule` did not exist in the plan | The walker returned `undetermined` on both labels |
+| 4 | **Noise filtering** (`evidence-reduction.md` §3.2): "filter by source, not by content" — implemented as a facility drop | Eight severity-3 records deleted unattributed, one an interactive session dying 22.7 s before the incident | A noise filter that silently deletes the tool's own damage |
+| 5 | **Historical projection** (§3.5): project to subject, as on the config axis | Retains **0 of 28** records. The events that explain a subject are the ones that do not name it | "No correlating events" about an incident whose full timeline was in the buffer |
+| 6 | **Source hierarchy** (§9): Loki is the real source, `show logging` the fallback | Every causal event is severity 5/6 and never reaches Loki. The platform returns two real events **from the previous day's incident** | A plausible, non-empty, confidently wrong timeline |
+
+Plus one the design never considered at all: **forward consistency** (B-428). The descent has no mechanism for concluding *health* — it exists to find the lowest broken thing, and one uplink down on a redundant device produces `cause: interface` with an empty causal chain on a session that is Established and carrying traffic.
+
+### What this list argues
+
+Two of these (1, 3) were caught by the `broken` fixture label. Two (4, 5, 6) by measuring a document's claims against captured output. One (2) by a fixture whose far end disagreed with its near end. **None was caught by review, and all six were written by people reasoning carefully about protocols they understand.**
+
+> **Build against captured reality, not against a specification — and when a specification arrives for code that already exists, read the specification against the code. The other direction finds nothing, because every line of code justifies itself.**
+
+The corollary is the more uncomfortable one. The design documents were not sloppy; they were *good*, and they were wrong in six places. A build that had trusted them would have shipped six defects, every one of which produces a plausible answer.
+
+---
+
+## 4. What we now know we do not know
+
+Listed as questions rather than risks, because each has a specific experiment attached.
+
+**Can the descent conclude health at all?** (B-428, Q-019) It has no mechanism for it. The walk finds the lowest broken thing; *"nothing that matters is broken"* is the one answer it cannot reach, and the true-negative case is where a dependency-descent architecture is structurally weakest. Round 4 is a **prediction** (OBS-082): `cause: interface`, empty chain, exit 1, on a healthy session.
+
+**Is the descent's behaviour under two faults acceptable?** (Q-019) A single interface fault and an interface fault plus a BGP shut produce **byte-identical rung tables**. The masking is structural. Two candidate signals — a second unexplained commit in the timeline, and forward consistency — neither validated, and the corpus contains no two-fault capture.
+
+**Is Q-006's agreement a pattern or a data point?** One match, on one rung. Four rounds landing on four *different* rungs is the minimum before this is called a property. Four rounds of one fault shape would be one data point sampled four times.
+
+**Does the model layer degrade gracefully under a model that is worse, or busier, or changed?** One live run, one provider, one prompt version. The grounding gate refused a fabricated timestamp, which is evidence that the gate works — not evidence about the failure rate it is protecting against. Nothing measures how often the model produces something the gate must catch.
+
+**What does this cost per investigation?** Not instrumented (B-425). ~5k tokens of prompt is a character-count proxy, response excluded. A number this project will be asked for and cannot currently give.
+
+**Does any of this hold on a second vendor?** `cisco_iosxe` and `juniper_junos` are declared from documentation with no device to test against. The abstraction is honest in shape and unverified in fact.
+
+**Does it hold at fabric scale?** Nine devices. The tool surface and flow count are device-count independent by construction (B-409), which is a claim, not a measurement.
+
+---
+
+## 5. What MVP-0 can and cannot do
+
+For an operations engineer deciding whether to point this at something.
+
+### What it does
+
+**Given a BGP session that is down, it tells you which layer is broken and shows its work.** Not "BGP is down" — that is where you started. It walks session → transport → route → IGP → interface, on the right devices, and reports the *lowest* broken layer plus every broken layer above it as a chain you can check link by link.
+
+**No model reaches that answer.** The descent is parse-and-compare. Turn the model off entirely (`--no-model`) and you still get the diagnosis; the model only writes it up and places it on a timeline.
+
+**It refuses rather than guesses.** A layer it could not read ends the walk with `undetermined` and no cause named. A written report whose claims do not cite evidence the descent actually read is **not emitted** — you get the descent and the reason, never the prose.
+
+**You can verify all of that in ten seconds with no lab**: `nettools investigate RR1 10.255.0.12 --from-fixtures --format table`.
+
+**Exit codes distinguish a broken network from a broken answer.** `1` is a fault. `2` is "no trustworthy answer" — and never the two conflated.
+
+### What it does not do
+
+**One flow.** `bgp_session` only. Not IS-IS, LDP, L3VPN, interfaces as a subject, or device health as an entry point. Ask it about anything else and there is no ladder to walk.
+
+**One vendor verified.** IOS-XR. The other two are unverified command strings.
+
+**It cannot tell you nothing is wrong.** This is the sharpest limitation and it is not a gap in coverage — it is structural (B-428). One down interface on a device with redundancy produces a reported cause on a session that is working perfectly. **Do not wire this to anything that pages on exit 1 until B-428 is settled.**
+
+**It cannot see a second fault.** If two things are broken it reports the lower one, correctly and incompletely, and the output is indistinguishable from the single-fault case. Fix what it names, and the session may still be down.
+
+**It does not act.** Read-only by construction — there is no configuration path, no shell, and no generic command tool. It will not fix anything and cannot be made to.
+
+**It does not know history.** No baselines, no "has this happened before", no rarity. A flap and a first-ever transition look the same.
+
+**Its timelines are bounded by what a device buffer holds.** 200 of 684 records on the measured run, and it says so — a negative over incomplete coverage is reported as `unevaluated`, never as "nothing happened".
+
+**It has produced one correct blind diagnosis.** One. Treat it as promising, not as reliable.
+
+### The honest summary
+
+> MVP-0 answers *"which layer is broken, and what is the evidence"* for one protocol on one vendor, deterministically, and refuses when it cannot. It does not yet answer *"is anything actually wrong"*, and it should not be trusted to tell you that nothing is.
+
+---
+
+## 6. What comes next, and what does not
+
+**Next: the four injection rounds** (B-426 sequencing). Not MVP-1. One match is one data point, and rounds 2–4 land on different rungs — including round 4, whose adverse outcome is already predicted and recorded.
+
+**Before or alongside them: B-428.** Round 4 is designed to hit it, and it is the difference between "cannot conclude health" being a known limitation and being a defect that reaches an operator.
+
+**Not yet:** the reasoning gate (B-101), more flows (B-107–B-111), the config axis (B-104). All of them assume the descent is trustworthy, and the four rounds are how that is established rather than asserted.
+
+`T-035` (report relay) remains optional and does not gate anything. Q-007 and Q-008 must be answered before it is built, not during.

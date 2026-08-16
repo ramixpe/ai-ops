@@ -2103,6 +2103,31 @@ transport path disappearing rather than a direct session teardown.
 
 ---
 
+## OBS-085 · M4 · MVP-0 complete, and the review's uncomfortable number
+
+- **Kind:** decision-made
+- **Escalation:** NOTE
+- **Model:** opus-5
+- **What happened:** M4 marked. T-001–T-034 plus T-029a/b/c, 97 commits, **1377 pass / 22 skip**, four frozen files byte-identical against `6629a2c` — the commit before T-001, verified against that baseline rather than against the repo root, which is a different diff and does show changes. `docs/build/MVP0-REVIEW.md` written before any MVP-1 work.
+- **Evidence:** `MVP0-REVIEW.md`; TRACKER M4 row.
+- **What I did:** Wrote the review, and two of its answers are worse than I expected going in.
+
+  **1. The silent-failure rate did not fall.** The operator asked whether it fell as the rules landed or whether we just got better at spotting them. **The second, and slowly.** Roughly fourteen instances across six shapes, and instances kept arriving through T-033 and T-029c — after §0.12, §0.13 and §0.14 were all written down. What changed is the *detection mechanism*: incident → companion test → independent specification → **prospective**, and the last happened exactly once (T-029c).
+
+  **One prospective catch out of fourteen is the honest score**, and the review says so. Nothing in the log book supports a claim that the rules prevent these failures. They make them findable and give them names, which is worth having and is a smaller claim than the rules' confident tone implies.
+
+  I also recorded why the rate cannot be computed cleanly rather than computing one: the taxonomy was built retrospectively, the tasks are not uniform in size, and the later tasks were deliberately the judgement-dense ones. A rate across that measures the denominator.
+
+  **2. Forty-three percent of the log book is `decision-made`** — 37 of 86. Decisions the plan did not specify. That is not plan failure, but it says the judgement-to-typing ratio was far higher than a 34-task list implies, and a future plan of this shape should budget for it rather than discover it.
+
+  **3. Q-006 was originally the wrong question**, and it is recorded as such. *"Does the stopping rung match what an engineer concludes from the same fixtures?"* would have compared two readings of a corpus the code was written against. It would have agreed, and the agreement would have meant nothing. The version that was answered — a live fault, never seen, whose symptom is identical to a captured fault with a different cause, hand diagnosis committed first — is a different question, and the reframing was the operator's.
+
+  **The section I expect to matter most in six months** is §3, the six design decisions measurement corrected. The uncomfortable part is not that the documents were wrong; it is that they were **good** and wrong in six places, every one producing a plausible answer. A build that had trusted them would have shipped all six.
+- **Needs human review:** the review itself is the artefact for review
+- **Blocks:** nothing. **Next is the four injection rounds, not MVP-1.**
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**
