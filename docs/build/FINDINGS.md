@@ -2205,6 +2205,81 @@ finding, not a diagnostic error.
 
 ---
 
+## OBS-088 · round 2 · **Second match, on a third rung** — `transport_blocked`
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5 (descent, deterministic) · MiniMax (report, correlation)
+- **What happened:** Hand diagnosis committed `ed77882` at **15:42:34 UTC**; agent ran at **15:42:45**. Ground truth sealed.
+
+  **They agree exactly.**
+
+  | | Hand | Agent |
+  |---|---|---|
+  | Rung | `transport` | `transport` |
+  | Device | RR1 | RR1 |
+  | Finding | `transport_blocked` | `transport_blocked` |
+  | rung 1 | broken — Active | `BROKEN` — state Active |
+  | rung 3 | **healthy**, route present and stable | `HEALTHY` — route present, 2 paths |
+  | rung 4 | **healthy** | `HEALTHY` — 2 adjacencies, all Up |
+  | rung 5 | **healthy** | `HEALTHY` — 3 of 3 members |
+
+  **This is the third distinct rung across three trials** — `interface` (captured `broken`), `igp_adjacency` (round 1), `transport` (round 2) — and the first where the descent had to **stop at rung 2 with three healthy rungs beneath it**. Rounds 1 and 3 of the ladder are worth distinguishing: round 1 required walking *past* a healthy rung to a broken one below; this one required *not* descending into healthy rungs and reporting a cause above them. Opposite pressures on the same walk rule, both correct.
+
+  | | |
+  |---|---|
+  | Wall clock | **121.7 s** (round 1: 114.2 s; healthy baseline 103 s) |
+  | Exit code | **1** |
+  | Report | emitted, **grounded: 5 observations, 10 citations, 5/5 rungs cited** |
+  | Correlation | **`coverage_limited`** — 200 of **847** records retrieved |
+  | Citation integrity | every report citation resolved; the single timeline entry cited a real record |
+  | Repairs | none |
+  | Character proxy | comparable to round 1 (~5k tokens of prompt); both runs retrieve 200 log records, so the correlate prompt dominates and is stable across rounds |
+
+  The model's recommendation is correctly scoped to the rung: capture the BGP OPEN attempts, check TCP 179 filtering and the local neighbour configuration. It did not speculate about the far end.
+- **Evidence:** OBS-087 committed before the run. Payload captured.
+- **What I did:** Two observations.
+
+  **1. The coverage machinery earned its place on a case it was not designed for.** The model answered `found: false` — no correlating events — over a window holding **200 of 847** records. T-029a refused it as a clean negative and the runner downgraded it to `coverage_limited`, exit code unchanged at 1 because the descent's finding is deterministic and only the timeline is qualified. That is the T-031 decision behaving exactly as specified, on a round where the fault genuinely leaves no trace in a device buffer — a transport-layer block produces one `ROUTING-BGP-5-ADJCHANGE` and nothing else, which is precisely the case where "no correlating events" is both true and unsupportable.
+
+  **2. One prompt-adherence miss, not a grounding failure.** `correlate.v3` says *"When `found` is false, `timeline` is an empty list."* The model returned `found: false` **with a one-entry timeline**. Grounding accepted it, correctly — the entry cites a real record at a real timestamp, so nothing is fabricated. It is a contract violation with no evidential consequence, which is the right place for one to land. Noted rather than filed; if it recurs it is a prompt clarity problem, not a validation gap.
+- **Needs human review:** no
+- **Blocks:** none — round 3 next.
+
+---
+
+## OBS-089 · round 2 · The device-resolution question, scored separately — and why this round could not have answered it
+
+- **Kind:** insight
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** The operator's hand diagnosis carried a caveat, correctly hedged: *"10.255.0.11 appears to be P1's loopback, not PE1's — RR1 has no direct link to PE1, and the route resolves via 10.0.1.17 toward P1."* If true, the subject would resolve to a different machine than the one that was changed — the first trial where those differ.
+
+  **Resolved by reading the devices: the resolver was right.**
+
+  ```
+  PE1  Loopback0   Internet address is 10.255.0.11/32   <- the subject
+  P1   Loopback0   Internet address is 10.255.0.1/32
+  ```
+
+  `10.0.1.17` is the **transit next-hop toward** PE1, not the owner of the destination. RR1's route to `10.255.0.11/32` carries `from 10.255.0.11` with two paths — a protected primary and a Local-LFA backup — which is a loopback advertised into IS-IS by its owner, reached through a neighbour.
+
+  The caveat's own falsification condition also fired: it predicted that a mismatch would show as the agent reporting `all_layers_healthy`. The agent reported two broken rungs.
+- **Evidence:** `show interfaces Loopback0` on PE1 and P1, read directly. `show route 10.255.0.11/32` on RR1.
+- **What I did:** Recorded it separately from OBS-088, as instructed, and then found the more important thing — **this round could not have detected a resolver error even if one existed.**
+
+  The cause is at rung 2, which is `DeviceScope.LOCAL` and needs no resolution at all. Rungs 4 and 5 *were* resolved, to PE1, and both returned healthy. **P1's IGP and interfaces are also healthy.** So had the resolver pointed at P1 instead, the descent would have produced a byte-identical result.
+
+  > **A resolution defect is only detectable when the wrongly-read device differs in state from the correctly-read one.**
+
+  That is a corpus-design requirement, not an observation about this round, and it belongs in **B-427**: a trial intended to exercise device resolution must be constructed so the two candidate devices are in *different* states. Otherwise the trial scores a pass on resolution while testing nothing about it — §0.12's vacuity, arriving in the evaluation corpus rather than in a test.
+
+  **On the caveat itself, fairly.** It was hedged with an explicit "if so" and an explicit falsification condition, which is the correct way to record an uncertainty and is why it cost nothing. But the mechanism is worth naming: the next-hop address was **real, correctly read, and about a different thing** — a transit neighbour mistaken for a destination owner. That is silent-failure shape 6 (§0.13, OBS-071), occurring in a human hand diagnosis rather than in a log query. The shape is not a property of tools.
+- **Needs human review:** no — but B-427 gains a requirement
+- **Blocks:** none
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**
