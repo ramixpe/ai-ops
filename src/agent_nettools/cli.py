@@ -156,10 +156,25 @@ def _emit(payload: dict, args: argparse.Namespace) -> None:
 
 
 def _note(message: str, args: argparse.Namespace) -> None:
-    """Print an informational (non-payload) line, suppressed by --quiet."""
+    """Print an informational (non-payload) line, suppressed by ``--quiet``.
+
+    **To stderr, not stdout** (B-422). These lines are commentary — a snapshot
+    path, a fixture-replay banner, a grounding failure — and stdout carries the
+    *payload*. Mixing them meant
+
+        nettools investigate ... --format json | jq
+
+    failed on the first note, so the JSON output was not actually consumable by
+    the tool everyone reaches for. The `#` prefix made the lines look like
+    comments, which is true of very little and not of JSON.
+
+    The split is the ordinary Unix one: **stdout is data, stderr is about the
+    run.** A human sees both interleaved exactly as before; a pipe gets only the
+    payload; `2>/dev/null` gets the payload alone even when notes exist.
+    """
 
     if not getattr(args, "quiet", False):
-        print(message)
+        print(message, file=sys.stderr)
 
 
 def _add_output_arguments(parser: argparse.ArgumentParser) -> None:

@@ -324,3 +324,60 @@ def test_an_unknown_subject_exits_two_rather_than_raising(monkeypatch):
 
     code = _main(["investigate", "RR1", "10.255.99.99", "--quiet"], monkeypatch)
     assert code == 2
+
+
+# --------------------------------------------------------------------------- #
+# B-422 -- stdout is the payload, stderr is about the run
+# --------------------------------------------------------------------------- #
+
+
+def test_format_json_output_is_valid_json_on_its_own(monkeypatch, capsys):
+    """The point of B-422, and the thing that was actually broken.
+
+    `_note` printed informational lines to **stdout**, so
+
+        nettools investigate ... --format json | jq
+
+    failed on the first note. The JSON output was not consumable by the tool
+    everyone reaches for, and the `#` prefix made the lines look like comments,
+    which is true of very little and not of JSON.
+    """
+
+    _main([*ARGS, "--format", "json"], monkeypatch)
+    captured = capsys.readouterr()
+
+    payload = json.loads(captured.out)
+    assert payload["finding"] == "interface_line_down"
+
+
+def test_the_notes_are_still_shown_just_on_the_other_stream():
+    """Not a deletion. A human sees both interleaved exactly as before; only a
+    pipe sees the difference."""
+
+    import sys as _sys
+    from unittest import mock
+
+    import pytest as _pytest
+
+    with mock.patch.object(cli, "load_dotenv", lambda *a, **k: False), \
+         mock.patch.object(cli, "find_dotenv", lambda *a, **k: ""):
+        with _pytest.MonkeyPatch.context() as mp:
+            mp.setattr(_sys, "argv", ["nettools", *ARGS, "--format", "json"])
+            import io
+
+            out, err = io.StringIO(), io.StringIO()
+            mp.setattr(_sys, "stdout", out)
+            mp.setattr(_sys, "stderr", err)
+            cli.main()
+
+    assert "Fixture replay" in err.getvalue(), "the note is still emitted"
+    assert "Fixture replay" not in out.getvalue(), "and not into the payload"
+
+
+def test_quiet_still_silences_both_streams(monkeypatch, capsys):
+    code = _main([*ARGS, "--quiet"], monkeypatch)
+    captured = capsys.readouterr()
+
+    assert code == 1
+    assert captured.out == ""
+    assert captured.err == ""

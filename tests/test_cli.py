@@ -289,7 +289,8 @@ def test_diff_no_previous_snapshot_exits_ok(monkeypatch, capsys):
     args = parser.parse_args(["diff", "PE1"])
 
     assert args.func(args) == cli.EXIT_OK
-    assert "baseline established" in capsys.readouterr().out
+    # B-422: informational notes go to stderr; stdout is the payload.
+    assert "baseline established" in capsys.readouterr().err
 
 
 def test_diff_no_changes_exits_ok(monkeypatch):
@@ -442,7 +443,7 @@ def test_baseline_show_none_pinned_exits_warning(monkeypatch, capsys):
     args = parser.parse_args(["baseline", "show", "PE1"])
 
     assert args.func(args) == cli.EXIT_WARNING
-    assert "No golden snapshot" in capsys.readouterr().out
+    assert "No golden snapshot" in capsys.readouterr().err  # B-422: a note, not payload
 
 
 def test_flaps_no_flapping_exits_ok(monkeypatch):
@@ -474,7 +475,7 @@ def test_evidence_prune_with_no_arguments_exits_warning(monkeypatch, capsys):
     args = parser.parse_args(["evidence", "prune"])
 
     assert args.func(args) == cli.EXIT_WARNING
-    assert "Nothing to do" in capsys.readouterr().out
+    assert "Nothing to do" in capsys.readouterr().err  # B-422: a note, not payload
 
 
 def test_evidence_prune_runs_when_a_retention_rule_is_given(monkeypatch):
