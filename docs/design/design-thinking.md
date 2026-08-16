@@ -207,7 +207,25 @@ Two consequences follow, and both are significant.
 
 **First: the dependency graph does not need designing.** It is the protocol layering, which is already known, stable, and vendor-independent. Each protocol declares what it stands on. This is why the cross-flow escalation graph proposed earlier was removed — it was reinventing something that already exists, at the wrong level of abstraction. The ladder belongs *inside* a flow definition, not between flows.
 
-**Second: the descent has a natural stopping rule.** The lowest broken layer is the root cause, almost by definition. You do not run all the checks; you descend while each layer is healthy and stop at the first that is not.
+**Second: the descent has a natural stopping rule.** The lowest broken layer is the root cause, almost by definition.
+
+The walk that follows from that, stated explicitly because an earlier draft of this sentence — and the build plan that took it literally — got it backwards:
+
+| Rung verdict | What the walk does |
+|---|---|
+| `broken` | record the finding and **continue descending** |
+| `healthy` | **continue descending** |
+| `unevaluated` | **stop** — nothing below a rung that could not be read is trustworthy |
+
+The result is the **lowest** broken rung. Higher broken rungs are not discarded: they become the **causal chain**, the evidence that this cause explains the observed symptom.
+
+Two things about this are easy to get wrong, and both were.
+
+*A healthy layer does not prove the layers below it are fine.* It is tempting to stop descending once a rung passes, but a rung is only ever checked against one device's view. Measured on this fabric: RR1's own IS-IS was perfectly healthy while PE2 — the other end of the session under investigation — had no adjacencies at all. Stopping at RR1's healthy IGP rung would have missed the entire fault.
+
+*Stopping at the first broken rung finds the highest broken layer, not the lowest.* When a link is shut, everything above it breaks too: the interface, the IGP adjacency, the route, the transport, and the session. Stop at the first and you report "BGP is not established" — which is where the investigation started. Walk to the bottom and you report "the interface is admin-down, which isolated IS-IS, which removed the route, which blocked transport, which is why BGP is Idle." The first restates the alert. The second is an RCA, and it is the whole point of the ladder.
+
+Where the walk finds rungs broken above but everything healthy below, there is nothing beneath to explain them, and the honest terminal finding is `cause_not_localised` rather than a guess.
 
 And the observation that changes where the model sits: **every check in that descent is deterministic.** Is the state `Established`? Is the prefix in the RIB? Is the adjacency `Up`? Is line protocol up and are error counters under threshold? Parse and compare. No model required, anywhere in the descent.
 
