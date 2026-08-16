@@ -92,8 +92,8 @@ T-035 is optional and does not gate the definition of done.
 | T-029a | absence coverage | DONE | opus-5 | a5ae7e2 | OBS-068, OBS-069 | `coverage.py` + `check_absence_coverage` + correlate.v3. Neither golden case can assert a clean negative — measured, not a limitation. 1297 passed |
 | T-030 | `investigation.py` runner | DONE | opus-5 | 8054be1 | OBS-070 | No gate: descent byte-identical with and without a model. Window read from the *cause* device. Coverage shortfall downgrades. 22 tests, 1319 passed |
 | T-031 | CLI wiring | DONE | opus-5 | a85ead6 | OBS-072, OBS-073 | Exit 1 = network problem, 2 = answer problem, decided in the open. `--from-fixtures` needed a password until OBS-072. 19 tests, 1338 passed |
-| T-032 | End-to-end offline test | DONE | opus-5 | _next commit_ | OBS-074 | Both labels, opposite answers, grounded reports. Mock model reads its own prompt. netmiko replaced with a module that raises. 10 tests, 1348 passed |
-| T-033 | Live lab run | TODO | opus-5 | | | Q-006 confirmation |
+| T-032 | End-to-end offline test | DONE | opus-5 | 13b58ae | OBS-074 | Both labels, opposite answers, grounded reports. Mock model reads its own prompt. netmiko replaced with a module that raises. 10 tests, 1348 passed |
+| T-033 | Live lab run | BLOCKED | opus-5 | | OBS-075 | Q-018: PE3 has 0 IS-IS adjacencies. B-412 recurred a third time in the harness written to prevent it; reopened as blocking |
 | T-034 | Documentation update | TODO | sonnet-5 | | | |
 | T-035 | Report relay — outbound only | TODO | sonnet-5 | | | **optional fast-follow**; residency decision first |
 

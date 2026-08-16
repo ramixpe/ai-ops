@@ -1729,6 +1729,46 @@ Copy this block for each new entry.
 
 ---
 
+## OBS-075 · T-033 · B-412's shape for the third time — inside the function written to prevent it
+
+- **Kind:** defect
+- **Escalation:** HALT (device state; see the reading below)
+- **Model:** opus-5 · **reported by the operator, 2026-08-16**
+- **What happened:** *Operator's account, recorded as given.* The T-033 fault-injection harness reproduced B-412's exact shape for the third time.
+
+  `restore()` was built around the rule B-412 exists to enforce — **verify by reading, never trust the write** — and on an exception it retried three times **without ever reading the device**. The restore had in fact succeeded on the first attempt, **252 ms after the fault**, confirmed independently by the device's own syslog and by `show isis adjacency`. The script raised a manual-intervention alarm on a healthy fabric.
+
+  Two lessons, as the operator stated them:
+
+  1. **The verification must run on EVERY path, including the error path.** A verification reachable only on the success path verifies nothing when it matters.
+  2. **The exception was a `TypeError`** — a code defect, not a network condition — swallowed by a broad handler and rendered as a network failure. **Catching broadly around a device call converts your own bugs into false reports about the network.**
+
+  The independent check that caught it was **a human watching the device console. Nothing inside the tool would have.**
+- **Evidence:** Operator's report, with two independent confirmations named (device syslog, `show isis adjacency`). Cross-checked from this side — see below.
+- **What I did:** Recorded it, amended §0.11, reopened B-412 — and then applied the finding's own rule to the finding itself.
+
+  **A read of the fabric, because a report of success is not evidence of success either.** `show isis adjacency` across the five edge/RR devices, 2026-08-16:
+
+  ```
+  PE1: 2 adj    PE2: 2 adj    PE3: 0 adj    PE4: 2 adj    RR1: 2 adj
+  ```
+
+  **PE3 currently has no IS-IS adjacencies.** Every other device is at its expected two, and PE3 had two in the baseline I read before proposing the fault. That is consistent with two quite different situations — the T-033 fault deliberately (re-)applied and still in place, or a fault left unrestored — and **I did not read further to distinguish them**, because if it is the first, the additional reads are the diagnosis I am under protocol to keep closed until the operator's hand diagnosis is recorded.
+
+  Reported to the operator rather than acted on. No write attempted: restoring would be a device write, and §0.11's HALT is not waived. It is also precisely the move §0.11 forbids — re-applying a change on the strength of a report, against a device whose state I have read exactly once.
+
+  **Three additions of my own, beyond the two lessons.**
+
+  **1. This is not §0.12's failure mode, and conflating them would produce the wrong fix.** §0.12 is a guardrail that *runs* and passes over an empty set. Here the guardrail was correct and would have passed — it was **never reached**. The remedy for §0.12 is a companion test that fails when the empty set ends; the remedy here is structural: the verification belongs in a `finally`, or after the try/except, never inside the success branch. A test asserting "restore verifies the device" passes against this defect, because on the happy path it does.
+
+  **2. The repository has the same idiom, correctly, and one line of drift would break it.** `CLAUDE.md` documents broad `except Exception` with `# noqa: BLE001` as the established idiom at the SSH boundary, and that is right — a device call genuinely can fail in unbounded ways, and a structured error beats a traceback. **The idiom is safe only while it wraps the call and nothing else.** Widen it by one line to include the caller's own logic and every `TypeError`, `KeyError` and `AttributeError` in that logic becomes a reported network fault. That is the most expensive kind of wrong this project can produce, because it is indistinguishable from the thing the tool exists to detect.
+
+  **3. The witness has to be outside the thing being verified.** "Nothing inside the tool would have caught it" is the whole finding compressed. A tool cannot be its own witness for whether it succeeded at a write: the same defective code path produces both the action and the report of the action. This is §0.13's **setup** face on the device axis — the bound is invisible from inside — and it is the argument for the harness reading state through a *different* path than the one it wrote through, which on this fabric means the device's own syslog rather than the return value of the commit.
+- **Needs human review:** **yes** — PE3's IS-IS state, and whether it is intended
+- **Blocks:** **T-033.** No device-touching run until PE3's state is confirmed intended, and B-412 is reopened as blocking any further harness use.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**
@@ -1765,6 +1805,7 @@ Anything logged with `Needs human review: yes` is mirrored here so the review ha
 | Q-008 | T-035 | Which host runs `nettools` in the target deployment, and does it have outbound egress to the chosen channel? | Yes for T-035 | Open |
 | Q-010 | T-003 | The MiniMax provider uses the OpenAI **Responses** API, not Chat Completions, so `BUILD-PLAN.md` T-003 step 4 (`reasoning_split`, `max_completion_tokens`) does not apply. Both behaviours it targeted are achieved structurally on that route. Confirm the route choice before the MVP-1 gate is built on it. | No for MVP-0 · **yes for the MVP-1 gate** | Open — decided and evidenced (OBS-010) |
 | Q-012 | T-005 | **The lab was rebuilt ~2 days ago and is now healthy** — all 16 BGP sessions Established, PE2/PE4 back to 2 IS-IS adjacencies. T-011 says to capture "against the current broken state", which no longer exists. Re-break the lab, capture a new consistent healthy label, or build the broken case synthetically in-test? | **Yes for T-011** (T-025/M3 unaffected — fixtures still hold the broken state) | **Closed (OBS-049)** — `broken` captured 2026-08-16 with both uplinks. Originally (OBS-019) — options 1+2: keep `t0`/`t1` frozen, add complete `healthy` and `broken` labels; operator runs the break, capture coordinated at T-011 |
+| **Q-018** | **T-033** | **PE3 has 0 IS-IS adjacencies as of 2026-08-16** (every other device is at its expected 2, and PE3 had 2 in the pre-proposal baseline). Intended — the T-033 fault applied and in place — or an unrestored fault from the OBS-075 harness incident? I did not read further to distinguish them, because if it is the former those reads are the diagnosis the Q-006 protocol keeps closed. | **Yes — blocks T-033** | Open (OBS-075) |
 | Q-009 | T-002 | Should `MINIMAX_API_KEY` **and the lab device credentials** be rotated after this build? Both were pasted into the transcript (OBS-008, OBS-037). It was pasted into the session transcript, which no control in this repository can revoke. | No — nothing is blocked on it | Open — recommended (OBS-008) |
 
 ---

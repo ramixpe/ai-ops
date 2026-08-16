@@ -217,6 +217,13 @@ Only these. They are absolute.
 
 A tool's report of failure is not evidence of failure. Before acting on either a success or a failure report from anything that touched a device, verify the device's actual state directly and cross-check against a second source. Never retry a non-idempotent action on the basis of a failure report alone — re-applying a change to a device that is already correct is itself the harm this section exists to prevent.
 
+**This has now happened three times, the third time inside the function written to prevent it (OBS-075, B-412).** The T-033 fault-injection harness was built around exactly the rule above — *verify by reading, never trust the write* — and on an exception it retried three times without reading the device once. The restore had succeeded on the first attempt, 252 ms after the fault. The script raised a manual-intervention alarm on a healthy fabric. Two consequences of that, both binding:
+
+- **The verification must run on every path, including the error path.** A verification reachable only on the success path verifies nothing in the one case it exists for. This is not §0.12's vacuous guardrail — the check was correct and would have passed; it was simply never reached.
+- **Never wrap your own logic in the broad `except Exception` used at the device boundary.** The exception that triggered all this was a `TypeError` — a code defect — swallowed and rendered as a network failure. `CLAUDE.md` documents broad catching as the established idiom at the SSH boundary, and it is right *there*, around the call and nothing else. Widened by one line past it, **it converts your own bugs into false reports about the network**, which is the most expensive kind of wrong this project can produce.
+
+The independent check that caught it was a human watching the device console. **Nothing inside the tool would have** — which is the standing argument for a witness outside the thing being verified, and the same reasoning as §0.13's setup face.
+
 On HALT: mark the task `BLOCKED`, write a finding with `Needs human review: yes`, add a row to the Open Questions table in `FINDINGS.md`, update `TRACKER.md`, and **stop**.
 
 ### DECIDE-AND-LOG — choose, record, continue
