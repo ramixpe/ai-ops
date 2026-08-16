@@ -26,7 +26,7 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 | Baseline test count | **550 passed, 4 skipped, 0 failed** (554 total; the 4 are `live_lab`, skipped by default) |
 | Run started | 2026-08-15 |
 | Last updated | 2026-08-16 |
-| Current task | T-024 |
+| Current task | T-026 (Part 4) |
 | Halted? | no — Q-013 and Q-017 resolved by the operator |
 | Operator decisions pending capture | **Lab must stay healthy until T-011** — `healthy` then `broken` captured in one coordinated window (OBS-019) |
 
@@ -71,10 +71,10 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 | T-019 | `checks.py` and `CheckResult` | DONE | opus-5 | `1437059` | OBS-051 | Contract + "absence is unevaluated" rule. 17 tests, 1047 passed |
 | T-020 | The five checks | DONE | sonnet-5 (opus-5 spec + review) | `fcc2210` | OBS-052, OBS-053 | **Q-005 closed** (rate, not total). 1069 passed. Divergence from `health.py` recorded for T-021 |
 | T-021 | Agreement test with `health.py` | DONE | opus-5 (HALT-sensitive) | _next commit_ | OBS-054 | **No disagreement. No HALT.** 92 comparisons, 1161 passed |
-| T-022 | `flows.py` registry and dataclasses | DONE | opus-5 | _next commit_ | OBS-055, OBS-056 | `DeviceScope` + `Aggregation` on `Rung`; 7 declared, 2 implemented |
-| T-023 | The `bgp_session` descent | DONE | opus-5 | _next commit_ | OBS-056 | 5 rungs, scopes settled by measurement. 1181 passed |
-| T-024 | `descent.py` walker | TODO | opus-5 | | | semantics task |
-| T-025 | **Acceptance test — RR1 → 10.255.0.12** | TODO | opus-5 | | | Q-006 · milestone |
+| T-022 | `flows.py` registry and dataclasses | DONE | opus-5 | `b6dd595` | OBS-055, OBS-056 | `DeviceScope` + `Aggregation` on `Rung`; 7 declared, 2 implemented |
+| T-023 | The `bgp_session` descent | DONE | opus-5 | `b6dd595` | OBS-056 | 5 rungs, scopes settled by measurement. 1181 passed |
+| T-024 | `descent.py` walker | DONE | opus-5 | _next commit_ | OBS-057 | Corrected walk; `SubjectRule` added to close a contract gap |
+| T-025 | **Acceptance test — RR1 → 10.255.0.12** | DONE | opus-5 | _next commit_ | OBS-057 | **M3.** `broken` → `interface_line_down` on PE2 with a 4-rung causal chain |
 
 ## Part 4 — Prompts, grounding, MVP-0
 
@@ -101,7 +101,7 @@ T-035 is optional and does not gate the definition of done.
 |---|---|---|
 | **M1 — Discovery complete** | T-009 done; all discovery docs written; Open Questions populated | ☑ **2026-08-15** |
 | **M2 — Parsing unblocked** | T-018 done; template results carry parsed data; all §0.10 completeness tests green | ☑ **2026-08-16** |
-| **M3 — Architecture validated** | T-025 green offline, no model call, no lab, no API key | ☐ |
+| **M3 — Architecture validated** | T-025 green offline, no model call, no lab, no API key | ☑ **2026-08-16** |
 | **M4 — MVP-0 shipped** | Part 7 definition of done satisfied in full (T-001…T-034) | ☐ |
 | **M5 — Team can see output** | T-035 done; a real investigation report reaches the team channel | ☐ |
 
@@ -137,4 +137,4 @@ One row per working session, so elapsed effort is visible without reading git.
 
 | Date | Tasks attempted | Tasks completed | Halted? | Notes |
 |------|-----------------|-----------------|---------|-------|
-| 2026-08-15/16 | T-001…T-018 | **T-001…T-018 all DONE** | HALT raised + waived | Required reading done; OBS-001/OBS-002 logged for the pre-plan install gap; baseline green; MiniMax contract verified and Q-001 resolved; MiniMax provider wired (567 tests); Loki + alerting discovery done; found the lab has been repaired (Q-012); L3VPN mapped; capture manifest written; TTP chosen; **M1 + M2 reached**; all six parsers done; blocking gap closed |
+| 2026-08-15/16 | T-001…T-025 | **T-001…T-025 all DONE** | HALT raised + waived | Required reading done; OBS-001/OBS-002 logged for the pre-plan install gap; baseline green; MiniMax contract verified and Q-001 resolved; MiniMax provider wired (567 tests); Loki + alerting discovery done; found the lab has been repaired (Q-012); L3VPN mapped; capture manifest written; TTP chosen; **M1 + M2 reached**; all six parsers done; blocking gap closed |

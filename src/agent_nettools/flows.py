@@ -69,6 +69,7 @@ __all__ = [
     "DeviceScope",
     "Flow",
     "Rung",
+    "SubjectRule",
     "flow_for",
 ]
 
@@ -87,6 +88,45 @@ class DeviceScope(Enum):
     #: Every device on the path between the two. Resolves to a set, so a rung
     #: using it must declare an `Aggregation`.
     PATH = "path"
+
+
+class SubjectRule(Enum):
+    """What a rung's check receives as its subject.
+
+    A ladder crosses subject vocabularies. `bgp_session` is about a peer
+    address, `route_to_peer` about a prefix, `igp_adjacency` about a whole
+    device, `interface` about an interface name -- and an interface name is not
+    derivable from a peer address at all. Left implicit, each rung's collector
+    and its check would each guess a transformation and the two would disagree
+    silently, which is exactly what happened on the walker's first run.
+
+    Declared on the rung, for the same reason `Aggregation` is: explicit beats
+    implied by the check.
+    """
+
+    #: Pass the descent subject through unchanged (a peer address).
+    AS_IS = "as_is"
+
+    #: `<subject>/32` -- a host route for the peer's loopback.
+    HOST_PREFIX = "host_prefix"
+
+    #: The rung is about the device, not an object on it; the check gets `None`.
+    DEVICE_WIDE = "device_wide"
+
+    #: Fan out over the device's *physical* interfaces, one check each.
+    #:
+    #: Physical only, and that exclusion is measured rather than tidy:
+    #: PE1 and PE3 each carry a `Gi0/0/0/2.300` subinterface that is
+    #: legitimately line-down on a completely healthy fabric. Including
+    #: subinterfaces would make both devices report broken in the `healthy`
+    #: label -- a false positive on 2 of 9 devices. A subinterface being down
+    #: is a service condition; a physical link being down is a path condition,
+    #: and the path is what a descent is about.
+    EACH_PHYSICAL_INTERFACE = "each_physical_interface"
+
+    @property
+    def is_fanout(self) -> bool:
+        return self is SubjectRule.EACH_PHYSICAL_INTERFACE
 
 
 class Aggregation(Enum):
@@ -131,19 +171,32 @@ class Rung:
     check: Callable[..., CheckResult]
     finding: str
     device_scope: DeviceScope = DeviceScope.LOCAL
+    subject_rule: SubjectRule = SubjectRule.AS_IS
     aggregation: Aggregation | None = None
 
+    @property
+    def evaluates_a_set(self) -> bool:
+        """Whether this rung produces more than one verdict to combine.
+
+        Two independent ways that happens: the scope resolves to several
+        devices, or the subject rule fans out over several objects on one
+        device. Either needs a declared aggregation.
+        """
+
+        return self.device_scope is DeviceScope.PATH or self.subject_rule.is_fanout
+
     def __post_init__(self) -> None:
-        if self.device_scope is DeviceScope.PATH and self.aggregation is None:
+        if self.evaluates_a_set and self.aggregation is None:
             raise ValueError(
-                f"rung {self.name!r} has PATH scope, which resolves to a set of "
-                "devices, so it must declare an aggregation "
-                "(ALL_HEALTHY or ANY_HEALTHY)"
+                f"rung {self.name!r} evaluates over a set "
+                f"(scope={self.device_scope.value}, subject={self.subject_rule.value}), "
+                "so it must declare an aggregation (ALL_HEALTHY or ANY_HEALTHY)"
             )
-        if self.device_scope is not DeviceScope.PATH and self.aggregation is not None:
+        if not self.evaluates_a_set and self.aggregation is not None:
             raise ValueError(
-                f"rung {self.name!r} declares an aggregation but its scope is "
-                f"{self.device_scope.value}, which resolves to exactly one device"
+                f"rung {self.name!r} declares an aggregation but evaluates exactly "
+                f"one object on one device (scope={self.device_scope.value}, "
+                f"subject={self.subject_rule.value})"
             )
 
 
@@ -235,6 +288,7 @@ INTERFACE_FLOW = Flow(
             check=_checks.interface_state,
             finding="interface_line_down",
             device_scope=DeviceScope.LOCAL,
+            subject_rule=SubjectRule.AS_IS,
         ),
     ),
     findings=frozenset({"interface_line_down"}) | UNIVERSAL_FINDINGS,
@@ -280,6 +334,7 @@ BGP_SESSION_FLOW = Flow(
             check=_checks.route_present,
             finding="peer_unreachable_no_route",
             device_scope=DeviceScope.LOCAL,
+            subject_rule=SubjectRule.HOST_PREFIX,
         ),
         Rung(
             name="igp_adjacency",
@@ -287,6 +342,7 @@ BGP_SESSION_FLOW = Flow(
             check=_checks.isis_adjacency,
             finding="igp_isolated",
             device_scope=DeviceScope.SUBJECT,
+            subject_rule=SubjectRule.DEVICE_WIDE,
         ),
         Rung(
             name="interface",
@@ -297,6 +353,8 @@ BGP_SESSION_FLOW = Flow(
             check=_checks.interface_state,
             finding="interface_line_down",
             device_scope=DeviceScope.SUBJECT,
+            subject_rule=SubjectRule.EACH_PHYSICAL_INTERFACE,
+            aggregation=Aggregation.ALL_HEALTHY,
         ),
     ),
     findings=frozenset(

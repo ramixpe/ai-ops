@@ -649,7 +649,7 @@ Findings are a closed enum on the flow, plus `all_layers_healthy` and `undetermi
 
 ---
 
-## T-024 · `descent.py` — the walker `[STATUS: TODO]`
+## T-024 · `descent.py` — the walker `[STATUS: DONE]`
 
 ```python
 def run_descent(flow: Flow, device: str, subject: str, *, collector) -> DescentResult
@@ -680,7 +680,7 @@ The `collector` is injected so a descent can run against `fixtures.load_fixture_
 
 ---
 
-## T-025 · The acceptance test `[STATUS: TODO]`
+## T-025 · The acceptance test `[STATUS: DONE]`
 
 **This is the milestone that proves the architecture.**
 

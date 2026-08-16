@@ -1188,6 +1188,40 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-057 · T-024 / T-025 · **M3 reached** — the descent produces an RCA, not a restatement
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5 (semantics task)
+- **What happened:** The walker implements the corrected semantics and the acceptance test passes against **both** labels. **1196 passed.** Measured, offline, no lab, no API key, no model call:
+
+  ```
+  broken   RR1 -> 10.255.0.12      FINDING: interface_line_down
+    bgp_session     RR1   broken
+    transport       RR1   broken
+    route_to_peer   RR1   broken
+    igp_adjacency   PE2   broken
+    interface       PE2   broken
+    cause         : interface on PE2
+    causal chain  : bgp_session -> transport -> route_to_peer -> igp_adjacency
+  ```
+
+  That is the sentence the ladder exists to produce: *the interface is down on PE2, which isolated IS-IS, which removed the route, which blocked transport, which is why BGP is Idle.* Under the plan's original rule the same input returned `peer_not_established` and stopped at rung 1. **`healthy` gives `all_layers_healthy` for the same subject**, so the two labels give opposite answers about one peer — which is what makes the result a measurement rather than a coincidence.
+
+  **M3 — "the diagnostic ladder is deterministic end to end" — is demonstrated rather than argued.**
+- **Evidence:** `tests/test_descent.py`, 15 tests. Acceptance on both labels, plus the walk semantics against stub ladders: broken does not stop the walk, healthy does not stop it, `unevaluated` does and **nothing below it is collected** (asserted on the collector, not the result).
+- **What I did:** Found and closed a real gap in the T-022 contract I had committed an hour earlier. **The walker's first run returned `undetermined` on both labels**, because the ladder crosses four subject vocabularies and the contract had no way to say so: `bgp_session` takes a peer address, `route_to_peer` a prefix, `igp_adjacency` a whole device, and `interface` an interface name — which is **not derivable from a peer address at all**. The collector and the check were each transforming the subject independently and disagreeing silently.
+
+  Fixed by adding **`SubjectRule`** to `Rung`, following the operator's own principle for `Aggregation`: explicit on the rung, never implied by the check. `AS_IS`, `HOST_PREFIX`, `DEVICE_WIDE`, `EACH_PHYSICAL_INTERFACE`. The last one fans out over objects rather than devices, so `Rung.evaluates_a_set` now covers both and an aggregation is required for either.
+
+  **`EACH_PHYSICAL_INTERFACE` excludes subinterfaces, and that is measured rather than tidy.** PE1 and PE3 each carry a `Gi0/0/0/2.300` that is legitimately line-down on a completely healthy fabric; including it would make 2 of 9 devices report broken in the `healthy` label. A subinterface being down is a service condition; a physical link being down is a path condition, and the path is what a descent is about.
+
+  Two smaller decisions worth recording. A `SUBJECT`-scoped rung with **no resolver is `unevaluated`, never a silent fall-back to the local device** — falling back is precisely the wrong-device reading Q-013 exists to prevent, and it would look healthy. And `unevaluated` **dominates any aggregation**: if one member of a set could not be read, the set's verdict is not known either. Absence is not health, at every level.
+- **Needs human review:** yes — `SubjectRule` extends the `Rung` contract the operator approved, and `EACH_PHYSICAL_INTERFACE`'s exclusion rule is a judgement grounded in this fabric's shape.
+- **Blocks:** none. Part 3 complete.
+
+---
+
 <!--
 Copy this block for each new entry.
 
