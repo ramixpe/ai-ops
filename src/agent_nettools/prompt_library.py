@@ -18,11 +18,42 @@ command string to the rendered prompt, and
 That is deliberately a structural guarantee rather than a filtering one. A
 redaction pass over text that might contain raw output is something somebody
 eventually gets wrong; a function that never holds the text cannot.
+
+B-421 -- the split that makes prompt caching possible
+--------------------------------------------------------
+Both builders used to return one fully-rendered string, with the template's
+fixed instructions and the substituted payload already interleaved. Anthropic's
+prompt cache is a prefix match on `system` (see `llm_analysis.py`'s module
+docstring), so a string of that shape cached nothing: the "static" prefix
+differed on every call the moment the payload changed, because the payload
+was *inside* the prefix.
+
+`build_report_prompt`/`build_correlate_prompt` now return a `RenderedPrompt`:
+`system` is every byte of the template that is not a substituted value --
+identical across every investigation at a given prompt version, and therefore
+the part `llm_analysis.complete_prompt` can hand to Anthropic as a cacheable
+block -- and `user` is the substituted payload alone.
+
+The templates themselves are not touched to make this true. `report.v1.txt`
+and `correlate.v3.txt` both put their payload placeholder(s) in the middle of
+the GRACE slots (the payload sits inside GROUNDING, with ROLE/ANCHORS/
+CONSTRAINTS/EXPECTED OUTPUT after it), so the split is done here, in code, by
+`_split_template`: it walks the template left to right and buckets every span
+by kind -- literal template text is static, a substituted value is volatile --
+preserving each bucket's own relative order. That is a reordering, not a
+rewrite: every character of the template and every substituted value still
+appears exactly once, so nothing the model is told changes, only whether it
+arrives in the cacheable prefix or the per-call message. Doing this in code
+rather than as a new prompt version is deliberate: `prompts/README.md` rule 2
+makes a version bump mean *the wording changed*, and here it has not --
+bumping the version for a pure code-side reordering would misrepresent what
+changed to whoever reads the version history next.
 """
 
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
@@ -32,6 +63,7 @@ from .log_window import ShapedWindow
 __all__ = [
     "CURRENT_VERSION",
     "PROMPTS_DIR",
+    "RenderedPrompt",
     "build_correlate_prompt",
     "build_report_prompt",
     "descent_payload",
@@ -79,6 +111,64 @@ def load_prompt(name: str, version: int = 1) -> str:
     return path.read_text(encoding="utf-8")
 
 
+@dataclass(frozen=True)
+class RenderedPrompt:
+    """A rendered prompt, already split at the cache boundary (B-421).
+
+    ``system`` is the static half: every byte of the template that is not a
+    substituted value, so it is byte-identical for every investigation run at
+    this prompt version -- the prefix Anthropic's cache can actually hit.
+    ``user`` is the volatile half: the substituted payload for this one
+    investigation.
+
+    Deliberately just these two fields, not a richer object -- everything
+    downstream (``llm_analysis.complete_prompt``, the OpenAI/MiniMax/Ollama
+    concatenation fallback) only ever needs "the cacheable part" and "the
+    part that changes every call".
+    """
+
+    system: str
+    user: str
+
+
+def _split_template(template: str, substitutions: list[tuple[str, str]]) -> RenderedPrompt:
+    """Partition one rendered template into its static and volatile halves.
+
+    ``substitutions`` is an ordered list of ``(placeholder, value)`` pairs, in
+    the order the placeholders actually appear in ``template`` -- required,
+    because this walks the template left to right with `str.partition`,
+    consuming one placeholder at a time from what is left of the text. Getting
+    the order wrong would leave an earlier placeholder's literal `{...}` text
+    stranded, unsubstituted, inside a `static_parts` span.
+
+    Every span of literal template text between (or before/after) a
+    placeholder is static -- identical on every call at this template version
+    -- and is appended to ``system`` in the template's own order. Every
+    substituted value is volatile and is appended to ``user``, also in order,
+    separated by a blank line for readability where more than one payload is
+    substituted (`correlate` substitutes three; the blank line is whitespace
+    only, not a change to any value's content).
+
+    This is why the reordering the module docstring describes is safe: no
+    template character and no substituted value is ever dropped, duplicated,
+    or reworded here -- each one is simply relocated to whichever of the two
+    output strings its own kind (static template text vs. substituted value)
+    belongs to, in the relative order it already had among spans of that kind.
+    """
+
+    static_parts: list[str] = []
+    volatile_parts: list[str] = []
+    remaining = template
+    for placeholder, value in substitutions:
+        before, found, remaining = remaining.partition(placeholder)
+        if not found:
+            raise ValueError(f"placeholder {placeholder!r} not found in template")
+        static_parts.append(before)
+        volatile_parts.append(value)
+    static_parts.append(remaining)
+    return RenderedPrompt(system="".join(static_parts), user="\n\n".join(volatile_parts))
+
+
 def descent_payload(result: DescentResult) -> dict:
     """The descent, reduced to what a report may be written from.
 
@@ -121,15 +211,21 @@ def descent_payload(result: DescentResult) -> dict:
     }
 
 
-def build_report_prompt(result: DescentResult, *, version: int | None = None) -> str:
-    """Render the report prompt for one descent."""
+def build_report_prompt(result: DescentResult, *, version: int | None = None) -> RenderedPrompt:
+    """Render the report prompt for one descent, split at the cache boundary.
+
+    ``report.v1.txt`` has one placeholder, `{descent_json}`, sitting inside
+    GROUNDING with ROLE/ANCHORS/CONSTRAINTS/EXPECTED OUTPUT after it --
+    `_split_template` (not `str.format`, for the same reason as before: the
+    prompt contains literal JSON braces in its anchor and expected-output
+    blocks that `format()` would misread as fields) does the reordering, in
+    code, that turns that into a static `system` half and a volatile `user`
+    half. See the module docstring's B-421 section.
+    """
 
     template = load_prompt("report", version or CURRENT_VERSION["report"])
     payload = json.dumps(descent_payload(result), indent=2)
-    # str.replace, not str.format: the prompt contains literal JSON braces in
-    # its anchor and expected-output blocks, and format() would try to read
-    # every one of them as a field.
-    return template.replace("{descent_json}", payload)
+    return _split_template(template, [("{descent_json}", payload)])
 
 
 def finding_payload(result: DescentResult) -> dict:
@@ -156,12 +252,21 @@ def finding_payload(result: DescentResult) -> dict:
 
 def build_correlate_prompt(
     result: DescentResult, window: ShapedWindow, *, version: int | None = None
-) -> str:
-    """Render the correlate prompt for one finding and one shaped window.
+) -> RenderedPrompt:
+    """Render the correlate prompt for one finding and one shaped window,
+    split at the cache boundary.
 
     The window arrives already filtered by :func:`log_window.shape_window`, and
     its removal counts travel with it -- so the model can say how much of the
     window it is seeing rather than presenting a filtered set as the whole.
+
+    ``correlate.v3.txt`` substitutes three placeholders inside GROUNDING, in
+    this order: `{coverage_json}` (COVERAGE), `{finding_json}` (FINDING), then
+    `{window_json}` (LOG WINDOW). `_split_template`'s ``substitutions`` list
+    below must name them in that same order -- it consumes the template left
+    to right, one placeholder at a time, so an out-of-order list would leave
+    an earlier placeholder's literal `{...}` text stranded inside a static
+    span instead of substituted. See the module docstring's B-421 section.
     """
 
     template = load_prompt("correlate", version or CURRENT_VERSION["correlate"])
@@ -185,9 +290,8 @@ def build_correlate_prompt(
         else {"complete": False,
               "gaps": ["no coverage record was produced for this window"]}
     )
-    return (
-        template
-        .replace("{finding_json}", json.dumps(finding_payload(result), indent=2))
-        .replace("{window_json}", json.dumps(window_payload, indent=2))
-        .replace("{coverage_json}", json.dumps(coverage, indent=2))
-    )
+    return _split_template(template, [
+        ("{coverage_json}", json.dumps(coverage, indent=2)),
+        ("{finding_json}", json.dumps(finding_payload(result), indent=2)),
+        ("{window_json}", json.dumps(window_payload, indent=2)),
+    ])

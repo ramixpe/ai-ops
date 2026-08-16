@@ -44,6 +44,20 @@ single-shot path here still returns a plain string (unchanged contract for
 existing callers), so its cache activity is only observable by inspecting
 the request/response objects directly, which is what the tests do.
 
+**B-421 extended this same split to the rendered-prompt path.**
+``complete_prompt`` used to receive one fully-rendered string from
+``prompt_library`` with the static template and the volatile payload already
+interleaved -- nothing on that path was ever cacheable, because the "static"
+prefix changed on every call the moment the payload did. ``build_report_prompt``/
+``build_correlate_prompt`` now return a ``prompt_library.RenderedPrompt``
+(``system``/``user``, pre-split), and ``complete_prompt`` puts ``system`` in a
+cached ``system`` block via ``_anthropic_system_blocks`` (the same helper
+``analyze_with_anthropic`` uses) and ``user`` in ``messages`` -- identical
+shape, same function, different caller. ``TokenUsage`` now carries
+``cache_read_input_tokens``/``cache_creation_input_tokens`` too, so this path's
+cache activity is visible on the returned ``Completion.usage`` without
+inspecting the request object directly, unlike the single-shot path above.
+
 **Refusal fallbacks are conditional, not automatic.** ``fallbacks="default"``
 requires the beta endpoint (``client.beta.messages.stream``, beta header
 ``server-side-fallback-2026-07-01``) and is only meaningful for the
@@ -75,6 +89,8 @@ import json
 import os
 from dataclasses import dataclass
 from typing import Any, Literal
+
+from .prompt_library import RenderedPrompt
 
 Provider = Literal["anthropic", "openai", "ollama", "minimax"]
 
@@ -236,19 +252,28 @@ def _fallbacks_enabled(model: str) -> bool:
     return model.startswith(_FALLBACK_MODEL_PREFIXES)
 
 
-def _anthropic_system_blocks() -> list[dict[str, Any]]:
-    """Static, cacheable system prompt for the single-shot analysis path.
+def _anthropic_system_blocks(text: str = TROUBLESHOOTING_PROMPT) -> list[dict[str, Any]]:
+    """Static, cacheable system prompt.
 
-    Never interpolate a timestamp, device name, or UUID here -- caching is a
-    prefix match, and anything volatile in this block would invalidate the
-    cache on every single call. All per-call content (the evidence) goes in
-    ``messages`` instead; see ``_anthropic_user_content``.
+    Defaults to ``TROUBLESHOOTING_PROMPT``, for ``analyze_with_anthropic``'s
+    single-shot analysis path, its only caller until B-421. ``complete_prompt``
+    (the rendered-prompt path -- report/correlate) reuses this exact function
+    with its own static half instead of duplicating the two-line block-building
+    shape: the caching mechanics are identical (one text block,
+    ``cache_control={"type": "ephemeral"}``) regardless of *which* static text
+    is being cached.
+
+    Never pass a ``text`` that interpolates a timestamp, device name, or UUID
+    -- caching is a prefix match, and anything volatile in this block would
+    invalidate the cache on every single call. All per-call content goes in
+    ``messages`` instead; see ``_anthropic_user_content`` (single-shot) /
+    ``complete_prompt``'s ``prompt.user`` (rendered-prompt).
     """
 
     return [
         {
             "type": "text",
-            "text": TROUBLESHOOTING_PROMPT,
+            "text": text,
             "cache_control": {"type": "ephemeral"},
         }
     ]
@@ -487,6 +512,13 @@ class TokenUsage:
     `calls` is carried because the per-investigation figure people actually want
     is "how many model calls and how many tokens", and a total with no call
     count cannot distinguish one large call from three small ones.
+
+    `cache_read_input_tokens`/`cache_creation_input_tokens` were added at
+    B-421, alongside the rendered-prompt path's prompt-caching fix -- they
+    default to 0 (not `None`) because they are additive counters, not a
+    reported/unreported distinction like `reported` below: a provider that
+    does not do prompt caching at all (OpenAI, MiniMax, Ollama) genuinely read
+    0 cached tokens, which is a true zero, not a missing measurement.
     """
 
     input_tokens: int = 0
@@ -496,6 +528,14 @@ class TokenUsage:
     #: zero. Anthropic and the OpenAI Responses API report it; a local Ollama
     #: route may not, and reporting 0 there would be a measurement nobody made.
     reported: bool = True
+    #: Input tokens served from the Anthropic prompt cache -- what B-421 exists
+    #: to grow. 0 on every non-Anthropic provider and on any Anthropic call
+    #: that missed the cache (a cold start, or a call more than 5 minutes
+    #: after the last one).
+    cache_read_input_tokens: int = 0
+    #: Input tokens written to the cache on this call (the one-time cost of a
+    #: cache miss that primes it for the next call).
+    cache_creation_input_tokens: int = 0
 
     @property
     def total_tokens(self) -> int:
@@ -507,6 +547,12 @@ class TokenUsage:
             output_tokens=self.output_tokens + other.output_tokens,
             calls=self.calls + other.calls,
             reported=self.reported and other.reported,
+            cache_read_input_tokens=(
+                self.cache_read_input_tokens + other.cache_read_input_tokens
+            ),
+            cache_creation_input_tokens=(
+                self.cache_creation_input_tokens + other.cache_creation_input_tokens
+            ),
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -516,6 +562,8 @@ class TokenUsage:
             "total_tokens": self.total_tokens,
             "calls": self.calls,
             "reported": self.reported,
+            "cache_read_input_tokens": self.cache_read_input_tokens,
+            "cache_creation_input_tokens": self.cache_creation_input_tokens,
         }
 
     def summary(self) -> str:
@@ -542,6 +590,14 @@ def _usage_from(raw: Any) -> TokenUsage:
     uses the same names. Anything unrecognised returns ``reported=False`` rather
     than zeros -- **"the provider did not say" and "it cost nothing" are
     different facts**, and collapsing them is how a cost report becomes fiction.
+
+    ``cache_read_input_tokens``/``cache_creation_input_tokens`` (B-421) are
+    read the same opportunistic way -- ``getattr(..., 0)``, never failing the
+    whole parse if absent -- because only Anthropic's usage object carries
+    them at all; the OpenAI Responses API usage object does not, and a missing
+    attribute there is not "the provider declined to say", it is "this
+    provider has no such concept", which is exactly what defaulting to 0
+    (a real count, not a null) already means for every non-Anthropic caller.
     """
 
     if raw is None:
@@ -550,25 +606,43 @@ def _usage_from(raw: Any) -> TokenUsage:
     out = getattr(raw, "output_tokens", None)
     if inp is None and out is None:
         return TokenUsage(calls=1, reported=False)
-    return TokenUsage(input_tokens=int(inp or 0), output_tokens=int(out or 0), calls=1)
+    return TokenUsage(
+        input_tokens=int(inp or 0),
+        output_tokens=int(out or 0),
+        calls=1,
+        cache_read_input_tokens=int(getattr(raw, "cache_read_input_tokens", 0) or 0),
+        cache_creation_input_tokens=int(getattr(raw, "cache_creation_input_tokens", 0) or 0),
+    )
 
 
-def complete_prompt(prompt: str) -> Completion:
-    """Send one fully-rendered prompt and return the model's raw text.
+def complete_prompt(prompt: RenderedPrompt) -> Completion:
+    """Send one rendered prompt and return the model's raw text.
 
     The prompt library (T-026-T-029) renders a complete, self-contained prompt
     -- Grounding, Role, Anchors, Constraints, Expected output -- so there is
     nothing for this layer to add. Every other entry point here *builds* a
     prompt from evidence; this one is handed a finished one, which is what lets
-    `investigation.investigate` take a plain `(prompt) -> str` callable and stay
-    testable with a scripted analyst.
+    `investigation.investigate` take a plain `(RenderedPrompt) -> str` callable
+    and stay testable with a scripted analyst.
 
-    **Prompt caching is not applied on this path.** Anthropic's cache is a
-    prefix match on `system`, and a rendered prompt arrives as one string with
-    its static and volatile halves already interleaved. Splitting it back apart
-    would mean the renderer returning two pieces, which is a prompt-library
-    change rather than CLI wiring. Filed as B-421; the prompts are a few
-    kilobytes, so this is cost, not correctness.
+    **Prompt caching (B-421).** `prompt` arrives pre-split: `prompt.system` is
+    every byte of the template that does not change across investigations at
+    this prompt version, and `prompt.user` is this one investigation's payload
+    -- see `prompt_library`'s module docstring for how the split is made safe.
+    That split is what makes the Anthropic branch below cacheable at all:
+    `prompt.system` becomes the single `system` text block, carrying
+    `cache_control={"type": "ephemeral"}` exactly like `_anthropic_system_blocks`
+    already does for `analyze_with_anthropic`, and `prompt.user` becomes the
+    one volatile `messages` entry. Before B-421 this function received one
+    fully-rendered string with the two halves already interleaved, which
+    cached nothing -- caching is a prefix match on `system`, and the "static"
+    prefix differed on every call the moment the payload changed, because the
+    payload was inside it.
+
+    OpenAI/MiniMax (the Responses API) and Ollama have no server-side prefix
+    cache to hit, so those three branches concatenate `prompt.system` and
+    `prompt.user` back into one string and send it exactly as the single
+    pre-B-421 string would have been -- unchanged behaviour on those paths.
     """
 
     provider = get_provider()
@@ -580,7 +654,8 @@ def complete_prompt(prompt: str) -> Completion:
         message = _call_anthropic_or_raise(
             client,
             model=os.getenv("ANTHROPIC_MODEL", ANTHROPIC_MODEL_DEFAULT),
-            messages=[{"role": "user", "content": prompt}],
+            system=_anthropic_system_blocks(prompt.system),
+            messages=[{"role": "user", "content": prompt.user}],
         )
         if message.stop_reason == "refusal":
             details = getattr(message, "stop_details", None)
@@ -601,13 +676,16 @@ def complete_prompt(prompt: str) -> Completion:
             )
         return Completion(text, _usage_from(getattr(message, "usage", None)))
 
+    # No prefix cache to hit on any of these three -- concatenate the split
+    # back into the one string these paths have always sent.
+    concatenated = f"{prompt.system}\n\n{prompt.user}"
     if provider == "openai":
-        return _openai_call_with_usage(prompt)
+        return _openai_call_with_usage(concatenated)
     if provider == "minimax":
-        return _openai_call_with_usage(prompt, **_minimax_call_kwargs())
+        return _openai_call_with_usage(concatenated, **_minimax_call_kwargs())
     if provider == "ollama":
         # No usage on this route -- reported=False rather than zeros.
-        return Completion(_ollama_call(prompt), TokenUsage(calls=1, reported=False))
+        return Completion(_ollama_call(concatenated), TokenUsage(calls=1, reported=False))
 
     raise LLMAnalysisError(f"Provider {provider!r} cannot send a rendered prompt.")
 

@@ -716,7 +716,11 @@ def test_the_rendered_prompt_carries_the_coverage_and_its_gaps():
 
     from agent_nettools.prompt_library import build_correlate_prompt
 
-    prompt = build_correlate_prompt(_finding_for_correlation(), _window("healthy"))
+    # B-421: build_correlate_prompt returns a RenderedPrompt (system/user
+    # split, so the static half is cacheable); system + user is the same text
+    # one fully-rendered prompt used to be.
+    rendered = build_correlate_prompt(_finding_for_correlation(), _window("healthy"))
+    prompt = f"{rendered.system}\n\n{rendered.user}"
 
     assert "{coverage_json}" not in prompt
     assert '"complete": false' in prompt
@@ -736,7 +740,8 @@ def test_a_window_shaped_without_coverage_renders_as_a_gap():
     shaped = log_window.shape_window(parsed["records"])
     assert shaped.coverage is None
 
-    prompt = build_correlate_prompt(_finding_for_correlation(), shaped)
+    rendered = build_correlate_prompt(_finding_for_correlation(), shaped)
+    prompt = f"{rendered.system}\n\n{rendered.user}"
     assert '"complete": false' in prompt
     assert "no coverage record was produced" in prompt
 

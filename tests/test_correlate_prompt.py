@@ -180,11 +180,94 @@ def test_the_window_carries_a_config_commit_the_model_can_correlate_against():
 
 def test_the_correlate_prompt_renders_with_device_timestamps():
     shaped = log_window.shape_window(_records("PE2", "broken"))
-    prompt = build_correlate_prompt(_finding(), shaped, version=CORRELATE_VERSION)
+    # B-421: build_correlate_prompt returns a RenderedPrompt (system/user
+    # split, so the static half is cacheable); system + user is the same
+    # text one fully-rendered prompt used to be.
+    rendered = build_correlate_prompt(_finding(), shaped, version=CORRELATE_VERSION)
+    prompt = f"{rendered.system}\n\n{rendered.user}"
 
     assert "{finding_json}" not in prompt and "{window_json}" not in prompt
     assert "interface_line_down" in prompt
     assert "Aug 16 07:41:54.688 UTC" in prompt, "device timestamps must reach the model verbatim"
+
+
+def test_invariant_4_holds_in_each_half_of_the_split_separately():
+    """Not just the concatenation.
+
+    B-421 splits the rendered prompt across two different fields of the
+    Anthropic request (`system`, the cached block, and `user`, the one
+    volatile message) -- a raw-output leak into either half individually is
+    the failure that would actually reach the model. The markers here are the
+    raw `show logging` preamble, never present in a parsed record -- the
+    device timestamps checked above (`Aug 16 07:41:54.688 UTC`) are legitimate
+    in `user`, since they are parsed log-line fields re-serialised, not raw
+    command output; see `test_end_to_end_offline.py` for the same distinction
+    made explicitly.
+    """
+
+    shaped = log_window.shape_window(_records("PE2", "broken"))
+    rendered = build_correlate_prompt(_finding(), shaped, version=CORRELATE_VERSION)
+
+    for half_name, half in (("system", rendered.system), ("user", rendered.user)):
+        for marker in ("RP/0/RP0/CPU0", "Log Buffer (4194303 bytes)"):
+            assert marker not in half, f"raw device output leaked into {half_name}: {marker!r}"
+
+
+# --------------------------------------------------------------------------- #
+# B-421 -- the system/user split that makes prompt caching possible
+# --------------------------------------------------------------------------- #
+
+
+def test_the_system_half_is_byte_identical_across_two_different_windows():
+    """The whole point of the split. Anthropic's prompt cache is a prefix
+    match on `system`: if the static half ever differed between two
+    investigations at the same prompt version, nothing would be cacheable.
+
+    The `broken` and `healthy` windows are as different as this fixture pair
+    gets -- one carries the whole causal story, the other nine unattributed
+    session events -- so this is not passing by accident of two similar
+    payloads.
+    """
+
+    broken_window = log_window.shape_window(_records("PE2", "broken"))
+    healthy_window = log_window.shape_window(_records("PE2", "healthy"))
+
+    a = build_correlate_prompt(_finding(), broken_window, version=CORRELATE_VERSION)
+    b = build_correlate_prompt(_finding(), healthy_window, version=CORRELATE_VERSION)
+
+    assert a.system == b.system
+
+
+def test_the_user_half_differs_between_two_different_windows():
+    """The companion assertion. If `user` never changed either, the split
+    would be hiding a bug where nothing volatile ever reaches the model at
+    all -- every correlation would be written from the same window."""
+
+    broken_window = log_window.shape_window(_records("PE2", "broken"))
+    healthy_window = log_window.shape_window(_records("PE2", "healthy"))
+
+    a = build_correlate_prompt(_finding(), broken_window, version=CORRELATE_VERSION)
+    b = build_correlate_prompt(_finding(), healthy_window, version=CORRELATE_VERSION)
+
+    assert a.user != b.user
+
+
+def test_nothing_is_lost_in_the_reordering():
+    """The split moves text between `system` and `user`; it must not drop any
+    of it. Every GRACE slot the template names -- including the three
+    sub-headings the payload placeholders sit under -- and the substituted
+    payloads themselves must still be present somewhere in system + user."""
+
+    shaped = log_window.shape_window(_records("PE2", "broken"))
+    rendered = build_correlate_prompt(_finding(), shaped, version=CORRELATE_VERSION)
+    combined = rendered.system + rendered.user
+
+    for slot in (
+        "GROUNDING", "COVERAGE", "FINDING", "LOG WINDOW",
+        "ROLE", "ANCHORS", "CONSTRAINTS", "EXPECTED OUTPUT",
+    ):
+        assert slot in combined
+    assert "interface_line_down" in combined, "the payload itself must survive the split"
 
 
 # --------------------------------------------------------------------------- #

@@ -13,8 +13,10 @@ from agent_nettools.llm_analysis import (
     analyze_with_anthropic,
     analyze_with_minimax,
     analyze_with_openai,
+    complete_prompt,
     get_provider,
 )
+from agent_nettools.prompt_library import RenderedPrompt
 
 
 def test_provider_requires_a_key(monkeypatch):
@@ -326,6 +328,81 @@ def test_anthropic_fallbacks_not_requested_for_non_opus_5_model(monkeypatch):
     analyze_with_anthropic({"device": "PE1"})
 
     assert "fallbacks" not in calls[0]
+
+
+# --------------------------------------------------------------------------- #
+# B-421 -- prompt caching on the rendered-prompt path (`complete_prompt`)
+#
+# `complete_prompt` used to receive one fully-rendered string with the static
+# template and the volatile payload already interleaved, so nothing was ever
+# cacheable -- caching is a prefix match on `system`, and the "static" prefix
+# changed on every call the moment the payload did. `build_report_prompt`/
+# `build_correlate_prompt` now return a `RenderedPrompt` (system/user
+# pre-split); these tests exercise `complete_prompt` directly with two
+# `RenderedPrompt`s that share a `system` but differ in `user`, mirroring
+# `test_anthropic_cached_prefix_is_byte_identical_across_different_evidence`
+# above -- the same claim, made about the rendered-prompt path instead of the
+# single-shot `analyze_evidence` path.
+# --------------------------------------------------------------------------- #
+
+
+def test_complete_prompt_sends_a_cacheable_system_block_on_anthropic(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
+
+    calls = []
+    install_fake_anthropic(monkeypatch, lambda **kwargs: fake_message("ok"), captured=calls)
+
+    static = "GROUNDING\n=========\nsome fixed instructions\n"
+    complete_prompt(RenderedPrompt(system=static, user='{"descent": "one"}'))
+    complete_prompt(RenderedPrompt(system=static, user='{"descent": "two"}'))
+
+    assert len(calls) == 2
+    # The system block itself, not just its text: byte-identical, or nothing
+    # is cacheable.
+    assert calls[0]["system"] == calls[1]["system"]
+    assert calls[0]["system"] == [
+        {"type": "text", "text": static, "cache_control": {"type": "ephemeral"}}
+    ]
+    # The volatile half must actually vary, or this test would pass even if
+    # `complete_prompt` accidentally cached the payload-bearing block instead.
+    assert calls[0]["messages"] != calls[1]["messages"]
+    assert calls[0]["messages"] == [{"role": "user", "content": '{"descent": "one"}'}]
+
+
+def test_complete_prompt_surfaces_anthropic_cache_usage(monkeypatch):
+    """`TokenUsage.cache_read_input_tokens`/`cache_creation_input_tokens`
+    (B-421) must actually carry what the API reported, not just exist as
+    zeroed fields nothing populates."""
+
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
+
+    usage = fake_usage(cache_read_input_tokens=123, cache_creation_input_tokens=45)
+    install_fake_anthropic(monkeypatch, lambda **kwargs: fake_message("ok", usage=usage))
+
+    completion = complete_prompt(RenderedPrompt(system="static", user="volatile"))
+
+    assert completion.usage.cache_read_input_tokens == 123
+    assert completion.usage.cache_creation_input_tokens == 45
+
+
+def test_complete_prompt_concatenates_system_and_user_for_openai(monkeypatch):
+    """No prefix cache on the Responses API -- `complete_prompt` must send
+    exactly the string a single fully-rendered prompt would have been, so
+    behaviour on this path is unchanged by the B-421 split."""
+
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+
+    calls = []
+    install_fake_openai(
+        monkeypatch, lambda **kwargs: fake_openai_response("ok"), captured_calls=calls
+    )
+
+    complete_prompt(RenderedPrompt(system="static half", user="volatile half"))
+
+    assert calls[0]["input"] == "static half\n\nvolatile half"
 
 
 # --------------------------------------------------------------------------- #

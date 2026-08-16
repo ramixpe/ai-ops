@@ -140,7 +140,14 @@ class ReadsItsPrompt:
         #: check a value that cannot contain raw output by construction.
         self.prompts: list[str] = []
 
-    def __call__(self, prompt: str) -> str:
+    def __call__(self, prompt) -> str:
+        # B-421: `analyst` now receives a `prompt_library.RenderedPrompt`
+        # (system/user pre-split, so `complete_prompt` can cache the static
+        # half), not one fully-rendered string. `system + user`, in that
+        # order, is exactly the text a single string used to be -- this mock
+        # (and invariant 4 below, which scans `self.prompts` for raw device
+        # text) reassembles it rather than changing what either checks.
+        prompt = f"{prompt.system}\n\n{prompt.user}"
         self.prompts.append(prompt)
         if "LOG WINDOW" in prompt:
             window = _embedded_object(prompt, "entries")
