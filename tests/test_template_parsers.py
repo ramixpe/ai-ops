@@ -1059,3 +1059,224 @@ def test_logging_unrecognised_line_surfaces_in_unaccounted_lines():
 
     assert status is tp.PARSE_OK
     assert parsed["meta"]["unaccounted_lines"] == ["Some New Vendor Field: 42"]
+
+
+# --------------------------------------------------------------------------- #
+# T-016: the ping parser
+# --------------------------------------------------------------------------- #
+
+_PING_FIXTURES = sorted(FIXTURE_DIR.glob("cisco_xr/*/healthy/ping-*.txt"))
+
+# Every key the T-016 spec's meta table requires, present in every case --
+# ``None`` where not applicable, never absent.
+_PING_META_KEYS = (
+    "target",
+    "sent",
+    "received",
+    "success_pct",
+    "loss_pct",
+    "size_bytes",
+    "timeout_seconds",
+    "result_string",
+    "rtt_min",
+    "rtt_avg",
+    "rtt_max",
+)
+
+
+def test_all_ten_ping_fixtures_are_on_disk():
+    """A sanity check on the parametrization source below: 9 real successes
+    plus the one deliberately captured total-failure fixture. If this ever
+    fails, the round-trip test below would be silently parametrized over a
+    shrunk list rather than failing loudly on its own."""
+
+    assert len(_PING_FIXTURES) == 10
+
+
+@pytest.mark.parametrize("fixture_path", _PING_FIXTURES, ids=lambda p: str(p.relative_to(FIXTURE_DIR)))
+def test_every_committed_ping_fixture_round_trips_clean(fixture_path: Path):
+    """Section 0.10, pinned against every real fixture on disk -- both the
+    9 success captures and the one 0%-success capture."""
+
+    raw = fixture_path.read_text()
+    parsed, status = tp.parse_template_output("cisco_xr", "ping", raw)
+    assert status is tp.PARSE_OK, f"{fixture_path}: {status}"
+    assert parsed["meta"]["unaccounted_lines"] == [], f"{fixture_path}: {parsed['meta']['unaccounted_lines']}"
+    assert parsed["meta"]["unparsed_rows"] == 0
+    assert parsed["records"] == []
+
+
+def test_a_successful_ping_reports_full_rtt_and_zero_loss():
+    """PE1 -> 10.255.0.31: a real, healthy, 100%-success ping."""
+
+    raw = _load_fixture("cisco_xr", "PE1", "healthy", "ping-10-255-0-31.txt")
+    parsed, status = tp.parse_template_output("cisco_xr", "ping", raw)
+    assert status is tp.PARSE_OK
+
+    meta = parsed["meta"]
+    assert meta["target"] == "10.255.0.31"
+    assert meta["sent"] == "5"
+    assert meta["received"] == "5"
+    assert meta["success_pct"] == "100"
+    assert meta["loss_pct"] == "0"
+    assert meta["result_string"] == "!!!!!"
+    assert meta["rtt_min"] is not None
+    assert meta["rtt_avg"] is not None
+    assert meta["rtt_max"] is not None
+
+
+def test_zero_percent_success_omits_the_round_trip_line_entirely():
+    """PE1 -> 192.0.2.1: the one deliberately captured total-failure
+    fixture. This is the whole reason the fixture exists -- at 0% success
+    IOS-XR does not print the 'round-trip min/avg/max' clause at all, so
+    rtt_min/avg/max must come back None, never the string '0'. A parser
+    that assumed the clause always follows the success-rate line would
+    pass on all 9 other fixtures and break on exactly this one."""
+
+    raw = _load_fixture("cisco_xr", "PE1", "healthy", "ping-192-0-2-1.txt")
+    parsed, status = tp.parse_template_output("cisco_xr", "ping", raw)
+    assert status is tp.PARSE_OK
+
+    meta = parsed["meta"]
+    assert meta["target"] == "192.0.2.1"
+    assert meta["sent"] == "5"
+    assert meta["received"] == "0"
+    assert meta["success_pct"] == "0"
+    assert meta["loss_pct"] == "100"
+    assert meta["result_string"] == "....."
+    assert meta["rtt_min"] is None
+    assert meta["rtt_avg"] is None
+    assert meta["rtt_max"] is None
+
+
+@pytest.mark.parametrize("fixture_path", _PING_FIXTURES, ids=lambda p: str(p.relative_to(FIXTURE_DIR)))
+def test_every_ping_meta_key_is_present(fixture_path: Path):
+    """Every key in the T-016 meta table, present -- ``None`` rather than
+    absent, in both the success and the 0%-success shape."""
+
+    raw = fixture_path.read_text()
+    parsed, status = tp.parse_template_output("cisco_xr", "ping", raw)
+    assert status is tp.PARSE_OK
+    for key in _PING_META_KEYS:
+        assert key in parsed["meta"], f"{fixture_path}: missing {key}"
+
+
+def test_ping_volatile_fields_are_the_rtts_and_result_string_not_the_counts():
+    """The point of the split: round-trip times and the exact reply pattern
+    move run to run on an unchanged network and are noise. success_pct,
+    loss_pct, sent, and received are deliberately NOT volatile -- a ping
+    going from 100% to 0% is the entire signal this template exists to
+    produce, and marking those volatile would discard it (the same trap
+    bgp_neighbor's last_reset_reason avoids). Both directions are asserted
+    -- the negative half is the point."""
+
+    volatile = tp.template_volatile_fields("cisco_xr", "ping")
+
+    assert "rtt_min" in volatile
+    assert "rtt_avg" in volatile
+    assert "rtt_max" in volatile
+    assert "result_string" in volatile
+
+    assert "success_pct" not in volatile
+    assert "loss_pct" not in volatile
+    assert "sent" not in volatile
+    assert "received" not in volatile
+
+
+def test_ping_record_key_is_none_because_there_are_no_records():
+    """Deliberately None, and for a different reason than logging's None:
+    ping has no records at all -- the whole result is one summary -- so
+    there is no per-record field for an identity key to name."""
+
+    assert tp.template_record_key("cisco_xr", "ping") is None
+
+
+def test_ping_garbage_input_raises_parse_error_and_reports_parse_failed():
+    """Something clearly not ping output must not be silently accepted."""
+
+    garbage = "lorem ipsum\nnot a ping"
+
+    with pytest.raises(tp.ParseError):
+        tp.parse_xr_ping(garbage)
+
+    parsed, status = tp.parse_template_output("cisco_xr", "ping", garbage)
+    assert parsed is None
+    assert status is tp.PARSE_FAILED
+
+
+def test_a_synthetic_partial_result_string_parses_cleanly():
+    """No fixture shows a partial reply pattern -- both real shapes on disk
+    are all-'!' or all-'.' -- but a mixed string like '!!.!!' is a legitimate
+    device output *format* already proven by those two real shapes, not an
+    invented one, and is exactly what a lossy-but-not-dead path looks like
+    on a real fabric."""
+
+    raw = (
+        "\n"
+        "Sat Aug 15 18:06:00.315 UTC\n"
+        "Type escape sequence to abort.\n"
+        "Sending 5, 100-byte ICMP Echos to 10.255.0.99 timeout is 2 seconds:\n"
+        "!!.!!\n"
+        "Success rate is 60 percent (3/5), round-trip min/avg/max = 1/2/4 ms\n"
+    )
+
+    parsed, status = tp.parse_template_output("cisco_xr", "ping", raw)
+    assert status is tp.PARSE_OK
+    assert parsed["meta"]["unaccounted_lines"] == []
+    assert parsed["meta"]["unparsed_rows"] == 0
+
+    meta = parsed["meta"]
+    assert meta["result_string"] == "!!.!!"
+    assert meta["received"] == "3"
+    assert meta["success_pct"] == "60"
+    assert meta["loss_pct"] == "40"
+    assert meta["rtt_min"] == "1"
+    assert meta["rtt_avg"] == "2"
+    assert meta["rtt_max"] == "4"
+
+
+def test_ping_truncated_output_does_not_raise_and_still_accounts_cleanly():
+    """Truncated right after the request line -- the first two lines of
+    real, ping-specific content ('Type escape sequence to abort.' and
+    'Sending N, ...'), before any reply characters or the summary arrive.
+    The universal blank-line/timestamp-banner preamble every command's
+    output carries is not itself ping content, so it is excluded from what
+    is being truncated here -- same convention as every other truncated-
+    output test in this module, which all cut right after their own
+    template's first substantive line. Must not raise: the device simply
+    has not finished answering yet, exactly as parse_xr_logging's
+    header-only truncation is not an error either."""
+
+    raw = _load_fixture("cisco_xr", "PE1", "healthy", "ping-10-255-0-31.txt")
+    lines = raw.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.strip() == "Type escape sequence to abort.")
+    truncated = "\n".join(lines[start : start + 2])
+
+    parsed, status = tp.parse_template_output("cisco_xr", "ping", truncated)
+
+    assert status is tp.PARSE_OK
+    assert parsed["meta"]["unaccounted_lines"] == []
+    assert parsed["meta"]["unparsed_rows"] == 0
+    assert parsed["records"] == []
+    assert parsed["meta"]["target"] == "10.255.0.31"
+    assert parsed["meta"]["result_string"] is None
+    assert parsed["meta"]["success_pct"] is None
+    assert parsed["meta"]["rtt_min"] is None
+
+
+def test_ping_unrecognised_line_surfaces_in_unaccounted_lines():
+    """The 0.10 guardrail: a line the template cannot know about must be
+    surfaced, not silently swallowed. Proves the accounting is not
+    decorative."""
+
+    raw = _load_fixture("cisco_xr", "PE1", "healthy", "ping-10-255-0-31.txt")
+    injected = raw.replace(
+        "Sending 5, 100-byte ICMP Echos to 10.255.0.31 timeout is 2 seconds:",
+        "Sending 5, 100-byte ICMP Echos to 10.255.0.31 timeout is 2 seconds:\n"
+        "Some New Vendor Field: 42",
+    )
+
+    parsed, status = tp.parse_template_output("cisco_xr", "ping", injected)
+
+    assert status is tp.PARSE_OK
+    assert parsed["meta"]["unaccounted_lines"] == ["Some New Vendor Field: 42"]

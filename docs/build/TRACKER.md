@@ -26,7 +26,7 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 | Baseline test count | **550 passed, 4 skipped, 0 failed** (554 total; the 4 are `live_lab`, skipped by default) |
 | Run started | 2026-08-15 |
 | Last updated | 2026-08-15 |
-| Current task | T-016 |
+| Current task | T-017 |
 | Halted? | no — Q-015 resolved, waiver discharged (OBS-038) |
 | Operator decisions pending capture | **Lab must stay healthy until T-011** — `healthy` then `broken` captured in one coordinated window (OBS-019) |
 
@@ -60,7 +60,7 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 | T-013 | `route` parser | DONE | sonnet-5 (opus-5 spec + review) | `d690246` | OBS-042 | 44 fixtures; a third output shape found that the spec missed. 719 passed |
 | T-014 | `interface` parser | DONE | sonnet-5 (opus-5 spec + review) | `04a0bf1` | OBS-043, OBS-044 | 45 fixtures, 3 shapes. Line-down omits error counters — binds T-020. 776 passed |
 | T-015 | `logging` parser | DONE | sonnet-5 (opus-5 spec + review) | `b45d4d2` | OBS-045 | 1,800 entries; mnemonic split verified by recomposition. Zero ignores. 804 passed |
-| T-016 | `ping` parser | TODO | sonnet-5 | | | §0.10 completeness |
+| T-016 | `ping` parser | DONE | sonnet-5 (opus-5 spec + review) | _next commit_ | OBS-046 | 10 fixtures; RTTs None (not 0) at 0%. 833 passed |
 | T-017 | `traceroute` parser | TODO | sonnet-5 | | | §0.10 completeness |
 | T-018 | Attach parsed data to `run_template` | TODO | sonnet-5 | | | closes the blocking gap |
 
@@ -135,4 +135,4 @@ One row per working session, so elapsed effort is visible without reading git.
 
 | Date | Tasks attempted | Tasks completed | Halted? | Notes |
 |------|-----------------|-----------------|---------|-------|
-| 2026-08-15 | T-001…T-015 | T-001…T-010, T-012…T-015; T-011 partial | HALT raised + waived | Required reading done; OBS-001/OBS-002 logged for the pre-plan install gap; baseline green; MiniMax contract verified and Q-001 resolved; MiniMax provider wired (567 tests); Loki + alerting discovery done; found the lab has been repaired (Q-012); L3VPN mapped; capture manifest written; TTP chosen; **M1 reached**; T-010 contract shipped |
+| 2026-08-15 | T-001…T-016 | T-001…T-010, T-012…T-016; T-011 partial | HALT raised + waived | Required reading done; OBS-001/OBS-002 logged for the pre-plan install gap; baseline green; MiniMax contract verified and Q-001 resolved; MiniMax provider wired (567 tests); Loki + alerting discovery done; found the lab has been repaired (Q-012); L3VPN mapped; capture manifest written; TTP chosen; **M1 reached**; T-010 contract shipped |

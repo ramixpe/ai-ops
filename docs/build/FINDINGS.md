@@ -886,6 +886,23 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-046 · T-016 · `ping` accepted; and a spec wording bug Sonnet was right to push back on
+
+- **Kind:** decision-made
+- **Escalation:** NOTE
+- **Model:** opus-5 (judgement) · sonnet-5 (implementation)
+- **What happened:** Accepted with no correction. **833 passed.** All 10 fixtures clean. The case the fixture was captured for behaves correctly: at 0% success the device omits the `round-trip min/avg/max` clause entirely, and the parser returns `rtt_min/avg/max = None` rather than `"0"` — the distinction between "no measurement exists" and "the measurement was zero", which is the same discipline as `unevaluated` one field down. `loss_pct` is derived (`100 - success_pct`) rather than parsed, because the device never prints it.
+
+  The volatile split landed as specified and is worth restating because it is the third time this judgement has come up: `rtt_min/avg/max` and `result_string` are volatile — RTTs vary run to run and so does the exact reply pattern — while **`success_pct`, `loss_pct`, `sent` and `received` are deliberately not.** A ping going from 100% to 0% is the entire signal the template exists to produce; marking those volatile would discard it while removing no noise.
+
+  **Sonnet pushed back on my spec, correctly.** Test item 9 said "truncated output (first 2 lines of a real fixture)". Taken literally that is the blank line and the IOS-XR timestamp banner — both already absorbed by `XR_COMMON_IGNORES` — so the parser would never reach its header line and *would* raise, contradicting the same item's "does not raise". It read the intent as the first two lines of *ping-specific* content and said so explicitly rather than quietly picking one. That is exactly the behaviour §0.9 rule 2 asks for: an ambiguous spec is my defect, not the implementer's to paper over.
+- **Evidence:** Success: `sent=5 received=5 success_pct=100 loss_pct=0 rtt=2/2/3 result='!!!!!'`. Failure: `sent=5 received=0 success_pct=0 loss_pct=100 rtt=None/None/None`. Volatile set verified to exclude all four signal fields.
+- **What I did:** Accepted both the implementation and the interpretation. Recording the spec bug against myself: three of the six parser specs I wrote have now had a gap the fixtures exposed (T-013's third route shape, T-014's counter absence, T-016's truncation wording). The pattern is consistent — **I write specs from a survey, and a survey is a sample.** §0.10 and an implementer willing to say "this does not fit" have caught all three.
+- **Needs human review:** no
+- **Blocks:** none — unblocks T-017, the last parser.
+
+---
+
 <!--
 Copy this block for each new entry.
 

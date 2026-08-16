@@ -82,6 +82,7 @@ __all__ = [
     "BGP_NEIGHBOR_IGNORES",
     "INTERFACE_IGNORES",
     "LOGGING_IGNORES",
+    "PING_IGNORES",
     "ROUTE_IGNORES",
     "TEMPLATE_PARSERS",
     "TEMPLATE_RECORD_KEYS",
@@ -96,6 +97,7 @@ __all__ = [
     "parse_xr_bgp_neighbor",
     "parse_xr_interface",
     "parse_xr_logging",
+    "parse_xr_ping",
     "parse_xr_route",
     "template_record_key",
     "template_volatile_fields",
@@ -1125,6 +1127,142 @@ def parse_xr_logging(output: str) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
+# cisco_xr: ping  (T-016)
+# --------------------------------------------------------------------------- #
+#
+# ``ping <address>`` answers one of two shapes on this fabric, both
+# legitimate, surveyed across all 10 committed fixtures (9 success, 1 total
+# failure):
+#
+#   Type escape sequence to abort.
+#   Sending 5, 100-byte ICMP Echos to 10.255.0.31 timeout is 2 seconds:
+#   !!!!!
+#   Success rate is 100 percent (5/5), round-trip min/avg/max = 2/2/3 ms
+#
+# and, at 0% success (PE1/healthy/ping-192-0-2-1.txt):
+#
+#   Type escape sequence to abort.
+#   Sending 5, 100-byte ICMP Echos to 192.0.2.1 timeout is 2 seconds:
+#   .....
+#   Success rate is 0 percent (0/5)
+#
+# **The critical difference is the last line.** At 0% success IOS-XR omits
+# the "round-trip min/avg/max" clause entirely -- it is not zeroed and not
+# present with empty values, the clause is simply absent from the line. One
+# regex with an optional trailing group (the same "one regex, optional
+# clause" shape ``_KNOWN_VIA``/``_STATE`` already use above) captures both:
+# when the clause does not participate, its three named groups are ``None``
+# by construction, which is exactly the "rtt_min/avg/max must be ``None``,
+# never ``'0'``" contract this template exists to prove.
+#
+# The reply-pattern line ("!!!!!" / "....." / a real fabric's plausible
+# "!!.!!") is parsed generically as a string of "!" and "." characters
+# rather than special-cased on the two literal values observed, since a
+# partial result is a real device behaviour this fabric's fixtures simply
+# never happened to capture.
+#
+# Unlike bgp_neighbor/route, there is no "device answered with an error"
+# shape for ping (no fixture shows one) -- the line that establishes this is
+# recognisable ping output at all is the "Sending N, ..." request line, the
+# first ping-specific content the device prints, echoing the header-line
+# convention every other parser in this module uses. Output that never gets
+# that far -- genuinely unrecognised input, or a capture cut off before even
+# that line arrived -- raises :class:`ParseError`. A capture cut off *after*
+# it (no reply line, no summary yet) is not an error: the device is still
+# mid-response, exactly as ``parse_xr_logging``'s header-only truncation is
+# not an error either.
+#
+# ``records`` is always ``[]``. BUILD-PLAN.md's T-016 table gives no record
+# shape for ping -- the whole result is one summary, not a set of named
+# per-probe objects, so there is nothing to build records from without
+# inventing structure the device never reported.
+
+_SENDING = re.compile(
+    r"^Sending (?P<count>\d+), (?P<size_bytes>\d+)-byte ICMP Echos to (?P<target>\S+) "
+    r"timeout is (?P<timeout_seconds>\d+) seconds:$"
+)
+_RESULT_STRING = re.compile(r"^(?P<result>[!.]+)$")
+# The round-trip clause is optional -- see the shape note above -- so its
+# three named groups are ``None`` whenever it does not participate, which is
+# the 0%-success case's entire reason for being parsed this way rather than
+# with two separate patterns.
+_SUCCESS_RATE = re.compile(
+    r"^Success rate is (?P<success_pct>\d+) percent \((?P<received>\d+)/(?P<sent>\d+)\)"
+    r"(?:, round-trip min/avg/max = (?P<rtt_min>\d+)/(?P<rtt_avg>\d+)/(?P<rtt_max>\d+) ms)?$"
+)
+
+# Section 0.10 accounting. A single, anchored, specific rule per
+# BUILD-PLAN.md 0.10's instruction against a broad catch-all.
+PING_IGNORES: tuple[IgnoreRule, ...] = (
+    IgnoreRule(
+        r"^Type escape sequence to abort\.$",
+        "operator hint IOS-XR prints before every ping/traceroute; not ping-specific data",
+    ),
+)
+
+_PING_META_KEYS: tuple[str, ...] = (
+    "target",
+    "sent",
+    "received",
+    "success_pct",
+    "loss_pct",
+    "size_bytes",
+    "timeout_seconds",
+    "result_string",
+    "rtt_min",
+    "rtt_avg",
+    "rtt_max",
+)
+
+
+def parse_xr_ping(output: str) -> dict[str, Any]:
+    """Parse ``ping <address>``.
+
+    Two legitimate shapes -- see the section comment above. Raises
+    :class:`ParseError` only when no recognisable "Sending N, ...-byte ICMP
+    Echos to ... timeout is ... seconds:" request line is found: genuinely
+    unrecognised output, including a capture too short to contain even that
+    much ping-specific content.
+    """
+
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+
+    meta: dict[str, Any] = dict.fromkeys(_PING_META_KEYS)
+    consumed: list[str] = []
+    found_request = False
+
+    for line in lines:
+        if match := _SENDING.match(line):
+            meta["target"] = match["target"]
+            meta["size_bytes"] = match["size_bytes"]
+            meta["timeout_seconds"] = match["timeout_seconds"]
+            found_request = True
+            consumed.append(line)
+        elif match := _SUCCESS_RATE.match(line):
+            meta["success_pct"] = match["success_pct"]
+            meta["received"] = match["received"]
+            meta["sent"] = match["sent"]
+            # The device does not print loss percentage itself; derived
+            # rather than parsed, and kept a string like every other value.
+            meta["loss_pct"] = str(100 - int(match["success_pct"]))
+            meta["rtt_min"] = match["rtt_min"]
+            meta["rtt_avg"] = match["rtt_avg"]
+            meta["rtt_max"] = match["rtt_max"]
+            consumed.append(line)
+        elif match := _RESULT_STRING.match(line):
+            meta["result_string"] = match["result"]
+            consumed.append(line)
+
+    if not found_request:
+        raise ParseError(
+            "output does not contain a recognisable 'Sending N, ...-byte ICMP Echos to ... "
+            "timeout is ... seconds:' request line"
+        )
+
+    return finalize(raw=output, meta=meta, records=[], consumed=consumed, ignores=PING_IGNORES)
+
+
+# --------------------------------------------------------------------------- #
 # The registry
 # --------------------------------------------------------------------------- #
 
@@ -1135,6 +1273,7 @@ TEMPLATE_PARSERS: dict[tuple[str, str], Callable[[str], dict[str, Any]]] = {
     ("cisco_xr", "route"): parse_xr_route,
     ("cisco_xr", "interface"): parse_xr_interface,
     ("cisco_xr", "logging"): parse_xr_logging,
+    ("cisco_xr", "ping"): parse_xr_ping,
 }
 
 # Fields that move on their own between two captures of an unchanged device --
@@ -1179,6 +1318,16 @@ TEMPLATE_VOLATILE_FIELDS: dict[tuple[str, str], frozenset[str]] = {
     # the dropped-message counter is live device state -- none of the three
     # are a signal about what changed in the *content* of the log.
     ("cisco_xr", "logging"): frozenset({"lines", "window_start", "window_end", "messages_dropped"}),
+    # rtt_min/avg/max move on every capture of an unchanged, healthy path --
+    # ordinary jitter, not a signal -- and result_string ("!!!!!" vs a
+    # plausible "!!.!!") is exactly as noisy: it can vary run to run without
+    # the network having changed. success_pct, loss_pct, sent and received
+    # are deliberately NOT volatile: a ping going from 100% to 0% is the
+    # entire signal this template exists to produce, and diff_evidence
+    # masking it out would discard the one thing worth diffing -- the same
+    # trap bgp_neighbor's last_reset_reason avoids above by staying out of
+    # that template's volatile set.
+    ("cisco_xr", "ping"): frozenset({"rtt_min", "rtt_avg", "rtt_max", "result_string"}),
 }
 
 # The field identifying a record across two captures. ``None`` means records
@@ -1199,6 +1348,12 @@ TEMPLATE_RECORD_KEYS: dict[tuple[str, str], str | None] = {
     # "timestamp"; that would make diff_evidence produce nonsense (every
     # entry in a newer, longer window would misalign against the older one).
     ("cisco_xr", "logging"): None,
+    # Deliberately None, and for a different reason than logging's: this
+    # template has no records at all (see the section comment above), so
+    # there is no per-record field for an identity key to name in the first
+    # place -- not "no stable identity among several records" (logging's
+    # case) but "there is nothing to identify".
+    ("cisco_xr", "ping"): None,
 }
 
 
