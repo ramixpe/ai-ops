@@ -713,7 +713,7 @@ Add the mirror case: `subject="10.255.0.11"` on `healthy` — an established pee
 
 ---
 
-## T-026 · Prompt library scaffold `[STATUS: TODO]`
+## T-026 · Prompt library scaffold `[STATUS: DONE]`
 
 **Goal.** Prompts as version-controlled, tested artifacts — the same discipline as the command allowlist.
 
@@ -821,6 +821,8 @@ Follow the existing conventions exactly: `--format json|table|summary`, `--quiet
 ## T-032 · End-to-end offline test `[STATUS: TODO]`
 
 Full pipeline against fixtures with the model mocked. Assert: descent runs, report shape is valid, grounding passes, exit code correct, no network calls.
+
+**Assert BOTH labels, as T-025 does** — the same peer (`RR1 → 10.255.0.12`) must give opposite answers on `healthy` and `broken`, all the way through to a grounded report. One label proves the pipeline runs; two prove it discriminates.
 
 ---
 

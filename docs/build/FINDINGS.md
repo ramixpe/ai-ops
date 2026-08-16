@@ -1222,6 +1222,31 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-058 · T-026 · Prompt library scaffold — the rules are enforced, and Part 4's requirements are written into it
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** `prompts/README.md`, the directory structure, and 8 tests. **1202 passed.** No prompts yet — those are T-027 and T-028.
+
+  **Each of the README's four rules has a test.** A rule nobody checks is a preference, and a prompt is an input to a system whose output someone acts on, so it gets the same treatment as the allowlist: versioned filenames, no duplicate versions, a named refusal path in every prompt, and a golden case for each.
+
+  **The operator's three Part-4 requirements are recorded as requirements, not intentions:**
+
+  1. *The report renders the causal chain, not just the finding.* Written into the README with the concrete contrast — `"BGP is down. Cause: interface_line_down on PE2"` versus the five-clause chain — and pinned by a test asserting the README still carries it. A report that states the finding without the four rungs above it is an assertion where the chain is an argument.
+  2. *Grounding covers the chain.* The mapping is recorded because it is cleaner than I expected: **every rung in the chain is an `observation`** carrying the evidence key its `CheckResult` already read, and **the lowest broken rung is the `interpretation`**, citing the observations above it. The observation/interpretation split was specified before the causal chain existed and takes it without modification.
+  3. *T-032 asserts both labels.* Recorded against that task.
+- **Evidence:** `tests/test_prompts.py`, 8 tests. `prompts/` with README and `tests/cases/`.
+- **What I did:** Two things worth recording.
+
+  **The missing Evaluation slot is enforced, not just explained.** A test bans `"verify that every claim is supported by the provided data"` and its neighbours from any prompt file. That exact clause is in `llm_analysis.py`'s existing `TROUBLESHOOTING_PROMPT` — it reads as reassurance and provides none. Evaluation here is `grounding.py` and the schema validator, both of which run every time without anyone's attention, which is the property a prompt clause cannot have. Banning it stops the reassuring version drifting back in.
+
+  **The two parametrized rule tests currently *skip*, because there are no prompts to run them against** — pytest reports "empty parameter set" and moves on. That is honest but silent, and a skipping rule is an unenforced rule. This build has already shipped one vacuously-passing guardrail before catching it (OBS-054), so there is now a test asserting the scaffold state explicitly, which **fails the moment the first prompt lands** — the signal to confirm those two tests actually run rather than still skip. Same handover mechanism as `test_registry_is_empty_until_the_parsers_land` at T-012.
+- **Needs human review:** no
+- **Blocks:** none — T-027 next.
+
+---
+
 <!--
 Copy this block for each new entry.
 
