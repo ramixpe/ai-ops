@@ -1,21 +1,45 @@
 {
   "prompt": "report.v1.txt",
-  "note": "Golden cases for the report prompt. Read by tests/test_report_prompt.py -- this file is load-bearing, not documentation. Each case names a scenario built from committed fixtures and the structural properties the descent payload must have before the prompt is rendered. Expected model output is asserted by shape and citation integrity only, never by prose.",
+  "note": "Golden cases for the report prompt. Read by tests/test_report_prompt.py -- this file is load-bearing, not documentation. Each case names a scenario built from committed fixtures and the structural properties the descent payload must have before the prompt is rendered. Expected model output is asserted by shape and citation integrity only, never by prose. One case is composed rather than captured; see its `fixture_provenance` for why that is unavoidable rather than convenient.",
   "output_schema": {
-    "observations": [{"claim": "string", "evidence_key": "a key present in the input"}],
-    "interpretations": [{"claim": "string", "based_on": ["obs-N"]}],
-    "recommendation": {"next_check": "string", "requires_human": true}
+    "observations": [
+      {
+        "claim": "string",
+        "evidence_key": "a key present in the input"
+      }
+    ],
+    "interpretations": [
+      {
+        "claim": "string",
+        "based_on": [
+          "obs-N"
+        ]
+      }
+    ],
+    "recommendation": {
+      "next_check": "string",
+      "requires_human": true
+    }
   },
   "cases": [
     {
       "name": "localised_cause",
       "source": "the `broken` label -- PE2 isolated, both uplinks shut",
-      "descent": {"device": "RR1", "subject": "10.255.0.12", "flow": "bgp_session"},
+      "descent": {
+        "device": "RR1",
+        "subject": "10.255.0.12",
+        "flow": "bgp_session"
+      },
       "expect": {
         "finding": "interface_line_down",
         "cause_rung": "interface",
         "cause_device": "PE2",
-        "causal_chain": ["bgp_session", "transport", "route_to_peer", "igp_adjacency"],
+        "causal_chain": [
+          "bgp_session",
+          "transport",
+          "route_to_peer",
+          "igp_adjacency"
+        ],
         "rung_count": 5
       },
       "why": "The chain is the product. A report naming the finding without the four rungs above it is an assertion; the chain is an argument an engineer can check link by link."
@@ -23,19 +47,41 @@
     {
       "name": "cause_not_localised",
       "source": "composed -- the `broken` label's bgp section over the `healthy` label's lower layers. Both halves are real captured output; only the combination is synthetic, and no consistently-behaving fabric can produce it.",
-      "descent": {"device": "RR1", "subject": "10.255.0.12", "flow": "bgp_session"},
+      "descent": {
+        "device": "RR1",
+        "subject": "10.255.0.12",
+        "flow": "bgp_session"
+      },
       "expect": {
         "finding": "cause_not_localised",
         "causal_chain": [],
-        "broken_rungs": ["bgp_session"],
-        "healthy_rungs": ["transport", "route_to_peer", "igp_adjacency", "interface"]
+        "broken_rungs": [
+          "bgp_session"
+        ],
+        "healthy_rungs": [
+          "transport",
+          "route_to_peer",
+          "igp_adjacency",
+          "interface"
+        ]
       },
-      "why": "The finding most likely to be reported badly. The model will want to name the topmost broken rung as the cause; the descent has already established that it is not one. The prompt must carry the healthy lower rungs so the model can see there is nothing underneath rather than infer something."
+      "why": "The finding most likely to be reported badly. The model will want to name the topmost broken rung as the cause; the descent has already established that it is not one. The prompt must carry the healthy lower rungs so the model can see there is nothing underneath rather than infer something.",
+      "fixture_provenance": {
+        "kind": "composed",
+        "why_not_captured": "No consistently-behaving fabric can produce 'BGP session Idle while every layer beneath it is healthy'. If the transport, route, IGP and interface are all fine, the session comes up. That is simultaneously what makes cause_not_localised a finding worth having and what makes it impossible to capture from a real device.",
+        "what_is_real": "Both halves are real captured output. The bgp section is the `broken` label's genuine Idle session; the transport/route/igp/interface sections are the `healthy` label's genuine healthy layers.",
+        "what_is_synthetic": "Only the combination. No output was written, edited or invented -- two real captures are served to different rungs of one descent.",
+        "note": "Every other golden case in this file is captured whole from one label. This is the single exception, and the reason is above rather than in a commit message, because a future reader comparing it against the others needs to know why."
+      }
     },
     {
       "name": "refusal_path",
       "source": "the `t0` label -- predates template capture, so the transport rung genuinely cannot be read",
-      "descent": {"device": "RR1", "subject": "10.255.0.12", "flow": "bgp_session"},
+      "descent": {
+        "device": "RR1",
+        "subject": "10.255.0.12",
+        "flow": "bgp_session"
+      },
       "expect": {
         "finding": "undetermined",
         "rung_count": 2,

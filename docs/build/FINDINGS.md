@@ -1295,6 +1295,31 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-061 · pattern · Structural containment beats filtering — a function that never holds the text cannot leak it
+
+- **Kind:** decision-made
+- **Escalation:** NOTE
+- **Model:** opus-5 (operator-identified as a pattern)
+- **What happened:** Recorded as a **pattern rather than a T-027 detail**, at the operator's direction, because it has now appeared three times in this design independently and it should shape the tasks that have not been written yet.
+
+  The shape: **when something must not escape, build the boundary so the dangerous value never reaches the function, rather than removing it on the way out.**
+
+  | Where | Structural form | The filtering alternative that was rejected |
+  |---|---|---|
+  | `templates.py` (Phase 5) | Canonicalize by reconstruction — the command is rendered from a *parsed object's* canonical form, so caller text never reaches it | Validate the text with a regex, then interpolate the text |
+  | `prompt_library.build_report_prompt` (T-027) | Takes a `DescentResult` of verdicts and evidence keys; **never receives device output at all** | Redact raw output from an assembled prompt |
+  | `notifier` (T-035, specified) | Receives the report object only, never the evidence bundle | Filter secrets out of a bundle before sending |
+
+  The argument is the same each time and it is not about diligence: **a redaction pass over text that might contain the dangerous value is something somebody eventually gets wrong** — a new output format, an unanticipated field, a regex that was broad enough last year. A function that never holds the value cannot leak it regardless of who edits it next, and the guarantee survives people who have never read the rule.
+
+  `CLAUDE.md` already states this for `templates.py`: *"A regex broad enough to accept every legitimate value is also broad enough to admit a lookalike nobody anticipated."* The generalisation is that the same reasoning governs egress, not just ingress.
+- **Evidence:** `test_the_rendered_prompt_carries_no_raw_device_output` asserts five IOS-XR output markers are absent from a rendered prompt — but the test is a check on the property, not the mechanism. The mechanism is the signature.
+- **What I did:** Recorded it against **T-030** and **T-035**, the two tasks where it is still a live choice. T-030's `investigate()` assembles what the model sees, and the temptation there is to pass the evidence bundle "in case the model needs it"; T-035's notifier already has the right shape specified and needs it kept. Also noted the test-design consequence: a test that asserts the dangerous value is absent is worth having, but it verifies the property while the *signature* is what guarantees it — if the two ever disagree, the signature is the thing to fix.
+- **Needs human review:** no
+- **Blocks:** none. Informs T-030 and T-035.
+
+---
+
 <!--
 Copy this block for each new entry.
 
