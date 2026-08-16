@@ -1,0 +1,48 @@
+{
+  "prompt": "report.v1.txt",
+  "note": "Golden cases for the report prompt. Read by tests/test_report_prompt.py -- this file is load-bearing, not documentation. Each case names a scenario built from committed fixtures and the structural properties the descent payload must have before the prompt is rendered. Expected model output is asserted by shape and citation integrity only, never by prose.",
+  "output_schema": {
+    "observations": [{"claim": "string", "evidence_key": "a key present in the input"}],
+    "interpretations": [{"claim": "string", "based_on": ["obs-N"]}],
+    "recommendation": {"next_check": "string", "requires_human": true}
+  },
+  "cases": [
+    {
+      "name": "localised_cause",
+      "source": "the `broken` label -- PE2 isolated, both uplinks shut",
+      "descent": {"device": "RR1", "subject": "10.255.0.12", "flow": "bgp_session"},
+      "expect": {
+        "finding": "interface_line_down",
+        "cause_rung": "interface",
+        "cause_device": "PE2",
+        "causal_chain": ["bgp_session", "transport", "route_to_peer", "igp_adjacency"],
+        "rung_count": 5
+      },
+      "why": "The chain is the product. A report naming the finding without the four rungs above it is an assertion; the chain is an argument an engineer can check link by link."
+    },
+    {
+      "name": "cause_not_localised",
+      "source": "composed -- the `broken` label's bgp section over the `healthy` label's lower layers. Both halves are real captured output; only the combination is synthetic, and no consistently-behaving fabric can produce it.",
+      "descent": {"device": "RR1", "subject": "10.255.0.12", "flow": "bgp_session"},
+      "expect": {
+        "finding": "cause_not_localised",
+        "causal_chain": [],
+        "broken_rungs": ["bgp_session"],
+        "healthy_rungs": ["transport", "route_to_peer", "igp_adjacency", "interface"]
+      },
+      "why": "The finding most likely to be reported badly. The model will want to name the topmost broken rung as the cause; the descent has already established that it is not one. The prompt must carry the healthy lower rungs so the model can see there is nothing underneath rather than infer something."
+    },
+    {
+      "name": "refusal_path",
+      "source": "the `t0` label -- predates template capture, so the transport rung genuinely cannot be read",
+      "descent": {"device": "RR1", "subject": "10.255.0.12", "flow": "bgp_session"},
+      "expect": {
+        "finding": "undetermined",
+        "rung_count": 2,
+        "has_unevaluated_rung": true,
+        "reason_present": true
+      },
+      "why": "The single most valuable thing the Constraints slot buys. A model that fills an unread rung with a plausible cause produces something indistinguishable from a finding -- the same silent-degradation shape as OBS-006, OBS-043 and OBS-044, arriving in the report layer."
+    }
+  ]
+}

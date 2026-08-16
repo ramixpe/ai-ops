@@ -1264,6 +1264,37 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-060 · T-027 · The `report` prompt, its three golden cases — and §0.12's handover firing on the day it was written
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** `prompts/report.v1.txt`, a versioned loader/renderer, and 13 golden tests. **1217 passed.**
+
+  **All three of the operator's requirements are pinned, and all three cases come from committed fixtures:**
+
+  | Case | Source | Finding |
+  |---|---|---|
+  | localised cause | the `broken` label | `interface_line_down` on PE2, 4-rung chain |
+  | `cause_not_localised` | **composed** — `broken`'s BGP section over `healthy`'s lower layers | `cause_not_localised`, empty chain |
+  | refusal path | the `t0` label | `undetermined`, stopped at `transport` |
+
+  The composed case is the only synthetic one, and it is synthetic in a specific and defensible way: **both halves are real captured output, only the combination is invented.** No consistently-behaving fabric can produce "session Idle, every layer beneath it healthy" — that is what makes the finding worth having and also what makes it uncapturable.
+
+  The refusal case needed no construction at all. `t0` predates template capture, so its transport rung genuinely cannot be read, and the descent stops there with `undetermined`. Real data, real gap.
+- **Evidence:** `tests/test_report_prompt.py`, 13 passed. `prompts/tests/cases/report.cases.json` is **read by the tests**, not decoration — a case file nothing reads is exactly the ornamental artifact these rules exist to prevent.
+- **What I did:** Three things worth recording.
+
+  **§0.12's handover mechanism fired the same day it was written, and caught something real.** Committing `report.v1.txt` broke `test_the_library_is_still_a_scaffold_and_the_rule_tests_are_skipping`, exactly as designed. What it forced me to check was whether the two parametrised rule tests had actually switched from skipping to running — and pytest now reports them as `[report.v1.txt]`, so they had. Without that companion test, the rules would have quietly kept skipping and I would have had no reason to look.
+
+  **Invariant 4 is structural here, not filtered.** `build_report_prompt` cannot leak device output because it never receives any: it takes a `DescentResult`, which holds verdicts, reasons and evidence keys, and serialises exactly those. A test asserts no recognisable IOS-XR output (`RP/0/RP0/CPU0`, `Routing entry for`, `BGP neighbor is`, …) appears in the rendered prompt. A redaction pass over text that *might* contain raw output is something somebody eventually gets wrong; a function that never holds the text cannot.
+
+  **One test failed for the wrong reason and I fixed the test.** An assertion on `"Do not supply a likely cause"` failed because the prompt wraps that phrase across a line break. That is a test depending on formatting — precisely the mistake these golden tests exist to avoid — so matching now collapses whitespace first. The operator's rule applied to itself: *if a test fails because of phrasing, the test is wrong.*
+- **Needs human review:** no
+- **Blocks:** none — T-028 next.
+
+---
+
 <!--
 Copy this block for each new entry.
 

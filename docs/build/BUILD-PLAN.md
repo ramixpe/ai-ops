@@ -760,7 +760,7 @@ prompts/
 
 ---
 
-## T-027 · The `report` prompt `[STATUS: TODO]`
+## T-027 · The `report` prompt `[STATUS: DONE]`
 
 **Input:** a `DescentResult` plus its evidence bundle.
 **Output:** JSON with three separated sections:

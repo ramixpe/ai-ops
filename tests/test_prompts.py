@@ -105,23 +105,19 @@ def test_the_readme_records_the_causal_chain_requirement():
     assert "observation" in readme and "interpretation" in readme
 
 
-def test_the_library_is_still_a_scaffold_and_the_rule_tests_are_skipping():
-    """T-026 ships the rules; T-027 and T-028 ship the prompts.
+def test_the_rule_tests_are_actually_running_now_that_prompts_exist():
+    """Was `test_the_library_is_still_a_scaffold...` (T-026).
 
-    Until then the two parametrized rule tests above have nothing to run
-    against and pytest reports them as skipped -- which is honest, but silent.
-    A rule that is skipping is a rule that is not enforced, and this build has
-    already shipped one vacuously-passing guardrail (OBS-054) before catching
-    it.
+    That test asserted the library was empty, so it failed the moment
+    `report.v1.txt` landed -- which was the point. Its job was to make me check
+    that the two parametrised rule tests above had switched from skipping to
+    running, rather than silently continuing to skip. They had: pytest now
+    reports them as `[report.v1.txt]`.
 
-    So this test states the scaffold state out loud. **It fails the moment the
-    first prompt lands**, which is the signal to confirm the parametrized tests
-    are actually running rather than still skipping -- exactly how
-    `test_registry_is_empty_until_the_parsers_land` handed over at T-012.
+    Replaced with the real expectation, per §0.12: a guardrail that can pass by
+    measuring nothing needs a companion that fails when the empty set ends.
     """
 
-    assert _prompt_files() == [], (
-        "a prompt now exists -- check that the parametrized rule tests above "
-        "are running rather than skipping, then update this test to assert the "
-        "real expectation"
-    )
+    prompts = _prompt_files()
+    assert prompts, "the rule tests above are skipping again -- they enforce nothing"
+    assert any(p.name.startswith("report.") for p in prompts)
