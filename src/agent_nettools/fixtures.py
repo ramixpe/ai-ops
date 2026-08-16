@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import parsers
+from .interface_kind import is_physical_member
 from .inventory import get_device
 from .network_tools import collect_evidence, run_templates
 
@@ -146,10 +147,16 @@ def _capturable_interfaces(evidence: dict[str, Any]) -> list[str]:
     if not parsed or section.get("data", {}).get("parse_status") != parsers.PARSE_OK:
         return []
 
+    # Deliberately *not* the descent's member set, and expressed against the
+    # same predicate so the difference is visible rather than accidental. A
+    # capture manifest wants the physical ports **and** `Lo0`, because a
+    # loopback's address is what a route resolves to; the descent's interface
+    # rung wants ports only. Three copies of a near-identical rule (B-431) is
+    # how "near-identical" stops being true without anyone noticing.
     names: list[str] = []
     for record in parsed.get("records", []):
         name = record.get("interface", "")
-        if name.startswith("Gi") or name == "Lo0":
+        if is_physical_member(name) or name == "Lo0":
             names.append(name)
     return names
 

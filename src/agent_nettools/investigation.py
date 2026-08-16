@@ -59,6 +59,7 @@ from . import flows
 from .coverage import Coverage
 from .descent import DescentResult, run_descent
 from .grounding import GroundingResult, ground_correlation, ground_report
+from .interface_kind import physical_members
 from .log_window import ShapedWindow, coverage_from_logging, shape_window
 from .network_tools import collect_evidence, run_template
 from .prompt_library import build_correlate_prompt, build_report_prompt
@@ -339,12 +340,16 @@ def _collect_for_rung(device: str, rung: flows.Rung, subject: str, *, sender=Non
             )
         elif step.parameter == "interface":
             parsed = evidence.get("interfaces", {}).get("data", {}).get("parsed") or {}
-            for record in parsed.get("records", []):
-                name = record.get("interface", "")
-                if name.startswith("Gi") and "." not in name:
-                    evidence[f"{step.name}:{name}"] = run_template(
-                        device, step.name, sender=sender, interface=name
-                    )
+            # The same declared taxonomy the descent aggregates over. Collecting
+            # one member set and aggregating over another is what three copies
+            # of this rule made possible (B-431).
+            members, _ = physical_members(
+                [r.get("interface", "") for r in parsed.get("records", [])]
+            )
+            for name in members:
+                evidence[f"{step.name}:{name}"] = run_template(
+                    device, step.name, sender=sender, interface=name
+                )
         else:
             evidence[f"{step.name}:{subject}"] = run_template(
                 device, step.name, sender=sender, **{step.parameter: subject}

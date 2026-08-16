@@ -47,6 +47,7 @@ An unread rung ends the walk with ``undetermined`` and the reason recorded.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -63,6 +64,11 @@ from .flows import (
     Rung,
     SubjectRule,
 )
+from .interface_kind import physical_members
+
+#: Module logger. No handler is installed here, so this is silent unless the
+#: application configures logging -- the module stays free of I/O by default.
+LOGGER = logging.getLogger(__name__)
 
 __all__ = ["DescentResult", "RungOutcome", "run_descent"]
 
@@ -161,12 +167,18 @@ def _physical_interfaces(evidence: dict[str, Any]) -> list[str]:
     if not isinstance(section, dict):
         return []
     parsed = section.get("data", {}).get("parsed") or {}
-    names = []
-    for record in parsed.get("records", []):
-        name = record.get("interface", "")
-        if name.startswith("Gi") and "." not in name:
-            names.append(name)
-    return names
+    # One declared taxonomy, not a name prefix -- see `interface_kind`. The
+    # unclassified list is deliberately not discarded: silently excluding a name
+    # nobody recognised is the defect this replaced (B-431, OBS-092).
+    members, unclassified = physical_members(
+        [record.get("interface", "") for record in parsed.get("records", [])]
+    )
+    if unclassified:
+        LOGGER.warning(
+            "interface names not classified by interface_kind, excluded from the "
+            "member set: %s", ", ".join(unclassified),
+        )
+    return members
 
 
 def _rung_subjects(rung: Rung, subject: str, evidence: dict[str, Any]) -> list[str | None]:
@@ -190,6 +202,20 @@ def _aggregate(rung: Rung, results: list[CheckResult]) -> CheckResult:
     read, the set's verdict is not known either. That is the same rule as
     everywhere else -- absence is not health.
     """
+
+    if not results:
+        # No members resolved. Previously an `IndexError` from `results[0]`,
+        # uncaught by the CLI and surfacing as a traceback (B-431). It is not a
+        # crash and it is emphatically not a vacuous `healthy` -- `all([])` is
+        # True, which would report a set nobody looked at as fine. Nothing was
+        # read, so the verdict is `unevaluated`, per the module rule.
+        return CheckResult(
+            UNEVALUATED,
+            reason=(
+                f"rung {rung.name!r} resolved to no members; nothing was read, so "
+                f"nothing is known about it"
+            ),
+        )
 
     if len(results) == 1:
         return results[0]
