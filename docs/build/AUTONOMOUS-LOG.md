@@ -52,3 +52,24 @@ Purpose: a running record of **what was done, what was asked, and what was answe
 ## Running notes
 
 - **Model variance seen, not a defect.** One live healthy run had its report *withheld* (grounding), an identical rerun emitted with 5/5 rungs cited. Same prompt, same descent. Worth knowing that grounding rejection is not deterministic across runs — it is the model that varies, and the gate doing its job either way.
+
+---
+
+## Session close
+
+**13 of 14 defect items resolved.** 11 implemented, 1 closed as won't-do with reasoning (B-403), 1 halted needing re-scoping (B-411). Three items were surfaced *by* the work and closed or filed: B-434 (ignore-rule classification, closed), B-435 (LLDP hostname mapping, filed), and the OBS-103 correction.
+
+| | |
+|---|---|
+| Tests | **1688 pass, 22 skipped** (from 1451 at session start) |
+| Commits | 129 total on the branch |
+| Frozen files | all four byte-identical against `6629a2c` |
+| Delegated | B-404 and B-421 to Sonnet 5 in isolated worktrees; both reviewed, one corrected |
+
+### The three findings worth reading first
+
+**OBS-103** — the fabric's LLDP never contradicted itself. Three devices were configured with hostnames differing from their inventory labels, and the tool compared LLDP device IDs against the labels. A documented anomaly, wrong since Phase 3, dissolved by a Sonnet agent reading every line for §0.10 accounting and mentioning it in passing.
+
+**OBS-102** — B-421's implementation was faithful and my specification was wrong. *"The reordering must not change what the model is being asked"* is unfalsifiable as written; the agent satisfied its letter and destroyed the association between each heading and its payload.
+
+**OBS-099** — B-411 describes a mechanism netmiko does not have. Halted rather than implemented; needs re-scoping to the capture path.
