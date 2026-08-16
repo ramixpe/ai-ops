@@ -5,6 +5,64 @@ Python, Netmiko, an LLM reasoning layer, and MCP.
 
 > Good agents are built on boring tools that work.
 
+## Try it in ten seconds — no lab, no API key
+
+```bash
+nettools investigate RR1 10.255.0.12 --from-fixtures --format table
+```
+
+```
+bgp_session: RR1 -> 10.255.0.12
+FINDING: interface_line_down on PE2
+
+RUNG           DEVICE  STATUS  REASON
+-------------  ------  ------  -------------------------------------------------------------  ---------
+bgp_session    RR1     BROKEN  BGP session to 10.255.0.12 is not Established (state: Idle)
+transport      RR1     BROKEN  BGP transport session to 10.255.0.12 is not Established
+route_to_peer  RR1     BROKEN  no route to 10.255.0.12/32 ('% Network not in table')
+igp_adjacency  PE2     BROKEN  no IS-IS adjacencies; device is isolated at the IGP layer
+interface      PE2     BROKEN  1 of 3 members healthy (all required)                           <-- CAUSE
+```
+
+**No model produced that.** It replays committed captures of a real fabric
+through the same deterministic descent that runs against live devices — it
+needs no devices, no credentials, and no API key, and a test asserts that by
+running it with the environment stripped.
+
+Read it bottom-up and it is an argument an engineer can check link by link:
+PE2's uplinks are administratively down, so PE2 has no IS-IS adjacencies, so
+RR1 has no route to its loopback, so the TCP transport cannot establish, so the
+BGP session is Idle. **The chain is the product.** A tool that reported only
+`interface_line_down` would be restating an alert with a label attached.
+
+Two more, and they exercise the other two exit codes:
+
+```bash
+nettools investigate RR1 10.255.0.12 --from-fixtures --label healthy   # exit 0
+nettools investigate RR1 10.255.0.12 --from-fixtures --label t0        # exit 2
+```
+
+`t0` predates template capture, so its transport rung genuinely cannot be read.
+The descent reports `undetermined` and names no cause — an unread rung ends the
+walk rather than being filled in with a plausible one.
+
+### What the exit codes mean here
+
+| Code | Meaning |
+|---|---|
+| `0` | the descent completed and found no fault |
+| `1` | the descent completed and found a fault — a problem with the **network** |
+| `2` | no trustworthy answer was produced — a problem with the **answer** |
+
+Exit 2 covers `undetermined`, a report that failed its grounding check, and a
+run that could not complete. A grounding failure is exit 2 even when the
+descent found a real fault: if it were exit 1, a systematic grounding
+regression would hide forever in the noise of routine faults.
+
+**This matches `nettools diff` and deliberately not `nettools health`**, where
+`2` is the worst *network* outcome. A script calling both must not assume one
+scheme.
+
 ## What This Does
 
 - Loads a declarative inventory of devices from `inventory/lab.yaml`.

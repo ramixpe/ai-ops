@@ -73,6 +73,12 @@ def render(payload: dict[str, Any], fmt: Format) -> str:
 # --------------------------------------------------------------------------- #
 
 
+def _is_investigation(payload: dict[str, Any]) -> bool:
+    """An `investigate` result: a descent, its rungs, and the model's work."""
+
+    return payload.get("tool") == "investigate" and isinstance(payload.get("rungs"), list)
+
+
 def _fabric_device_map(payload: dict[str, Any]) -> dict[str, Any] | None:
     """A tool-envelope-shaped fabric result: ``data.devices`` is a *map*."""
 
@@ -139,6 +145,9 @@ def _compact(value: Any, limit: int = 80) -> str:
 
 
 def render_table(payload: dict[str, Any]) -> str:
+    if _is_investigation(payload):
+        return _render_investigation_table(payload)
+
     fabric_map = _fabric_device_map(payload)
     if fabric_map is not None:
         return _render_tool_device_table(fabric_map)
@@ -215,6 +224,9 @@ def _render_flat_table(payload: dict[str, Any]) -> str:
 
 
 def render_summary(payload: dict[str, Any]) -> str:
+    if _is_investigation(payload):
+        return _render_investigation_summary(payload)
+
     health_map = _health_fabric_map(payload)
     if health_map is not None:
         by_severity = payload.get("counts", {}).get("by_severity", {})
@@ -270,3 +282,88 @@ def render_summary(payload: dict[str, Any]) -> str:
         return f"{payload.get('tool', '?')} {payload.get('device', '?')}: {payload['status']}{suffix}"
 
     return json.dumps(payload, separators=(",", ":"))
+
+
+# --------------------------------------------------------------------------- #
+# The investigation result. The causal chain is the product, so both renderers
+# put it first -- a finding without its chain is an assertion where the descent
+# produced an argument (`prompts/README.md`).
+# --------------------------------------------------------------------------- #
+
+
+def _render_investigation_table(payload: dict[str, Any]) -> str:
+    """The rungs top-down, then what happened to the model's work.
+
+    Deliberately the *whole* ladder rather than just the broken rungs. A
+    healthy rung below a broken one is what tells a reader the descent went
+    past it and found nothing -- omitting it would make "the cause is here"
+    look like "we stopped looking here".
+    """
+
+    cause = payload.get("cause") or {}
+    rows = []
+    for rung in payload.get("rungs") or []:
+        marker = "<-- CAUSE" if (
+            rung.get("rung") == cause.get("rung")
+            and rung.get("device") == cause.get("device")
+        ) else ""
+        rows.append([
+            str(rung.get("rung", "?")),
+            str(rung.get("device", "?")),
+            str(rung.get("status", "?")).upper(),
+            _compact(str(rung.get("reason") or "")),
+            marker,
+        ])
+
+    table = _format_table(["RUNG", "DEVICE", "STATUS", "REASON", ""], rows)
+
+    lines = [
+        f"{payload.get('flow', '?')}: {payload.get('device', '?')} -> "
+        f"{payload.get('subject', '?')}",
+        f"FINDING: {payload.get('finding', '?')}"
+        + (f" on {cause['device']}" if cause.get("device") else ""),
+        "",
+        table,
+    ]
+
+    report = payload.get("report") or {}
+    correlation = payload.get("correlation") or {}
+    lines.append("")
+    lines.append(f"report:      {report.get('status', '?')}")
+    lines.append(f"correlation: {correlation.get('status', '?')}")
+    if correlation.get("caveat"):
+        lines.append(f"  caveat: {_compact(correlation['caveat'])}")
+    if not payload.get("trustworthy", True):
+        lines.append("  NOT TRUSTWORTHY -- no answer was produced (exit 2)")
+    return "\n".join(lines)
+
+
+def _render_investigation_summary(payload: dict[str, Any]) -> str:
+    """One line, and the chain survives it.
+
+    A summary that printed only the finding would be the exact output
+    `prompts/README.md` rules out, in the format most likely to be pasted into
+    a ticket. The chain is rendered as arrows so it stays one line.
+    """
+
+    cause = payload.get("cause") or {}
+    chain = payload.get("causal_chain") or []
+    where = f" on {cause['device']}" if cause.get("device") else ""
+
+    head = (
+        f"{payload.get('device', '?')} -> {payload.get('subject', '?')} "
+        f"({payload.get('flow', '?')}): {payload.get('finding', '?')}{where}"
+    )
+    if chain and cause:
+        links = " <- ".join(str(link.get("rung", "?")) for link in chain)
+        head += f" [{links} <- {cause.get('rung', '?')}]"
+    elif chain:
+        # No localised cause: the chain is what broke, not an explanation of it.
+        head += " [broken: " + ", ".join(str(link.get("rung", "?")) for link in chain) + "]"
+
+    correlation = payload.get("correlation") or {}
+    if correlation.get("status") == "coverage_limited":
+        head += " (timeline coverage-limited; finding unaffected)"
+    if not payload.get("trustworthy", True):
+        head += " -- NOT TRUSTWORTHY"
+    return head

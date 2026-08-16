@@ -462,6 +462,64 @@ def analyze_with_minimax(evidence: dict[str, Any]) -> str:
     return _openai_call(build_analysis_prompt(evidence), **_minimax_call_kwargs())
 
 
+def complete_prompt(prompt: str) -> str:
+    """Send one fully-rendered prompt and return the model's raw text.
+
+    The prompt library (T-026-T-029) renders a complete, self-contained prompt
+    -- Grounding, Role, Anchors, Constraints, Expected output -- so there is
+    nothing for this layer to add. Every other entry point here *builds* a
+    prompt from evidence; this one is handed a finished one, which is what lets
+    `investigation.investigate` take a plain `(prompt) -> str` callable and stay
+    testable with a scripted analyst.
+
+    **Prompt caching is not applied on this path.** Anthropic's cache is a
+    prefix match on `system`, and a rendered prompt arrives as one string with
+    its static and volatile halves already interleaved. Splitting it back apart
+    would mean the renderer returning two pieces, which is a prompt-library
+    change rather than CLI wiring. Filed as B-421; the prompts are a few
+    kilobytes, so this is cost, not correctness.
+    """
+
+    provider = get_provider()
+
+    if provider == "anthropic":
+        import anthropic
+
+        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        message = _call_anthropic_or_raise(
+            client,
+            model=os.getenv("ANTHROPIC_MODEL", ANTHROPIC_MODEL_DEFAULT),
+            messages=[{"role": "user", "content": prompt}],
+        )
+        if message.stop_reason == "refusal":
+            details = getattr(message, "stop_details", None)
+            category = getattr(details, "category", None) if details is not None else None
+            suffix = f" (category: {category})" if category else ""
+            raise LLMAnalysisError(f"The model declined this prompt.{suffix}")
+        text = "\n".join(
+            block.text for block in message.content if getattr(block, "text", None)
+        )
+        if message.stop_reason == "max_tokens":
+            # Not a truncation *notice* here, unlike `analyze_evidence`. This
+            # response is parsed as JSON, and appending prose to it would turn
+            # a truncation into a parse failure that reads as a malformed model
+            # response. Raising says what actually happened.
+            raise LLMAnalysisError(
+                "The model's response hit max_tokens and is incomplete; a partial "
+                "JSON document cannot be grounded"
+            )
+        return text
+
+    if provider == "openai":
+        return _openai_call(prompt)
+    if provider == "minimax":
+        return _openai_call(prompt, **_minimax_call_kwargs())
+    if provider == "ollama":
+        return _ollama_call(prompt)
+
+    raise LLMAnalysisError(f"Provider {provider!r} cannot send a rendered prompt.")
+
+
 def _ollama_call(prompt: str) -> str:
     """Send one prompt string to a local Ollama model via its native chat API.
 

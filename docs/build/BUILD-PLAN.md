@@ -938,7 +938,7 @@ Order: resolve scope → run descent → correlate (model) → write report (mod
 
 ---
 
-## T-031 · CLI wiring `[STATUS: TODO]`
+## T-031 · CLI wiring `[STATUS: DONE]`
 
 ```bash
 nettools investigate RR1 10.255.0.12 --flow bgp_session
@@ -949,6 +949,22 @@ nettools investigate PE1 GigabitEthernet0/0/0/1 --flow interface --format summar
 Follow the existing conventions exactly: `--format json|table|summary`, `--quiet`, and the project-wide exit-code scheme (`0` nothing actionable, `1` reports a problem, `2` could not run / worst outcome).
 
 `--from-fixtures` must work with **no lab and no API key**, skipping the model steps and emitting the descent result alone. That is the demo that proves the deterministic core.
+
+**Exit codes, decided at T-031 and diverging from the generic scheme above.**
+
+| Code | Meaning |
+|---|---|
+| `0` | the descent completed and found no fault |
+| `1` | the descent completed and found a fault — a problem with the **network** |
+| `2` | no trustworthy answer was produced — a problem with the **answer** |
+
+Exit 2 covers `undetermined`, a withheld report, a collection failure, and a flow that could not run. **A grounding failure is exit 2 even when the descent found a real fault**, and the argument is not "the caller got nothing": if it were exit 1, a *systematic* grounding regression would hide in the noise of routine faults forever, because faults are normal and exit 1 is normal. The descent's finding stays in the payload either way, so nothing about the network is concealed.
+
+`coverage_limited` follows the descent's own outcome (0 or 1) and carries its caveat as a **payload field**, rendered in every format. The descent is deterministic and reached with no model; only the correlation is qualified.
+
+Matches `nettools diff`. **Does not match `nettools health`**, where 2 is the worst network outcome — documented in the subcommand's `--help` and the README, because a script calling both will otherwise assume one scheme.
+
+**README:** `--from-fixtures` is the first documented command, above "What This Does", with the rendered causal chain inline.
 
 ---
 

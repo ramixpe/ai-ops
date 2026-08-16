@@ -93,14 +93,20 @@ from pathlib import Path
 
 from dotenv import find_dotenv, load_dotenv
 
-from . import __version__, metrics, output
+from . import __version__, flows, metrics, output
 from .agent_loop import run_agent_loop
 from .fabric_analysis import analyze_fabric
 from .fixtures import capture_device, load_fixture_evidence
 from .health import evaluate_fabric, exit_code_for_severity, severity_rank
 from .inventory import InventoryError, get_default_device_name
 from .inventory_model import resolve_inventory_path
-from .llm_analysis import LLMAnalysisError, analyze_evidence
+from .investigation import investigate
+from .llm_analysis import (
+    LLMAnalysisError,
+    analyze_evidence,
+    complete_prompt,
+    get_provider,
+)
 from .network_tools import (
     CHECK_TOOLS,
     check_fabric,
@@ -307,6 +313,98 @@ def _cmd_agent(args: argparse.Namespace) -> int:
         f"stopped_because={result['stopped_because']}]"
     )
     return EXIT_OK if result["stopped_because"] == "end_turn" else EXIT_WARNING
+
+
+
+def _cmd_investigate(args: argparse.Namespace) -> int:
+    """Run one deterministic investigation and report what it found.
+
+    **Exit codes here answer "is the network broken", not "is the answer
+    trustworthy" — and never both.**
+
+    ==== =========================================================
+    Code Meaning
+    ==== =========================================================
+    0    the descent completed and found no fault
+    1    the descent completed and found a fault
+    2    no trustworthy answer was produced
+    ==== =========================================================
+
+    Exit 1 is a problem with the **network**. Exit 2 is a problem with the
+    **answer** — `undetermined`, a withheld report, a collection failure, a
+    flow that could not run. Conflating them is the failure this scheme exists
+    to prevent, and the decisive case is not the obvious one: if a grounding
+    failure exited 1, a *systematic* grounding regression (a prompt change, a
+    model change) would hide in the noise of routine faults. Faults are normal.
+    Exit 1 is normal. A model layer that has quietly stopped producing
+    verifiable output would look exactly like a fabric with intermittent
+    problems, forever.
+
+    Matches `nettools diff`, which already uses "2 = the comparison itself is
+    not trustworthy". **It does not match `nettools health`**, where 2 is the
+    worst *network* outcome — see the note in `_add_investigate_parser`.
+
+    `coverage_limited` follows the descent's own outcome (0 or 1) and carries
+    its caveat in the payload. The descent is deterministic and reached with no
+    model; only the correlation is qualified, and downgrading the exit code for
+    it would report doubt about a diagnosis that has none.
+    """
+
+    analyst = None
+    sender = None
+
+    if args.from_fixtures:
+        from .fixtures import fixture_sender
+
+        sender = fixture_sender(label=args.label)
+        _note(f"# Fixture replay: label={args.label}, no lab and no model", args)
+    elif not args.no_model:
+        try:
+            analyst = _build_analyst()
+        except (ValueError, LLMAnalysisError) as exc:
+            _note(f"# No model configured ({exc}); running the descent alone.", args)
+
+    try:
+        result = investigate(
+            args.device, args.subject, flow=args.flow, analyst=analyst, sender=sender
+        )
+    except (ValueError, KeyError) as exc:
+        # A flow that does not exist, or a subject no device owns. The run
+        # produced no answer at all, which is exit 2 by the rule above.
+        _emit({"tool": "investigate", "status": "error", "device": args.device,
+               "subject": args.subject, "errors": [str(exc)]}, args)
+        return EXIT_CRITICAL
+
+    _emit(result.to_payload(), args)
+
+    for repair in result.repairs:
+        _note(f"# Repaired a model response: {repair}", args)
+    for reason in result.withheld_because():
+        _note(f"# {reason}", args)
+
+    if not result.trustworthy:
+        return EXIT_CRITICAL
+    if result.descent.finding == flows.ALL_LAYERS_HEALTHY:
+        return EXIT_OK
+    return EXIT_WARNING
+
+
+def _build_analyst():
+    """A model call bound to the configured provider, or raise.
+
+    Deliberately thin. `investigation.investigate` takes `(prompt) -> str` and
+    knows nothing about providers, so a provider change never reaches the
+    runner and the runner stays testable with a scripted callable.
+
+    `get_provider()` is called here rather than inside the callable so a
+    missing key fails *before* the descent runs -- reporting "no model" after
+    thirty seconds of device collection is a worse experience than reporting it
+    immediately, and the descent then runs deliberately rather than by
+    accident.
+    """
+
+    get_provider()
+    return complete_prompt
 
 
 def _cmd_demo(args: argparse.Namespace) -> int:
@@ -707,6 +805,41 @@ def build_parser() -> argparse.ArgumentParser:
         "--time-budget", type=float, default=120, help="Wall-clock budget in seconds (default: 120)."
     )
     p_agent.set_defaults(func=_cmd_agent)
+
+    p_investigate = sub.add_parser(
+        "investigate",
+        help="Deterministically descend a flow's dependency stack and report the cause.",
+        description=(
+            "Exit codes answer a different question here than in `nettools health`. "
+            "0 = the descent completed and found no fault; 1 = it completed and found "
+            "one (a problem with the NETWORK); 2 = no trustworthy answer was produced "
+            "-- undetermined, a withheld report, or a run that could not complete (a "
+            "problem with the ANSWER). This matches `nettools diff`. It does NOT match "
+            "`nettools health`, where 2 is the worst network outcome; a script calling "
+            "both must not assume one scheme."
+        ),
+    )
+    p_investigate.add_argument("device", help="Device the investigation starts from.")
+    p_investigate.add_argument("subject", help="The object under investigation, e.g. a peer address.")
+    p_investigate.add_argument(
+        "--flow", default="bgp_session", choices=sorted(flows.FLOWS),
+        help="Which dependency ladder to descend (default: bgp_session).",
+    )
+    p_investigate.add_argument(
+        "--from-fixtures", action="store_true",
+        help="Replay committed fixtures instead of touching the lab. Needs no devices "
+             "and no API key, and skips the model steps entirely.",
+    )
+    p_investigate.add_argument(
+        "--label", default="broken",
+        help="Fixture label to replay with --from-fixtures (default: broken).",
+    )
+    p_investigate.add_argument(
+        "--no-model", action="store_true",
+        help="Run the descent against live devices but skip the report and correlation.",
+    )
+    _add_output_arguments(p_investigate)
+    p_investigate.set_defaults(func=_cmd_investigate)
 
     p_demo = sub.add_parser("demo", help="Run the narrated agent demo.")
     p_demo.add_argument("device", nargs="?", help="Device name; defaults to PE1.")

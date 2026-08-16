@@ -26,7 +26,7 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 | Baseline test count | **550 passed, 4 skipped, 0 failed** (554 total; the 4 are `live_lab`, skipped by default) |
 | Run started | 2026-08-15 |
 | Last updated | 2026-08-16 |
-| Current task | T-031 |
+| Current task | T-032 |
 | Halted? | no — Q-013 and Q-017 resolved by the operator |
 | Operator decisions pending capture | **Lab must stay healthy until T-011** — `healthy` then `broken` captured in one coordinated window (OBS-019) |
 
@@ -90,8 +90,8 @@ T-035 is optional and does not gate the definition of done.
 | — | merge `evidence-reduction` r1+r2 | DONE | opus-5 | 67ead0d | OBS-067 | 3 of r2's claims corrected against measurement. Loki would return 2 events from the *wrong incident*, not nothing |
 | — | BUILD-PLAN §0.13 | DONE | opus-5 | e32d046 | OBS-064 | Fifth silent-failure shape; OBS-064 promoted to a Part 0 rule |
 | T-029a | absence coverage | DONE | opus-5 | a5ae7e2 | OBS-068, OBS-069 | `coverage.py` + `check_absence_coverage` + correlate.v3. Neither golden case can assert a clean negative — measured, not a limitation. 1297 passed |
-| T-030 | `investigation.py` runner | DONE | opus-5 | _next commit_ | OBS-070 | No gate: descent byte-identical with and without a model. Window read from the *cause* device. Coverage shortfall downgrades. 22 tests, 1319 passed |
-| T-031 | CLI wiring | TODO | sonnet-5 | | | |
+| T-030 | `investigation.py` runner | DONE | opus-5 | 8054be1 | OBS-070 | No gate: descent byte-identical with and without a model. Window read from the *cause* device. Coverage shortfall downgrades. 22 tests, 1319 passed |
+| T-031 | CLI wiring | DONE | opus-5 | _next commit_ | OBS-072, OBS-073 | Exit 1 = network problem, 2 = answer problem, decided in the open. `--from-fixtures` needed a password until OBS-072. 19 tests, 1338 passed |
 | T-032 | End-to-end offline test | TODO | sonnet-5 | | | **must assert BOTH labels**, as T-025 does |
 | T-033 | Live lab run | TODO | opus-5 | | | Q-006 confirmation |
 | T-034 | Documentation update | TODO | sonnet-5 | | | |

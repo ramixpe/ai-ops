@@ -457,7 +457,21 @@ def _run_approved_commands(
             f"Refusing unapproved commands for {platform}: {', '.join(unsafe_commands)}",
         )
 
-    if device is None:
+    if sender is None and device is None:
+        # Credentials are resolved here and **only** here -- after the allowlist
+        # check above, and only on the path that actually opens a socket.
+        #
+        # The injection path deliberately skips this. A `sender` short-circuits
+        # the transport entirely, so requiring a password to serve a committed
+        # fixture is coupling with nothing behind it -- and it is not harmless:
+        # it made `nettools investigate --from-fixtures` fail on a checkout with
+        # no `.env`, which is the one environment that demo exists for (OBS-072).
+        #
+        # This *strengthens* the §0.6 ordering invariant rather than bending it.
+        # The rule is "the allowlist is checked before credentials load"; loading
+        # them strictly later on strictly fewer paths cannot violate it, and
+        # `test_refuses_unapproved_commands_before_loading_credentials` is
+        # unchanged and still passes.
         try:
             device = get_device(device_name)
         except InventoryError as exc:
@@ -467,7 +481,12 @@ def _run_approved_commands(
     result["data"] = {"commands": {}}
 
     if sender is not None:
-        # Test/injection path: the caller supplies output per command.
+        # Test/injection path: the caller supplies output per command. The
+        # record handed to the sender carries identity only -- name and
+        # platform, both from credential-free inventory data, which is all any
+        # sender in this codebase reads.
+        if device is None:
+            device = {"name": device_name, "platform": platform}
         for command in commands:
             try:
                 result["data"]["commands"][command] = sender(device, command)
@@ -651,10 +670,18 @@ def _run_rendered_command(
             "run_template", device_name, f"Refusing unsafe rendered command: {command!r}"
         )
 
-    try:
-        device = get_device(device_name)
-    except InventoryError as exc:
-        return _safe_error("run_template", device_name, str(exc))
+    # Credentials only on the path that opens a socket. A `sender` short-circuits
+    # the transport, and every sender in this codebase reads only the device's
+    # name and platform -- both credential-free. See OBS-072 and the longer note
+    # in `_run_approved_commands`.
+    device: dict[str, Any] | None = None
+    if sender is None:
+        try:
+            device = get_device(device_name)
+        except InventoryError as exc:
+            return _safe_error("run_template", device_name, str(exc))
+    else:
+        device = {"name": device_name, "platform": platform}
 
     result = _base_result("run_template", device_name)
     # Output goes under "commands", keyed by the rendered command, matching what
@@ -839,6 +866,18 @@ def run_templates(
     commands = [command for _, command in rendered]
 
     # ---- Phase 2: only now are credentials and a socket touched. ----
+    if sender is not None:
+        # ...and not even then, on the injection path. See OBS-072.
+        device = {"name": device_name, "platform": platform}
+        result["data"]["commands"] = {}
+        for template_name, command in rendered:
+            try:
+                result["data"]["commands"][command] = sender(device, command)
+            except Exception as exc:  # noqa: BLE001 - structured errors at the boundary.
+                result["status"] = STATUS_ERROR
+                result["errors"].append(f"{template_name}: {exc}")
+        return result
+
     try:
         device = get_device(device_name)
     except InventoryError as exc:

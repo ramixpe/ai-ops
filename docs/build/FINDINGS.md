@@ -1640,6 +1640,64 @@ Copy this block for each new entry.
 
 ---
 
+## OBS-072 · T-031 · `--from-fixtures` silently required a device password, and the demo hid it
+
+- **Kind:** defect-found
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** `nettools investigate --from-fixtures` worked perfectly from my shell and failed with no credentials in the environment. The shell runs passed because `main()` calls `load_dotenv()`, and **this repository's `.env` holds real lab credentials** — so every manual check was silently supplied with the thing the command is supposed not to need.
+
+  It failed the moment a test stubbed `load_dotenv` out. That test exists only because the operator's requirement was specific: *"runs with no lab and no API key"*, first command in the README. A looser requirement would have shipped this.
+
+  Three call sites resolved credentials before checking for an injected `sender`: `_run_approved_commands`, `_run_rendered_command`, and `run_templates`. A `sender` short-circuits the transport entirely, and **every sender in this codebase reads only `device["name"]` and `device["platform"]`** — both credential-free inventory data. So a password was being demanded to read a committed text file.
+- **Evidence:** `tests/test_cli_investigate.py::_no_environment` strips `DEVICE_USERNAME`/`DEVICE_PASSWORD`/`DEVICE_SSH_KEYFILE` and all three API keys. **1338 passed, lint clean.** `tests/test_safety.py` and `tests/test_template_security.py` byte-identical and passing (186 tests).
+- **What I did:** Moved credential resolution behind the sender check at all three sites, and handed the sender a `{"name", "platform"}` record built from credential-free data.
+
+  **This strengthens the §0.6 ordering invariant rather than bending it.** The rule is "the allowlist is checked before credentials load". Loading credentials strictly later, on strictly fewer paths, cannot violate it — and `test_refuses_unapproved_commands_before_loading_credentials`, which runs with an empty environment, is unchanged and still passes. I checked that first, because a change in this area that *needed* a frozen test edited would have been a HALT.
+
+  The finding worth keeping is not the defect. It is **how it stayed invisible**: the verification environment was contaminated by the thing being verified. Every manual run of `--from-fixtures` "proved" it needed no credentials while being handed credentials. That is §0.13's family again — *the evidence could not have shown me the dependency, because the evidence was produced with the dependency satisfied.*
+
+  > **A demo verified in the developer's own environment verifies the developer's environment.**
+
+  Which is the argument for the test asserting it rather than a person checking it: the test can strip the environment, and a person running a command cannot easily un-know their own `.env`.
+- **Needs human review:** no
+- **Blocks:** none
+
+---
+
+## OBS-073 · T-031 · The exit-code scheme, decided in the open
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** Three orthogonal outcomes — did the descent find a fault, did grounding pass, was coverage complete — and three exit codes. The operator proposed a scheme and asked me to take it or argue it. **I take it, in full, and the reasoning is worth recording because one case is genuinely contestable.**
+
+  | Code | Meaning |
+  |---|---|
+  | 0 | the descent completed and found no fault |
+  | 1 | the descent completed and found a fault — a **network** problem |
+  | 2 | no trustworthy answer was produced — an **answer** problem |
+
+  The contestable case is a **grounding failure over a real fault**. The descent found `interface_line_down`; the network genuinely is broken; exit 1 is defensible and my first instinct was that exit 2 risks a real outage being read as a tool problem.
+
+  That instinct is wrong, and the argument that settles it is not the one about "the caller got nothing":
+
+  > **If a grounding failure exited 1, a systematic grounding regression would hide in the noise of routine faults forever.** Faults are normal. Exit 1 is normal. A model layer that had quietly stopped producing verifiable output would look exactly like a fabric with intermittent problems — indefinitely, and to everyone.
+
+  That is the silent-degradation shape this build has spent its entire length eliminating, and it decides the case. The counter-concern also dissolves on inspection: exit 2 is *more* alarming than exit 1, not less, and the descent's finding stays in the payload either way, so nothing about the network is concealed.
+- **Evidence:** `cli._cmd_investigate`; `tests/test_cli_investigate.py`, 19 tests. All three codes produced from three real fixture labels, and asserted to be *different* — the §0.12 companion, since each expectation is individually satisfiable by a constant.
+- **What I did:** Three things beyond adopting it.
+
+  **1. Documented the divergence from `nettools health`, which is a live trap.** `health --all` maps 2 to the worst *network* outcome; `diff` and now `investigate` map it to "the answer is not trustworthy". Within one CLI, exit 2 means opposite things. That predates this task, but a cron job calling both and assuming one scheme will read a critical fabric as a broken tool or the reverse. It is now in the subcommand's `--help` and in the README, and a test asserts the help text says so.
+
+  **2. `coverage_limited` follows the descent, and the caveat is a field.** The operator's rule is right — the finding is deterministic and reached with no model, so only the *timeline* is qualified. But "carries the caveat in the report" is a promise unless every renderer keeps it, so the caveat is a payload field and the test is parametrised over all three formats. A caveat surviving only in `--format json` is one the person reading a summary never sees.
+
+  **3. An `undetermined` walk names no cause.** `DescentResult.cause` is "the lowest broken rung", which for a stopped walk is only "the lowest broken rung reached before we stopped". Rendering that as a cause would present a stopping point as a conclusion. Suppressed in the payload and both renderers.
+- **Needs human review:** no
+- **Blocks:** none — T-032 next.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**

@@ -147,12 +147,108 @@ class InvestigationResult:
         """One line. Always available -- the descent needs no model."""
 
         cause = self.descent.cause
-        where = f" on {cause.device}" if cause is not None else ""
+        localised = cause is not None and self.descent.finding != flows.UNDETERMINED
+        where = f" on {cause.device}" if localised else ""
         return (
             f"{self.flow} {self.device} -> {self.subject}: "
             f"{self.descent.finding}{where} "
             f"[report {self.report_status}, correlation {self.correlation_status}]"
         )
+
+    def to_payload(self) -> dict:
+        """The structured result a CLI or MCP caller renders.
+
+        Carries the descent in full, the model's work only where it was
+        emitted, and **the caveat wherever a claim is qualified** -- a
+        `coverage_limited` correlation that renders without its caveat is the
+        overstatement the downgrade exists to prevent, so the caveat is a field
+        rather than something a renderer is trusted to add.
+        """
+
+        descent = self.descent
+        return {
+            "tool": "investigate",
+            "device": self.device,
+            "subject": self.subject,
+            "flow": self.flow,
+            "finding": descent.finding,
+            "reason": descent.reason,
+            # Suppressed when the walk did not localise one. `DescentResult.cause`
+            # is "the lowest broken rung", which for an `undetermined` walk is
+            # only "the lowest broken rung reached before we stopped" -- naming
+            # that as a cause would present a stopping point as a conclusion.
+            "cause": (
+                {"rung": descent.cause.rung, "device": descent.cause.device,
+                 "reason": descent.cause.result.reason}
+                if descent.cause is not None
+                and descent.finding != flows.UNDETERMINED
+                else None
+            ),
+            "causal_chain": [
+                {"rung": o.rung, "device": o.device, "reason": o.result.reason}
+                for o in descent.causal_chain
+            ],
+            "rungs": [
+                {"rung": o.rung, "device": o.device, "status": o.status,
+                 "reason": o.result.reason,
+                 "evidence_keys": list(o.result.evidence_keys)}
+                for o in descent.outcomes
+            ],
+            "report": {
+                "status": self.report_status,
+                "content": self.report,
+                "grounding": self.report_grounding.summary(),
+            },
+            "correlation": {
+                "status": self.correlation_status,
+                "content": self.correlation,
+                "grounding": self.correlation_grounding.summary(),
+                "caveat": self.caveat,
+            },
+            "coverage": self.coverage.as_dict() if self.coverage is not None else None,
+            "repairs": list(self.repairs),
+            "trustworthy": self.trustworthy,
+        }
+
+    @property
+    def caveat(self) -> str | None:
+        """The qualification a `coverage_limited` correlation must carry.
+
+        Explicitly **not** a qualification of the descent. The finding is
+        deterministic and was reached without a model; only the *timeline* is
+        limited by what the log source could show. Conflating the two would
+        make a correlation shortfall read as doubt about the diagnosis.
+        """
+
+        if self.correlation_status != COVERAGE_LIMITED:
+            return None
+        gaps = "; ".join(self.coverage.gaps()) if self.coverage else "coverage unknown"
+        return (
+            f"The finding is deterministic and unaffected. The timeline is "
+            f"limited: {gaps}. Read the correlation as 'nothing found in what "
+            f"was available', not as 'nothing happened'."
+        )
+
+    @property
+    def trustworthy(self) -> bool:
+        """Did this run produce an answer a caller may act on?
+
+        The axis the exit code is built from, and deliberately *not* "is the
+        network healthy". An `undetermined` descent and a withheld report are
+        both untrustworthy answers about a fabric that may be perfectly fine;
+        `interface_line_down` with a grounded report is a trustworthy answer
+        about a fabric that is not.
+
+        A `coverage_limited` correlation is trustworthy. It is a qualified
+        answer, not an absent one, and the qualification travels in
+        :attr:`caveat`.
+        """
+
+        if self.descent.finding == flows.UNDETERMINED:
+            return False
+        if self.report_status == WITHHELD or self.correlation_status == WITHHELD:
+            return False
+        return True
 
     def withheld_because(self) -> tuple[str, ...]:
         """Why a model output is not here, in terms of the descent.
