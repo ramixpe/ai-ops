@@ -288,7 +288,19 @@ So proximity thresholds must accommodate **protocol timers, not human intuitions
 
 **This is the `unevaluated` discipline applied to evidence sources**, and it is the highest-priority item here because the gap exists today.
 
-"No BGP events were found" is an incomplete statement unless the completeness of the source is known. Logs can be missing because of severity filtering, a collector outage, source configuration, transport loss, ingestion delay, parsing failure, or a wrapped device buffer. §4 is not hypothetical about this: on this fabric a platform query returns a plausible, wrong, non-empty answer, and nothing downstream can tell.
+"No BGP events were found" is an incomplete statement unless the completeness of the source is known. Logs can be missing because of severity filtering, a collector outage, source configuration, transport loss, ingestion delay, parsing failure, or a wrapped device buffer.
+
+### Why this is not the same problem as `unevaluated`
+
+Every other guard in this system catches **absence read as presence**: something was not measured, the gap is invisible, and a green result fills the space. `unevaluated`, §0.12's vacuity rule, grounding's citation requirement — all of them work by noticing that something is *missing*.
+
+A filtered source does not produce absence. Measured on this fabric (§4): querying the log platform for PE2's isolation window returns two genuine, correctly-timestamped severity-3 link events **from the previous day's restore**, and nothing from the isolation. The data is real. The timestamps are right. The mnemonics are right for a link event. A timeline built from them reads as competent work.
+
+> **A source that filters what it delivers does not return less of the truth; it returns a different, complete-looking truth.**
+
+That is why no consistency check can catch it — there is nothing inconsistent to find — and why coverage metadata is the only thing that can. Coverage does not ask "is anything missing from this result", which is unanswerable from inside the result. It states what the source **could not have carried**, which is a fact about the source, knowable without knowing what the answer should have been.
+
+Recorded as the sixth silent-failure shape in `BUILD-PLAN.md` §0.13, and the only one whose polarity is presence rather than absence.
 
 Every evidence response carries coverage:
 

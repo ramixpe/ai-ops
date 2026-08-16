@@ -257,10 +257,11 @@ The companion takes one of two forms: assert the collection is currently empty (
 > - a rule generalised from one instance fits one instance — *(rules)*
 > - a test sharing the implementation's premise confirms it — *(tests)*
 > - a corpus shows width only in dimensions where it varies — *(identity)*
+> - a demo verified in the developer's environment verifies the environment — *(setup)*
 >
-> **Before trusting any of the four, ask what the evidence could not have shown you.**
+> **Before trusting any of the five, ask what the evidence could not have shown you.**
 
-One family, four faces. Each has cost this build real time, and in every case the artefact was internally consistent — which is why the question has to be asked deliberately rather than noticed.
+One family, five faces. Each has cost this build real time, and in every case the artefact was internally consistent — which is why the question has to be asked deliberately rather than noticed.
 
 **The buffer-level trap is the same family.** `show logging` returns the device *buffer* (level `debugging`, severities 0–7); the *trap* level governs what is shipped to the collector (`informational`, 0–6). Reading the trap level to describe local coverage **understates the source by exactly the class in question**, while looking entirely correct. The evidence — a header line stating a level — cannot show you that you read the wrong line.
 
@@ -272,6 +273,9 @@ One family, four faces. Each has cost this build real time, and in every case th
 | **Rules** — one instance fits one instance | T-026: "every prompt names its refusal path as `undetermined`" — `report`'s refusal, not `correlate`'s | Move the value into data the instance declares |
 | **Tests** — a shared premise confirms itself | T-028: **sixteen green tests** over a filter deleting eight severity-3 records unattributed. The suite and the defect shared an author and a premise | Specify independently of the code, and read the specification against the implementation |
 | **Identity** — width only where the corpus varies | T-029a: `refusal_marker` moved into data and keyed by *prompt family*, then failed again when a second **version** appeared | Key by the finest identity the thing has — a filename, not a family name |
+| **Setup** — the environment verifies itself | T-031: `--from-fixtures` was checked by hand a dozen times and "needed no credentials", because `main()` loads this repo's `.env` and it holds real ones. The verification environment was contaminated by the thing being verified | Strip the environment in a test, and in CI. A person cannot easily un-know their own `.env`; a clean container can (**B-423**) |
+
+The **setup** face is the one most likely to be dismissed as an operations detail. It is not: it is the only face where the contaminating evidence is *outside the repository*, so no amount of reading the code or the tests reveals it. The fix has to be an environment, not an inspection.
 
 The **tests** face deserves the extra sentence, because it is the one that cannot be caught by looking harder at the artefact: *green tests are not by themselves evidence that a component is correct — only that it agrees with the assumption it was built on.* Where a component encodes a judgement about the world, specify it independently.
 
