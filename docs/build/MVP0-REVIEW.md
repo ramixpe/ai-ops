@@ -44,7 +44,7 @@ The `decision-made` count is the one worth pausing on. **Forty-three percent of 
 
 Shapes 1–5 are all **absence** presented as presence. Shape 6 is *presence of the wrong thing* — real, correctly read, and answering a different question than the one asked; **a property of inference from partial evidence, not of tools** (two of its four instances are human).
 
-**Shape 7, added after this review was first written, is the one that breaks the frame.** Every other shape concerns what the evidence could not tell you. Shape 7 is the evidence telling you and nothing listening:  reads  and ignores , which stated the cause verbatim in the same parsed record. **It is invisible to every mechanism in this build**, because all of them are aimed at output that claims *too much* and this claims too little — the output is correct. Detection is an audit of what each check reads against what its inputs contain, which is measurable:  parses 23 fields and 5 are read.
+**Shape 7, added after this review was first written, is the one that breaks the frame.** Every other shape concerns what the evidence could not tell you. Shape 7 is the evidence telling you and nothing listening: `bgp_transport` reads `connection_state` and ignores `last_reset_reason`, which stated the cause verbatim in the same parsed record. **It is invisible to every mechanism in this build**, because all of them are aimed at output that claims *too much* and this claims too little — the output is correct. Detection is an audit of what each check reads against what its inputs contain, and it is measurable: `bgp_neighbor` parses 23 fields and 5 are read.
 
 ### Did the rate fall as the rules landed?
 
