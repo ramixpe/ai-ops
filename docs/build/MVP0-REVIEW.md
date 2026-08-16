@@ -5,10 +5,10 @@
 | | |
 |---|---|
 | Tasks | T-001 … T-034, plus T-029a/b/c pulled forward from the backlog |
-| Commits | 97 on `feat/investigation-layer` |
+| Commits | 106 on `feat/investigation-layer` |
 | Tests | **1377 pass, 22 skipped**, no network, no credentials, no API key |
-| Findings | **86** |
-| Backlog | 63 items |
+| Findings | **97** |
+| Backlog | 67 items |
 | Investigation layer | ~5,100 lines across 9 modules |
 | Frozen files | `test_safety.py`, `test_template_security.py`, `platforms.py`, `templates.py` — **byte-identical** against `6629a2c`, the commit before T-001 |
 
@@ -22,7 +22,7 @@
 
 | Family | Rule | Instances |
 |---|---|---|
-| **Silent failure** — a green thing that verifies nothing | §0.12, §0.13 | 6 shapes, ~14 instances |
+| **Silent failure** — a green thing that verifies nothing | §0.12, §0.13 | **7 shapes**, ~15 instances |
 | **Classification** — a true statement filed as the wrong kind | §0.14 | 4 instances, all in one session |
 | **Tests face** — a test agreeing with the code by construction | §0.13 | 4 instances |
 
@@ -30,7 +30,7 @@ By declared kind: 37 `decision-made`, 10 `risk`, 9 `surprise`, 13 `defect`/`defe
 
 The `decision-made` count is the one worth pausing on. **Forty-three percent of the log book is decisions the plan did not specify.** That is not plan failure — a plan that specified them all would be the implementation — but it does say that the ratio of judgement to typing in this build was much higher than a 34-task list suggests, and that a future plan of this shape should budget for it explicitly rather than discovering it.
 
-### The six silent-failure shapes, and their polarity
+### The seven silent-failure shapes, and their polarity
 
 | # | Shape | Found by |
 |---|---|---|
@@ -40,8 +40,11 @@ The `decision-made` count is the one worth pausing on. **Forty-three percent of 
 | 4 | A rule generalised from one instance | each caught by the *next* instance arriving |
 | 5 | A test agreeing with the code by construction | independent specification, live run, and once **prospectively** |
 | 6 | Wrong evidence read as right evidence | re-deriving a claim during a document merge |
+| 7 | **Evidence collected, parsed, carried, and never read** | **a live round, by auditing what a check reads against what its input contains** |
 
-Shapes 1–5 are all **absence** presented as presence. Shape 6 is the only one with the opposite polarity — the evidence is real, correctly timestamped, internally consistent, and about a different event — which is why no consistency check can catch it and coverage metadata is the only thing that can.
+Shapes 1–5 are all **absence** presented as presence. Shape 6 is *presence of the wrong thing* — real, correctly read, and answering a different question than the one asked; **a property of inference from partial evidence, not of tools** (two of its four instances are human).
+
+**Shape 7, added after this review was first written, is the one that breaks the frame.** Every other shape concerns what the evidence could not tell you. Shape 7 is the evidence telling you and nothing listening:  reads  and ignores , which stated the cause verbatim in the same parsed record. **It is invisible to every mechanism in this build**, because all of them are aimed at output that claims *too much* and this claims too little — the output is correct. Detection is an audit of what each check reads against what its inputs contain, which is measurable:  parses 23 fields and 5 are read.
 
 ### Did the rate fall as the rules landed?
 
