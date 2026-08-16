@@ -527,7 +527,7 @@ One task each, in this order. **Do not start a parser before the previous one is
 
 ---
 
-## T-018 · Attach parsed data to `run_template` `[STATUS: TODO]`
+## T-018 · Attach parsed data to `run_template` `[STATUS: DONE]`
 
 **Goal.** Make template results carry parsed data, exactly as `run_intent` does.
 

@@ -1265,3 +1265,108 @@ def test_run_templates_uses_the_longest_read_timeout_in_the_batch(monkeypatch):
     )
 
     assert captured["read_timeout"] == 60.0
+
+
+# --------------------------------------------------------------------------- #
+# T-018: run_template attaches parsed data -- the LLD's blocking gap
+# --------------------------------------------------------------------------- #
+
+
+def _fixture_template_result(template, **params):
+    from agent_nettools.fixtures import fixture_sender
+    from agent_nettools.network_tools import run_template
+
+    device = params.pop("_device", "RR1")
+    return run_template(device, template, sender=fixture_sender(label="healthy"), **params)
+
+
+@pytest.mark.parametrize(
+    ("template", "params", "device"),
+    [
+        ("bgp_neighbor", {"address": "10.255.0.11"}, "RR1"),
+        ("route", {"prefix": "10.255.0.11/32"}, "RR1"),
+        ("interface", {"interface": "Gi0/0/0/0"}, "RR1"),
+        ("logging", {"count": "200"}, "RR1"),
+        ("ping", {"address": "10.255.0.31"}, "PE1"),
+        ("traceroute", {"address": "10.255.0.31"}, "PE1"),
+    ],
+)
+def test_run_template_attaches_parsed_data_for_every_template(
+    monkeypatch, template, params, device
+):
+    """The LLD calls this the blocking gap.
+
+    Every rung of the dependency descent below the top one reads template
+    output. Until this landed, run_template returned raw text only -- which
+    the fourth invariant forbids handing to a model.
+    """
+
+    set_device_environment(monkeypatch)
+    result = _fixture_template_result(template, _device=device, **params)
+
+    assert result["data"]["parse_status"] == "ok"
+    assert result["data"]["parsed"] is not None
+    assert "meta" in result["data"]["parsed"]
+
+
+def test_run_template_parse_failure_does_not_become_a_transport_error(monkeypatch):
+    """Parsing is independent of transport, exactly as run_intent treats it.
+
+    The device answered; we could not read the answer. Those are different
+    failures and collapsing them would lose the distinction.
+    """
+
+    from agent_nettools.network_tools import run_template
+
+    set_device_environment(monkeypatch)
+    result = run_template(
+        "RR1", "route", prefix="10.255.0.11/32", sender=lambda _d, _c: "not route output at all"
+    )
+
+    assert result["status"] == "success"
+    assert result["data"]["parse_status"] == "failed"
+    assert result["data"]["parsed"] is None
+
+
+def test_unsupported_template_is_parse_unavailable_not_parse_failed(monkeypatch):
+    """No parser was even attempted, which is not the same as one failing."""
+
+    from agent_nettools.network_tools import run_template
+
+    set_device_environment(monkeypatch)
+    result = run_template(
+        "RR1", "bgp_neighbor", platform="juniper_junos", address="10.255.0.11"
+    )
+
+    assert result["status"] == "unsupported"
+    assert result["data"]["parse_status"] == "unavailable"
+    assert result["data"]["parsed"] is None
+
+
+def test_run_template_envelope_shape_is_unchanged_for_existing_callers(monkeypatch):
+    """Additive only: the keys every existing consumer reads must still be there."""
+
+    set_device_environment(monkeypatch)
+    result = _fixture_template_result("route", prefix="10.255.0.11/32")
+
+    for key in ("tool", "device", "status", "timestamp", "data", "errors"):
+        assert key in result
+    data = result["data"]
+    for key in ("template", "platform", "command", "commands"):
+        assert key in data, f"{key} disappeared from the template envelope"
+
+
+def test_parsed_template_output_is_usable_by_a_descent_rung(monkeypatch):
+    """The point of the whole exercise, expressed as the descent will use it.
+
+    A rung asks "is this peer's session established" and gets a typed answer
+    out of parsed records -- never by reading device text.
+    """
+
+    set_device_environment(monkeypatch)
+    result = _fixture_template_result("bgp_neighbor", address="10.255.0.11")
+
+    meta = result["data"]["parsed"]["meta"]
+    assert meta["state"] == "Established"
+    assert meta["connection_state"] == "Established"
+    assert isinstance(result["data"]["parsed"]["records"], list)

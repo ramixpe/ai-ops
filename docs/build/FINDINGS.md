@@ -922,6 +922,41 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-048 · T-018 · The blocking gap is closed — **M2 reached**
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** `run_template` now attaches `data.parsed` and `data.parse_status` to every result, via `_attach_parsed_template` — the template-side twin of `_attach_parsed`, deliberately identical in semantics. **871 passed.**
+
+  This is what LLD §4.2 calls *the blocking gap*: "`run_template` attaches no parsed data at all… Every rung of the dependency descent below the top one reads exactly those commands. **Without template parsers there is no descent** — only a model reading raw text, which §3 forbids." That is invariant 4 of §0.6, and until this commit the repository could not satisfy it for any template.
+
+  Verified end to end against fixture replay — all six templates now return typed records rather than text:
+
+  | Template | `parse_status` | records |
+  |---|---|---|
+  | `bgp_neighbor` | ok | 5 address families |
+  | `route` | ok | 2 paths |
+  | `interface` | ok | 22 counters |
+  | `logging` | ok | 200 entries |
+  | `ping` | ok | 0 (summary only, by design) |
+  | `traceroute` | ok | 2 hops |
+- **Evidence:** **158/158 template fixtures** round-trip with `unaccounted_lines == []` and `unparsed_rows == 0`, across all six parsers. The six frozen safety tests pass (186 assertions), and **all four frozen files are byte-identical to the baseline commit** across the entire run.
+- **What I did:** Mirrored `_attach_parsed`'s three semantics rather than inventing new ones, because a second set of rules for the same concept is how the `intent`/`domain` confusion started:
+  1. **Parsing is independent of transport.** An `error` result still gets a parse attempt over whatever output arrived. Pinned by a test: garbage output yields `status: "success"` with `parse_status: "failed"` — the device answered, we could not read the answer, and those are different failures.
+  2. **`unsupported` gets `PARSE_UNAVAILABLE` with no attempt.** No parser was tried, which is not the same as one failing.
+  3. **Additive only.** A test asserts every pre-existing envelope key is still present, so no existing caller — CLI, MCP, `agent_loop` — sees a changed shape. The MCP `get_lab_*` tools inherit parsed output for free, since they all route through `run_template`.
+
+  One deliberate omission: **`run_templates` (the batched capture path) does not attach parsed data.** Its envelope holds many commands, so a single `parse_status` would be meaningless, and capture writes raw text by design — the fixtures are the input to parsing, not its output. Noted so the asymmetry reads as a decision.
+
+  Done by opus-5 rather than the suggested sonnet-5: the change is ~30 lines against a pattern that already existed, and it is the milestone judgement, so writing a spec would have cost more than the work. Same reasoning as OBS-031, logged for the same reason.
+
+  **M2 — "Parsing unblocked" — is reached**, and Part 2 is complete.
+- **Needs human review:** no
+- **Blocks:** none. Part 3 (checks and descent) is unblocked, subject to Q-013 at T-022.
+
+---
+
 <!--
 Copy this block for each new entry.
 

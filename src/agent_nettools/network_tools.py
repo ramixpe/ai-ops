@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-from . import evidence_store, metrics, parsers
+from . import evidence_store, metrics, parsers, template_parsers
 from .evidence_store import get_store
 from .inventory import InventoryError, get_device, load_inventory
 from .lab import platform_for
@@ -585,7 +585,43 @@ def _unsupported_template_result(
     result = _base_result(tool, device_name)
     result["status"] = STATUS_UNSUPPORTED
     result["data"] = {"template": template_name, "platform": platform}
+    _attach_parsed_template(result, platform, template_name)
     return result
+
+
+def _attach_parsed_template(
+    result: dict[str, Any], platform: str, template_name: str
+) -> None:
+    """Attach parsed data (or its absence) to one template result.
+
+    The template-side twin of ``_attach_parsed``, and deliberately identical in
+    semantics: parsing is independent of transport status, so an ``error``
+    result still gets a parse attempt over whatever output arrived (usually
+    none, which ``parse_template_output`` reports as ``PARSE_FAILED``), while
+    an ``unsupported`` result gets ``PARSE_UNAVAILABLE`` with no attempt --
+    there is nothing to look at. A parser exception never reaches here;
+    ``parse_template_output`` guards every call.
+
+    This closes the gap the LLD calls blocking: every rung of the dependency
+    descent below the top one reads template output, and until now
+    ``run_template`` returned raw text only -- which the fourth invariant
+    forbids handing to a model.
+    """
+
+    if result.get("status") == STATUS_UNSUPPORTED:
+        result["data"]["parsed"] = None
+        result["data"]["parse_status"] = template_parsers.PARSE_UNAVAILABLE
+        return
+
+    # A template renders exactly one command, so there is exactly one output to
+    # parse -- unlike an intent, which can run several.
+    outputs = result["data"].get("commands", {})
+    output = next(iter(outputs.values()), "")
+    parsed, parse_status = template_parsers.parse_template_output(
+        platform, template_name, output
+    )
+    result["data"]["parsed"] = parsed
+    result["data"]["parse_status"] = parse_status
 
 
 def _run_rendered_command(
@@ -636,6 +672,7 @@ def _run_rendered_command(
             result["status"] = STATUS_ERROR
             result["errors"].append(f"{command}: {exc}")
             result["data"]["commands"] = {}
+        _attach_parsed_template(result, platform, template_name)
         return result
 
     outputs, errors, retries = _netmiko_send_commands(device, [command], read_timeout=read_timeout)
@@ -646,6 +683,7 @@ def _run_rendered_command(
         result["status"] = STATUS_ERROR
         result["errors"].extend(errors)
 
+    _attach_parsed_template(result, platform, template_name)
     return result
 
 

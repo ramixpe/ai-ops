@@ -26,7 +26,7 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 | Baseline test count | **550 passed, 4 skipped, 0 failed** (554 total; the 4 are `live_lab`, skipped by default) |
 | Run started | 2026-08-15 |
 | Last updated | 2026-08-15 |
-| Current task | T-018 |
+| Current task | T-019 (Part 3) — **Q-013 must be answered at T-022** |
 | Halted? | no — Q-015 resolved, waiver discharged (OBS-038) |
 | Operator decisions pending capture | **Lab must stay healthy until T-011** — `healthy` then `broken` captured in one coordinated window (OBS-019) |
 
@@ -61,8 +61,8 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 | T-014 | `interface` parser | DONE | sonnet-5 (opus-5 spec + review) | `04a0bf1` | OBS-043, OBS-044 | 45 fixtures, 3 shapes. Line-down omits error counters — binds T-020. 776 passed |
 | T-015 | `logging` parser | DONE | sonnet-5 (opus-5 spec + review) | `b45d4d2` | OBS-045 | 1,800 entries; mnemonic split verified by recomposition. Zero ignores. 804 passed |
 | T-016 | `ping` parser | DONE | sonnet-5 (opus-5 spec + review) | `cd07101` | OBS-046 | 10 fixtures; RTTs None (not 0) at 0%. 833 passed |
-| T-017 | `traceroute` parser | DONE | sonnet-5 (opus-5 spec + review) | _next commit_ | OBS-047 | 9 fixtures; `completed` trap avoided. 861 passed |
-| T-018 | Attach parsed data to `run_template` | TODO | sonnet-5 | | | closes the blocking gap |
+| T-017 | `traceroute` parser | DONE | sonnet-5 (opus-5 spec + review) | `d4f9bf5` | OBS-047 | 9 fixtures; `completed` trap avoided. 861 passed |
+| T-018 | Attach parsed data to `run_template` | DONE | opus-5 (see OBS-048) | _next commit_ | OBS-048 | **Blocking gap closed.** 158/158 fixtures clean. 871 passed |
 
 ## Part 3 — Checks and descent
 
@@ -100,7 +100,7 @@ T-035 is optional and does not gate the definition of done.
 | Milestone | Gate | Reached |
 |---|---|---|
 | **M1 — Discovery complete** | T-009 done; all discovery docs written; Open Questions populated | ☑ **2026-08-15** |
-| **M2 — Parsing unblocked** | T-018 done; template results carry parsed data; all §0.10 completeness tests green | ☐ |
+| **M2 — Parsing unblocked** | T-018 done; template results carry parsed data; all §0.10 completeness tests green | ☑ **2026-08-16** |
 | **M3 — Architecture validated** | T-025 green offline, no model call, no lab, no API key | ☐ |
 | **M4 — MVP-0 shipped** | Part 7 definition of done satisfied in full (T-001…T-034) | ☐ |
 | **M5 — Team can see output** | T-035 done; a real investigation report reaches the team channel | ☐ |
@@ -135,4 +135,4 @@ One row per working session, so elapsed effort is visible without reading git.
 
 | Date | Tasks attempted | Tasks completed | Halted? | Notes |
 |------|-----------------|-----------------|---------|-------|
-| 2026-08-15 | T-001…T-017 | T-001…T-010, T-012…T-017; T-011 partial | HALT raised + waived | Required reading done; OBS-001/OBS-002 logged for the pre-plan install gap; baseline green; MiniMax contract verified and Q-001 resolved; MiniMax provider wired (567 tests); Loki + alerting discovery done; found the lab has been repaired (Q-012); L3VPN mapped; capture manifest written; TTP chosen; **M1 reached**; T-010 contract shipped |
+| 2026-08-15/16 | T-001…T-018 | T-001…T-010, T-012…T-018; T-011 partial | HALT raised + waived | Required reading done; OBS-001/OBS-002 logged for the pre-plan install gap; baseline green; MiniMax contract verified and Q-001 resolved; MiniMax provider wired (567 tests); Loki + alerting discovery done; found the lab has been repaired (Q-012); L3VPN mapped; capture manifest written; TTP chosen; **M1 + M2 reached**; all six parsers done; blocking gap closed |
