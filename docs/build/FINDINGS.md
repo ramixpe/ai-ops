@@ -1043,6 +1043,37 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-052 · T-020 · Q-005 resolved: the error-counter signal is a **rate**, not a total
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5 (recording an operator decision)
+- **What happened:** The operator settled Q-005's first half, and rejected the framing the plan offered. `BUILD-PLAN.md` T-020 says `interface_state` is broken when "error counters above threshold" — an absolute. **That is the wrong shape.** A counter total is meaningless without uptime: 500 CRC errors accumulated over three months is noise; 500 in ten minutes is a dying optic. The same number, opposite conclusions.
+
+  The ruling, which is a rate:
+
+  | Outcome | When |
+  |---|---|
+  | `broken` | error delta non-zero and **rising between observations** |
+  | `unevaluated` | only one observation, **or** counters absent |
+  | `healthy` | counters read in both observations and **flat** |
+
+  With a single-observation absolute permitted only to flag a warning-equivalent — **never to make the check broken, never to stop a descent.**
+- **Evidence:** Operator instruction. `t0`/`t1` exist as a deliberate pair ~90s apart, and `diff_evidence` already computes deltas, so a rate is computable wherever two observations exist.
+- **What I did:** Recorded it, and worked out the consequence the ruling implies but does not spell out — **the two halves of `interface_state` do not compose symmetrically**, and getting that wrong would break every descent.
+
+  A descent runs on **one** collection. So the counter half is almost always `unevaluated` in practice. If an `unevaluated` counter half made the whole check `unevaluated`, the interface rung would be permanently inconclusive and **every descent would end in `undetermined`** — the check would be strictly worse than not existing. The operator's "never stop a descent" is precisely this.
+
+  So the composition is ordered, not conjunctive: admin-up-plus-line-down is `broken` and outranks everything; a rising counter delta is `broken`; otherwise, if line state was read and is up, the answer is **`healthy` with the reason naming the counter half as unevaluated**.
+
+  **Case 3 is worth defending explicitly, because it looks like a violation of the rule I just wrote into `checks.py` and is not.** The rule forbids claiming health about a field you did *not* read. Case 3 claims health about **line state, which it did read**, and declines to claim anything about counters — in the reason string, where a report can carry it. Reporting the field you read is the rule working; refusing to report it would be a different failure, one where an honest "I could not check everything" degrades into "I can tell you nothing".
+
+  Specified into T-020 with that reasoning in the function docstring, because someone will otherwise tidy case 3 into `unevaluated` for consistency and silently disable the descent.
+- **Needs human review:** yes — flagged as instructed. The composition rule is mine, derived from the ruling rather than stated by it.
+- **Blocks:** none. Binds T-020, and T-024 should be aware the interface rung concludes on line state alone in single-observation mode.
+
+---
+
 <!--
 Copy this block for each new entry.
 
@@ -1075,7 +1106,7 @@ Anything logged with `Needs human review: yes` is mirrored here so the review ha
 | Q-011 | T-004 | Should the devices' `logging trap` level be lowered so severity-5 events (`%BGP-5-ADJCHANGE`, IS-IS transitions) reach Loki? Today only `err`/`warning` arrive, so the events T-028 correlates against are absent entirely. Operator decision — it changes log volume on a pipeline already carrying 97% self-generated noise. | No for MVP-0 · **yes for a useful historical axis** | Open (OBS-014) |
 | Q-003 | T-005 | Does Alertmanager have a webhook receiver, and can it replace n8n as the Stage 2 trigger? | No — Stage 2 | **Resolved (OBS-016)** — yes to both. Gap is that no alert rule carries a device label; that is rule authoring, not infrastructure. |
 | Q-004 | T-006 | What is the subject naming scheme for an L3VPN service object? | No — flow not in MVP-0 | **Accepted (OBS-035)** — `<pe>:<vrf>` recommended; `<vrf>:<rd>` eliminated because RD is reused across PEs. Confirm at T-022. |
-| Q-005 | T-020 | What error-counter threshold should `interface_state` treat as broken? **And what does it do when the counters are absent?** A line-down interface omits them entirely (OBS-044) — the answer must be `unevaluated`, never "0 errors, healthy". | No — but the absent-counter half is a correctness trap | **Second half answered (OBS-051)** — `unevaluated`, now a stated rule in `checks.py`. Threshold value still open for T-020. |
+| Q-005 | T-020 | What error-counter threshold should `interface_state` treat as broken? **And what does it do when the counters are absent?** A line-down interface omits them entirely (OBS-044) — the answer must be `unevaluated`, never "0 errors, healthy". | No — but the absent-counter half is a correctness trap | **Both halves answered.** First: a rate, not a total (OBS-052). Second (OBS-051) — `unevaluated`, now a stated rule in `checks.py`. Threshold value still open for T-020. |
 | Q-006 | T-025 | Does the descent's stopping rung match what a network engineer would conclude by hand from the same fixtures? | **Yes — this validates the architecture** | Open |
 | Q-007 | T-035 | Telegram or Mattermost? Hosted means device names, IPs and RCA text leave the estate; self-hosted keeps them in. Decide before implementing — only one provider gets built. | Yes for T-035 | Open |
 | Q-008 | T-035 | Which host runs `nettools` in the target deployment, and does it have outbound egress to the chosen channel? | Yes for T-035 | Open |
