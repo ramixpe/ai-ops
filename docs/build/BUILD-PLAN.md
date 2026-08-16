@@ -233,6 +233,22 @@ Observations outside the current task's scope. A smell in existing code, a docst
 
 On NOTE: **do not fix it.** Write the finding, continue. Out-of-scope fixes are how a sequential plan turns into an unreviewable diff.
 
+## 0.12 Guardrails must not pass vacuously
+
+**A guardrail that can pass by measuring nothing needs a companion test that fails the moment the empty set ends. A test that passes vacuously converts an unverified property into a green tick — the same silent-degradation failure this build has hit three times.**
+
+The shape to watch for is a test that iterates a collection, a registry, a fixture glob or a parametrised set that is currently empty or currently uniform. pytest reports "empty parameter set" as a skip and moves on; an `all()` over nothing is `True`; a comparison across a corpus that only contains one verdict compares nothing.
+
+Three instances so far, each caught only because something else was watching:
+
+- **T-010 → T-012.** The template-parser registry was empty by design. `test_registry_is_empty_until_the_parsers_land` failed the moment the first parser landed, which was the signal to replace it with the real expectation.
+- **T-021.** The `checks`/`health` agreement test passed on its first run with 36 green comparisons — because credentials were absent, every check returned `unevaluated`, and every assertion was trivially satisfied. Caught by an anti-vacuity test in the same file asserting the corpus actually produces both `healthy` and `broken`.
+- **T-026.** Two prompt-rule tests skip with no prompts to run against.
+
+The companion takes one of two forms: assert the collection is currently empty (so it fails when populated), or assert the corpus exercises every outcome the test discriminates between. Either is cheap. Neither is optional on a test whose whole job is to catch a regression that has not happened yet.
+
+---
+
 ### The three tracking documents
 
 All three live in `docs/build/` and are maintained continuously, not at the end.
