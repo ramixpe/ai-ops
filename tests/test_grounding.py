@@ -15,6 +15,8 @@ knowable.
 
 from __future__ import annotations
 
+import pathlib
+
 import pytest
 from helpers import set_device_environment
 
@@ -23,6 +25,8 @@ from agent_nettools.checks import BROKEN, HEALTHY, UNEVALUATED, CheckResult
 from agent_nettools.descent import DescentResult, RungOutcome, run_descent
 from agent_nettools.fixtures import fixture_sender, load_fixture_evidence
 from agent_nettools.network_tools import run_template
+
+FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures" / "cisco_xr"
 
 _OWNER = {"10.255.0.12": "PE2", "10.255.0.31": "RR1"}
 
@@ -499,3 +503,225 @@ def test_the_observation_labels_match_what_the_prompt_tells_the_model_to_emit():
     prompt = " ".join(load_prompt("report", 1).split())
     assert "obs-1" in prompt
     assert "in the order you emit them" in prompt
+
+
+# --------------------------------------------------------------------------- #
+# T-029a -- absence claims must be backed by coverage
+# --------------------------------------------------------------------------- #
+
+
+def _window(label: str):
+    from agent_nettools import log_window, template_parsers
+
+    raw = (FIXTURES / "PE2" / label / "show-logging-last-200.txt").read_text()
+    parsed, status = template_parsers.parse_template_output("cisco_xr", "logging", raw)
+    assert status is template_parsers.PARSE_OK
+    return log_window.shape_window(
+        parsed["records"], coverage=log_window.coverage_from_logging(parsed, "PE2")
+    )
+
+
+_REFUSAL = {"correlation": {"found": False,
+                            "summary": "no correlating events in the available coverage"}}
+
+
+def test_the_gap_that_existed_before_this_check():
+    """An absence claim with nothing behind it.
+
+    This is what "no correlating events in window" was worth before T-029a: a
+    statement about a source whose completeness nobody had established, on a
+    fabric where the platform is measured to drop severity 5 and 6.
+    """
+
+    result = grounding.ground_correlation(_REFUSAL, None)
+
+    assert not result.ok
+    assert [f.kind for f in result.failures] == ["unbacked_absence_claim"]
+    assert result.absence_claims_checked == 1
+
+
+def test_the_real_refusal_case_cannot_assert_a_clean_negative():
+    """Measured, and the answer is uncomfortable and correct.
+
+    PE2's `healthy` buffer holds **555** messages; `show logging last 200`
+    retrieved 200. Whatever is in the other 355 was not read, so "there were no
+    correlating events" is a stronger claim than this evidence supports. The
+    supportable one is "none in the available coverage" -- an `unevaluated`,
+    not a `no`.
+
+    The remedy is not to weaken the rule. It is to widen the window until the
+    source is exhausted, which is exactly the incentive the rule should create.
+    """
+
+    shaped = _window("healthy")
+    result = grounding.ground_correlation(_REFUSAL, shaped.coverage)
+
+    assert not result.ok
+    assert [f.kind for f in result.failures] == ["absence_claim_exceeds_coverage"]
+    assert "200 of 555" in str(result.failures[0])
+
+
+def test_an_exhausted_source_supports_a_negative():
+    """The other side of the pair, and the §0.12 companion.
+
+    Without this, `check_absence_coverage` could reject every absence claim
+    unconditionally and every test above would still pass. When the source has
+    handed over everything it holds, the negative is real.
+    """
+
+    from agent_nettools.coverage import Coverage
+
+    exhausted = Coverage(
+        device="PE2", source="device_buffer",
+        severity_available=tuple(range(8)),
+        records_available=180, records_returned=180,
+    )
+    assert exhausted.complete, exhausted.gaps()
+
+    result = grounding.ground_correlation(_REFUSAL, exhausted)
+    assert result.ok
+    assert not result.vacuous
+    assert result.absence_claims_checked == 1
+
+
+def test_a_source_that_drops_severities_can_never_support_a_negative():
+    """The measured Loki case, as a coverage record.
+
+    Per B-206a the platform carries only severity 3 and 4. Every event in the
+    causal sequence is 5 or 6. An absence claim over that source is unsupportable
+    by construction, and it must be the coverage record that says so rather than
+    anyone remembering.
+    """
+
+    from agent_nettools.coverage import Coverage
+
+    loki = Coverage(device="PE2", source="loki", severity_available=(3, 4),
+                    records_available=2, records_returned=2)
+
+    assert not loki.complete
+    gaps = " ".join(loki.gaps())
+    for severity in ("0", "1", "2", "5", "6", "7"):
+        assert severity in gaps
+
+    result = grounding.ground_correlation(_REFUSAL, loki)
+    assert not result.ok
+    assert result.failures[0].kind == "absence_claim_exceeds_coverage"
+
+
+def test_presence_is_not_weakened_by_a_coverage_gap():
+    """Only absence needs coverage. A found correlation over a truncated window
+    is still a found correlation -- the events are there, whatever else is
+    missing. Rejecting it would be the mirror-image mistake."""
+
+    shaped = _window("broken")
+    assert not shaped.coverage.complete
+
+    found = {"correlation": {"found": True, "summary": "the uplinks went down"}}
+    assert grounding.ground_correlation(found, shaped.coverage).ok
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [{}, {"correlation": None}, {"correlation": "no"}, {"correlation": {}},
+     {"correlation": {"found": "false"}}, {"correlation": {"found": 0}}],
+    ids=lambda c: str(c)[:36],
+)
+def test_a_malformed_correlation_is_not_read_as_an_absence_claim(claim):
+    """`is not False`, so a missing or string-valued `found` is never silently
+    treated as "nothing to check". `"false"` and `0` are falsy and are not
+    `False`; reading them as an absence claim would apply the rule to a report
+    whose shape is already wrong."""
+
+    result = grounding.ground_correlation(claim, None)
+    assert result.ok and result.absence_claims_checked == 0
+
+
+def test_coverage_is_read_from_what_the_device_reported_not_asserted():
+    """Every field traceable to the `show logging` header the device emitted."""
+
+    shaped = _window("broken")
+    coverage = shaped.coverage
+
+    assert coverage.source == "device_buffer"
+    assert coverage.records_available == 593, "Buffer logging: ... 593 messages logged"
+    assert coverage.records_returned == 200
+    assert coverage.severity_available == tuple(range(8)), "buffer level is debugging"
+    assert coverage.severity_missing == ()
+    assert coverage.records_dropped_at_source == 0
+    assert coverage.window_start and coverage.window_end
+    assert coverage.records_kept_unattributable == 8
+
+
+def test_the_buffer_level_is_read_not_the_trap_level():
+    """A real trap on this fabric.
+
+    `show logging` returns the *buffer*, at level debugging (0-7). The *trap*
+    level governs what is shipped to the collector and is informational (0-6).
+    Reading the trap level here would understate the local source by exactly
+    the severity class B-206a is about -- and would do it while looking correct.
+    """
+
+    from agent_nettools import log_window, template_parsers
+
+    raw = (FIXTURES / "PE2" / "broken" / "show-logging-last-200.txt").read_text()
+    parsed, _ = template_parsers.parse_template_output("cisco_xr", "logging", raw)
+
+    assert parsed["meta"]["buffer_level"] == "debugging"
+    assert parsed["meta"]["trap_level"] == "informational"
+    assert parsed["meta"]["buffer_level"] != parsed["meta"]["trap_level"], (
+        "if these ever coincide this test stops discriminating"
+    )
+    assert log_window.coverage_from_logging(parsed, "PE2").severity_available == tuple(range(8))
+
+
+def test_an_unknown_level_is_a_gap_not_an_assumption_of_completeness():
+    """The one thing a missing level must never resolve to is "everything"."""
+
+    from agent_nettools.coverage import severities_at_or_below
+
+    assert severities_at_or_below(None) == ()
+    assert severities_at_or_below("") == ()
+    assert severities_at_or_below("nonsense") == ()
+    assert severities_at_or_below("errors") == (0, 1, 2, 3)
+    assert severities_at_or_below("debugging") == tuple(range(8))
+
+
+def test_the_rendered_prompt_carries_the_coverage_and_its_gaps():
+    """The model must be able to see what it is allowed to conclude."""
+
+    from agent_nettools.prompt_library import build_correlate_prompt
+
+    prompt = build_correlate_prompt(_finding_for_correlation(), _window("healthy"))
+
+    assert "{coverage_json}" not in prompt
+    assert '"complete": false' in prompt
+    assert "200 of 555" in prompt
+    assert "in the available coverage" in prompt
+
+
+def test_a_window_shaped_without_coverage_renders_as_a_gap():
+    """Not silently as complete. A caller that never built a coverage record has
+    established nothing, and the rendered prompt must say so."""
+
+    from agent_nettools import log_window, template_parsers
+    from agent_nettools.prompt_library import build_correlate_prompt
+
+    raw = (FIXTURES / "PE2" / "healthy" / "show-logging-last-200.txt").read_text()
+    parsed, _ = template_parsers.parse_template_output("cisco_xr", "logging", raw)
+    shaped = log_window.shape_window(parsed["records"])
+    assert shaped.coverage is None
+
+    prompt = build_correlate_prompt(_finding_for_correlation(), shaped)
+    assert '"complete": false' in prompt
+    assert "no coverage record was produced" in prompt
+
+
+def _finding_for_correlation() -> DescentResult:
+    outcome = RungOutcome(
+        "interface", "PE2",
+        CheckResult(BROKEN, reason="both uplinks admin-down", subject="Gi0/0/0/0",
+                    evidence_keys=("PE2:interface:Gi0/0/0/0",)))
+    return DescentResult(
+        flow="bgp_session", device="RR1", subject="10.255.0.12",
+        finding="interface_line_down", outcomes=(outcome,),
+        evidence_keys=("PE2:interface:Gi0/0/0/0",))

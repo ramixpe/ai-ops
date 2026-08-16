@@ -55,15 +55,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .coverage import Coverage
 from .descent import DescentResult
 
 __all__ = [
     "MAX_LOCUS_LENGTH",
     "GroundingFailure",
     "GroundingResult",
+    "check_absence_coverage",
     "check_chain_coverage",
     "check_grounding",
     "descent_evidence_keys",
+    "ground_correlation",
     "ground_report",
     "observation_labels",
 ]
@@ -120,6 +123,7 @@ class GroundingResult:
     citations_checked: int = 0
     rungs_covered: int = 0
     rungs_required: int = 0
+    absence_claims_checked: int = 0
 
     @property
     def ok(self) -> bool:
@@ -135,7 +139,10 @@ class GroundingResult:
         """
 
         return self.ok and not (
-            self.observations_checked or self.citations_checked or self.rungs_required
+            self.observations_checked
+            or self.citations_checked
+            or self.rungs_required
+            or self.absence_claims_checked
         )
 
     def merge(self, other: GroundingResult) -> GroundingResult:
@@ -145,6 +152,9 @@ class GroundingResult:
             citations_checked=self.citations_checked + other.citations_checked,
             rungs_covered=self.rungs_covered + other.rungs_covered,
             rungs_required=self.rungs_required + other.rungs_required,
+            absence_claims_checked=(
+                self.absence_claims_checked + other.absence_claims_checked
+            ),
         )
 
     def summary(self) -> str:
@@ -155,7 +165,8 @@ class GroundingResult:
             return (
                 f"{state}: {self.observations_checked} observations, "
                 f"{self.citations_checked} citations, "
-                f"{self.rungs_covered}/{self.rungs_required} rungs cited"
+                f"{self.rungs_covered}/{self.rungs_required} rungs cited, "
+                f"{self.absence_claims_checked} absence claims backed"
             )
         return f"not grounded ({len(self.failures)} failures): " + "; ".join(
             str(f) for f in self.failures
@@ -440,3 +451,91 @@ def ground_report(report: dict, descent: DescentResult) -> GroundingResult:
 
     keys = descent_evidence_keys(descent)
     return check_grounding(report, keys).merge(check_chain_coverage(report, descent))
+
+
+def check_absence_coverage(claim: dict, coverage: Coverage | None) -> GroundingResult:
+    """A claim of absence must be backed by coverage. T-029a.
+
+    Grounding enforces citation for claims of **presence**: an observation names
+    the evidence key it was read from. Nothing enforced anything for claims of
+    **absence**, so ``"no correlating events in window"`` passed with nothing
+    behind it — on a source measured to drop severity 5 and 6, which is to say
+    on a source that cannot support the claim at all.
+
+    Same asymmetry as :func:`check_chain_coverage`, on a different axis: *a
+    check that inspects only what is present cannot see what was omitted.* And
+    a peer for the same reason — the input it needs, the coverage record, is not
+    in the report.
+
+    Three outcomes:
+
+    * The claim is not an absence claim → vacuous pass. Presence is not
+      weakened by a gap; only absence is.
+    * ``unbacked_absence_claim`` — there is no coverage record. This is the gap
+      that exists today.
+    * ``absence_claim_exceeds_coverage`` — there is one and it has gaps. "No
+      correlating events" is a stronger claim than the evidence supports; the
+      honest statement is "not in the available coverage", which is an
+      `unevaluated` rather than a `no`.
+
+    The two failure kinds are deliberately distinct so a runner can tell them
+    apart: the first is a construction bug and the report is not emitted; the
+    second is a real answer at the wrong strength, and **downgrading the finding
+    is a legitimate response to it**. Grounding states what the evidence
+    supports; what to do about a shortfall is the runner's call.
+    """
+
+    if not isinstance(claim, dict):
+        return GroundingResult(
+            failures=(GroundingFailure("malformed_report", "correlation",
+                                       "the correlation result is not a JSON object"),)
+        )
+
+    correlation = claim.get("correlation")
+    if not isinstance(correlation, dict) or correlation.get("found") is not False:
+        # `is not False`, so a missing or malformed `found` is not silently read
+        # as an absence claim and waved through as "nothing to check".
+        return GroundingResult()
+
+    if coverage is None:
+        return GroundingResult(
+            failures=(
+                GroundingFailure(
+                    "unbacked_absence_claim",
+                    "correlation.found",
+                    "claims no correlating events with no coverage record behind it; "
+                    "absence is only a finding when the completeness of the source "
+                    "is known",
+                ),
+            ),
+            absence_claims_checked=1,
+        )
+
+    gaps = coverage.gaps()
+    if gaps:
+        return GroundingResult(
+            failures=(
+                GroundingFailure(
+                    "absence_claim_exceeds_coverage",
+                    f"correlation.found via {_locus(coverage.source)}",
+                    "claims no correlating events over incomplete coverage -- "
+                    + "; ".join(gaps)
+                    + ". The supportable statement is 'not in the available "
+                    "coverage', which is an unevaluated, not a negative",
+                ),
+            ),
+            absence_claims_checked=1,
+        )
+
+    return GroundingResult(absence_claims_checked=1)
+
+
+def ground_correlation(claim: dict, coverage: Coverage | None) -> GroundingResult:
+    """The gate for a correlation result. **This is what the emit path calls.**
+
+    Separate from :func:`ground_report` because the two consume different
+    outputs -- a correlation has no observations and no descent, and a report
+    has no coverage record. A future output carrying both grounds through both.
+    """
+
+    return check_absence_coverage(claim, coverage)

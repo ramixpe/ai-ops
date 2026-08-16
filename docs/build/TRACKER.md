@@ -86,7 +86,10 @@ T-035 is optional and does not gate the definition of done.
 | T-027 | `report` prompt | DONE | opus-5 | `436d90b` | OBS-059, OBS-060 | 3 golden cases incl. refusal path + `cause_not_localised`. 1217 passed |
 | T-028 | `correlate` prompt | DONE | opus-5 | e9b468c | OBS-061, OBS-062 | Window shaped in code. `show logging` beats Loki here. 1235 passed |
 | — | reconcile `evidence-reduction.md` | DONE | opus-5 | 1630635 | OBS-063, OBS-064, OBS-065 | 6 divergences: 4 amended the doc, 1 corrected the filter (attribution, not facility), 1 scoped to B-414. correlate.v2. B-414/B-415 filed. 1245 passed |
-| T-029 | `grounding.py` | DONE | opus-5 | _next commit_ | OBS-066 | Two checks: citation integrity (spec) + chain coverage (operator). `ground_report` runs both. 34 tests, 1279 passed |
+| T-029 | `grounding.py` | DONE | opus-5 | 2cf95c1 | OBS-066 | Two checks: citation integrity (spec) + chain coverage (operator). `ground_report` runs both. 34 tests, 1279 passed |
+| — | merge `evidence-reduction` r1+r2 | DONE | opus-5 | 67ead0d | OBS-067 | 3 of r2's claims corrected against measurement. Loki would return 2 events from the *wrong incident*, not nothing |
+| — | BUILD-PLAN §0.13 | DONE | opus-5 | e32d046 | OBS-064 | Fifth silent-failure shape; OBS-064 promoted to a Part 0 rule |
+| T-029a | absence coverage | DONE | opus-5 | _next commit_ | OBS-068, OBS-069 | `coverage.py` + `check_absence_coverage` + correlate.v3. Neither golden case can assert a clean negative — measured, not a limitation. 1297 passed |
 | T-030 | `investigation.py` runner | TODO | sonnet-5 | | | no gate in MVP-0 |
 | T-031 | CLI wiring | TODO | sonnet-5 | | | |
 | T-032 | End-to-end offline test | TODO | sonnet-5 | | | **must assert BOTH labels**, as T-025 does |

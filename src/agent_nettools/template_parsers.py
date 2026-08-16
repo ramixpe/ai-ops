@@ -1028,8 +1028,15 @@ _SYSLOG_LOGGING = re.compile(
 # evidence that the drop diagnosed there is downstream of the device, not on
 # it, because the trap level is "informational" while only severities 3 and
 # 4 ever reach the log collector (discovery-loki.md, section 6.1).
+# The message count is captured, not discarded: `Buffer logging: level
+# debugging, 593 messages logged` against 200 records returned is the exact,
+# unambiguous statement that this window is count-limited and 393 buffered
+# messages were not retrieved. That is a coverage fact (evidence-reduction.md
+# §7) and inferring it from `returned >= requested` would be a guess where the
+# device states it.
 _LEVEL_LOGGING = re.compile(
-    r"^(?P<kind>Console|Monitor|Trap|Buffer) logging: level (?P<level>\S+), \d+ messages logged$"
+    r"^(?P<kind>Console|Monitor|Trap|Buffer) logging: level (?P<level>\S+), "
+    r"(?P<logged>\d+) messages logged$"
 )
 _LOGGING_TO = re.compile(r"^Logging to (?P<address>\S+), \d+ message lines logged$")
 _LOG_BUFFER_SIZE = re.compile(r"^Log Buffer \((?P<size>\d+) bytes\):$")
@@ -1044,6 +1051,13 @@ _LEVEL_META_KEY: dict[str, str] = {
     "Monitor": "monitor_level",
     "Trap": "trap_level",
     "Buffer": "buffer_level",
+}
+
+_LEVEL_COUNT_KEY: dict[str, str] = {
+    "Console": "console_messages_logged",
+    "Monitor": "monitor_messages_logged",
+    "Trap": "trap_messages_logged",
+    "Buffer": "buffer_messages_logged",
 }
 
 # Section 0.10 accounting: deliberately empty. Every non-blank line the
@@ -1064,9 +1078,13 @@ _LOGGING_META_KEYS: tuple[str, ...] = (
     "syslog_enabled",
     "messages_dropped",
     "console_level",
+    "console_messages_logged",
     "monitor_level",
+    "monitor_messages_logged",
     "trap_level",
+    "trap_messages_logged",
     "buffer_level",
+    "buffer_messages_logged",
     "logging_to",
     "buffer_size_bytes",
 )
@@ -1118,6 +1136,7 @@ def parse_xr_logging(output: str) -> dict[str, Any]:
             consumed.append(line)
         elif match := _LEVEL_LOGGING.match(line):
             meta[_LEVEL_META_KEY[match["kind"]]] = match["level"]
+            meta[_LEVEL_COUNT_KEY[match["kind"]]] = match["logged"]
             consumed.append(line)
         elif match := _LOGGING_TO.match(line):
             meta["logging_to"] = match["address"]

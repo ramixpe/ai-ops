@@ -1521,6 +1521,62 @@ Copy this block for each new entry.
 
 ---
 
+## OBS-068 · T-029a · Absence claims must be backed by coverage — and neither golden case can make one
+
+- **Kind:** defect-found
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** Grounding enforced citation for claims of **presence** and nothing for claims of **absence**. So `"no correlating events in window"` passed with nothing behind it, on a source measured to drop severity 5 and 6 — which is to say on a source that cannot support the claim at all.
+
+  Same asymmetry `check_chain_coverage` closes, arriving on a different axis: **a check that inspects only what is present cannot see what was omitted.** A peer check rather than a rule inside the existing one, because the input it needs — the coverage record — is not in the report.
+
+  `coverage.py`'s `Coverage.gaps()` lists every reason a source cannot support a negative. **Built by code**, never asserted by a caller and never by a model: `coverage_from_logging` reads every field from the `show logging` header the device itself emitted. The parser was extended (additively) to capture the message counts the header already prints, so
+
+  ```
+  Buffer logging: level debugging, 593 messages logged
+  ```
+
+  against 200 records returned is a *statement* that 393 were not retrieved, not an inference from "we asked for 200 and got 200".
+- **Evidence:** `src/agent_nettools/coverage.py`, `grounding.check_absence_coverage`, `prompts/correlate.v3.txt`, 16 new tests. **1297 passed, lint clean.**
+- **What I did:** Four things.
+
+  **1. The measured consequence is uncomfortable and correct: neither golden correlate case can assert a clean negative.** PE2's `healthy` buffer holds **555** messages; `show logging last 200` retrieved 200. Whatever is in the other 355 was not read, so "there were no correlating events" is stronger than the evidence allows. The supportable claim is "none in the available coverage" — an `unevaluated`, not a `no`.
+
+  I considered relaxing the rule to `returned >= requested` being acceptable, and rejected it. **The remedy is to widen the window until the source reports itself exhausted, which is exactly the incentive the rule should create.** A rule that permits the claim the evidence does not support, because enforcing it is inconvenient, is not a rule.
+
+  **2. Two failure kinds, deliberately distinct.** `unbacked_absence_claim` is a construction bug and the report is not emitted. `absence_claim_exceeds_coverage` is a real answer at the wrong strength, and **downgrading the finding is a legitimate response**. Grounding states what the evidence supports; what to do about a shortfall is the runner's call, and collapsing the two would have forced T-030 to discard a usable answer.
+
+  **3. A trap I nearly walked into: read the *buffer* level, not the trap level.** `show logging` returns the buffer, at `debugging` (0–7). The trap level governs what is *shipped to the collector* and is `informational` (0–6). Reading the trap level would understate the local source by exactly the severity class B-206a is about — while looking entirely correct. Pinned by a test that also asserts the two levels differ on this fabric, so it stops passing vacuously if they ever coincide.
+
+  **4. `correlate.v3`**, carrying a COVERAGE slot, constraint 7 (*never state a negative more strongly than the coverage supports*), and the refusal marker `"no correlating events in the available coverage"`.
+- **Needs human review:** no
+- **Blocks:** none. T-030 next, and it should treat `absence_claim_exceeds_coverage` as a downgrade rather than a rejection.
+
+---
+
+## OBS-069 · T-029a · The refusal-marker rule was too narrow for the *second* time, one level in
+
+- **Kind:** defect-found
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** `correlate.v3` changed the refusal wording, and `test_every_prompt_names_its_refusal_path` immediately failed — for `correlate.v1` and `correlate.v2`, which had not changed.
+
+  The test reads `refusal_marker` from the prompt's case file. One marker per **prompt family**. But the refusal wording is a property of a **version**: v1 and v2 say "in window", v3 says "in the available coverage", and each is correct for its own era. Checking every version against the current wording fails the historical record *for being historical*.
+- **Evidence:** `prompts/tests/cases/*.cases.json` now carry `refusal_markers`, keyed by filename; `tests/test_prompts.py` looks the prompt up by its own name.
+- **What I did:** Fixed it, and recorded it because of what it says about OBS-065 rather than about prompts.
+
+  **This is the third encoding of the same rule and the second time it was too narrow.** The first hardcoded `undetermined` — the value the one existing prompt used. The fix moved the value into data, which was right, and encoded it at the width of *a prompt* — because there was one version of each. The second failure is the same mistake at the next level in.
+
+  So the generalisation in OBS-065 needs sharpening. "Encode the rule at the width of the rule" is correct and insufficient, because **the width is not observable from a corpus with one member at every level.** With one prompt you cannot see that the marker varies by prompt; with one version of each you cannot see that it varies by version. Each widening was invisible until the corpus grew.
+
+  > **A rule generalised from one instance fits one instance — and the corpus tells you the width only up to the dimension in which it already varies. Ask which dimension is about to grow, not which one has.**
+
+  The practical form is cheap: when moving a constant into data, key it by the **finest identity the thing has** — a filename, not a family name — rather than by the coarsest one that currently works. Keying `refusal_markers` by filename costs one dictionary level and would have survived both widenings.
+- **Needs human review:** no
+- **Blocks:** none
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**

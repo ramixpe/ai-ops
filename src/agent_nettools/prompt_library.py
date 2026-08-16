@@ -49,10 +49,11 @@ PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "prompts"
 #: superseding a prompt is one line in a diff someone reads, not a default that
 #: drifted.
 #:
-#: `correlate` is at 2 because v1's grounding text describes a noise filter that
-#: dropped whole facilities, which is no longer what the code does. v1 stays in
-#: the tree as the record of what was reviewed at T-028.
-CURRENT_VERSION: dict[str, int] = {"report": 1, "correlate": 2}
+#: `correlate` is at 3: v1's grounding text described a noise filter that
+#: dropped whole facilities, and v2 had no coverage slot, so its refusal claimed
+#: a negative the source could not support. Superseded versions stay in the tree
+#: as the record of what was reviewed when.
+CURRENT_VERSION: dict[str, int] = {"report": 1, "correlate": 3}
 
 
 class PromptNotFoundError(FileNotFoundError):
@@ -178,6 +179,15 @@ def build_correlate_prompt(
         "entries_shown": len(window.records),
         "entries_collected": window.total_in,
     }
-    return template.replace("{finding_json}", json.dumps(finding_payload(result), indent=2)).replace(
-        "{window_json}", json.dumps(window_payload, indent=2)
+    coverage = (
+        window.coverage.as_dict()
+        if window.coverage is not None
+        else {"complete": False,
+              "gaps": ["no coverage record was produced for this window"]}
+    )
+    return (
+        template
+        .replace("{finding_json}", json.dumps(finding_payload(result), indent=2))
+        .replace("{window_json}", json.dumps(window_payload, indent=2))
+        .replace("{coverage_json}", json.dumps(coverage, indent=2))
     )

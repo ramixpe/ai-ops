@@ -1,11 +1,11 @@
 {
-  "prompt": "correlate.v2.txt",
+  "prompt": "correlate.v3.txt",
   "note": "Golden cases for the correlate prompt. Read by tests/test_correlate_prompt.py -- load-bearing, not documentation. Both cases are captured whole from committed fixtures; neither is composed.",
   "window_shaping": {
     "decision": "Deduplication and collector-noise filtering happen in CODE, before the model sees the window -- log_window.shape_window(). Deterministic, testable, and it keeps the context budget honest.",
     "measured": "PE2's broken window is 200 entries / 37,962 chars, of which 172 are attributable to the collector's own SSH and exec sessions. 28 entries remain.",
     "counts_are_reported": "shape_window returns what it removed, so a report can say '28 of 200 entries were network events' rather than presenting 28 and implying that was all there was.",
-    "attribution_not_content": "A rule drops a record only when it can name what produced it -- every address in the line is a known management host, or the line names the client process and the vty. `evidence-reduction.md` §3 reduction 2. The first implementation dropped two whole facilities instead, which removed eight PE2 records nothing attributes to this tool, including a severity-3 session reset 22 seconds before the interfaces went down. Those eight are now retained and counted as `unattributed_kept`."
+    "attribution_not_content": "A rule drops a record only when it can name what produced it -- every address in the line is a known management host, or the line names the client process and the vty. `evidence-reduction.md` \u00a73 reduction 2. The first implementation dropped two whole facilities instead, which removed eight PE2 records nothing attributes to this tool, including a severity-3 session reset 22 seconds before the interfaces went down. Those eight are now retained and counted as `unattributed_kept`."
   },
   "output_schema": {
     "timeline": [
@@ -59,10 +59,19 @@
         "is_empty": false,
         "all_retained_are_unattributed_sessions": true,
         "correlation_found": false,
-        "summary_contains": "no correlating events in window"
+        "summary_contains": "no correlating events in window",
+        "absence_claim_supportable": false
       },
       "why": "The refusal path, and the more likely case in practice. After filtering, a healthy device's window contains nine records and not one of them bears on a BGP session: they are `kex_exchange_identification` session failures the noise filter declined to attribute. The failure to guard against is a model reaching for the nearest line in time and describing it as related -- an unrelated event presented as context reads exactly like a correlated one, and the reader cannot tell the difference.",
-      "note": "This case got harder when the noise filter was corrected to attribute rather than assume, and the harder version is the right one. An empty window tests constraint 6, which is nearly free to satisfy. Nine severity-3 lines reading `Connection closed by remote host` test constraint 5 -- the model is now shown the highest-severity records on the device and must still answer `found: false`. `empty_window` below keeps constraint 6 covered separately."
+      "note": "This case got harder when the noise filter was corrected to attribute rather than assume, and the harder version is the right one. An empty window tests constraint 6, which is nearly free to satisfy. Nine severity-3 lines reading `Connection closed by remote host` test constraint 5 -- the model is now shown the highest-severity records on the device and must still answer `found: false`. `empty_window` below keeps constraint 6 covered separately. **T-029a:** measured, this window cannot support a clean negative at all. PE2's healthy buffer holds 555 messages and `show logging last 200` retrieved 200, so \"there were no correlating events\" is stronger than the evidence allows. The supportable claim is \"none in the available coverage\" -- an unevaluated, not a no. The remedy is to widen the window until the source is exhausted, which is the incentive the rule should create.",
+      "coverage": {
+        "source": "device_buffer",
+        "records_available": 555,
+        "records_returned": 200,
+        "severity_available": "0-7 (buffer level debugging)",
+        "complete": false,
+        "gap": "200 of 555 available records were retrieved"
+      }
     },
     {
       "name": "empty_window",
@@ -74,11 +83,18 @@
       "expect": {
         "entries_retained": 0,
         "is_empty": true,
-        "correlation_found": false
+        "correlation_found": false,
+        "absence_claim_supportable": false
       },
-      "why": "Constraint 6, separated from constraint 5 now that the `healthy` label no longer produces an empty window. `evidence-reduction.md` §7's fifth failure mode: an empty window is evidence that nothing was recorded, never evidence that nothing happened, and the two must be distinguishable in the output. The only constructed case in this file, and it is constructed because it is a degenerate shape rather than a scenario -- there is nothing a capture could add to a list of zero records."
+      "why": "Constraint 6, separated from constraint 5 now that the `healthy` label no longer produces an empty window. `evidence-reduction.md` \u00a77's fifth failure mode: an empty window is evidence that nothing was recorded, never evidence that nothing happened, and the two must be distinguishable in the output. The only constructed case in this file, and it is constructed because it is a degenerate shape rather than a scenario -- there is nothing a capture could add to a list of zero records. Note that an empty window is *also* coverage-limited unless the source reports itself exhausted: zero records retrieved says nothing about whether zero exist."
     }
   ],
-  "refusal_marker": "no correlating events in window",
-  "refusal_note": "GRACE's C slot requires a named refusal path. The marker differs per prompt because the refusals differ in kind: a report that cannot determine a cause returns `undetermined`, while a correlation with nothing to correlate returns `found: false`. Enforced by tests/test_prompts.py, which reads this field rather than assuming one vocabulary fits both."
+  "refusal_marker": "no correlating events in the available coverage",
+  "refusal_note": "GRACE's C slot requires a named refusal path. The marker differs per prompt because the refusals differ in kind -- a report that cannot determine a cause returns `undetermined`, a correlation with nothing to correlate returns `found: false`. It also differs per VERSION, which the first two attempts at this rule both missed: v1 and v2 say \"in window\", v3 says \"in the available coverage\" because T-029a established that a negative over incomplete coverage is an unevaluated, not a no. `refusal_markers` is keyed by filename so a superseded version is checked against the wording of its own era; `refusal_marker` is the current one. Third encoding of this rule, and the second time it was too narrow -- see OBS-065.",
+  "refusal_markers": {
+    "correlate.v1.txt": "no correlating events in window",
+    "correlate.v2.txt": "no correlating events in window",
+    "correlate.v3.txt": "no correlating events in the available coverage"
+  },
+  "absence_claims": "T-029a. A `found: false` result is a claim of absence and is only a negative finding over coverage with no gaps. `grounding.check_absence_coverage` enforces it; `coverage_from_logging` builds the record from what the device's own `show logging` header reported. Neither golden case here can support a clean negative, and that is the measured answer rather than a limitation of the cases."
 }

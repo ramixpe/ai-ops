@@ -129,9 +129,16 @@ that drifted.
 | Prompt | Current | History |
 |---|---|---|
 | `report` | v1 | T-027. Unchanged |
-| `correlate` | **v2** | v1 (T-028) described a noise filter that dropped whole facilities. `log_window.py` was corrected to attribute each record before dropping it, which leaves unattributable — and often high-severity — session events in the window. v2 states why they are there and that **retention is not relevance**, and adds constraint 7: severity ranks how loudly a device reports something, not whether it bears on the finding. See OBS-063 |
+| `correlate` | **v3** | v1 (T-028) described a noise filter that dropped whole facilities. `log_window.py` was corrected to attribute each record before dropping it, which leaves unattributable — and often high-severity — session events in the window. v2 states why they are there and that **retention is not relevance**, and adds constraint 7: severity ranks how loudly a device reports something, not whether it bears on the finding. See OBS-063. v3 (T-029a) adds a COVERAGE slot and constraint 7 — *never state a negative more strongly than the coverage supports* — and moves the refusal marker to "no correlating events in the available coverage", because a negative over an incomplete source is an `unevaluated`, not a `no`. See OBS-068 |
 
-v1 files stay in the tree. No report was ever produced from `correlate.v1`, so
-nothing was made unreproducible by superseding it — the bump was taken anyway,
-because carving the first exception to a rule the day after writing it is how
-the rule stops meaning anything.
+Superseded versions stay in the tree. No report was ever produced from
+`correlate.v1` or `v2`, so nothing was made unreproducible by superseding
+them — the bumps were taken anyway, because carving the first exception to a
+rule the day after writing it is how the rule stops meaning anything.
+
+**Each version declares its own refusal marker**, in `tests/cases/*.cases.json`
+under `refusal_markers`, keyed by filename. The wording is a property of a
+version, not of a prompt family: v1 and v2 say "in window", v3 says "in the
+available coverage", and each is right for its own era. Checking a superseded
+version against the current wording would fail the historical record for being
+historical. See OBS-069.

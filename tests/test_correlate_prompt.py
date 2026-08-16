@@ -11,8 +11,9 @@ Two golden scenarios, both from committed fixtures:
   timer expired.
 * **the refusal path** — PE2's `healthy` window, which after filtering contains
   nine records and not one of them bears on a BGP session. The honest answer is
-  "no correlating events in window", and the failure to guard against is a
-  model reaching for the nearest line in time and describing it as related.
+  "no correlating events in the available coverage", and the failure to guard
+  against is a model reaching for the nearest line in time and describing it as
+  related.
 
 The second is the more likely case in practice, which is why it is pinned.
 
@@ -36,7 +37,7 @@ from agent_nettools.prompt_library import (
 )
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "cisco_xr"
-CORRELATE_VERSION = 2
+CORRELATE_VERSION = 3
 
 CASES_FILE = (
     Path(__file__).resolve().parent.parent
@@ -355,7 +356,7 @@ def test_the_prompt_forbids_reaching_for_the_nearest_event_in_time():
 
     prompt = _flat(load_prompt("correlate", CORRELATE_VERSION))
 
-    assert "no correlating events in window" in prompt
+    assert "no correlating events in the available coverage" in prompt
     assert "Do not reach for the nearest event in time" in prompt
     assert "worse than no timeline" in prompt
 

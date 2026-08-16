@@ -97,9 +97,11 @@ dead code.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any
+
+from .coverage import Coverage, severities_at_or_below
 
 __all__ = [
     "COLLECTOR_NOISE",
@@ -107,6 +109,7 @@ __all__ = [
     "Attribution",
     "NoiseRule",
     "ShapedWindow",
+    "coverage_from_logging",
     "dedupe",
     "drop_collector_noise",
     "filter_to_subject",
@@ -238,6 +241,10 @@ class ShapedWindow:
     #: Records in a noise rule's facility that the rule could not attribute,
     #: and therefore kept. Reported so the conservative choice stays visible.
     unattributed_kept: int = 0
+    #: What the source was able to tell us. ``None`` when the caller shaped raw
+    #: records without the parser's meta -- which is itself a gap, and
+    #: ``grounding.check_absence_coverage`` treats it as one.
+    coverage: Coverage | None = None
 
     @property
     def is_empty(self) -> bool:
@@ -326,11 +333,55 @@ def filter_to_subject(records: list[dict[str, Any]], subject: str | None) -> lis
     return [r for r in records if subject in r.get("text", "")]
 
 
+def coverage_from_logging(parsed: dict[str, Any], device: str) -> Coverage:
+    """Build a coverage record from a parsed `show logging` result.
+
+    Every field is read from what the device itself reported. The header states
+    its own buffer level and how many messages that buffer holds, so
+
+        Buffer logging: level debugging, 593 messages logged
+
+    against 200 records returned is a *statement* that 393 were not retrieved,
+    not an inference from "we asked for 200 and got 200".
+
+    `buffer_level` is the right level to read, not `trap_level`. The buffer is
+    what `show logging` returns; the trap level governs what is shipped to the
+    collector, and on this fabric those differ -- informational (0-6) shipped
+    against debugging (0-7) buffered. Reading the trap level here would
+    understate the local source's coverage by exactly the severity class B-206a
+    is about.
+    """
+
+    meta = parsed.get("meta") or {}
+    available = meta.get("buffer_messages_logged")
+    dropped = meta.get("messages_dropped")
+
+    notes: list[str] = []
+    if meta.get("syslog_enabled") is False:
+        notes.append("syslog logging is disabled on this device")
+    if not meta.get("buffer_level"):
+        notes.append("the source did not report its buffer level")
+
+    return Coverage(
+        device=device,
+        source="device_buffer",
+        query_complete=True,
+        window_start=meta.get("window_start"),
+        window_end=meta.get("window_end"),
+        severity_available=severities_at_or_below(meta.get("buffer_level")),
+        records_available=int(available) if str(available).isdigit() else None,
+        records_returned=len(parsed.get("records") or ()),
+        records_dropped_at_source=int(dropped) if str(dropped).isdigit() else 0,
+        notes=tuple(notes),
+    )
+
+
 def shape_window(
     records: list[dict[str, Any]],
     *,
     subject: str | None = None,
     drop_noise: bool = True,
+    coverage: Coverage | None = None,
 ) -> ShapedWindow:
     """Dedupe, drop attributable collector noise, optionally narrow to a subject.
 
@@ -358,6 +409,9 @@ def shape_window(
     narrowed = filter_to_subject(kept, subject)
     unrelated = len(kept) - len(narrowed)
 
+    if coverage is not None:
+        coverage = replace(coverage, records_kept_unattributable=unattributed)
+
     return ShapedWindow(
         records=tuple(narrowed),
         total_in=total,
@@ -365,4 +419,5 @@ def shape_window(
         collector_noise_removed=noise,
         unrelated_removed=unrelated,
         unattributed_kept=unattributed,
+        coverage=coverage,
     )

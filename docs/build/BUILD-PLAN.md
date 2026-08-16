@@ -856,6 +856,38 @@ Keys are `descent_evidence_keys(descent)` — what the checks *read*, never what
 
 ---
 
+## T-029a · absence claims must be backed by coverage `[STATUS: DONE]`
+
+Pulled forward from **B-420** at the operator's direction, and it lands before T-032.
+
+```python
+def check_absence_coverage(claim: dict, coverage: Coverage | None) -> GroundingResult
+def ground_correlation(claim: dict, coverage: Coverage | None) -> GroundingResult
+```
+
+**The gap.** Grounding enforces citation for claims of **presence**. It enforced nothing for claims of **absence**, so `"no correlating events in window"` passed with nothing behind it — on a source measured to drop severity 5 and 6, which is to say on a source that cannot support the claim at all.
+
+Same asymmetry `check_chain_coverage` exists to close, on a different axis: **a check that inspects only what is present cannot see what was omitted.** A peer rather than a rule inside the existing check, because the input it needs — the coverage record — is not in the report.
+
+**`coverage.py`.** `Coverage` carries what a source was able to tell us and `gaps()` lists every reason it cannot support a negative: an incomplete query, a severity class the source does not carry, a truncated read, records the source reports dropping. Built **by code**, never asserted by a caller and never by a model — `coverage_from_logging` reads every field from the `show logging` header the device itself emitted.
+
+Read the **buffer** level, not the trap level. `show logging` returns the buffer (debugging, 0–7); the trap level governs what is shipped to the collector (informational, 0–6). Reading the trap level here understates the local source by exactly the severity class B-206a is about, while looking correct.
+
+**Two failure kinds, deliberately distinct** so a runner can tell them apart:
+
+| Kind | Meaning | What a runner should do |
+|---|---|---|
+| `unbacked_absence_claim` | no coverage record at all | construction bug — do not emit |
+| `absence_claim_exceeds_coverage` | a record, with gaps | a real answer at the wrong strength — **downgrade the finding**, do not discard it |
+
+**Measured consequence, and it is uncomfortable.** Neither golden correlate case can assert a clean negative. PE2's `healthy` buffer holds **555** messages and `show logging last 200` retrieved 200; whatever is in the other 355 was not read. The remedy is not to weaken the rule — it is to widen the window until the source reports itself exhausted, which is exactly the incentive this should create.
+
+`correlate.v3` carries a COVERAGE slot and constraint 7 (*never state a negative more strongly than the coverage supports*), and its refusal marker becomes **"no correlating events in the available coverage"**.
+
+**Tests:** an unbacked claim fails; a truncated source fails and names the shortfall; an exhausted source passes (the §0.12 companion — without it the check could reject everything and every other test would still pass); a severity-limited source can never pass; **presence is not weakened by a gap**; a malformed `found` is not read as an absence claim.
+
+---
+
 ## T-030 · `investigation.py` — the MVP-0 runner `[STATUS: TODO]`
 
 ```python

@@ -68,8 +68,18 @@ def test_every_prompt_names_its_refusal_path(prompt):
     stem = prompt.name.split(".")[0]
     case_file = CASES_DIR / f"{stem}.cases.json"
     assert case_file.is_file(), f"{prompt.name} has no case file declaring its refusal marker"
-    marker = json.loads(case_file.read_text(encoding="utf-8")).get("refusal_marker")
-    assert marker, f"{case_file.name} declares no refusal_marker"
+    declared = json.loads(case_file.read_text(encoding="utf-8"))
+    # Keyed by *filename*, not by prompt family. A superseded version carries
+    # the wording of its own era -- `correlate.v3` says "in the available
+    # coverage" where v1 and v2 said "in window" -- and checking every version
+    # against the current wording would fail the historical record for being
+    # historical. Second time this rule has been too narrow; see OBS-065.
+    markers = declared.get("refusal_markers") or {}
+    marker = markers.get(prompt.name) or declared.get("refusal_marker")
+    assert marker, (
+        f"{case_file.name} declares no refusal marker for {prompt.name}; every "
+        f"version needs one, including superseded ones"
+    )
 
     text = " ".join(prompt.read_text(encoding="utf-8").split()).lower()
     assert marker.lower() in text, (
