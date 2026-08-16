@@ -2128,6 +2128,33 @@ transport path disappearing rather than a direct session teardown.
 
 ---
 
+## OBS-086 · planning · B-401 parked, and three tracks — with the shared contracts named
+
+- **Kind:** decision-made
+- **Escalation:** NOTE
+- **Model:** opus-5
+- **What happened:** Post-M4 planning. **B-401 (Juniper) parked** — there is no Junos device or container to capture from, and writing templates against vendor documentation would be building against a specification, which this build corrected six times out of six by measuring instead (MVP0-REVIEW §3). Revisit condition recorded: a device to capture from, and nothing else.
+
+  Three tracks recorded, one agent each, merge order A → B → C.
+- **Evidence:** `BACKLOG.md` B-401 and *What happens next*; `BUILD-PLAN.md` §0.9a.
+- **What I did:** Three additions the instruction implied but did not state, each because the rule is otherwise unenforceable.
+
+  **1. Enumerated the shared contracts by name.** "Any change to a shared contract is a HALT" is unusable without a list — two agents will disagree about what counts, and they will disagree *silently*, which is the whole failure mode. Eight are named, with an owner each. The one that matters is **`log_window.ShapedWindow`**: track B's B-414 and B-416 will want to add aggregated records and episodes to it, and `prompt_library.build_correlate_prompt` and `grounding.check_timeline_citations` both consume it. That is the collision, and it is at the seam between the two tracks that are not supposed to couple.
+
+  **`investigation.py` is named as the most likely merge conflict** — it wires every module both tracks touch, and it is on track A's side of the line while depending on track B's output.
+
+  **2. §0.9a states why the HALT is stricter than §0.11's ladder would make it.** Most contract edits are, on their face, DECIDE-AND-LOG: a defensible technical choice with no safety consequence. That classification is correct on one branch and wrong on three. **A defensible choice made independently on two branches produces two defensible, incompatible contracts** — and the incompatibility surfaces at merge, when both are finished and both authors are confident. §0.14: the same statement, different kind of claim, depending on whether one agent or three are acting on it.
+
+  **3. Amended the five-flow note, which contradicted the new sequencing.** B-107–B-111 carried "Parallelisable — these five are where concurrent Sonnet 5 agents genuinely pay off". That is now wrong in two ways: they do not start until B-428 lands, and `isis_adjacency` runs serially first. Left unamended it would have read as standing authorisation to fan out five agents.
+
+  The reason is worth stating rather than just the schedule: **the descent has produced one correct blind diagnosis, on one flow.** Spawning five concurrent implementations off a pattern demonstrated once replicates an unvalidated assumption five times — §0.13's data face applied to project planning rather than to a corpus. One instance fits one instance, whether the instance is a fixture or a flow.
+
+  **On B-401's payoff test.** The operator's framing is the important half and I have recorded it prominently: *do not let the absence of a counterexample read as confirmation.* No code has ever run against a second vendor, so nothing has had the **opportunity** to leak upward. A boundary that has never been pushed on is not a boundary that has held, and `juniper_junos` exists in the tree precisely to keep the abstraction honest while being itself unverified — which makes it easy to mistake for evidence.
+- **Needs human review:** no
+- **Blocks:** none. Track A starts with the four rounds.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**

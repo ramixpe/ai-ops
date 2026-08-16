@@ -155,6 +155,26 @@ Three models, three distinct jobs. The separation is not about capability — it
 
 ---
 
+### 0.9a Concurrent tracks — added 2026-08-16, post-M4
+
+§0.9 was written for one plan running on one branch. Work now runs on **three branches, one agent each** (`BACKLOG.md` → *What happens next*). Everything above holds unchanged; four things are added because concurrency creates failure modes a single track cannot have.
+
+1. **Opus 5 judges acceptance on every track.** Not per branch, not delegated to whichever agent owns the track. Three tracks do not mean three judgements — they mean one judge and three queues.
+
+2. **A change to a shared contract is a HALT on that track, not a decision.** It is escalated to Opus 5 and coordinated across tracks before anything is written. This is deliberately stricter than §0.11's ladder, which would otherwise class most contract edits as DECIDE-AND-LOG: a defensible choice made independently on two branches produces two defensible, incompatible contracts, and the incompatibility surfaces at merge, when both are finished and both authors are confident.
+
+   The contracts are **enumerated by name** in `BACKLOG.md`, because a HALT rule nobody can apply is not a rule.
+
+3. **One agent per track, never two.** A track is a unit of ownership, not a queue that parallelises.
+
+4. **A feeds-into relationship is not a coupling.** Where one track's output will *probably* be consumed by another's — episodes (B-416) feeding forward consistency (B-428) is the live case — the producing track builds it **on its own merit**, against its own acceptance criteria, and the consuming track decides later whether to take it.
+
+   Coupling them feels efficient and is the exact shape rule 2 exists to prevent: it puts two agents in one contract with a shared, unwritten assumption about what the other is doing. **If B-416's episodes turn out to be worth nothing to B-428, B-416 must still stand on correlation quality alone** — and if it cannot, it was not worth building.
+
+**Merge order is part of the design, not scheduling.** A first, because it is the critical path and owns most of the shared contracts. C last, because it lives outside the repository and touches none of them.
+
+---
+
 ## 0.10 TTP parsing must cover the complete output
 
 **Requirement.** Every TTP template must account for the *entire* command output. Not the fields the current caller happens to need — everything.
