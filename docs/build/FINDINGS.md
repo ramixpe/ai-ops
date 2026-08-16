@@ -1921,6 +1921,64 @@ transport path disappearing rather than a direct session teardown.
 
 ---
 
+## OBS-079 · design · Forward consistency is a general architectural gap — and the corpus already contains an instance
+
+- **Kind:** defect
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** Raised while amending `chaos-harness.md` §7, and it turned out to be larger than the two-fault question it came from. **The operator asked that it be recorded as a general architectural gap rather than only a two-fault detector, and that is right — it is a closed loop the design lacks.**
+
+  **The descent reasons strictly downward and never checks that the cause it found accounts for the symptom it started from.** Every rung asks "is this layer broken"; nothing ever asks "does the thing I localised explain the thing I was called about".
+
+  **A measured instance, found offline, needing no injection.** Construct the round-4 perturbation — one uplink down on a device with two, IGP reconverges over the survivor:
+
+  ```
+  rung 1  bgp_session    HEALTHY     <- the session is Established and working
+  rung 2  transport      HEALTHY
+  rung 3  route_to_peer  HEALTHY
+  rung 4  igp_adjacency  HEALTHY
+  rung 5  interface      BROKEN      <- ALL_HEALTHY over EACH_PHYSICAL_INTERFACE
+  ```
+
+  `DescentResult.cause` → **`interface`**. `causal_chain` → **empty**. The descent localises a fault on a session that is up and carrying traffic.
+
+  **The empty causal chain is the tell, and the descent already has it.** A cause with no broken rungs above it means "I found something broken and nothing above it is affected" — which, for an investigation that began from a symptom, is a contradiction: the symptom should *be* one of those upper rungs. Rung 1 healthy means there was no symptom. The information needed to catch this is already in the `DescentResult`; nothing reads it.
+- **Evidence:** Constructed against the real `bgp_session` ladder via `DescentResult`, offline. Reproducible without a lab.
+- **What I did:** Recorded, filed, **not fixed** — §0.3, and T-029b is the task in front of me. Filed as **B-428**.
+
+  Three notes on scope, because the obvious narrow fix is wrong.
+
+  **1. This is not "add a healthy-rung-1 special case".** The general rule is *forward consistency*: after localising, check that the observed upper rungs match what the cause **alone** predicts. Rung 1 healthy is the degenerate instance where the prediction is "there is nothing to explain". The two-fault case is the instance where the prediction is "the session timed out" and the observation is "the session is administratively shut" — same check, different mismatch.
+
+  **2. It bears on `EACH_PHYSICAL_INTERFACE` + `ALL_HEALTHY`, which was a deliberate decision (OBS-057) with a stated revisit condition.** This is that condition arriving. The rule is right for *isolation* — all uplinks down means isolated — and produces a false positive under *redundancy*, where one down uplink affects nothing. Forward consistency is the better fix than weakening the aggregation, because weakening it would lose the isolation case that the rule exists for.
+
+  **3. It is the second-strongest argument for the harness, and the first that does not need it.** Round 4 was chosen as a true negative — "does the tool stay quiet under a perturbation the IGP absorbs". The prediction is now specific and adverse: **it will not stay quiet.** A round that predicts a particular failure is worth more than one that hopes for silence, and this one can be checked offline first, so the live round confirms rather than discovers.
+- **Needs human review:** **yes** — a false positive on a healthy session is user-visible
+- **Blocks:** nothing immediately. Should be settled before the four rounds, since round 4 is designed to hit it.
+
+---
+
+## OBS-080 · process · Three improvements to operator specifications, recorded as such
+
+- **Kind:** decision-made
+- **Escalation:** NOTE
+- **Model:** opus-5
+- **What happened:** The operator asked that three amendments accepted this session be recorded **as improvements on what was specified**, rather than folded silently into the documents. Recorded here so the direction of each correction is visible, in the same spirit as OBS-062's note that three T-028 findings corrected the document rather than the implementation.
+
+  | # | As specified | As amended | Why it matters |
+  |---|---|---|---|
+  | 1 | The injector prohibition filed in `chaos-harness.md` §3.1 alongside §0.11 | Split into two rule *kinds*, with the blinding rule explicitly **not** a §0.11 rule | §0.11 rules get waived on reversibility and supervision — twice in this build, both times correctly. The same reasoning applied to the blinding rule would waive it, and every argument would be sound and beside the point |
+  | 2 | Two-fault output is "true, incomplete, and actionably misleading" | The rung tables are **byte-identical**, and the masking is structural | "Incomplete" suggests a careful reader might notice. Nothing distinguishes the two outputs. The consequence is decisive: **no care within the descent can fix it**, because the signal is not in the rung verdicts |
+  | 3 | Non-contiguity is "the most promising and cheapest" signal, to be tested first | Sound but **blind to the canonical case**; forward consistency goes first | Interface-down plus BGP-shut leaves every rung broken and perfectly contiguous. Non-contiguity catches only the cases where neither fault propagates far enough to mask the other |
+
+  And one in the other direction, recorded for symmetry: the operator's **round 3** — replacing the build's only composed fixture (`cause_not_localised`, the single synthetic artefact in the corpus) with a captured one — closes a gap I had noted at T-027 and left open. I had treated "no consistently-behaving fabric can produce this" as a fact about fabrics. It is a fact about *single* faults; an administratively shut session with a healthy underlay produces it directly.
+- **Evidence:** `chaos-harness.md` §3.1 and §7; `docs/design/design-thinking.md` D6; `prompts/tests/cases/report.cases.json` `fixture_provenance`.
+- **What I did:** Recorded. The pattern across all four is the same and worth stating once: **the corrections that mattered were about the *kind* of a thing, not its content.** A rule of method filed as a rule of safety; an incompleteness filed as a detectability problem; a signal filed as primary when it is partial; an impossibility filed as a property of fabrics when it is a property of single faults. In each case the original statement was true and the classification was what misled.
+- **Needs human review:** no
+- **Blocks:** none
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**
