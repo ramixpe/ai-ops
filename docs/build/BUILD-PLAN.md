@@ -968,11 +968,18 @@ Matches `nettools diff`. **Does not match `nettools health`**, where 2 is the wo
 
 ---
 
-## T-032 · End-to-end offline test `[STATUS: TODO]`
+## T-032 · End-to-end offline test `[STATUS: DONE]`
 
 Full pipeline against fixtures with the model mocked. Assert: descent runs, report shape is valid, grounding passes, exit code correct, no network calls.
 
 **Assert BOTH labels, as T-025 does** — the same peer (`RR1 → 10.255.0.12`) must give opposite answers on `healthy` and `broken`, all the way through to a grounded report. One label proves the pipeline runs; two prove it discriminates.
+
+**Two decisions taken during implementation.**
+
+1. **The mock model reads its own prompt.** A canned report is correct whatever the pipeline renders, so it cannot detect the pipeline handing the model the *wrong descent* — the single most likely wiring bug in a chain this long, and the one an end-to-end test exists to catch. `ReadsItsPrompt` parses the descent payload out of the rendered prompt and answers from it, so a `healthy` run carrying the `broken` descent produces a report about the wrong finding and `test_the_model_was_handed_the_right_descent_on_each_label` fails.
+2. **"No network" is enforced, not assumed.** `netmiko` is replaced with a module that raises on contact — the lazy import inside `_netmiko_send_commands` is the single choke point every real connection passes. `test_the_guard_actually_fires` is the §0.12 companion: without it, a misnamed module or attribute would make the guard decorative while every other test still passed.
+
+**Tests:** 10. Invariant 4 is asserted against the **verbatim rendered prompts**, not the parsed payloads — a parsed payload cannot contain raw command output by construction, so checking it would check nothing. The assertion also pins that the correlate prompt *does* carry device log lines (parsed records re-serialised) while *not* carrying the raw `show logging` header, since distinguishing those two is the entire content of invariant 4 here.
 
 ---
 

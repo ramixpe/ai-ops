@@ -1698,6 +1698,37 @@ Copy this block for each new entry.
 
 ---
 
+## OBS-074 · T-032 · A mock that reads its prompt, and a test of mine that checked the wrong object
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** The full pipeline offline on both labels: same device, same subject, same flow, same code, opposite captured state — `all_layers_healthy` / exit 0 against `interface_line_down on PE2` / exit 1, both with grounded reports. **1348 passed.**
+
+  Two decisions worth recording, and one mistake of my own.
+
+  **1. The mock model reads its own prompt.** My first instinct was a canned report string. That is wrong for an end-to-end test in a specific way: a hardcoded report is correct *whatever the pipeline rendered*, so it cannot detect the pipeline handing the model the wrong descent. In a chain this long — collect, parse, check, descend, render, ground, emit — feeding the model the wrong payload is the most likely wiring bug and the least visible, because the output stays plausible. `ReadsItsPrompt` parses the descent out of the prompt and answers from it, so `test_the_model_was_handed_the_right_descent_on_each_label` fails if a `healthy` run is handed the `broken` descent.
+
+  **2. "No network" is enforced, not assumed.** `netmiko` is replaced with a module that raises on contact. An offline test that merely *happens* not to reach a lab stops being offline the day someone adds a code path that does, and it fails only when the lab is down — which is the worst possible time to learn about it.
+- **Evidence:** `tests/test_end_to_end_offline.py`, 10 tests. All four frozen files byte-identical throughout.
+- **What I did:** **Found and fixed a defect in my own test, and it is worth recording because of what kind it was.**
+
+  `test_no_unparsed_device_text_reaches_the_model` asserted invariant 4 against `analyst.saw_descents` — the *parsed JSON payloads* the mock had extracted. That object cannot contain raw command output by construction. The test was green, and it was checking nothing.
+
+  That is §0.13's tests face in miniature, in a test written *by* the person who had just written §0.13: I asserted against the object I had conveniently stored rather than the object the invariant is about. The fix stores the verbatim prompts separately and asserts against those — and adds the line that makes it non-vacuous:
+
+  ```python
+  assert "Cisco IOS XR Software" in raw, "the corpus must contain what we forbid"
+  ```
+
+  Without that, a corpus that simply lacked the forbidden strings would pass identically.
+
+  The version that ships also pins the *distinction* rather than just the prohibition: the correlate prompt **does** carry device log lines — parsed records re-serialised — while **not** carrying the raw `show logging` header. Invariant 4 is "no unparsed device text", not "no device text", and a test that could not tell those apart would eventually be satisfied by removing the evidence.
+- **Needs human review:** no
+- **Blocks:** none — T-033 (live lab run) next, and it is the first task since T-011 that touches real devices.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**
