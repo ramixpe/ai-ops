@@ -159,7 +159,12 @@ def test_the_rendered_prompt_carries_no_raw_device_output():
     raw IOS-XR output reaches the prompt.
     """
 
-    prompt = build_report_prompt(_descent("broken"))
+    # B-421: build_report_prompt returns a RenderedPrompt (system/user split,
+    # so the static half is cacheable); system + user is the same text one
+    # fully-rendered prompt used to be, and this invariant is a property of
+    # the whole text the model receives, in either half.
+    rendered = build_report_prompt(_descent("broken"))
+    prompt = f"{rendered.system}\n\n{rendered.user}"
 
     for marker in (
         "RP/0/RP0/CPU0",            # the IOS-XR log/prompt prefix
@@ -178,6 +183,74 @@ def test_the_payload_is_verdicts_and_keys_only():
     assert set(payload) == allowed
     for rung in payload["rungs"]:
         assert set(rung) == {"rung", "device", "status", "reason", "evidence_keys"}
+
+
+def test_invariant_4_holds_in_each_half_of_the_split_separately():
+    """Not just the concatenation.
+
+    B-421 splits the rendered prompt across two different fields of the
+    Anthropic request (`system`, the cached block, and `user`, the one
+    volatile message) -- a raw-output leak into either half individually is
+    the failure that would actually reach the model, so each half is checked
+    on its own, not only their concatenation (which the test above already
+    covers).
+    """
+
+    rendered = build_report_prompt(_descent("broken"))
+
+    for half_name, half in (("system", rendered.system), ("user", rendered.user)):
+        for marker in (
+            "RP/0/RP0/CPU0", "Routing entry for", "BGP neighbor is",
+            "Interface state transitions", "Type escape sequence",
+        ):
+            assert marker not in half, f"raw device output leaked into {half_name}: {marker!r}"
+
+
+# --------------------------------------------------------------------------- #
+# B-421 -- the system/user split that makes prompt caching possible
+# --------------------------------------------------------------------------- #
+
+
+def test_the_system_half_is_byte_identical_across_two_different_descents():
+    """The whole point of the split. Anthropic's prompt cache is a prefix
+    match on `system`: if the static half ever differed between two
+    investigations at the same prompt version, nothing would be cacheable and
+    the split would have bought nothing.
+
+    `_descent("broken")` and `_descent("t0")` are about as different as two
+    descents at this version get -- one finds a localised cause, the other
+    stops at `undetermined` -- so this is not passing by accident of two
+    similar payloads.
+    """
+
+    broken = build_report_prompt(_descent("broken"))
+    refusal = build_report_prompt(_descent("t0"))
+
+    assert broken.system == refusal.system
+
+
+def test_the_user_half_differs_between_two_different_descents():
+    """The companion assertion. If `user` never changed either, the split
+    would be hiding a bug where nothing volatile ever reaches the model at
+    all -- every report would be written from the same payload."""
+
+    broken = build_report_prompt(_descent("broken"))
+    refusal = build_report_prompt(_descent("t0"))
+
+    assert broken.user != refusal.user
+
+
+def test_nothing_is_lost_in_the_reordering():
+    """The split moves text between `system` and `user`; it must not drop
+    any of it. Every GRACE slot the template names, and the substituted
+    payload itself, must still be present somewhere in system + user."""
+
+    rendered = build_report_prompt(_descent("broken"))
+    combined = rendered.system + rendered.user
+
+    for slot in ("GROUNDING", "ROLE", "ANCHORS", "CONSTRAINTS", "EXPECTED OUTPUT"):
+        assert slot in combined
+    assert "interface_line_down" in combined, "the payload itself must survive the split"
 
 
 # --------------------------------------------------------------------------- #
@@ -218,7 +291,8 @@ def test_every_rung_in_the_prompt_carries_citable_evidence_keys():
 
 
 def test_the_prompt_renders_and_contains_the_descent_json():
-    prompt = build_report_prompt(_descent("broken"))
+    rendered = build_report_prompt(_descent("broken"))
+    prompt = f"{rendered.system}\n\n{rendered.user}"
 
     assert "{descent_json}" not in prompt, "the placeholder was not substituted"
     assert "interface_line_down" in prompt

@@ -62,7 +62,7 @@ from .grounding import GroundingResult, ground_correlation, ground_report
 from .interface_kind import physical_members
 from .log_window import ShapedWindow, coverage_from_logging, shape_window
 from .network_tools import collect_evidence, run_template
-from .prompt_library import build_correlate_prompt, build_report_prompt
+from .prompt_library import RenderedPrompt, build_correlate_prompt, build_report_prompt
 from .template_parsers import PARSE_OK, parse_template_output
 
 __all__ = [
@@ -86,8 +86,13 @@ COVERAGE_LIMITED = "coverage_limited"
 #: No model was configured, or there was nothing for it to do.
 NOT_ATTEMPTED = "not_attempted"
 
-#: A model call: takes a rendered prompt, returns the model's raw text.
-Analyst = Callable[[str], str]
+#: A model call: takes a rendered prompt (already split at the cache boundary
+#: -- B-421, see `prompt_library.RenderedPrompt`), returns the model's raw
+#: text. Passing the split object through, rather than a concatenated string,
+#: is what lets `cli.py`'s real analyst hand it straight to
+#: `llm_analysis.complete_prompt`, which needs the split intact to cache
+#: anything.
+Analyst = Callable[[RenderedPrompt], str]
 
 #: Findings that name no cause, for two different reasons.
 #:

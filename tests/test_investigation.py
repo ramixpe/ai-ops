@@ -65,16 +65,27 @@ def _run(label, analyst=None, **kwargs):
 
 
 class Scripted:
-    """Returns a canned response per prompt kind, and records what it was asked."""
+    """Returns a canned response per prompt kind, and records what it was asked.
+
+    B-421: `analyst` now receives a `prompt_library.RenderedPrompt` (the
+    system/user split), not a plain string -- `build_report_prompt`/
+    `build_correlate_prompt` return the split object so `complete_prompt` can
+    cache the static half. `self.prompts` still records plain text, though:
+    every assertion in this file that reads it (`"LOG WINDOW" in p`, `len(p)`)
+    only cares about substrings and length, and `system + user` in that order
+    is exactly the text a single fully-rendered prompt used to be -- nothing
+    downstream needs to change to keep meaning what it meant.
+    """
 
     def __init__(self, *, report=None, correlate=None):
         self._report, self._correlate = report, correlate
         self.prompts: list[str] = []
 
-    def __call__(self, prompt: str) -> str:
-        self.prompts.append(prompt)
-        which = self._correlate if "LOG WINDOW" in prompt else self._report
-        return which(prompt) if callable(which) else (which or "{}")
+    def __call__(self, prompt) -> str:
+        text = f"{prompt.system}\n\n{prompt.user}"
+        self.prompts.append(text)
+        which = self._correlate if "LOG WINDOW" in text else self._report
+        return which(text) if callable(which) else (which or "{}")
 
 
 def _good_report(prompt: str) -> str:
@@ -560,8 +571,9 @@ class CountingAnalyst(Scripted):
     def __call__(self, prompt):
         from agent_nettools.llm_analysis import TokenUsage
 
+        text = f"{prompt.system}\n\n{prompt.user}"
         self.usage = self.usage + TokenUsage(
-            input_tokens=len(prompt) // 4, output_tokens=64, calls=1
+            input_tokens=len(text) // 4, output_tokens=64, calls=1
         )
         return super().__call__(prompt)
 

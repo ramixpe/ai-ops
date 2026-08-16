@@ -430,23 +430,28 @@ def _build_analyst():
 
 
 class _UsageRecordingAnalyst:
-    """A ``(prompt) -> str`` callable that remembers what its calls cost.
+    """A ``(RenderedPrompt) -> str`` callable that remembers what its calls cost.
 
-    `investigation.Analyst` stays `Callable[[str], str]` -- the runner must
-    remain drivable by a plain scripted function in tests, and threading a
-    usage type through that signature would make every test analyst carry
-    machinery it does not need.
+    `investigation.Analyst` stays `Callable[[RenderedPrompt], str]` -- the
+    runner must remain drivable by a plain scripted function in tests, and
+    threading a usage type through that signature would make every test
+    analyst carry machinery it does not need.
 
     So the usage rides on the *callable* instead, and the runner reads it
     duck-typed after the calls. An analyst without a `.usage` attribute is
     fine and reports nothing, which is what a scripted test analyst is.
+
+    The prompt is passed straight through to `complete_prompt` unopened --
+    B-421 depends on that: `complete_prompt` needs the `RenderedPrompt`'s
+    `system`/`user` split intact to build a cacheable request, so nothing
+    here may collapse it back into one string first.
     """
 
     def __init__(self, complete):
         self._complete = complete
         self.usage = TokenUsage()
 
-    def __call__(self, prompt: str) -> str:
+    def __call__(self, prompt) -> str:
         completion = self._complete(prompt)
         self.usage = self.usage + completion.usage
         return completion.text
