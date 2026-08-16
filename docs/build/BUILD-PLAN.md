@@ -607,7 +607,7 @@ Create `tests/test_checks_agree_with_health.py`. For every fixture device at `t0
 
 ---
 
-## T-022 · `flows.py` — registry and dataclasses `[STATUS: TODO]`
+## T-022 · `flows.py` — registry and dataclasses `[STATUS: DONE]`
 
 ```python
 @dataclass(frozen=True)
@@ -633,7 +633,7 @@ Register seven object types: `interface`, `isis_adjacency`, `bgp_session`, `ldp_
 
 ---
 
-## T-023 · The `bgp_session` descent `[STATUS: TODO]`
+## T-023 · The `bgp_session` descent `[STATUS: DONE]`
 
 Ordered rungs, top of stack first:
 

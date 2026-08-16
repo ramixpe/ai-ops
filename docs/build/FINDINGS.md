@@ -1163,6 +1163,31 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-056 · T-022 / T-023 · `flows.py` — Q-013 and Q-017 resolved into the contract
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5 (contract task)
+- **What happened:** Both operator decisions are now in the `Rung` contract, plus the `bgp_session` and `interface` ladders. **1181 passed**, 20 new tests.
+
+  **Q-013 → `DeviceScope`.** Each rung declares `LOCAL`, `SUBJECT` or `PATH`. The `bgp_session` ladder switches at the right place, and the measurement that decided it is pinned as a test rather than left in a finding: rungs 1–3 are `LOCAL` (the local FSM, socket and RIB), rungs 4–5 are `SUBJECT`, because RR1's own IS-IS was healthy while PE2's was not.
+
+  **The operator's aggregation addition is enforced, not documented.** A `PATH` rung without an `Aggregation` raises at construction, and so does a single-device rung that declares one. Both directions are tested. Left implicit, the walker would silently pick a rule — and the right rule differs per rung, which is exactly why it cannot be inferred: ECMP routes are `ANY_HEALTHY`, path hops are `ALL_HEALTHY`.
+
+  **Q-017 → `cause_not_localised`** joins `all_layers_healthy` and `undetermined` as universal findings every flow must declare. A test asserts all five `bgp_session` rung findings are reachable — the registry-level form of the bug: under the old walk rule, four of them were not.
+- **Evidence:** `tests/test_flows.py`, 20 passed. Ladder verified: `bgp_session(LOCAL) → transport(LOCAL) → route_to_peer(LOCAL) → igp_adjacency(SUBJECT) → interface(SUBJECT)`.
+- **What I did:** Three judgement calls worth recording.
+
+  1. **No rung uses `PATH` yet.** `route_to_peer` is the obvious candidate — an ECMP set with `ANY_HEALTHY` — but this fabric's route to a loopback resolves to one entry plus a Local-LFA backup, not a true ECMP set. Declaring `PATH` would be modelling a topology we do not have, and the aggregation machinery would go untested-by-use while looking exercised. `LOCAL` is the honest scope until a fabric needs otherwise; the enum and its enforcement exist for when one does.
+  2. **The `interface` flow has one rung.** The plan never specified its ladder (OBS-028), and an interface has nothing below it this tool can observe — optics, cabling and the far end are precisely where the descent bottoms out and hands to a human (D3's ceiling). `checks.interface_state` already folds line state and the counter rate into one ordered verdict, so splitting them across two rungs would double-report the same object.
+  3. **`flow_for` raises rather than returning `None`** for a declared-but-unimplemented type, and raises `KeyError` rather than `NotImplementedError` for an unknown one. `None` would let a caller read "no flow" as "nothing wrong" — the same silent-degradation shape this build keeps meeting — and a typo and a deliberate stub are different mistakes that deserve different errors.
+
+  The safety test T-022 asks for is in, mirroring `test_check_tool_intents_exist_in_the_platform_table`, and extended: every template collect step must also name a parameter the template actually has. A bad ladder now fails as a static property of the registry rather than mid-descent against a real device, where it would have looked like a device fault.
+- **Needs human review:** no
+- **Blocks:** none — T-024 next, implementing the corrected walk.
+
+---
+
 <!--
 Copy this block for each new entry.
 
@@ -1191,8 +1216,8 @@ Anything logged with `Needs human review: yes` is mirrored here so the review ha
 | Q-014 | T-008 | `ttp` added as a **core** dependency rather than an optional extra, deviating from T-008's wording. Rationale: `run_template` attaches parsed data on every call from T-018, so an extra would make the descent silently unavailable on a default install. | No — decided and green | **Closed (OBS-035)** — accepted; an extra would be silent degradation on a default install |
 | **Q-015** | **T-011** | **HALT.** Executing the PE2 `Gi0/0/0/0` shutdown is a device state change — §0.11's absolute HALT, under a standing instruction that explicitly overrides later session instructions. The script is written and ready. **Does the operator waive §0.11 for this single pre-planned, reversible action, or run it themselves?** | **Yes — blocks T-011 and everything after it** | **Resolved (OBS-038)** — waiver granted, exercised, discharged. Fabric verified restored. |
 | **Q-016** | **T-011** | Shutting one uplink does not isolate PE2 — it has two, and the IGP routed around it (OBS-039). Isolating it needs **both** `Gi0/0/0/0` and `Gi0/0/0/1` shut in one commit. Schedule a second window, or accept `healthy` + `t0` as sufficient for MVP-0? **T-025/M3 are not blocked either way.** | No — nothing downstream is blocked | **Resolved (OBS-049)** — second window run, both uplinks in one commit, PE2 fully isolated, 216 files captured |
-| **Q-017** | **T-024** | **The specified walk semantics make four of five findings unreachable.** T-024 says "broken → stop", but rungs 1–3 are all broken for `RR1 → 10.255.0.12`, so the descent stops at rung 1 and reports the symptom (`peer_not_established`), never the shut interface. D6 says the *lowest* broken layer is the root cause. | **Yes — blocks T-022/T-023/T-024/T-025** | Open (OBS-055) |
-| Q-013 | T-022 | Does a `Rung` carry its own device scope? The `bgp_session` descent's lower rungs (route, IGP adjacency, interface) concern the *path*, not the subject device — checking RR1's own IS-IS adjacencies would miss that PE2 is the isolated one. | **Yes — blocks T-022/T-023/T-024** | Open (OBS-020) — decide at T-022. **Operator: add the field when the dataclass is defined; retrofitting after `descent.py` exists is not cheap** (OBS-035) |
+| **Q-017** | **T-024** | **The specified walk semantics make four of five findings unreachable.** T-024 says "broken → stop", but rungs 1–3 are all broken for `RR1 → 10.255.0.12`, so the descent stops at rung 1 and reports the symptom (`peer_not_established`), never the shut interface. D6 says the *lowest* broken layer is the root cause. | **Yes — blocks T-022/T-023/T-024/T-025** | **Resolved (OBS-056)** — operator confirmed the plan was defective. New semantics in T-024/T-025 and D6; `cause_not_localised` added. |
+| Q-013 | T-022 | Does a `Rung` carry its own device scope? The `bgp_session` descent's lower rungs (route, IGP adjacency, interface) concern the *path*, not the subject device — checking RR1's own IS-IS adjacencies would miss that PE2 is the isolated one. | **Yes — blocks T-022/T-023/T-024** | **Resolved (OBS-056)** — `DeviceScope` enum on `Rung`, option (a)+(b); subject resolution beside the registry. Aggregation required for `PATH`, enforced at construction. |
 | Q-011 | T-004 | Should the devices' `logging trap` level be lowered so severity-5 events (`%BGP-5-ADJCHANGE`, IS-IS transitions) reach Loki? Today only `err`/`warning` arrive, so the events T-028 correlates against are absent entirely. Operator decision — it changes log volume on a pipeline already carrying 97% self-generated noise. | No for MVP-0 · **yes for a useful historical axis** | Open (OBS-014) |
 | Q-003 | T-005 | Does Alertmanager have a webhook receiver, and can it replace n8n as the Stage 2 trigger? | No — Stage 2 | **Resolved (OBS-016)** — yes to both. Gap is that no alert rule carries a device label; that is rule authoring, not infrastructure. |
 | Q-004 | T-006 | What is the subject naming scheme for an L3VPN service object? | No — flow not in MVP-0 | **Accepted (OBS-035)** — `<pe>:<vrf>` recommended; `<vrf>:<rd>` eliminated because RD is reused across PEs. Confirm at T-022. |
