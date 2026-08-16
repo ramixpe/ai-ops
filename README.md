@@ -63,6 +63,46 @@ regression would hide forever in the noise of routine faults.
 `2` is the worst *network* outcome. A script calling both must not assume one
 scheme.
 
+## Does it work against a real fabric? One blind trial, reported in full
+
+The fixture demo proves the pipeline is deterministic. It does not prove the *diagnosis* is right — the code was written against those fixtures. So the diagnosis was tested blind, once, against a live fault.
+
+**The protocol.** An engineer applied a fault and did not say what it was. They diagnosed the same subject by hand, and that diagnosis was **written down and committed to git before the agent ran** — 14:11:50 UTC for the hand diagnosis, 14:12:02 for the run. Then they were compared.
+
+| | Engineer, by hand | Agent |
+|---|---|---|
+| Rung | `igp_adjacency` | `igp_adjacency` |
+| Device | PE3 | PE3 |
+| Finding | `igp_isolated` | `igp_isolated` |
+| Interface rung | healthy | `HEALTHY — 3 of 3 members` |
+| Broken above | rungs 1 and 3 named | `bgp_session`, `transport`, `route_to_peer` |
+
+114 seconds, against a 103-second baseline on a healthy fabric. Exit code 1. Report grounded with every citation resolving.
+
+**Why this case and not an easier one.** From the route reflector the symptom is *identical* to the fixture demo above — BGP Idle, no route to the peer's loopback — but the cause is a **different rung**. Anything pattern-matching on "peer unreachable, so the far end's links are down" gets it wrong, because the links were up the whole time. Both the engineer and the descent walked past a **healthy** interface rung to report the broken IGP rung above it.
+
+### What the model got wrong
+
+One thing, and it is worth stating plainly because an account with only successes in it is not an account.
+
+Asked to place the finding on a timeline, the model emitted:
+
+```
+Aug 14 04:28.238 UTC   ROUTING-ISIS-5-ADJCHANGE   Adjacency to P2 ... Down
+```
+
+The real log record reads `Aug 16 14:04:28.238 UTC`. Characters were dropped, producing a malformed date **two days earlier** — in the one field the prompt explicitly says to quote verbatim. One of nine timeline entries did not exist in the evidence.
+
+**Three things about that.**
+
+**It could not affect the diagnosis.** The rung, the device and the causal chain come from `descent.py`, which contains no model call of any kind. The model is handed a conclusion that has already been reached and is asked to render it and place it in time. A corrupted timestamp makes the *timeline* wrong. It cannot make the *finding* wrong, because the finding was not the model's to produce.
+
+**Grounding did not catch it, and that was a real gap.** The report's citations were all checked; the timeline's were not — every claim of *presence* in a correlation was being emitted unverified. That hole is now closed (`grounding.check_timeline_citations`): every timeline entry must cite a device timestamp that exists in the window, and its event identifier must match the record at that timestamp. **The exact fabricated line above is pinned as a regression test.**
+
+**This is the failure mode the architecture is built around.** A model asked to *diagnose* would have produced a confident, plausible, unfalsifiable answer, and a wrong timestamp inside it would be indistinguishable from a right one. A model asked only to *render and correlate* produces a wrong timestamp that a deterministic check can catch — and now does.
+
+---
+
 ## What This Does
 
 - Loads a declarative inventory of devices from `inventory/lab.yaml`.
@@ -83,6 +123,11 @@ scheme.
 - Reports operational metrics (`nettools metrics`) and supports `--format
   table|summary`/`--quiet` and consistent exit codes on top of the default
   JSON output (Phase 8).
+- **Investigates a fault deterministically** (`nettools investigate`) by walking
+  a flow's protocol dependency stack and reporting the *lowest* broken rung plus
+  the causal chain above it -- with no model involved in reaching the answer.
+- **Grounds every model-written claim against the evidence it came from**, and
+  does not emit a report that fails the check.
 
 ## Environment
 
@@ -166,6 +211,107 @@ make facts
 `make inventory` lists the nine devices without showing credentials.
 `make facts` contacts PE1 using only `show running-config hostname` and
 `show version`.
+
+## The investigation layer
+
+Everything above answers *"what is the state of this device?"*. This layer answers
+*"why is this thing broken, and what is the evidence?"* — and it is built so the
+second answer is not a model's opinion.
+
+```
+nettools investigate <device> <subject> [--flow bgp_session]
+                                        [--from-fixtures [--label broken]]
+                                        [--no-model]
+                                        [--format json|table|summary] [--quiet]
+```
+
+### The descent has no model in it
+
+`descent.py` walks a flow's ladder — for `bgp_session`: session, transport, route
+to peer, IGP adjacency, interface — and applies pure predicates from `checks.py`
+to already-parsed records. Three verdicts, and the walk rule matters:
+
+| Verdict | What the walk does |
+|---|---|
+| `broken` | record it and **keep descending** |
+| `healthy` | **keep descending** |
+| `unevaluated` | **stop** — nothing below a rung that could not be read is trustworthy |
+
+**The result is the *lowest* broken rung**, and the broken rungs above it become
+the causal chain. Stopping at the first broken rung would report "BGP is not
+established", which is where the investigation started. Walking to the bottom
+turns a restated alert into an argument an engineer can check link by link.
+
+A rung is only ever read on one device's view, so a healthy rung proves nothing
+about the rungs below it: on this fabric the route reflector's own IS-IS was
+perfectly healthy while the far end of the session had no adjacencies at all.
+
+`unevaluated` is not decoration. A check may only answer `healthy` about a field
+it actually read; absence is `unevaluated`, and an unread rung ends the walk with
+`undetermined` rather than a plausible guess.
+
+### What the model is for, and what it is not
+
+The descent already found the cause. The model does the three things a
+deterministic walk cannot: **render** the chain as something absorbed in ten
+seconds, **correlate** it against the log timeline, and **say "I cannot determine
+this"** when the evidence does not support a conclusion.
+
+Prompts live in `prompts/` as versioned files (`report.v1.txt`,
+`correlate.v3.txt`), reviewed like code, each with golden cases in
+`prompts/tests/cases/`. A prompt change is a **version bump, never an in-place
+edit** — a report has to be attributable to the exact text that produced it.
+
+They are written to **GRACE**: **G**rounding (what is true and where it came
+from), **R**ole, **A**nchors (a worked example), **C**onstraints (including a
+named refusal path), **E**xpected output. There is deliberately **no Evaluation
+slot** — asking a model to check its own work is a request, and evaluation here
+is code that runs every time.
+
+### Grounding is a gate, not a suggestion
+
+`grounding.py` verifies the model's output against the descent that produced it,
+and **a report that fails is not emitted** — the run returns the descent and the
+grounding failure, never the prose.
+
+- Every observation cites an evidence key **the descent actually read** — not
+  merely one that exists.
+- Every rung the walk read appears as an observation, and the causal chain is
+  cited by an interpretation. *An uncited rung is an uncited claim.*
+- Every timeline entry cites a device timestamp present in the log window, with a
+  matching event identifier.
+- A claim of **absence** requires coverage metadata showing the source could have
+  carried what it says is missing.
+- A verdict that examined nothing, beside a payload that asserts things, is a
+  contradiction and fails.
+
+Failure objects carry a *locus* — `obs-3`, a rung name — and structurally cannot
+hold a claim, so a rejected report's prose cannot leak through the rejection.
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | the descent completed and found no fault |
+| `1` | it completed and found one — a problem with the **network** |
+| `2` | no trustworthy answer was produced — a problem with the **answer** |
+
+Exit 2 covers `undetermined`, a withheld report, and a run that could not
+complete. A grounding failure is exit 2 even when a real fault was found: if it
+were exit 1, a systematic grounding regression would hide forever in the noise of
+routine faults. **This matches `nettools diff` and deliberately not `nettools
+health`**, where `2` is the worst *network* outcome — a script calling both must
+not assume one scheme.
+
+### Design documents
+
+`docs/design/` carries the reasoning: `design-thinking.md` (decisions D1–D20),
+`evidence-reduction.md` (how large sources are made model-readable without a
+model reading them), `chaos-harness.md` (fault injection as the Stage 2
+acceptance vehicle), and `glossary.md` — read that one first, since `intent`
+means *a question name* here, not intended state.
+
+---
 
 ## Safety Boundary
 

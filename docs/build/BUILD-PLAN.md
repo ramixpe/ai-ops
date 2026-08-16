@@ -1129,9 +1129,17 @@ Then run manually against the real fabric with MiniMax configured, and record in
 
 ---
 
-## T-034 · Documentation update `[STATUS: TODO]`
+## T-034 · Documentation update `[STATUS: DONE]`
 
 Update `README.md` (new CLI surface, GRACE, the prompts directory), `CLAUDE.md` (new modules, where they sit in the layer model), and `.env.example` (MiniMax variables).
+
+**Two operator requirements, both binding on any future edit.**
+
+1. **`--from-fixtures` is the README's first documented command**, above "What This Does". It runs with no lab, no API key and no network, and produces a named rung with a causal chain. That is the demonstration that convinces a sceptical engineer the diagnosis is not the model's opinion, and it is the most persuasive artifact this build has produced. Do not demote it below feature lists.
+
+2. **The T-033 result is documented including the fabricated timestamp.** An honest account of the one thing the model got wrong — and of why it could not affect the diagnosis — is more convincing than an account with only successes in it. The discrimination is stated too: the same symptom as the captured `broken` label, a different rung, and both diagnoses walking past a healthy interface rung to report the broken IGP rung above it.
+
+**What was written.** README gains "Try it in ten seconds", "Does it work against a real fabric? One blind trial, reported in full" (with the timestamp failure and the three things about it), and "The investigation layer" — the walk rule, why `unevaluated` stops it, what the model is and is not for, GRACE with its deliberately absent E slot, grounding as a gate, and the exit-code scheme with the `nettools health` divergence. `CLAUDE.md` gains the nine-module investigation-layer dependency table, the four inherited invariants, and the two things that look like ordinary code and are not. `.env.example`'s MiniMax block already existed; what was missing was **which surfaces need a provider at all** — `investigate` needs one only for the report and timeline, and `--no-model`/`--from-fixtures` need none.
 
 ---
 

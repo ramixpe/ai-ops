@@ -2084,6 +2084,25 @@ transport path disappearing rather than a direct session teardown.
 
 ---
 
+## OBS-084 · T-034 · Documenting the failure is the persuasive part
+
+- **Kind:** decision-made
+- **Escalation:** NOTE
+- **Model:** opus-5
+- **What happened:** README, `CLAUDE.md` and `.env.example` updated. The two operator requirements — `--from-fixtures` first, and the T-033 result documented **including the fabricated timestamp** — are now recorded in the T-034 spec as binding on future edits, not just satisfied once.
+- **Evidence:** `README.md` +146 lines, `CLAUDE.md` +40, `.env.example` +10. `1377 passed`, lint clean, doc-sync tests green.
+- **What I did:** Three notes.
+
+  **1. The honest account is the stronger one, and it is worth understanding why rather than treating it as a virtue.** A README claiming the model never errs invites exactly one question — *what happens when it does?* — and has no answer. The T-033 section answers it with the real case: the model corrupted a device timestamp into a malformed date two days early, **and the diagnosis was unaffected, because the diagnosis was never the model's to produce.** That single paragraph carries the architecture better than the architecture section does. The failure is the proof: a system where a model error is confined to the timeline is visibly a different shape from one where a model error is the answer.
+
+  **2. `.env.example`'s MiniMax block already existed; the real gap was elsewhere.** The spec said "MiniMax variables" and they had been added at T-003. What was missing was **which surfaces need a provider at all** — a reader had no way to learn that `investigate` needs one only for the report and timeline, and that `--no-model` and `--from-fixtures` need none. Added as a table in the config file itself, where the question is asked.
+
+  **3. `--from-fixtures` being first is now a documented constraint rather than a layout accident.** It sat first because T-031 put it there; nothing recorded *why*, so the next person tidying the README into a conventional order would have moved it below the feature list without noticing they had removed the demonstration. The reason is now in the T-034 spec.
+- **Needs human review:** no
+- **Blocks:** none — M4 next.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**

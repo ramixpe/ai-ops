@@ -14,7 +14,7 @@ reasoning layer, and an MCP server — all over the same narrow allowlist of
 ```bash
 make setup                  # python -m venv .venv + pip install -e ".[dev,llm]"
 source .venv/bin/activate
-make test                   # pytest -q  (554 tests -- 550 run + 4 live_lab-skipped, no network needed)
+make test                   # pytest -q  (1377 pass + 22 skipped; no network, no credentials, no API key needed)
 make lint                   # ruff check .
 make help                   # full target list
 ```
@@ -33,7 +33,11 @@ validated parameterized templates) take an additional value
 across every device instead of one at a time; `nettools agent "QUESTION"
 [--device D] [--max-iterations N] [--time-budget SECONDS]` (Phase 6,
 Anthropic only) runs a bounded, read-only tool-calling loop.
-`nettools evidence prune --keep-days N --keep-count M [--device D]` and
+`nettools investigate DEVICE SUBJECT [--flow bgp_session] [--from-fixtures
+[--label LABEL]] [--no-model]` (MVP-0) runs the deterministic dependency
+descent and reports the lowest broken rung plus its causal chain;
+`--from-fixtures` replays committed captures and needs no lab, credentials or
+API key. `nettools evidence prune --keep-days N --keep-count M [--device D]` and
 `nettools evidence history [DEVICE]` (Phase 7) manage stored snapshots
 against whichever backend `NETTOOLS_EVIDENCE_BACKEND` selects.
 `nettools metrics [--format json|prometheus] [--quiet]` (Phase 8) reports
@@ -97,6 +101,36 @@ read parsed evidence and the inventory, but nothing depends on them.
 `inventory.py`; `metrics.py` (Phase 8) sits beside layer 4, called from
 `network_tools.py`/`health.py`; `output.py` (Phase 8) sits beside layer 5,
 called only from `cli.py`.
+
+**The investigation layer (MVP-0)** sits between layers 4 and 5 as a stack of
+its own, each module depending only on the ones above it in this list:
+
+| Module | What it is | Depends on |
+|---|---|---|
+| `template_parsers.py` | TTP parsers for the Phase 5 templates, plus §0.10 line accounting (`IgnoreRule`, `account_lines`, `finalize`) | nothing in this layer |
+| `checks.py` | Pure predicates over parsed records. `healthy`/`broken`/`unevaluated`, and a check may only answer `healthy` about a field it actually read | `template_parsers` |
+| `flows.py` | The ladder: `Rung`, `DeviceScope`, `SubjectRule`, `Aggregation`, and the `bgp_session` flow | `checks` |
+| `descent.py` | `run_descent()` — the deterministic walk. **No model call anywhere in this module**, and that is the claim the layer rests on | `flows`, `checks` |
+| `coverage.py` | What an evidence source was able to tell us; `gaps()` is why a negative may not be assertable | nothing |
+| `log_window.py` | Shapes a log window by *attribution* (`NoiseRule`), never by content; builds the coverage record | `coverage` |
+| `prompt_library.py` | Loads versioned prompts from `prompts/` and renders them. **Structurally cannot receive device text** — it takes a `DescentResult` | `descent`, `log_window` |
+| `grounding.py` | The gate. Citation integrity, chain coverage, timeline citations, absence coverage | `descent`, `coverage`, `log_window` |
+| `investigation.py` | `investigate()` — the runner that wires the above together | all of the above, `network_tools` |
+
+`cli.py`'s `investigate` subcommand is the only front end so far; MCP parity is
+backlog (B-113).
+
+**Four invariants this layer inherits and must not break.** Platform resolves
+credential-free; the allowlist is checked before credentials load; no command is
+built by interpolation; and **no unparsed device text ever reaches a model** —
+enforced structurally in `prompt_library`, which never holds the text, rather
+than by filtering.
+
+**Two things that look like ordinary code and are not.** `descent.py` has no
+model call, deliberately and permanently — if it ever needs one, something above
+it has been designed wrong. And `grounding.py`'s failure objects have no field a
+model's prose can occupy, so "a failed report is not emitted" cannot be defeated
+by forgetting to redact.
 
 `build/lib/` and `agent_nettools.egg-info/` are stale build artifacts. Never edit
 those copies; `make clean` removes them.
@@ -864,6 +898,8 @@ Read these before changing anything in the investigation layer. Placed by `insta
 | [docs/design/design-thinking.md](docs/design/design-thinking.md) | Decisions D1-D20 with options considered, rationale, and growth path |
 | [docs/design/lld-investigation-layer.md](docs/design/lld-investigation-layer.md) | Delta spec: what this repo is missing and where it goes |
 | [docs/design/interfaces.md](docs/design/interfaces.md) | How humans interact with the agent, staged. Read before T-035 |
+| [docs/design/evidence-reduction.md](docs/design/evidence-reduction.md) | How large evidence sources are made model-readable **without a model reading them** |
+| [docs/design/chaos-harness.md](docs/design/chaos-harness.md) | Fault injection, framed as the Stage 2 acceptance vehicle. §3.1's operating rule is binding |
 | [docs/build/BUILD-PLAN.md](docs/build/BUILD-PLAN.md) | The 34-task build plan. **Part 0 is binding** — model roles, escalation ladder, frozen files |
 | [docs/build/TRACKER.md](docs/build/TRACKER.md) | Progress. Authoritative on task status |
 | [docs/build/FINDINGS.md](docs/build/FINDINGS.md) | Append-only findings log |
