@@ -116,9 +116,8 @@ Knowledge and Constraints:
 say so plainly rather than retrying the same call unchanged.
 - If you cannot fully answer within your remaining tool calls, say what you \
 found and what you were not able to check.
-
-Evaluation:
-Before answering, verify every claim is supported by a tool result you actually received.
+- If a claim cannot be traced to a tool result you actually received, do not \
+make it.
 """
 
 

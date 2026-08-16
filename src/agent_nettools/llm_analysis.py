@@ -131,9 +131,7 @@ Knowledge and Constraints:
 - Do not assume missing data.
 - Do not recommend configuration changes unless explicitly asked.
 - If the evidence is incomplete, say what is missing.
-
-Evaluation:
-Before responding, verify that every claim is supported by the provided data.
+- If a claim cannot be traced to a specific command's output, do not make it.
 """
 
 

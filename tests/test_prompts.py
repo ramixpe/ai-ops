@@ -147,3 +147,39 @@ def test_the_rule_tests_are_actually_running_now_that_prompts_exist():
     prompts = _prompt_files()
     assert prompts, "the rule tests above are skipping again -- they enforce nothing"
     assert any(p.name.startswith("report.") for p in prompts)
+
+
+def test_no_prompt_anywhere_in_the_package_carries_an_evaluation_slot():
+    """B-413, widened.
+
+    `prompts/` is covered by `test_no_prompt_asks_the_model_to_mark_its_own_work`.
+    The prompts that predate the library are not, and B-413 named only one of
+    them -- `llm_analysis.TROUBLESHOOTING_PROMPT`. There were **three**:
+    `fabric_analysis` and `agent_loop` carried the same clause, and nothing was
+    looking at them.
+
+    GRACE has no E slot on purpose. "Before responding, verify that every claim
+    is supported" reads as reassurance and provides none: evaluation here is
+    `grounding.py` and the schema validator, which run every time without
+    anyone's attention -- a property a prompt clause cannot have.
+
+    Scoped to the whole package rather than to the three known files, so a
+    fourth prompt added later is covered without anyone remembering to add it.
+    """
+
+    import pathlib
+
+    package = pathlib.Path(__file__).resolve().parent.parent / "src" / "agent_nettools"
+    offenders = []
+    for path in sorted(package.glob("*.py")):
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            stripped = line.strip()
+            if stripped.startswith("Evaluation:") or (
+                stripped.startswith("Before ") and "verify" in stripped
+            ):
+                offenders.append(f"{path.name}:{number}: {stripped}")
+
+    assert not offenders, (
+        "a prompt asks the model to mark its own work; evaluation is code here:\n  "
+        + "\n  ".join(offenders)
+    )

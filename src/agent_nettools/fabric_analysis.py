@@ -73,9 +73,7 @@ Knowledge and Constraints:
 - Do not recommend configuration changes unless explicitly asked.
 - Evidence may be truncated in the middle (marked "[TRUNCATED: N characters
   omitted]"); if that affects your confidence in a finding, say so.
-
-Evaluation:
-Before responding, verify that every claim is supported by the provided data.
+- If a claim cannot be traced to a specific device's output, do not make it.
 """
 
 
