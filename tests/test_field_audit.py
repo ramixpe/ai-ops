@@ -1,0 +1,180 @@
+"""What every check reads, against what its inputs contain (B-433).
+
+The detection method for silent-failure **shape 7** (`BUILD-PLAN.md` §0.13):
+*evidence collected, parsed, carried in the envelope, and never read.* It is
+invisible to any check that grades output, because the output is correct — round
+3 reported `transport_blocked`, which was true, while the same parsed record
+carried `last_reset_reason: "BGP Notification received: administrative shutdown"`
+and nothing looked at it.
+
+So this file does not grade output. **It compares what a parser emits against
+what any check reads**, and holds the answer as a committed number.
+
+Two things it deliberately is not
+----------------------------------
+**It is not a rule that every parsed field must be read.** `mac_address` and
+`bandwidth_kbps` are not diagnostic, and failing on them would reproduce exactly
+the noise-generating over-correction T-029c refused — a rule against unread
+evidence that generates unread warnings has defeated itself the same way.
+
+**It is not a judgement about which fields matter.** That is per-check work and
+belongs with whoever owns the check. This file records the split, names the
+fields whose *purpose* is to explain a state, and fails when the numbers move —
+so a parser gaining a field nothing reads is a decision someone makes, not a
+drift nobody notices.
+"""
+
+from __future__ import annotations
+
+import pathlib
+import re
+
+import pytest
+
+from agent_nettools import template_parsers as tp
+
+FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures" / "cisco_xr" / "RR1" / "broken"
+CHECKS = pathlib.Path(__file__).resolve().parent.parent / "src" / "agent_nettools" / "checks.py"
+
+#: One real capture per diagnostic template. Fixtures, not synthetic input --
+#: a field a parser only emits on real output is exactly the kind that gets
+#: missed.
+SOURCES = {
+    "bgp_neighbor": "show-bgp-neighbor-10-255-0-12.txt",
+    "route": "show-route-10-255-0-12-32.txt",
+    "interface": "show-interfaces-gi0-0-0-0.txt",
+}
+
+#: Measured 2026-08-16. `(fields parsed, fields any check reads)`.
+#:
+#: These are pinned so the ratio cannot drift silently in either direction: a
+#: parser gaining an unread field, or a check quietly dropping one it used to
+#: read. When a number changes, update it **and** say which field moved and why
+#: in the commit.
+EXPECTED = {
+    "bgp_neighbor": (23, 5),
+    "route": (8, 2),
+    "interface": (14, 5),
+}
+
+#: Unread fields whose entire purpose is to explain *why* something is in the
+#: state it is in. Not defects on their own -- a deliberate decision not to read
+#: one is fine -- but they are the population shape 7 is drawn from, and round 3
+#: came out of the first entry here.
+#:
+#: An AS mismatch and a hold-timer mismatch both produce the `Active` state
+#: round 3 produced. The tool cannot distinguish either from an administrative
+#: shutdown, while parsing and discarding the fields that would.
+EXPLANATORY = {
+    "bgp_neighbor": {
+        "last_reset_reason", "state_reason", "previous_state",
+        "remote_as", "local_as", "hold_time", "keepalive",
+    },
+    "interface": {"last_link_flapped", "state_transitions"},
+    "route": {"protocol", "distance", "metric"},
+}
+
+
+def _parsed_fields(template: str) -> set[str]:
+    raw = (FIXTURES / SOURCES[template]).read_text(encoding="utf-8")
+    parsed, status = tp.parse_template_output("cisco_xr", template, raw)
+    assert status is tp.PARSE_OK, f"{template} fixture must parse"
+
+    fields = set(parsed.get("meta") or {})
+    for record in parsed.get("records") or []:
+        fields |= set(record)
+    return fields - {"unaccounted_lines", "unparsed_rows"}
+
+
+def _fields_read_by_any_check() -> str:
+    return CHECKS.read_text(encoding="utf-8")
+
+
+def _split(template: str) -> tuple[set[str], set[str]]:
+    """(read, unread) for one template."""
+
+    source = _fields_read_by_any_check()
+    fields = _parsed_fields(template)
+    read = {f for f in fields if re.search(rf'["\']{re.escape(f)}["\']', source)}
+    return read, fields - read
+
+
+@pytest.mark.parametrize("template", sorted(SOURCES), ids=sorted(SOURCES))
+def test_the_read_versus_parsed_split_is_what_was_measured(template):
+    """The audit itself, held as a number.
+
+    Failing here is not necessarily a defect. It means the split moved, and the
+    question to answer in the commit is *which field, and was that deliberate?*
+    """
+
+    read, unread = _split(template)
+    parsed_count, read_count = EXPECTED[template]
+
+    assert len(read) + len(unread) == parsed_count, (
+        f"{template} now parses {len(read) + len(unread)} fields, expected "
+        f"{parsed_count}. Which field was added, and does any check read it?"
+    )
+    assert len(read) == read_count, (
+        f"{template}: {len(read)} fields read, expected {read_count}. "
+        f"read={sorted(read)} unread={sorted(unread)}"
+    )
+
+
+@pytest.mark.parametrize("template", sorted(EXPLANATORY), ids=sorted(EXPLANATORY))
+def test_the_explanatory_fields_are_enumerated_and_still_unread(template):
+    """The population shape 7 is drawn from, held explicitly.
+
+    Every field here exists to say *why* something is in a state. Reading one is
+    a change worth noticing, so this fails when a check starts reading it --
+    prompting the entry to move out of `EXPLANATORY` and into a real check with
+    tests, rather than being read incidentally by a string match.
+    """
+
+    read, unread = _split(template)
+    declared = EXPLANATORY[template]
+
+    assert declared <= (read | unread), (
+        f"{template}: EXPLANATORY names fields the parser no longer emits: "
+        f"{sorted(declared - (read | unread))}"
+    )
+
+    now_read = declared & read
+    assert not now_read, (
+        f"{template}: {sorted(now_read)} is now read by a check. Good -- move it "
+        f"out of EXPLANATORY and make sure the check has its own test."
+    )
+
+
+def test_the_audit_is_not_a_rule_that_everything_must_be_read():
+    """The boundary, asserted so nobody tightens this into noise.
+
+    T-029c's lesson applies directly: a rule against unread evidence that
+    generates unread warnings has defeated itself. Most unread fields are
+    legitimately not diagnostic, and this file must keep passing while they are
+    unread.
+    """
+
+    _, unread = _split("interface")
+
+    assert {"mac_address", "bandwidth_kbps"} <= unread
+    assert _split("interface")[0], "and some fields ARE read -- the audit is not vacuous"
+
+
+def test_every_diagnostic_template_is_covered_by_the_audit():
+    """§0.12. A template added to the flow and not to `SOURCES` would leave this
+    file passing over a shrinking fraction of the surface."""
+
+    from agent_nettools import flows
+
+    used = {
+        step.name
+        for flow in (flows.flow_for(o) for o in flows.FLOWS)
+        for rung in flow.descent
+        for step in rung.collect
+        if step.is_template
+    }
+
+    assert used, "no templates in any flow -- the audit would be vacuous"
+    assert used <= set(SOURCES), (
+        f"templates used by a flow but absent from the audit: {sorted(used - set(SOURCES))}"
+    )

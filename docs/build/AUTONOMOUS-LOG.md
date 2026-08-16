@@ -32,6 +32,7 @@ Purpose: a running record of **what was done, what was asked, and what was answe
 | Item | Outcome | Tests | Notes |
 |---|---|---|---|
 | — | session opened | 1391 | 64 backlog items; 13 defect-class targeted |
+| **B-433** | ✅ closed | 1400 | Split pinned as numbers; explanatory fields enumerated separately. Fails in **both** directions — a new unread field, or a check quietly starting to read an explanatory one |
 | **B-413** | ✅ closed | 1392 | Item named **one** prompt. There were **three** — `fabric_analysis` and `agent_loop` carried the same clause and nothing was looking at them. Now pinned package-wide rather than per-file |
 
 ---
