@@ -116,3 +116,22 @@ deterministic walk cannot:
 
 If a prompt here ever starts asking the model to decide *what is broken*, the
 architecture has leaked and the prompt is the wrong place to fix it.
+
+---
+
+## Version history
+
+`prompt_library.CURRENT_VERSION` is the table deciding which version a builder
+loads by default. Superseding a prompt means one line there and one row here —
+the point of rule 2 is that the change is a diff someone reads, not a default
+that drifted.
+
+| Prompt | Current | History |
+|---|---|---|
+| `report` | v1 | T-027. Unchanged |
+| `correlate` | **v2** | v1 (T-028) described a noise filter that dropped whole facilities. `log_window.py` was corrected to attribute each record before dropping it, which leaves unattributable — and often high-severity — session events in the window. v2 states why they are there and that **retention is not relevance**, and adds constraint 7: severity ranks how loudly a device reports something, not whether it bears on the finding. See OBS-063 |
+
+v1 files stay in the tree. No report was ever produced from `correlate.v1`, so
+nothing was made unreproducible by superseding it — the bump was taken anyway,
+because carving the first exception to a rule the day after writing it is how
+the rule stops meaning anything.

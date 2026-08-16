@@ -30,6 +30,7 @@ from .descent import DescentResult
 from .log_window import ShapedWindow
 
 __all__ = [
+    "CURRENT_VERSION",
     "PROMPTS_DIR",
     "build_correlate_prompt",
     "build_report_prompt",
@@ -39,6 +40,19 @@ __all__ = [
 ]
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "prompts"
+
+#: The version each builder uses when a caller does not name one.
+#:
+#: A single reviewable table rather than a default buried in six signatures.
+#: `prompts/README.md` rule 2 says a prompt change is a version bump and the
+#: caller names the version — this is where "the current one" is decided, so
+#: superseding a prompt is one line in a diff someone reads, not a default that
+#: drifted.
+#:
+#: `correlate` is at 2 because v1's grounding text describes a noise filter that
+#: dropped whole facilities, which is no longer what the code does. v1 stays in
+#: the tree as the record of what was reviewed at T-028.
+CURRENT_VERSION: dict[str, int] = {"report": 1, "correlate": 2}
 
 
 class PromptNotFoundError(FileNotFoundError):
@@ -106,10 +120,10 @@ def descent_payload(result: DescentResult) -> dict:
     }
 
 
-def build_report_prompt(result: DescentResult, *, version: int = 1) -> str:
+def build_report_prompt(result: DescentResult, *, version: int | None = None) -> str:
     """Render the report prompt for one descent."""
 
-    template = load_prompt("report", version)
+    template = load_prompt("report", version or CURRENT_VERSION["report"])
     payload = json.dumps(descent_payload(result), indent=2)
     # str.replace, not str.format: the prompt contains literal JSON braces in
     # its anchor and expected-output blocks, and format() would try to read
@@ -140,7 +154,7 @@ def finding_payload(result: DescentResult) -> dict:
 
 
 def build_correlate_prompt(
-    result: DescentResult, window: ShapedWindow, *, version: int = 1
+    result: DescentResult, window: ShapedWindow, *, version: int | None = None
 ) -> str:
     """Render the correlate prompt for one finding and one shaped window.
 
@@ -149,7 +163,7 @@ def build_correlate_prompt(
     window it is seeing rather than presenting a filtered set as the whole.
     """
 
-    template = load_prompt("correlate", version)
+    template = load_prompt("correlate", version or CURRENT_VERSION["correlate"])
     window_payload = {
         "entries": [
             {

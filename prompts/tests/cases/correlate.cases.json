@@ -1,10 +1,11 @@
 {
-  "prompt": "correlate.v1.txt",
+  "prompt": "correlate.v2.txt",
   "note": "Golden cases for the correlate prompt. Read by tests/test_correlate_prompt.py -- load-bearing, not documentation. Both cases are captured whole from committed fixtures; neither is composed.",
   "window_shaping": {
     "decision": "Deduplication and collector-noise filtering happen in CODE, before the model sees the window -- log_window.shape_window(). Deterministic, testable, and it keeps the context budget honest.",
-    "measured": "PE2's broken window is 200 entries / 37,962 chars, of which 137 are the collector's own SSH sessions and 43 are exec-session registration churn from the same source. 20 genuine network events remain.",
-    "counts_are_reported": "shape_window returns what it removed, so a report can say '20 of 200 entries were network events' rather than presenting 20 and implying that was all there was."
+    "measured": "PE2's broken window is 200 entries / 37,962 chars, of which 172 are attributable to the collector's own SSH and exec sessions. 28 entries remain.",
+    "counts_are_reported": "shape_window returns what it removed, so a report can say '28 of 200 entries were network events' rather than presenting 28 and implying that was all there was.",
+    "attribution_not_content": "A rule drops a record only when it can name what produced it -- every address in the line is a known management host, or the line names the client process and the vty. `evidence-reduction.md` §3 reduction 2. The first implementation dropped two whole facilities instead, which removed eight PE2 records nothing attributes to this tool, including a severity-3 session reset 22 seconds before the interfaces went down. Those eight are now retained and counted as `unattributed_kept`."
   },
   "output_schema": {
     "timeline": [
@@ -27,8 +28,9 @@
       "source": "PE2, the `broken` label -- the window covering the deliberate isolation",
       "window": {
         "entries_collected": 200,
-        "entries_retained": 20,
-        "collector_noise_removed": 180
+        "entries_retained": 28,
+        "collector_noise_removed": 172,
+        "unattributed_kept": 8
       },
       "expect": {
         "mnemonics_present": [
@@ -48,15 +50,33 @@
       "source": "PE2, the `healthy` label",
       "window": {
         "entries_collected": 200,
+        "entries_retained": 9,
+        "collector_noise_removed": 191,
+        "unattributed_kept": 9
+      },
+      "expect": {
+        "entries_retained": 9,
+        "is_empty": false,
+        "all_retained_are_unattributed_sessions": true,
+        "correlation_found": false,
+        "summary_contains": "no correlating events in window"
+      },
+      "why": "The refusal path, and the more likely case in practice. After filtering, a healthy device's window contains nine records and not one of them bears on a BGP session: they are `kex_exchange_identification` session failures the noise filter declined to attribute. The failure to guard against is a model reaching for the nearest line in time and describing it as related -- an unrelated event presented as context reads exactly like a correlated one, and the reader cannot tell the difference.",
+      "note": "This case got harder when the noise filter was corrected to attribute rather than assume, and the harder version is the right one. An empty window tests constraint 6, which is nearly free to satisfy. Nine severity-3 lines reading `Connection closed by remote host` test constraint 5 -- the model is now shown the highest-severity records on the device and must still answer `found: false`. `empty_window` below keeps constraint 6 covered separately."
+    },
+    {
+      "name": "empty_window",
+      "source": "constructed -- an empty record list, the shape a device with a cleared buffer returns",
+      "window": {
+        "entries_collected": 0,
         "entries_retained": 0
       },
       "expect": {
         "entries_retained": 0,
         "is_empty": true,
-        "correlation_found": false,
-        "summary_contains": "no correlating events in window"
+        "correlation_found": false
       },
-      "why": "The refusal path, and the more likely case in practice. After filtering, a healthy device's window contains zero network events. The failure to guard against is a model reaching for the nearest line in time and describing it as related -- an unrelated event presented as context reads exactly like a correlated one, and the reader cannot tell the difference."
+      "why": "Constraint 6, separated from constraint 5 now that the `healthy` label no longer produces an empty window. `evidence-reduction.md` §7's fifth failure mode: an empty window is evidence that nothing was recorded, never evidence that nothing happened, and the two must be distinguishable in the output. The only constructed case in this file, and it is constructed because it is a degenerate shape rather than a scenario -- there is nothing a capture could add to a list of zero records."
     }
   ],
   "refusal_marker": "no correlating events in window",

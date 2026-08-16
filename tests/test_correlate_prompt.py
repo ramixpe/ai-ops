@@ -10,11 +10,14 @@ Two golden scenarios, both from committed fixtures:
   commit in the same second, and BGP following 154 seconds later when the hold
   timer expired.
 * **the refusal path** — PE2's `healthy` window, which after filtering contains
-  **zero** network events. The honest answer is "no correlating events in
-  window", and the failure to guard against is a model reaching for the
-  nearest line in time and describing it as related.
+  nine records and not one of them bears on a BGP session. The honest answer is
+  "no correlating events in window", and the failure to guard against is a
+  model reaching for the nearest line in time and describing it as related.
 
 The second is the more likely case in practice, which is why it is pinned.
+
+Also here: the failure modes `docs/design/evidence-reduction.md` §7 names, each
+tested against a corpus whose correct answer is known in advance.
 """
 
 from __future__ import annotations
@@ -33,6 +36,8 @@ from agent_nettools.prompt_library import (
 )
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "cisco_xr"
+CORRELATE_VERSION = 2
+
 CASES_FILE = (
     Path(__file__).resolve().parent.parent
     / "prompts" / "tests" / "cases" / "correlate.cases.json"
@@ -85,6 +90,7 @@ def test_shaping_removes_the_collector_noise_that_dominates_a_real_window():
     assert shaped.total_in == expect["entries_collected"]
     assert len(shaped.records) == expect["entries_retained"]
     assert shaped.collector_noise_removed == expect["collector_noise_removed"]
+    assert shaped.unattributed_kept == expect["unattributed_kept"]
 
 
 def test_dedupe_is_a_no_op_on_a_device_buffer_and_kept_deliberately():
@@ -106,8 +112,9 @@ def test_dedupe_is_a_no_op_on_a_device_buffer_and_kept_deliberately():
 
 def test_shaping_reports_what_it_removed():
     """Because filtering is code, what was dropped is knowable. A report can
-    then say "20 of 200 were network events" rather than presenting 20 and
-    implying that was all there was."""
+    then say "28 of 200 were network events" rather than presenting 28 and
+    implying that was all there was -- and can say how many it *declined* to
+    drop, which is the honest half of an aggressive filter."""
 
     shaped = log_window.shape_window(_records("PE2", "broken"))
     summary = shaped.summary()
@@ -115,6 +122,7 @@ def test_shaping_reports_what_it_removed():
     assert str(len(shaped.records)) in summary
     assert str(shaped.total_in) in summary
     assert "collector-generated" in summary
+    assert "source could not be established" in summary
 
 
 def test_subject_filtering_is_off_by_default_and_would_discard_the_cause():
@@ -171,7 +179,7 @@ def test_the_window_carries_a_config_commit_the_model_can_correlate_against():
 
 def test_the_correlate_prompt_renders_with_device_timestamps():
     shaped = log_window.shape_window(_records("PE2", "broken"))
-    prompt = build_correlate_prompt(_finding(), shaped)
+    prompt = build_correlate_prompt(_finding(), shaped, version=CORRELATE_VERSION)
 
     assert "{finding_json}" not in prompt and "{window_json}" not in prompt
     assert "interface_line_down" in prompt
@@ -184,13 +192,156 @@ def test_the_correlate_prompt_renders_with_device_timestamps():
 
 
 def test_a_healthy_window_has_no_correlating_events_at_all():
-    """The refusal case, from real data rather than construction."""
+    """The refusal case, from real data rather than construction.
+
+    Not an empty window. Nine records survive, every one of them a session
+    failure the noise filter declined to attribute -- and at severity 3 they
+    are the *highest*-severity records on the device. The model is shown the
+    scariest lines in the buffer and must still answer `found: false`, which is
+    a far better test of constraint 5 than an empty list was.
+    """
 
     shaped = log_window.shape_window(_records("PE2", "healthy"))
     expect = _case("no_correlating_events")["expect"]
 
     assert len(shaped.records) == expect["entries_retained"]
     assert shaped.is_empty is expect["is_empty"]
+    assert shaped.unattributed_kept == len(shaped.records)
+    assert {r["facility"] for r in shaped.records} == {"SECURITY-SSHD_SYSLOG_PRX"}
+    assert {r["severity"] for r in shaped.records} == {"3"}
+
+
+def test_an_empty_record_list_is_still_an_empty_window():
+    """Constraint 6, kept covered now that the `healthy` label is not empty."""
+
+    expect = _case("empty_window")["expect"]
+    shaped = log_window.shape_window([])
+
+    assert len(shaped.records) == expect["entries_retained"]
+    assert shaped.is_empty is expect["is_empty"]
+
+
+# --------------------------------------------------------------------------- #
+# evidence-reduction.md §7 -- the named failure modes
+# --------------------------------------------------------------------------- #
+
+
+def test_noise_filtering_attributes_rather_than_assuming():
+    """§7, noise filter over-reach -- the mode this implementation failed.
+
+    A corpus containing both: the collector's own session churn, and a session
+    failure from an address that is not the collector's. Dropping by facility
+    passes every other test in this file and deletes the second one.
+    """
+
+    collector = {
+        "timestamp": "Aug 16 07:41:20.000 UTC", "facility": "SECURITY-SSHD_SYSLOG_PRX",
+        "mnemonic": "SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL", "severity": "6",
+        "text": "sshd[1]: Connection closed by 172.20.250.2 port 52574",
+    }
+    genuine = {
+        "timestamp": "Aug 16 07:41:21.000 UTC", "facility": "SECURITY-SSHD_SYSLOG_PRX",
+        "mnemonic": "SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL", "severity": "3",
+        "text": "sshd[2]: error: maximum authentication attempts exceeded for root from 10.0.9.9 port 40001",
+    }
+    unattributable = {
+        "timestamp": "Aug 16 07:41:22.000 UTC", "facility": "SECURITY-SSHD_SYSLOG_PRX",
+        "mnemonic": "SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL", "severity": "3",
+        "text": "sshd[3]: kex_exchange_identification: Connection closed by remote host",
+    }
+
+    shaped = log_window.shape_window([collector, genuine, unattributable])
+
+    assert [r["text"] for r in shaped.records] == [genuine["text"], unattributable["text"]]
+    assert shaped.collector_noise_removed == 1
+    assert shaped.unattributed_kept == 2
+
+
+def test_a_singleton_survives_a_window_of_thousands_of_repeats():
+    """§7, over-aggregation -- the mode the document calls out hardest.
+
+    One `ROUTING-BGP-5-ADJCHANGE` among three thousand routine records. Any
+    reduction with a minimum-count threshold, or one that keys aggregation on
+    the mnemonic without preserving membership, loses exactly this line.
+    """
+
+    routine = [
+        {
+            "timestamp": f"Aug 16 07:{m:02d}:{s:02d}.000 UTC",
+            "facility": "SECURITY-SSHD_SYSLOG_PRX", "severity": "6",
+            "mnemonic": "SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL",
+            "text": f"sshd[{m * 60 + s}]: Connection closed by 172.20.250.2 port {40000 + m * 60 + s}",
+        }
+        for m in range(50) for s in range(60)
+    ]
+    critical = {
+        "timestamp": "Aug 16 07:44:28.097 UTC", "facility": "ROUTING-BGP", "severity": "5",
+        "mnemonic": "ROUTING-BGP-5-ADJCHANGE",
+        "text": "neighbor 10.255.0.31 Down - Hold timer expired",
+    }
+    corpus = routine[:1500] + [critical] + routine[1500:]
+    assert len(corpus) == 3001
+
+    shaped = log_window.shape_window(corpus)
+
+    assert [r["mnemonic"] for r in shaped.records] == ["ROUTING-BGP-5-ADJCHANGE"]
+    assert shaped.total_in == 3001
+
+
+def test_two_distinct_events_never_collapse_into_one():
+    """§7, template collision.
+
+    Today the only step that can merge records is `dedupe`, and the mnemonic is
+    in its key so two event types cannot merge however similar their text. The
+    assertion the document asks for -- distinct mnemonics never share a
+    template ID -- is this, in the form the current implementation has.
+    """
+
+    shared_text = "neighbor 10.255.0.31 Down"
+    a = {"timestamp": "Aug 16 07:44:28.097 UTC", "mnemonic": "ROUTING-BGP-5-ADJCHANGE",
+         "facility": "ROUTING-BGP", "severity": "5", "text": shared_text}
+    b = {**a, "mnemonic": "ROUTING-BGP-5-NBR_RESET", "text": shared_text}
+
+    assert len(log_window.dedupe([a, b])) == 2
+    assert len(log_window.dedupe([a, dict(a)])) == 1
+
+
+def test_every_noise_rule_declares_how_it_attributes_a_record():
+    """The §0.10 discipline, applied to filtering.
+
+    A rule that cannot say what produced a record has no business deleting it,
+    and `describe()` is what puts that in a report rather than in a comment.
+    """
+
+    for rule in log_window.COLLECTOR_NOISE:
+        assert rule.reason and rule.facility
+        assert rule.attribution.value in rule.describe()
+        assert rule.reason in rule.describe()
+
+    with pytest.raises(ValueError):
+        log_window.NoiseRule(
+            facility="X", attribution=log_window.Attribution.SOURCE_ADDRESS, reason="y",
+        )
+    with pytest.raises(ValueError):
+        log_window.NoiseRule(
+            facility="X", attribution=log_window.Attribution.GENERATING_PROCESS, reason="y",
+        )
+
+
+def test_no_lab_device_address_is_treated_as_a_collector_source():
+    """The rule that keeps source attribution honest.
+
+    `COLLECTOR_SOURCES` is an enumerated set rather than a subnet test because
+    the devices' own management interfaces sit in the same /24. A subnet rule
+    would attribute a device-sourced session to the collector -- and would do
+    it silently, which is the whole failure class this module exists to avoid.
+    """
+
+    from agent_nettools import lab
+
+    device_addresses = set(lab.DEVICES.values())
+    assert len(device_addresses) == 9
+    assert not (device_addresses & log_window.COLLECTOR_SOURCES)
 
 
 def test_the_prompt_forbids_reaching_for_the_nearest_event_in_time():
@@ -202,7 +353,7 @@ def test_the_prompt_forbids_reaching_for_the_nearest_event_in_time():
     the timeline.
     """
 
-    prompt = _flat(load_prompt("correlate", 1))
+    prompt = _flat(load_prompt("correlate", CORRELATE_VERSION))
 
     assert "no correlating events in window" in prompt
     assert "Do not reach for the nearest event in time" in prompt
@@ -212,7 +363,7 @@ def test_the_prompt_forbids_reaching_for_the_nearest_event_in_time():
 def test_an_empty_window_is_distinguished_from_nothing_having_happened():
     """"Nothing was recorded" and "nothing happened" are different claims."""
 
-    prompt = _flat(load_prompt("correlate", 1))
+    prompt = _flat(load_prompt("correlate", CORRELATE_VERSION))
     assert "not evidence that nothing happened" in prompt
 
 
@@ -230,26 +381,51 @@ def test_the_grounding_slot_states_the_device_versus_ingest_time_constraint():
     is invented.
     """
 
-    prompt = _flat(load_prompt("correlate", 1))
+    prompt = _flat(load_prompt("correlate", CORRELATE_VERSION))
 
     assert "device's own clock" in prompt
     assert "not the time the network changed" in prompt
     assert "confidently wrong" in prompt
 
 
+def test_the_prompt_says_a_retained_entry_is_not_thereby_a_relevant_one():
+    """What v2 exists for.
+
+    Correcting the noise filter put nine severity-3 lines in front of the model
+    on a healthy device. The filter is right to keep them -- nothing attributes
+    them to this tool -- but the model must not read retention as relevance, and
+    severity is the exact hook it would reach for. Both halves are stated.
+    """
+
+    prompt = _flat(load_prompt("correlate", CORRELATE_VERSION))
+
+    assert "Do not treat retention as relevance" in prompt
+    assert "an unattributed line is not a correlation" in prompt
+    assert "A high-severity entry is not thereby a relevant one" in prompt
+
+
+def test_the_superseded_version_is_still_loadable_and_still_says_what_it_said():
+    """Rule 2's point. v1 produced no report, but the mechanism that makes a
+    report attributable is only real if the old text is still there."""
+
+    v1 = _flat(load_prompt("correlate", 1))
+    assert "duplicates have been collapsed" in v1
+    assert "Do not treat retention as relevance" not in v1
+
+
 def test_the_prompt_treats_a_commit_as_coincident_not_causal():
-    prompt = _flat(load_prompt("correlate", 1))
+    prompt = _flat(load_prompt("correlate", CORRELATE_VERSION))
     assert "coincidence in time, not a proven cause" in prompt
 
 
 def test_the_expected_output_schema_is_specified():
-    prompt = _flat(load_prompt("correlate", 1))
+    prompt = _flat(load_prompt("correlate", CORRELATE_VERSION))
     for key in ("timeline", "correlation", "followed_a_commit", "recurrence"):
         assert key in prompt
 
 
 def test_the_anchor_example_is_valid_json():
-    prompt = load_prompt("correlate", 1)
+    prompt = load_prompt("correlate", CORRELATE_VERSION)
     start = prompt.index('{\n  "timeline"')
     depth, end = 0, None
     for i, ch in enumerate(prompt[start:], start):

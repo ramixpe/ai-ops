@@ -1355,6 +1355,93 @@ Append-only record of everything learned during the build of the investigation l
   Also: **my own T-026 rule was too narrow and failed on its second prompt.** `test_every_prompt_names_its_refusal_path` asserted the literal word `undetermined`, which is `report`'s refusal but not `correlate`'s — a correlation with nothing to correlate returns `found: false`. The rule was right, the check was written from a single example. Each prompt's case file now declares its own `refusal_marker` and the test reads it. Same shape as three of the six parser specs: **a rule generalised from one instance fits one instance.**
 - **Needs human review:** no
 - **Blocks:** none — T-029 next.
+- **Operator response (2026-08-16):** all three accepted, and **all three correct things the design documents asserted, not things the implementation got wrong.** Recorded explicitly because the direction matters: `evidence-reduction.md` §3 reduction 4 (aggregation as a major reduction), §3 reduction 5 (project to subject), and §9 (Loki as the real source, `show logging` as the fallback) were each written before the measurement and each contradicted by it. **The document was wrong; the implementation was right.** All three amended at OBS-063. A finding that corrects a specification is worth more than one that corrects code, because the specification was going to be built from again.
+
+---
+
+## OBS-063 · reconciliation · `evidence-reduction.md` read against `log_window.py` — and the one divergence that went the other way
+
+- **Kind:** defect-found
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** The operator added `docs/design/evidence-reduction.md` (219 lines) after T-028 shipped and asked for reconciliation rather than re-implementation: where document and implementation disagree, the implementation wins and the document is amended. **Six divergences. Four went that way. One went the other way, and it was worth more than the other five together.**
+
+  **The one that went the other way — §3 reduction 2, "filter by source, not by content".** `drop_collector_noise` dropped every record in two *facilities*, `SECURITY-SSHD_SYSLOG_PRX` and `SYSDB-SYSDB`. That is a content rule wearing a provenance label: it deletes SSH events because they are *usually* the collector here, having never established that any particular one was.
+
+  Measured cost on PE2's `broken` window: **eight** entries deleted that nothing attributes to this tool. All eight are **severity 3 — the highest-severity records on the device** — and one is
+
+  ```
+  Aug 16 07:41:32.006 UTC  sshd[202504]: process_output:
+    ssh_packet_write_poll: Connection reset by peer
+  ```
+
+  an interactive session dying **22 seconds before the interfaces went down**. On this fabric that was my own capture script. In production the same line is an operator's session dropping mid-change, which is exactly what a timeline is for. **A noise filter that can silently delete the tool's own damage is the wrong filter.**
+
+  Corrected: every `NoiseRule` must declare *how* it attributes a record, and there are two honest forms — `SOURCE_ADDRESS` (every address the line names is a known management host; measured, all 2,723 SSH records fabric-wide name only `.1/.2/.5/.6`, and the devices are `.11`–`.31`) and `GENERATING_PROCESS` (the line names the process and the session object; measured, 843 of 843 SYSDB records name both `client 'exec'` and `/vty/`). **A record whose provenance cannot be established is kept**, and `unattributed_kept` reports how many, so the conservative choice stays visible instead of becoming folklore.
+
+  Note what `COLLECTOR_SOURCES` is *not*: a subnet test on `172.20.250.0/24`. The devices' own management interfaces are in that /24, so a subnet rule would attribute a device-sourced session to the collector — silently. A test asserts no device address is in the set.
+- **Evidence:** `log_window.py` rewritten; `tests/test_correlate_prompt.py` 27 tests; `prompts/correlate.v2.txt`; `docs/design/evidence-reduction.md` §10 divergence log. **1245 passed, lint clean.**
+- **What I did:** Four things beyond the fix.
+
+  **1. The fix to one failure mode produced the test for another.** Correcting the filter made PE2's `healthy` window non-empty: nine severity-3 `Connection closed by remote host` lines survive. That broke the refusal golden case, which asserted `entries_retained: 0` — and the replacement is strictly better. An empty window tests constraint 6, which is nearly free. Nine urgent-looking lines that are *not* related test constraint 5, which is where a model actually fails. `empty_window` was added as a separate constructed case so constraint 6 stays covered.
+
+  **Over-reach and empty-result are the same failure seen from two ends**: a filter aggressive enough to guarantee an empty window has already deleted the evidence that would have filled it.
+
+  **2. `correlate.v2.txt`, because an honest filter creates a new hazard.** Leaving unattributable records in the window means the model is now shown high-severity lines that are not evidence. v2's grounding states both halves — why they are there, and that *retention is not relevance* — plus a new constraint 7: "a high-severity entry is not thereby a relevant one. Severity ranks how loudly a device reports something, not whether it bears on this finding." v1 stays in the tree; `prompt_library.CURRENT_VERSION` is now a single reviewable table rather than a default buried in six signatures.
+
+  This was a version bump and not an edit even though **v1 had never produced a report**, so nothing was unreproducible. Carving the first exception to a rule on the day after writing it is how the rule stops meaning anything.
+
+  **3. §7's five failure modes: three covered, one covered by the fix, one filed.** Template collision (`dedupe` keys on the mnemonic, so two event types cannot merge however similar their text), over-aggregation (one `ROUTING-BGP-5-ADJCHANGE` among 3,000 routine records, asserted to survive — no reduction in the module has a minimum-count threshold), noise over-reach (the defect above, now with a corpus containing collector churn *and* a genuine foreign-address auth failure *and* an unattributable error), empty result (twice over). **Clock skew is filed as B-415**, untestable today for an honest reason: every window this layer reads is single-device, so there are no two clocks to disagree. It arrives with B-206 and belongs in the same change.
+
+  **4. Reductions 3 and 4 are not implemented, and that is a scope statement rather than a gap.** The document is right that the mnemonic already *is* the template key — the parser emits it as a field, so grouping is a `Counter` and no clustering algorithm is required. But at 28 records the aggregate carries no information the records do not, and collapsing them costs the verbatim ordering the timeline is built from. Filed as **B-414**, with the one property that must hold on day one pinned by a test *now* rather than described in the backlog item.
+- **Needs human review:** no — but the direction of divergence 5 is worth the operator's attention
+- **Blocks:** none — T-029 next.
+
+---
+
+## OBS-064 · pattern · A test written from the same premise as the implementation confirms the premise, not the implementation
+
+- **Kind:** insight
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** The facility-based noise filter had sixteen tests. Every one passed. They passed because they were written from the same assumption the code was: that `SECURITY-SSHD_SYSLOG_PRX` means "the collector". Nothing in the suite could have caught it, because the suite and the defect share an author and a premise.
+
+  What caught it was a specification written independently, from the problem rather than from the code. `evidence-reduction.md` §3 reduction 2 states the rule in one sentence — *filter by source, not by content* — and the violation is visible the moment the code is read against it.
+
+  > **A test written from the same premise as the implementation confirms the premise, not the implementation. An independent specification is the only thing that catches a premise.**
+
+  This is the third distinct form of the same underlying problem this build has hit. §0.12 covers the guardrail that measures nothing. OBS-062 covers the rule generalised from one instance. This one covers the test that agrees with the code by construction. All three are *green things that verify nothing*, and none of them is detectable from inside the artefact that has the problem.
+- **Evidence:** OBS-063 divergence 5. Sixteen passing tests over a filter deleting eight severity-3 records unattributed.
+- **What I did:** Recorded as a standing observation rather than a task finding. The practical consequence is narrow and worth stating: **when a design document arrives for code that already exists, read the document against the code rather than the code against the document.** The second reading finds nothing — every line of code justifies itself.
+- **Needs human review:** no
+- **Blocks:** none
+
+---
+
+## OBS-065 · pattern · A rule generalised from one instance fits one instance
+
+- **Kind:** insight
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** Operator observation at T-028, generalised here and placed alongside §0.12 as standing practice.
+
+  Three instances in this build, all the same shape:
+
+  | Instance | The rule | What it was generalised from | How it failed |
+  |---|---|---|---|
+  | T-013 | "A route entry has a next hop" | 44 fixtures grouped by line 4 — which is identical across all three route shapes | A directly-connected local route has no next hop at all |
+  | T-026 | "Every prompt names its refusal path as `undetermined`" | `report`, the only prompt that existed | `correlate`'s refusal is `found: false` |
+  | T-028 | "SSH facility records are collector noise" | A corpus where they happened to be | Eight severity-3 records deleted unattributed (OBS-063) |
+
+  In each case **the rule was right and the check was written from a single example.** That is the distinction worth keeping: the failure is not bad generalisation, it is a correct generalisation encoded at the wrong width. "Every prompt names its refusal path" is true; "every prompt says `undetermined`" is that same true rule, narrowed to its one witness.
+
+  > **A survey is a sample. A rule generalised from one instance fits one instance. Encode the rule at the width of the rule, and let the instance supply the value.**
+
+  The mechanical form is small: the check reads the value from data the instance declares, rather than hardcoding the value the first instance had. `refusal_marker` in each case file; `IgnoreRule` per parser; `NoiseRule.attribution` per facility. In every one of the three, the fix was to move a constant out of the assertion and into a declaration.
+- **Evidence:** OBS-021 (T-013), OBS-062 (T-026), OBS-063 (T-028).
+- **What I did:** Recorded as standing practice alongside §0.12. Not written into BUILD-PLAN Part 0 as a numbered rule — §0.12 earned that because it prescribes an action (write the companion test). This one is a reading habit, and Part 0 is stronger for holding only rules that can be checked.
+- **Needs human review:** no
+- **Blocks:** none
 
 ---
 
