@@ -1413,6 +1413,7 @@ Append-only record of everything learned during the build of the investigation l
   This is the third distinct form of the same underlying problem this build has hit. §0.12 covers the guardrail that measures nothing. OBS-062 covers the rule generalised from one instance. This one covers the test that agrees with the code by construction. All three are *green things that verify nothing*, and none of them is detectable from inside the artefact that has the problem.
 - **Evidence:** OBS-063 divergence 5. Sixteen passing tests over a filter deleting eight severity-3 records unattributed.
 - **What I did:** Recorded as a standing observation rather than a task finding. The practical consequence is narrow and worth stating: **when a design document arrives for code that already exists, read the document against the code rather than the code against the document.** The second reading finds nothing — every line of code justifies itself.
+- **Promoted 2026-08-16:** the operator made this **BUILD-PLAN §0.13**, alongside §0.12, and named it the fifth and widest of the build's silent-failure shapes. §0.13 carries the full table of all five and the second practical consequence: a passing suite is not acceptance for a component that encodes a judgement about the world.
 - **Needs human review:** no
 - **Blocks:** none
 

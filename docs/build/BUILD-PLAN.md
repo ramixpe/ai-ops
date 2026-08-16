@@ -249,6 +249,33 @@ The companion takes one of two forms: assert the collection is currently empty (
 
 ---
 
+## 0.13 A test cannot validate the premise it was written from
+
+**A test written from the same premise as the implementation confirms the premise, not the implementation. Green tests are not by themselves evidence that a component is correct — only that it agrees with the assumption it was built on. Where a component encodes a judgement about the world, specify it independently of the code and read the specification against the implementation, never the reverse.**
+
+The standing example is T-028's noise filter. `drop_collector_noise` deleted every record in two facilities, which is a content rule wearing a provenance label. **Sixteen tests passed over it.** They passed because they were written from the same assumption the code was — that `SECURITY-SSHD_SYSLOG_PRX` means "the collector" — and no test in the suite could have caught it, because the suite and the defect shared an author and a premise. The measured cost was eight severity-3 records deleted unattributed, one of them an interactive session dying 22.7 seconds before the incident.
+
+What caught it was `evidence-reduction.md` §3.2, written from the problem rather than from the code: *filter by source, not by content*. The violation is visible the moment the code is read against that sentence.
+
+**This is the fifth distinct silent-failure shape in this build, and the widest.** The others are recoverable by looking harder at the artefact; this one is not, because the artefact is internally consistent.
+
+| # | Shape | Instances |
+|---|---|---|
+| 1 | Green flag over a degraded read | OBS-006, OBS-043, OBS-044 |
+| 2 | Absence read as a healthy value | OBS-044, OBS-051 — answered by `unevaluated` |
+| 3 | A guardrail passing over an empty set | §0.12 |
+| 4 | A rule generalised from one instance | OBS-021, OBS-062, OBS-063 |
+| 5 | **A test agreeing with the code by construction** | **§0.13** — OBS-064 |
+
+All five are green things that verify nothing. Numbers 3, 4 and 5 are undetectable from inside the artefact that has the problem, which is why each has a rule rather than a habit.
+
+Two practical consequences:
+
+- **When a design document arrives for code that already exists, read the document against the code.** The other direction finds nothing — every line of code justifies itself, and the reading converges on "yes, that is what it does".
+- **Do not treat a passing suite as acceptance for a component that encodes a judgement.** Parsers, filters, checks and thresholds all make a claim about the world. The suite tells you the code is self-consistent; only an independent statement of the claim tells you the claim is right.
+
+---
+
 ### The three tracking documents
 
 All three live in `docs/build/` and are maintained continuously, not at the end.
