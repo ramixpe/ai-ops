@@ -227,6 +227,18 @@ Two things about this are easy to get wrong, and both were.
 
 Where the walk finds rungs broken above but everything healthy below, there is nothing beneath to explain them, and the honest terminal finding is `cause_not_localised` rather than a guess.
 
+### D6a. Which interfaces the interface rung checks
+
+**Question.** The interface rung fans out over a device's interfaces. Which ones?
+
+**Decision.** Physical interfaces only. Subinterfaces are excluded.
+
+**Why, measured rather than assumed.** PE1 and PE3 each carry a `Gi0/0/0/2.300` subinterface that is legitimately line-down on a completely healthy fabric. Including subinterfaces in the fan-out makes **2 of 9 devices report broken in the `healthy` label** — a false positive rate of 22% on a fabric with nothing wrong with it, baked into the contract rather than into a bug.
+
+The distinction that survives the measurement: **a subinterface being down is a service condition; a physical link being down is a path condition.** A descent is about the path. A down VLAN subinterface may well matter to whoever owns that service, but it is not why a BGP session to a loopback is Idle, and a rung that says otherwise is wrong in a way an engineer will notice immediately and stop trusting.
+
+**Revisit if.** A fabric arrives where subinterfaces carry real services that the descent must reason about — an L3VPN attachment circuit, say. Then the rung needs a scope that distinguishes *service-bearing* from *decorative* rather than *physical* from *logical*, and the honest place to get that distinction is configuration, not the interface name.
+
 And the observation that changes where the model sits: **every check in that descent is deterministic.** Is the state `Established`? Is the prefix in the RIB? Is the adjacency `Up`? Is line protocol up and are error counters under threshold? Parse and compare. No model required, anywhere in the descent.
 
 So the model's real contribution is not diagnosis. It is:
