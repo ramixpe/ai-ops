@@ -1027,7 +1027,17 @@ A vacuous verdict beside a payload that plainly contains claims is not a note ab
 | `InvestigationResult.repairs` | a fact about model behaviour |
 | `data["retries"]` | a fact about the transport |
 
-Turning every reader-facing number into an error is the opposite mistake, and it trains people to ignore these too — which is precisely how the T-033 warning went unread. The rule fires only where two facts contradict each other.
+> **A rule against unread warnings that generates unread warnings has defeated itself. A contradiction is raised; a fact is reported. One flag changed out of five, and that ratio is the point.**
+
+Turning every reader-facing number into an error is the same failure wearing the opposite sign — it trains people to ignore these too, which is precisely how the T-033 warning went unread. The rule fires only where two facts contradict each other.
+
+### Prefer the narrowest true failure name
+
+On the exact T-033 shape the failure raised is `uncited_timeline`, **not** `verified_nothing`. The timeline check *ran*, found no window to grade against, and refused.
+
+> **A gate that refused something did not measure nothing.**
+
+Collapsing a specific refusal into a generic one loses the same information as reporting `cause_not_localised` where the cause is localised to routing: in both cases the system knows more than it says, and the reader cannot recover the difference. **Prefer the narrowest true failure name available** — `verified_nothing` is a backstop for when nothing examined the payload at all, and it is worth less every time it fires somewhere a specific name would have fitted.
 
 **Also caught:** `{"correlation": {"found": true}, "timeline": []}` — a positive correlation with no cited event, previously accepted. The purest form of the defect.
 

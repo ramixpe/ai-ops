@@ -2070,7 +2070,13 @@ transport path disappearing rather than a direct session teardown.
 
   **3. Three existing tests failed, and all three were asserting the old, weaker behaviour.** `test_presence_is_not_weakened_by_a_coverage_gap` passed a bare `found: true` with no timeline and no window; rewritten to use a real cited timeline, because *"presence survives a coverage gap"* is a claim about **cited** presence, not about the word `true`. Two malformed-correlation cases asserted `result.ok` for payloads that were already malformed; they now assert the narrow property they were about (the absence rule does not fire) **and** that the gate refuses them anyway.
 
-  Worth noting the shape: **the new check's first act was to expose three tests that had been encoding the defect as expected behaviour.** They passed before because the code and the tests shared the premise — §0.13's tests face, caught this time by a change rather than by an incident.
+  Worth noting the shape: **the new check's first act was to expose three tests that had been encoding the defect as expected behaviour.** They passed before because the code and the tests shared the premise — §0.13's tests face.
+
+  **And this is the first *prospective* catch of that face in the build.** Every prior instance was found after something went wrong: T-013's route shape by a failing parse, T-026's refusal marker by a second prompt arriving, T-028's noise filter by an independent specification, T-033's `_log_window` by a live run. Each was a post-mortem.
+
+  Here the sequence ran the other way. A change was made on principle — *check the condition rather than report it* — and the change **exposed three tests that had encoded the defect as correct**, before any incident. Nothing had gone wrong; nothing was going to go wrong until a model emitted a bare positive claim.
+
+  That is the mechanism working as intended, and it is worth knowing it **can** work that way, because §0.13 as written reads like a diagnosis rather than a tool. The operational form: **a change that tightens a rule will fail exactly the tests that encoded the old rule as correct — and those failures are findings, not breakage.** The instinct to "fix the tests" back to green is the instinct to restore the defect. All three of these looked like ordinary breakage and all three were the check reporting on the suite.
 
   One precision the tests pin: on the exact T-033 shape the failure raised is `uncited_timeline`, **not** `verified_nothing`. The timeline check *ran*, found no window, and refused. `verified_nothing` is the backstop for when nothing examined the payload at all — a gate that refused something did not measure nothing, and conflating the two would make the specific diagnosis disappear behind the generic one.
 - **Needs human review:** no
