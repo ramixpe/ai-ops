@@ -655,20 +655,28 @@ Findings are a closed enum on the flow, plus `all_layers_healthy` and `undetermi
 def run_descent(flow: Flow, device: str, subject: str, *, collector) -> DescentResult
 ```
 
-Semantics, exactly:
+Semantics, exactly. **Corrected 2026-08-16 — the original rule was a defect in this plan, found by measuring the ladder against the `broken` label (OBS-055, Q-017).**
 
-- `healthy` → continue to the next rung.
-- `broken` → **stop.** That rung's `finding` is the result. No deeper rung is collected or checked.
-- `unevaluated` → **stop** with `finding="undetermined"` and the reason recorded.
-- Descent exhausted with every rung healthy → `all_layers_healthy`.
+- `broken` → **record the finding and CONTINUE descending.**
+- `healthy` → **continue descending.** A healthy layer does not prove the ones below it are fine: RR1's own IS-IS was healthy while PE2's was not.
+- `unevaluated` → **STOP.** Nothing below a rung that could not be read is trustworthy. `finding="undetermined"`, reason recorded.
+- Ladder exhausted with every rung healthy → `all_layers_healthy`.
 
-Returns the rung path taken, each `CheckResult`, and the accumulated evidence keys.
+**The result is the LOWEST broken rung.** Higher broken rungs become the *causal chain* — the evidence that this cause explains the observed symptom. The descent ends at the bottom of the ladder or at an `unevaluated`, never at the first fault.
+
+**Why the original rule was wrong.** It said "`broken` → stop, that rung's finding is the result", which stops at the *highest* broken layer. D6 says the lowest broken layer is the root cause. Measured on the `broken` label, rungs 1, 2 and 3 are all broken for `RR1 → 10.255.0.12`, so the old rule returned `peer_not_established` — a restatement of the alert — and never reached the shut interface. **Four of the five findings the flow declares were unreachable.** `t0` hid it, because there the deeper rungs have no template fixtures and stopping at rung 1 looks correct.
+
+New finding required on the flow: **`cause_not_localised`** — rungs broken above, all healthy below, nothing beneath to explain them. That is an honest answer, not a failure.
+
+What this buys, concretely: the report stops being *"BGP is not established"* and becomes *"the interface is admin-down, which isolated IS-IS, which removed the route, which blocked transport, which is why BGP is Idle."* The first restates the alert; the second is an RCA.
+
+Returns the rung path taken, each `CheckResult`, the causal chain, and the accumulated evidence keys.
 
 **No model call anywhere in this module.** If you find yourself wanting one, stop and log a blocker.
 
 The `collector` is injected so a descent can run against `fixtures.load_fixture_evidence` with no lab access. That is what makes T-025 possible.
 
-**Tests:** stops at first broken; never collects below the stop (assert on collector call count); `unevaluated` halts rather than descending.
+**Tests:** descends past a broken rung; reports the lowest broken rung as the finding; higher broken rungs appear in the causal chain; `unevaluated` stops the walk and nothing below it is collected (assert on collector call count); an all-healthy ladder yields `all_layers_healthy`; broken-above-healthy-below yields `cause_not_localised`.
 
 ---
 
@@ -676,21 +684,26 @@ The `collector` is injected so a descent can run against `fixtures.load_fixture_
 
 **This is the milestone that proves the architecture.**
 
+**Rewritten 2026-08-16.** The original wording said "the descent stops at a named rung / no rung below the stopping rung was collected", which endorsed the T-024 defect: it would have passed against the buggy walker and failed against the correct one. A milestone test that ratifies the bug it should catch is worse than no test.
+
 ```
-Given  fixture evidence for RR1 at t0
+Given  fixture evidence for RR1
 When   run_descent(bgp_session, device="RR1", subject="10.255.0.12")
-Then   the descent stops at a named rung
-And    the finding is a member of bgp_session.findings
-And    no rung below the stopping rung was collected
+Then   the descent visits every rung until the ladder ends or a rung is unevaluated
+And    the reported finding is the LOWEST broken rung
+And    higher broken rungs appear as the causal chain
 And    every CheckResult carries the evidence keys it read
 And    no model call occurred
 ```
 
-The last two clauses are the point.
+**Two acceptance cases, both required.**
 
-Add the mirror case: `subject="10.255.0.11"` — an established peer — must yield `all_layers_healthy` or stop at a rung with a defensible reason.
+1. **`t0`** — the original partly-broken fabric.
+2. **`broken`** — the deliberate PE2 isolation. `RR1 → 10.255.0.12` must descend all the way to **`interface_line_down` on PE2**, with rungs 1–3 (`bgp_session`, `transport`, `route_to_peer`) present in the causal chain. **This is the test that would have caught Q-017**, and it is the reason the `broken` label was captured.
 
-**Acceptance.** Both pass offline, with no lab and no API key.
+Add the mirror case: `subject="10.255.0.11"` on `healthy` — an established peer — must yield `all_layers_healthy`.
+
+**Acceptance.** All pass offline, with no lab and no API key.
 
 **Record in observations:** which rung stopped, and whether that matches what a network engineer would conclude by hand from the same fixtures. If it does not, that is the single most important finding of the whole build.
 
