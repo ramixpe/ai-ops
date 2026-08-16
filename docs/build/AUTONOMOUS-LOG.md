@@ -32,6 +32,7 @@ Purpose: a running record of **what was done, what was asked, and what was answe
 | Item | Outcome | Tests | Notes |
 |---|---|---|---|
 | — | session opened | 1391 | 64 backlog items; 13 defect-class targeted |
+| **B-425** | ✅ closed | 1436 | Live: 1 call, **2,286 tokens**. T-033's character proxy (~5k) was ~2× the real figure |
 | **B-423** | ✅ closed | 1432 | `unshare` unavailable in this sandbox, so isolation is **announced not assumed**. All 7 assertions dry-run locally in an empty env |
 | **B-411** | ⛔ **HALTED** | 1432 | Item's mechanism does not exist in netmiko 4.7. Nothing implemented. Needs re-scoping to the capture path — see OBS-099 |
 | **B-422** | ✅ closed | 1432 | `_note` → stderr. Verified end to end: `... --format json 2>/dev/null \| jq` now works |
@@ -43,3 +44,5 @@ Purpose: a running record of **what was done, what was asked, and what was answe
 ---
 
 ## Running notes
+
+- **Model variance seen, not a defect.** One live healthy run had its report *withheld* (grounding), an identical rerun emitted with 5/5 rungs cited. Same prompt, same descent. Worth knowing that grounding rejection is not deterministic across runs — it is the model that varies, and the gate doing its job either way.

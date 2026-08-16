@@ -73,6 +73,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 from typing import Any, Literal
 
 Provider = Literal["anthropic", "openai", "ollama", "minimax"]
@@ -366,6 +367,7 @@ def _openai_call(
     model_env: str = "OPENAI_MODEL",
     model_default: str = "gpt-5.5",
     provider_label: str = "OpenAI",
+    _return_usage: bool = False,
 ) -> str:
     """Send one prompt string to an OpenAI-Responses-API-compatible endpoint.
 
@@ -421,7 +423,20 @@ def _openai_call(
     if getattr(incomplete, "reason", None) == "max_output_tokens":
         analysis += TRUNCATION_NOTICE
 
+    if _return_usage:
+        return Completion(analysis, _usage_from(getattr(response, "usage", None)))
     return analysis
+
+
+def _openai_call_with_usage(prompt: str, **kwargs: Any) -> Completion:
+    """`_openai_call`, returning what it cost as well as what it said.
+
+    A flag on the shared function rather than a copy of it: the error handling
+    above is six `except` clauses of provider-specific translation, and a second
+    copy would drift the first time one of them changed.
+    """
+
+    return _openai_call(prompt, _return_usage=True, **kwargs)
 
 
 def analyze_with_openai(evidence: dict[str, Any]) -> str:
@@ -460,7 +475,85 @@ def analyze_with_minimax(evidence: dict[str, Any]) -> str:
     return _openai_call(build_analysis_prompt(evidence), **_minimax_call_kwargs())
 
 
-def complete_prompt(prompt: str) -> str:
+@dataclass(frozen=True)
+class TokenUsage:
+    """What one or more model calls cost, in tokens.
+
+    Added at B-425. T-033 was asked to report token usage and could only offer a
+    character-count proxy, because nothing on the rendered-prompt path surfaced
+    `usage` -- and a cost estimated from character counts is the kind of number
+    that quietly becomes folklore.
+
+    `calls` is carried because the per-investigation figure people actually want
+    is "how many model calls and how many tokens", and a total with no call
+    count cannot distinguish one large call from three small ones.
+    """
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    calls: int = 0
+    #: `None` when the provider did not report usage, which is different from
+    #: zero. Anthropic and the OpenAI Responses API report it; a local Ollama
+    #: route may not, and reporting 0 there would be a measurement nobody made.
+    reported: bool = True
+
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.output_tokens
+
+    def __add__(self, other: TokenUsage) -> TokenUsage:
+        return TokenUsage(
+            input_tokens=self.input_tokens + other.input_tokens,
+            output_tokens=self.output_tokens + other.output_tokens,
+            calls=self.calls + other.calls,
+            reported=self.reported and other.reported,
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "total_tokens": self.total_tokens,
+            "calls": self.calls,
+            "reported": self.reported,
+        }
+
+    def summary(self) -> str:
+        if not self.reported:
+            return f"{self.calls} model call(s); the provider did not report usage"
+        return (
+            f"{self.calls} model call(s), {self.total_tokens} tokens "
+            f"({self.input_tokens} in, {self.output_tokens} out)"
+        )
+
+
+@dataclass(frozen=True)
+class Completion:
+    """A model's answer, and what it cost."""
+
+    text: str
+    usage: TokenUsage
+
+
+def _usage_from(raw: Any) -> TokenUsage:
+    """Read a provider's usage object, whatever it calls its fields.
+
+    Anthropic uses ``input_tokens``/``output_tokens``; the OpenAI Responses API
+    uses the same names. Anything unrecognised returns ``reported=False`` rather
+    than zeros -- **"the provider did not say" and "it cost nothing" are
+    different facts**, and collapsing them is how a cost report becomes fiction.
+    """
+
+    if raw is None:
+        return TokenUsage(calls=1, reported=False)
+    inp = getattr(raw, "input_tokens", None)
+    out = getattr(raw, "output_tokens", None)
+    if inp is None and out is None:
+        return TokenUsage(calls=1, reported=False)
+    return TokenUsage(input_tokens=int(inp or 0), output_tokens=int(out or 0), calls=1)
+
+
+def complete_prompt(prompt: str) -> Completion:
     """Send one fully-rendered prompt and return the model's raw text.
 
     The prompt library (T-026-T-029) renders a complete, self-contained prompt
@@ -506,14 +599,15 @@ def complete_prompt(prompt: str) -> str:
                 "The model's response hit max_tokens and is incomplete; a partial "
                 "JSON document cannot be grounded"
             )
-        return text
+        return Completion(text, _usage_from(getattr(message, "usage", None)))
 
     if provider == "openai":
-        return _openai_call(prompt)
+        return _openai_call_with_usage(prompt)
     if provider == "minimax":
-        return _openai_call(prompt, **_minimax_call_kwargs())
+        return _openai_call_with_usage(prompt, **_minimax_call_kwargs())
     if provider == "ollama":
-        return _ollama_call(prompt)
+        # No usage on this route -- reported=False rather than zeros.
+        return Completion(_ollama_call(prompt), TokenUsage(calls=1, reported=False))
 
     raise LLMAnalysisError(f"Provider {provider!r} cannot send a rendered prompt.")
 

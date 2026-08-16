@@ -343,6 +343,17 @@ def _render_investigation_table(payload: dict[str, Any]) -> str:
     report = payload.get("report") or {}
     correlation = payload.get("correlation") or {}
     lines.append("")
+    usage = payload.get("usage")
+    if usage:
+        lines.append(
+            f"model:       {usage.get('calls', 0)} call(s), "
+            + (
+                f"{usage.get('total_tokens', 0)} tokens "
+                f"({usage.get('input_tokens', 0)} in, {usage.get('output_tokens', 0)} out)"
+                if usage.get("reported")
+                else "usage not reported by the provider"
+            )
+        )
     lines.append(f"report:      {report.get('status', '?')}")
     lines.append(f"correlation: {correlation.get('status', '?')}")
     if correlation.get("caveat"):

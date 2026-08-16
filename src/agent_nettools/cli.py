@@ -103,6 +103,7 @@ from .inventory_model import resolve_inventory_path
 from .investigation import investigate
 from .llm_analysis import (
     LLMAnalysisError,
+    TokenUsage,
     analyze_evidence,
     complete_prompt,
     get_provider,
@@ -425,7 +426,30 @@ def _build_analyst():
     """
 
     get_provider()
-    return complete_prompt
+    return _UsageRecordingAnalyst(complete_prompt)
+
+
+class _UsageRecordingAnalyst:
+    """A ``(prompt) -> str`` callable that remembers what its calls cost.
+
+    `investigation.Analyst` stays `Callable[[str], str]` -- the runner must
+    remain drivable by a plain scripted function in tests, and threading a
+    usage type through that signature would make every test analyst carry
+    machinery it does not need.
+
+    So the usage rides on the *callable* instead, and the runner reads it
+    duck-typed after the calls. An analyst without a `.usage` attribute is
+    fine and reports nothing, which is what a scripted test analyst is.
+    """
+
+    def __init__(self, complete):
+        self._complete = complete
+        self.usage = TokenUsage()
+
+    def __call__(self, prompt: str) -> str:
+        completion = self._complete(prompt)
+        self.usage = self.usage + completion.usage
+        return completion.text
 
 
 def _cmd_demo(args: argparse.Namespace) -> int:

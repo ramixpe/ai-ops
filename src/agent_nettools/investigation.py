@@ -150,6 +150,10 @@ class InvestigationResult:
 
     #: Non-semantic fixes applied to a model response, e.g. a stripped fence.
     repairs: tuple[str, ...] = field(default_factory=tuple)
+    #: What the model calls cost, when the analyst reports it (B-425). `None`
+    #: for a `--no-model` run and for any analyst that carries no `.usage` --
+    #: which is different from zero, and says so.
+    usage: object | None = None
 
     @property
     def finding(self) -> str:
@@ -221,6 +225,7 @@ class InvestigationResult:
                 "caveat": self.caveat,
             },
             "off_path": list(self.off_path),
+            "usage": self.usage.as_dict() if self.usage is not None else None,
             "coverage": self.coverage.as_dict() if self.coverage is not None else None,
             "repairs": list(self.repairs),
             "trustworthy": self.trustworthy,
@@ -469,4 +474,6 @@ def investigate(
         correlation=correlation, correlation_status=correlation_status,
         correlation_grounding=correlation_grounding, coverage=coverage,
         repairs=tuple(repairs),
+        # Duck-typed: an analyst that does not record usage simply has none.
+        usage=getattr(analyst, "usage", None),
     )

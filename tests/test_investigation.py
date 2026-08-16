@@ -541,3 +541,71 @@ def test_a_faithful_timeline_still_passes_through_the_runner():
     assert result.correlation_status == EMITTED
     assert result.correlation_grounding.ok
     assert result.correlation_grounding.timeline_entries_checked == 3
+
+
+# --------------------------------------------------------------------------- #
+# B-425 -- what an investigation costs, measured rather than estimated
+# --------------------------------------------------------------------------- #
+
+
+class CountingAnalyst(Scripted):
+    """A scripted analyst that also reports usage, as the real one does."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        from agent_nettools.llm_analysis import TokenUsage
+
+        self.usage = TokenUsage()
+
+    def __call__(self, prompt):
+        from agent_nettools.llm_analysis import TokenUsage
+
+        self.usage = self.usage + TokenUsage(
+            input_tokens=len(prompt) // 4, output_tokens=64, calls=1
+        )
+        return super().__call__(prompt)
+
+
+def test_an_investigation_reports_what_its_model_calls_cost():
+    """T-033 was asked for token usage and could only give a character-count
+    proxy, because nothing on the rendered-prompt path surfaced `usage`. A cost
+    estimated from character counts is the kind of number that quietly becomes
+    folklore."""
+
+    analyst = CountingAnalyst(report=_good_report, correlate=_FOUND)
+    result = _run("broken", analyst)
+
+    assert result.usage is not None
+    assert result.usage.calls == 2, "one correlate, one report"
+    assert result.usage.total_tokens > 0
+    assert result.to_payload()["usage"]["calls"] == 2
+
+
+def test_an_analyst_that_reports_nothing_is_not_reported_as_zero():
+    """"The provider did not say" and "it cost nothing" are different facts.
+
+    A plain scripted callable has no `.usage`, and the result says `None`
+    rather than a zeroed record that reads as a measurement.
+    """
+
+    result = _run("broken", Scripted(report=_good_report, correlate=_FOUND))
+
+    assert result.usage is None
+    assert result.to_payload()["usage"] is None
+
+
+def test_a_run_with_no_model_reports_no_usage():
+    assert _run("broken").usage is None
+
+
+def test_unreported_usage_is_distinguishable_from_zero_usage():
+    from agent_nettools.llm_analysis import TokenUsage
+
+    silent = TokenUsage(calls=1, reported=False)
+    free = TokenUsage(input_tokens=0, output_tokens=0, calls=1)
+
+    assert silent.total_tokens == free.total_tokens == 0
+    assert silent.reported is False and free.reported is True
+    assert "did not report" in silent.summary()
+    assert "did not report" not in free.summary()
+    assert (silent + free).reported is False, "one unreported call taints the total"
