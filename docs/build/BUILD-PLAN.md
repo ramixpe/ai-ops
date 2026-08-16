@@ -549,7 +549,7 @@ Implements LLD Phases 10 and 11.
 
 ---
 
-## T-019 · `checks.py` and `CheckResult` `[STATUS: TODO]`
+## T-019 · `checks.py` and `CheckResult` `[STATUS: DONE]`
 
 **Goal.** Pure per-object predicates over parsed records. No I/O, no device access, no inventory reads.
 

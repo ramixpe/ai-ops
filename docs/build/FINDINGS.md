@@ -1014,6 +1014,35 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-051 · T-019 · `checks.py` shipped, with "absence is unevaluated" as a stated rule
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** `src/agent_nettools/checks.py` and 17 contract tests. **1047 passed.** The five checks land at T-020; what exists now is the shape they must satisfy.
+
+  The operator's instruction was to generalise Q-005's second half into a rule in the module docstring: **a check may only answer `healthy` about a field it actually read; absence is `unevaluated`.** It is stated there with all three instances named, because the point is that this is not a one-off:
+
+  | | Where | What it looked like |
+  |---|---|---|
+  | OBS-006 | model API | empty content, `finish_reason: "length"`, no error |
+  | OBS-043 | transport | partial output, `status: "success"`, `errors: []` — now **B-411** |
+  | OBS-044 | parsed evidence | a line-down interface omits error counters; absent reads as zero |
+
+  Same shape every time: **silent degradation behind a green flag.** A wrong verdict that announces itself is a bug; a wrong verdict that looks right is a liability, because nothing downstream can detect it.
+- **Evidence:** 17 tests. `checks.py` imports exactly `dataclasses`, `typing` and `.parsers` — nothing that can reach a device, a file, the clock or the environment.
+- **What I did:** Three design choices worth recording, each enforcing the rule structurally rather than by convention:
+
+  1. **`require_parsed()` is the gate every check starts with.** It returns `(section, None)` on `PARSE_OK` and `(None, unevaluated)` otherwise — so the honest answer is the *default path* and reaching records without checking takes deliberate effort. Its three failure reasons stay distinct (section missing / platform unsupported / parser failed), because collapsing them discards the only clue about what to do next.
+  2. **A `healthy` or `broken` verdict citing no evidence is refused at construction.** D20 requires every claim to cite an evidence key; a verdict that cites nothing cannot be grounded, and catching that in `__post_init__` beats discovering it in the grounding check three layers later. `unevaluated` is the sole exception — there may genuinely have been nothing to read.
+  3. **`parsed_records()` carries a warning in its own docstring** that it returns `[]` for both "parsed fine, no records" and "never parsed", with a test pinning that the two are indistinguishable by records alone. That is precisely the OBS-044 hazard, kept visible next to the function that causes it rather than only in a docstring above.
+
+  **The T-019 acceptance criterion needed OBS-033's warning to test at all.** "No import of `inventory`, `network_tools`, or anything that touches a device" cannot be checked via `sys.modules` — `agent_nettools/__init__.py` eagerly imports `agent_loop`, which pulls in both, so importing *any* submodule loads them however pure `checks.py` is. The test parses the module's own AST instead. Without that finding I would have written a test that failed for reasons unrelated to the code, and the likely reaction would have been to weaken the criterion.
+- **Needs human review:** no
+- **Blocks:** none — unblocks T-020, which must use `require_parsed` and test the absent-counter case against the one line-down interface.
+
+---
+
 <!--
 Copy this block for each new entry.
 
@@ -1046,7 +1075,7 @@ Anything logged with `Needs human review: yes` is mirrored here so the review ha
 | Q-011 | T-004 | Should the devices' `logging trap` level be lowered so severity-5 events (`%BGP-5-ADJCHANGE`, IS-IS transitions) reach Loki? Today only `err`/`warning` arrive, so the events T-028 correlates against are absent entirely. Operator decision — it changes log volume on a pipeline already carrying 97% self-generated noise. | No for MVP-0 · **yes for a useful historical axis** | Open (OBS-014) |
 | Q-003 | T-005 | Does Alertmanager have a webhook receiver, and can it replace n8n as the Stage 2 trigger? | No — Stage 2 | **Resolved (OBS-016)** — yes to both. Gap is that no alert rule carries a device label; that is rule authoring, not infrastructure. |
 | Q-004 | T-006 | What is the subject naming scheme for an L3VPN service object? | No — flow not in MVP-0 | **Accepted (OBS-035)** — `<pe>:<vrf>` recommended; `<vrf>:<rd>` eliminated because RD is reused across PEs. Confirm at T-022. |
-| Q-005 | T-020 | What error-counter threshold should `interface_state` treat as broken? **And what does it do when the counters are absent?** A line-down interface omits them entirely (OBS-044) — the answer must be `unevaluated`, never "0 errors, healthy". | No — but the absent-counter half is a correctness trap | Open — two parts now (OBS-044) |
+| Q-005 | T-020 | What error-counter threshold should `interface_state` treat as broken? **And what does it do when the counters are absent?** A line-down interface omits them entirely (OBS-044) — the answer must be `unevaluated`, never "0 errors, healthy". | No — but the absent-counter half is a correctness trap | **Second half answered (OBS-051)** — `unevaluated`, now a stated rule in `checks.py`. Threshold value still open for T-020. |
 | Q-006 | T-025 | Does the descent's stopping rung match what a network engineer would conclude by hand from the same fixtures? | **Yes — this validates the architecture** | Open |
 | Q-007 | T-035 | Telegram or Mattermost? Hosted means device names, IPs and RCA text leave the estate; self-hosted keeps them in. Decide before implementing — only one provider gets built. | Yes for T-035 | Open |
 | Q-008 | T-035 | Which host runs `nettools` in the target deployment, and does it have outbound egress to the chosen channel? | Yes for T-035 | Open |
