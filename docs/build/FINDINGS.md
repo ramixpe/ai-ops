@@ -1134,6 +1134,35 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-055 · T-022 · Q-013 measured against the fixtures — and a second, larger problem with the descent's stopping rule
+
+- **Kind:** risk
+- **Escalation:** **HALT** (T-022 blocked pending the operator's decision, as agreed)
+- **Model:** opus-5
+- **What happened:** Ran the full `bgp_session` ladder for `RR1 → 10.255.0.12` against the `broken` label, both ways. The `broken` capture settles Q-013 empirically rather than by argument:
+
+  | Rung | Checked on RR1 (local) | Checked on PE2 (subject device) |
+  |---|---|---|
+  | 1 `bgp_session` | **broken** | n/a |
+  | 2 `transport` | **broken** | n/a |
+  | 3 `route_to_peer` | **broken** | n/a |
+  | 4 `igp_adjacency` | **healthy** | **broken** |
+  | 5 `interface` | *which interface?* | **broken** — `admin_state='admin-down', line_state='admin-down'` |
+
+  **Read locally, the descent finds nothing below rung 3 and cannot reach the cause.** Read against the subject device, rung 5 lands exactly on the interface that was shut. Q-013 is not a matter of taste; one reading answers the question and the other does not.
+
+  **A second and larger problem surfaced while measuring this**, and it is not what Q-013 asks about. Rungs 1, 2 **and** 3 are all broken. `BUILD-PLAN.md` T-024 specifies the walker as *"healthy → continue to the next rung; broken → **stop.** That rung's `finding` is the result."* Applied here the descent stops at **rung 1** and reports `peer_not_established` — **the symptom it was invoked to explain.** It never reaches the shut interface, whichever way Q-013 is decided.
+
+  That contradicts the design the ladder exists to serve. D6: *"the lowest broken layer is the root cause"* — but "stop at the first broken rung, descending from the top" stops at the **highest** broken layer. The LLD's own terminal findings (`peer_unreachable_no_route`, `igp_isolated`, `interface_line_down`) are only reachable if the walk continues **past** broken rungs. Under the specified rule, four of the five findings the flow declares are unreachable.
+
+  `t0` hid this completely: there, rung 1 is broken and the deeper rungs have no template fixtures, so stopping at rung 1 looks like correct behaviour. **The `broken` label is what made it visible** — which is precisely the argument the operator made for capturing it.
+- **Evidence:** Measured output above, from `checks.*` against `tests/fixtures/cisco_xr/{RR1,PE2}/broken/`. Rung 5's reason on PE2: `"interface Gi0/0/0/0 is not up (admin_state='admin-down', line_state='admin-down')"` — the exact fault that was introduced.
+- **What I did:** Stopped at T-022 as agreed rather than choosing. Both questions change the `Rung` contract, and T-022 is the last cheap moment to settle them — retrofitting after `descent.py` exists is what the operator already ruled against for Q-013, and it applies at least as strongly to the walk semantics.
+- **Needs human review:** **yes — T-022 is blocked on both.**
+- **Blocks:** T-022, T-023, T-024, and therefore T-025/M3.
+
+---
+
 <!--
 Copy this block for each new entry.
 
@@ -1162,6 +1191,7 @@ Anything logged with `Needs human review: yes` is mirrored here so the review ha
 | Q-014 | T-008 | `ttp` added as a **core** dependency rather than an optional extra, deviating from T-008's wording. Rationale: `run_template` attaches parsed data on every call from T-018, so an extra would make the descent silently unavailable on a default install. | No — decided and green | **Closed (OBS-035)** — accepted; an extra would be silent degradation on a default install |
 | **Q-015** | **T-011** | **HALT.** Executing the PE2 `Gi0/0/0/0` shutdown is a device state change — §0.11's absolute HALT, under a standing instruction that explicitly overrides later session instructions. The script is written and ready. **Does the operator waive §0.11 for this single pre-planned, reversible action, or run it themselves?** | **Yes — blocks T-011 and everything after it** | **Resolved (OBS-038)** — waiver granted, exercised, discharged. Fabric verified restored. |
 | **Q-016** | **T-011** | Shutting one uplink does not isolate PE2 — it has two, and the IGP routed around it (OBS-039). Isolating it needs **both** `Gi0/0/0/0` and `Gi0/0/0/1` shut in one commit. Schedule a second window, or accept `healthy` + `t0` as sufficient for MVP-0? **T-025/M3 are not blocked either way.** | No — nothing downstream is blocked | **Resolved (OBS-049)** — second window run, both uplinks in one commit, PE2 fully isolated, 216 files captured |
+| **Q-017** | **T-024** | **The specified walk semantics make four of five findings unreachable.** T-024 says "broken → stop", but rungs 1–3 are all broken for `RR1 → 10.255.0.12`, so the descent stops at rung 1 and reports the symptom (`peer_not_established`), never the shut interface. D6 says the *lowest* broken layer is the root cause. | **Yes — blocks T-022/T-023/T-024/T-025** | Open (OBS-055) |
 | Q-013 | T-022 | Does a `Rung` carry its own device scope? The `bgp_session` descent's lower rungs (route, IGP adjacency, interface) concern the *path*, not the subject device — checking RR1's own IS-IS adjacencies would miss that PE2 is the isolated one. | **Yes — blocks T-022/T-023/T-024** | Open (OBS-020) — decide at T-022. **Operator: add the field when the dataclass is defined; retrofitting after `descent.py` exists is not cheap** (OBS-035) |
 | Q-011 | T-004 | Should the devices' `logging trap` level be lowered so severity-5 events (`%BGP-5-ADJCHANGE`, IS-IS transitions) reach Loki? Today only `err`/`warning` arrive, so the events T-028 correlates against are absent entirely. Operator decision — it changes log volume on a pipeline already carrying 97% self-generated noise. | No for MVP-0 · **yes for a useful historical axis** | Open (OBS-014) |
 | Q-003 | T-005 | Does Alertmanager have a webhook receiver, and can it replace n8n as the Stage 2 trigger? | No — Stage 2 | **Resolved (OBS-016)** — yes to both. Gap is that no alert rule carries a device label; that is rule authoring, not infrastructure. |

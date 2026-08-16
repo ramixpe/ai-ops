@@ -27,7 +27,7 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 | Run started | 2026-08-15 |
 | Last updated | 2026-08-16 |
 | Current task | **T-022 — BLOCKED pending Q-013** |
-| Halted? | no — Q-015 resolved, waiver discharged (OBS-038) |
+| Halted? | **YES — T-022 blocked on Q-013 and Q-017 (OBS-055)** |
 | Operator decisions pending capture | **Lab must stay healthy until T-011** — `healthy` then `broken` captured in one coordinated window (OBS-019) |
 
 **Baseline environment (T-001).** Python 3.13.11 · Linux 6.8.0-136 x86_64 · ruff 0.16.3 · pytest 9.1.1 · 63 pip packages · `agent-nettools` 0.2.0 · repo at `/home/rami/ai-agent-ops/ios-xr-nettools`. CI pins Python 3.11 — see OBS-004.
@@ -71,7 +71,7 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 | T-019 | `checks.py` and `CheckResult` | DONE | opus-5 | `1437059` | OBS-051 | Contract + "absence is unevaluated" rule. 17 tests, 1047 passed |
 | T-020 | The five checks | DONE | sonnet-5 (opus-5 spec + review) | `fcc2210` | OBS-052, OBS-053 | **Q-005 closed** (rate, not total). 1069 passed. Divergence from `health.py` recorded for T-021 |
 | T-021 | Agreement test with `health.py` | DONE | opus-5 (HALT-sensitive) | _next commit_ | OBS-054 | **No disagreement. No HALT.** 92 comparisons, 1161 passed |
-| T-022 | `flows.py` registry and dataclasses | TODO | opus-5 | | | contract task |
+| T-022 | `flows.py` registry and dataclasses | **BLOCKED** | opus-5 | | OBS-055 | Q-013 (rung device scope) **and** new Q-017 (walk semantics) |
 | T-023 | The `bgp_session` descent | TODO | sonnet-5 | | | |
 | T-024 | `descent.py` walker | TODO | opus-5 | | | semantics task |
 | T-025 | **Acceptance test — RR1 → 10.255.0.12** | TODO | opus-5 | | | Q-006 · milestone |
@@ -125,6 +125,7 @@ Every HALT under §0.11. A populated row here means the run stopped and a human 
 
 | # | Task | Reason | Question ID | Resolved |
 |---|------|--------|-------------|----------|
+| 3 | T-022 | Two contract questions must be settled before the `Rung` dataclass is fixed: device scope (Q-013) and the walk stopping rule (Q-017), the latter found by measuring the ladder against the `broken` label. | Q-013, Q-017 | No — awaiting the operator |
 | 2 | T-011 | Second scoped waiver: shut PE2 `Gi0/0/0/0` **and** `Gi0/0/0/1` in one commit to capture the `broken` label. | Q-016 | **Yes** — granted, exercised 07:41–07:51Z 2026-08-16, discharged. Fabric verified restored three ways (OBS-049) |
 | 1 | T-011 | Asked to execute a device configuration change (shut PE2 `Gi0/0/0/0`). §0.11 makes any device state change an absolute HALT, under a standing instruction that overrides later session instructions. Script written and verified; not run until authorised. | Q-015 | **Yes** — operator granted a scoped one-action waiver; exercised 23:01-23:07Z and discharged. Fabric verified restored (OBS-038) |
 
