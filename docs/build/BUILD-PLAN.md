@@ -996,6 +996,45 @@ A timeline with **no window** is refused rather than passed: grading against not
 
 ---
 
+## T-029c · a vacuous verdict beside claims is a contradiction `[STATUS: DONE]`
+
+Promoted from **B-429** at the operator's direction, before T-034.
+
+```python
+def claims_present(payload: object) -> tuple[str, ...]
+# applied inside ground_report() and ground_correlation()
+```
+
+**The gap.** §0.12 gave `GroundingResult.vacuous` so a pass over nothing would be *distinguishable* from a real pass. It worked. At T-033 the payload printed
+
+```
+correlation grounding: vacuous pass -- 0 observations, 0 citations
+```
+
+next to a **nine-entry timeline carrying a fabricated timestamp**. The instrument was correct, reported the gap in every run, and **nobody read it.**
+
+> **Any warning that requires a human to notice it will eventually not be noticed. Where a condition is checkable, check it.**
+
+A vacuous verdict beside a payload that plainly contains claims is not a note about coverage — it is a **contradiction**: the payload asserts things and the gate examined none of them. Contradictions are raised by the code.
+
+**Deliberately narrow, and that is load-bearing.** The audit covered every reader-facing flag in the package:
+
+| Flag | Verdict |
+|---|---|
+| `GroundingResult.vacuous` + claims | **contradiction → raised** |
+| `meta["unaccounted_lines"]` with `PARSE_OK` | borderline; §0.10 specifies these *surface* rather than fail. Left informational, noted |
+| `ShapedWindow.unattributed_kept` | a **fact** — the noise filter declined to drop 8 records. Nothing inconsistent |
+| `InvestigationResult.repairs` | a fact about model behaviour |
+| `data["retries"]` | a fact about the transport |
+
+Turning every reader-facing number into an error is the opposite mistake, and it trains people to ignore these too — which is precisely how the T-033 warning went unread. The rule fires only where two facts contradict each other.
+
+**Also caught:** `{"correlation": {"found": true}, "timeline": []}` — a positive correlation with no cited event, previously accepted. The purest form of the defect.
+
+**Tests:** 6, in both directions. `test_a_genuinely_empty_payload_is_still_a_clean_vacuous_pass` is the companion — without it the check could refuse every vacuous result and every other test would still pass.
+
+---
+
 ## T-030 · `investigation.py` — the MVP-0 runner `[STATUS: DONE]`
 
 ```python

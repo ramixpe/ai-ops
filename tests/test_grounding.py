@@ -611,13 +611,25 @@ def test_a_source_that_drops_severities_can_never_support_a_negative():
 def test_presence_is_not_weakened_by_a_coverage_gap():
     """Only absence needs coverage. A found correlation over a truncated window
     is still a found correlation -- the events are there, whatever else is
-    missing. Rejecting it would be the mirror-image mistake."""
+    missing. Rejecting it would be the mirror-image mistake.
+
+    The timeline has to be real and the window has to be supplied, because since
+    T-029c a `found: true` with nothing behind it is refused as unmeasured. That
+    is the point: "presence survives a coverage gap" is a claim about *cited*
+    presence, not about the word `true`.
+    """
 
     shaped = _window("broken")
     assert not shaped.coverage.complete
 
-    found = {"correlation": {"found": True, "summary": "the uplinks went down"}}
-    assert grounding.ground_correlation(found, shaped.coverage).ok
+    found = {
+        "timeline": [{"at": r["timestamp"], "event": r["text"][:20],
+                      "mnemonic": r["mnemonic"]} for r in shaped.records[:2]],
+        "correlation": {"found": True, "summary": "the uplinks went down"},
+    }
+    result = grounding.ground_correlation(found, shaped.coverage, shaped)
+    assert result.ok, result.summary()
+    assert result.timeline_entries_checked == 2
 
 
 @pytest.mark.parametrize(
@@ -630,10 +642,23 @@ def test_a_malformed_correlation_is_not_read_as_an_absence_claim(claim):
     """`is not False`, so a missing or string-valued `found` is never silently
     treated as "nothing to check". `"false"` and `0` are falsy and are not
     `False`; reading them as an absence claim would apply the rule to a report
-    whose shape is already wrong."""
+    whose shape is already wrong.
+
+    Two separate properties, and T-029c added the second. The absence rule does
+    not fire -- `absence_claims_checked == 0`. And the *gate* still refuses any
+    payload that carries a `correlation.found` nothing verified, which is the
+    right outcome for a malformed one: it asserts a result and no check touched
+    it.
+    """
 
     result = grounding.ground_correlation(claim, None)
-    assert result.ok and result.absence_claims_checked == 0
+
+    assert result.absence_claims_checked == 0, "the absence rule must not fire"
+    if grounding.claims_present(claim):
+        assert not result.ok
+        assert any(f.kind == "verified_nothing" for f in result.failures)
+    else:
+        assert result.ok, "a payload asserting nothing has nothing to refuse"
 
 
 def test_coverage_is_read_from_what_the_device_reported_not_asserted():
@@ -864,3 +889,127 @@ def test_a_malformed_timeline_is_a_verdict_not_a_crash(claim):
     result = grounding.check_timeline_citations(claim, _window("broken"))
     assert isinstance(result, grounding.GroundingResult)
     assert not result.ok
+
+
+# --------------------------------------------------------------------------- #
+# T-029c -- a vacuous verdict beside claims is a contradiction, not a note
+# --------------------------------------------------------------------------- #
+
+
+def test_the_exact_t033_shape_is_now_refused_by_the_gate_itself():
+    """The gap B-429 recorded, closed.
+
+    At T-033 the payload printed `vacuous pass -- 0 observations, 0 citations`
+    beside a nine-entry timeline carrying a fabricated timestamp. The instrument
+    was correct and nobody read it. The verdict now carries the contradiction as
+    a failure rather than as a note somebody has to notice.
+    """
+
+    nine = _found([{"at": "Aug 16 07:41:54.688 UTC", "event": f"e{i}",
+                    "mnemonic": "PKT_INFRA-LINK-5-CHANGED"} for i in range(9)])
+
+    bare = grounding.check_absence_coverage(nine, None)
+    assert bare.ok and bare.vacuous, "the component alone still measures nothing"
+
+    gated = grounding.ground_correlation(nine, None, None)
+    assert not gated.ok
+
+    # `uncited_timeline`, not `verified_nothing` -- and the distinction is the
+    # point rather than a technicality. The timeline check *ran*, found no
+    # window to grade against, and refused. `verified_nothing` is the backstop
+    # for the case where nothing examined the payload at all; here something
+    # did, so the specific failure is the better one and fires first.
+    assert [f.kind for f in gated.failures] == ["uncited_timeline"]
+    assert gated.timeline_entries_checked == 9
+    assert not gated.vacuous, "a gate that refused something did not measure nothing"
+
+
+def test_a_positive_correlation_with_no_timeline_is_refused():
+    """`found: true` with nothing behind it.
+
+    Previously accepted, and it is the purest form of the defect: an assertion
+    that a correlation exists, with no cited event, verified by nothing.
+    """
+
+    empty_positive = {"timeline": [], "correlation": {"found": True, "summary": "s"}}
+    result = grounding.ground_correlation(empty_positive, _window("broken").coverage,
+                                          _window("broken"))
+
+    assert not result.ok
+    assert [f.kind for f in result.failures] == ["verified_nothing"]
+
+
+def test_a_genuinely_empty_payload_is_still_a_clean_vacuous_pass():
+    """The §0.12 companion, and the line the rule must not cross.
+
+    A payload that asserts nothing has nothing to contradict. Without this, the
+    check could refuse every vacuous result and the test above would still pass
+    -- and refusing an honest "nothing to grade" is how a rule this shape starts
+    producing noise nobody reads, which is the failure it exists to prevent.
+    """
+
+    result = grounding.ground_correlation({"timeline": []}, None, None)
+
+    assert result.ok
+    assert result.vacuous
+    assert "vacuous" in result.summary()
+
+
+def test_a_report_asserting_nothing_still_passes_but_one_with_claims_does_not():
+    """The same rule on the report gate, in both directions."""
+
+    descent = DescentResult(
+        flow="bgp_session", device="RR1", subject="10.255.0.12",
+        finding="undetermined",
+        outcomes=(RungOutcome("bgp_session", "RR1",
+                              CheckResult(UNEVALUATED, reason="no evidence")),))
+
+    assert grounding.ground_report({"observations": []}, descent).ok
+
+    recommendation_only = {"observations": [], "interpretations": [],
+                           "recommendation": {"next_check": "look at it",
+                                              "requires_human": True}}
+    result = grounding.ground_report(recommendation_only, descent)
+    assert not result.ok
+    assert any(f.kind == "verified_nothing" for f in result.failures)
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        ({}, ()),
+        ({"observations": []}, ()),
+        ({"timeline": []}, ()),
+        ({"observations": [1, 2]}, ("observations[2]",)),
+        ({"recommendation": {}}, ("recommendation",)),
+        ({"correlation": {"found": False}}, ("correlation.found=False",)),
+        ({"correlation": {}}, ()),
+    ],
+    ids=lambda x: str(x)[:34],
+)
+def test_claims_present_counts_assertions_not_fields(payload, expected):
+    """Empty containers assert nothing. A report with `observations: []` is not
+    making a claim, and treating it as one would refuse every honest refusal."""
+
+    assert grounding.claims_present(payload) == expected
+
+
+def test_informational_flags_are_not_turned_into_errors():
+    """The narrowness of the rule, asserted.
+
+    `unattributed_kept`, `repairs` and `retries` are *facts* with nothing
+    inconsistent about them -- the noise filter declined to drop 8 records, a
+    markdown fence was stripped, a command was retried. Turning every
+    reader-facing number into an error is the opposite mistake and trains people
+    to ignore these too, which is precisely how the T-033 warning went unread.
+    """
+
+    window = _window("broken")
+    assert window.unattributed_kept == 8
+
+    faithful = _found([{"at": r["timestamp"], "event": "e", "mnemonic": r["mnemonic"]}
+                       for r in window.records[:2]])
+    result = grounding.ground_correlation(faithful, window.coverage, window)
+
+    assert result.ok, "a kept-unattributable count must not fail a grounded correlation"
+    assert not window.coverage.complete, "nor must incomplete coverage, on a presence claim"

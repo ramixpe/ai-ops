@@ -66,6 +66,7 @@ __all__ = [
     "check_absence_coverage",
     "check_chain_coverage",
     "check_timeline_citations",
+    "claims_present",
     "check_grounding",
     "descent_evidence_keys",
     "ground_correlation",
@@ -458,7 +459,85 @@ def ground_report(report: dict, descent: DescentResult) -> GroundingResult:
     """
 
     keys = descent_evidence_keys(descent)
-    return check_grounding(report, keys).merge(check_chain_coverage(report, descent))
+    merged = check_grounding(report, keys).merge(check_chain_coverage(report, descent))
+    return _refuse_unmeasured(merged, report, locus="report")
+
+
+def claims_present(payload: object) -> tuple[str, ...]:
+    """Every field in a graded payload that asserts something.
+
+    The list a :attr:`GroundingResult.vacuous` verdict is checked against. A
+    field counts when its presence is the model making a claim -- an
+    observation, an interpretation, a recommendation, a timeline entry, or a
+    ``correlation.found`` either way. Empty containers do not count; a report
+    with ``observations: []`` claims nothing.
+    """
+
+    if not isinstance(payload, dict):
+        return ()
+
+    found: list[str] = []
+    for key in ("observations", "interpretations", "timeline"):
+        value = payload.get(key)
+        if isinstance(value, list) and value:
+            found.append(f"{key}[{len(value)}]")
+    if isinstance(payload.get("recommendation"), dict):
+        found.append("recommendation")
+    correlation = payload.get("correlation")
+    if isinstance(correlation, dict) and "found" in correlation:
+        found.append(f"correlation.found={correlation['found']}")
+    return tuple(found)
+
+
+def _refuse_unmeasured(
+    result: GroundingResult, payload: object, *, locus: str
+) -> GroundingResult:
+    """Turn "this verdict measured nothing" from a note into a failure.
+
+    `BUILD-PLAN.md` §0.12 gave :attr:`GroundingResult.vacuous` so a pass over
+    nothing would be *distinguishable* from a real pass. It worked, and that
+    turned out not to be enough. At T-033 the payload printed
+
+        correlation grounding: vacuous pass -- 0 observations, 0 citations
+
+    next to a **nine-entry timeline** carrying a fabricated timestamp. The
+    instrument reported the gap correctly in every single run. Nobody read it.
+
+    > **Any warning that requires a human to notice it will eventually not be
+    > noticed. Where a condition is checkable, check it.**
+
+    A vacuous verdict beside a payload that plainly contains claims is not a
+    note about coverage — it is a **contradiction**: the payload asserts things
+    and the gate examined none of them. Contradictions are for the code to
+    raise, not for a reader to spot.
+
+    Deliberately narrow. This fires only where the two facts contradict each
+    other, never merely because something is informational — `unattributed_kept`
+    counts records the noise filter declined to drop, `repairs` records a
+    stripped markdown fence, `retries` records a transport retry, and all three
+    are *facts* with nothing inconsistent about them. Turning every reader-facing
+    number into an error would be the opposite mistake and would train people to
+    ignore these too.
+    """
+
+    claims = claims_present(payload)
+    if not result.vacuous or not claims:
+        return result
+    return GroundingResult(
+        failures=result.failures + (
+            GroundingFailure(
+                "verified_nothing", locus,
+                f"the payload asserts {', '.join(claims)} and this gate examined "
+                f"none of it; a pass over nothing is not a pass",
+            ),
+        ),
+        observations_checked=result.observations_checked,
+        citations_checked=result.citations_checked,
+        rungs_covered=result.rungs_covered,
+        rungs_required=result.rungs_required,
+        absence_claims_checked=result.absence_claims_checked,
+        timeline_entries_checked=result.timeline_entries_checked,
+    )
 
 
 def check_absence_coverage(claim: dict, coverage: Coverage | None) -> GroundingResult:
@@ -657,6 +736,7 @@ def ground_correlation(
     no window. A future output carrying both grounds through both.
     """
 
-    return check_absence_coverage(claim, coverage).merge(
+    merged = check_absence_coverage(claim, coverage).merge(
         check_timeline_citations(claim, window)
     )
+    return _refuse_unmeasured(merged, claim, locus="correlation")

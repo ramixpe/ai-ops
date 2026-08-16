@@ -26,7 +26,8 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 | Baseline test count | **550 passed, 4 skipped, 0 failed** (554 total; the 4 are `live_lab`, skipped by default) |
 | Run started | 2026-08-15 |
 | Last updated | 2026-08-16 |
-| Current task | T-029b | timeline citations | DONE | opus-5 | _next commit_ | OBS-081 | Closes B-424. Presence checking for correlations; the live fabrication pinned as a regression. 15 tests, 1365 passed |
+| Current task | T-029b | timeline citations | DONE | opus-5 | 30b6170 | OBS-081 | Closes B-424. Presence checking for correlations; the live fabrication pinned as a regression. 15 tests, 1365 passed |
+| T-029c | vacuous-with-claims | DONE | opus-5 | _next commit_ | OBS-083 | Closes B-429. A warning nobody reads is not running. Audited every reader-facing flag; changed exactly one. 6 tests, 1377 passed |
 | T-034 |
 | Halted? | no — Q-013 and Q-017 resolved by the operator |
 | Operator decisions pending capture | **Lab must stay healthy until T-011** — `healthy` then `broken` captured in one coordinated window (OBS-019) |

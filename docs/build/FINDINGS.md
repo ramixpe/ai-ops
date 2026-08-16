@@ -2049,6 +2049,35 @@ transport path disappearing rather than a direct session teardown.
 
 ---
 
+## OBS-083 · T-029c · A warning nobody reads is not running — and the audit that kept the rule narrow
+
+- **Kind:** defect-found
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** Closed B-429, promoted to a task by the operator before T-034. `ground_report` and `ground_correlation` now refuse a payload whose verdict is `vacuous` while the payload itself plainly contains claims. **1377 passed.**
+
+  > **Any warning that requires a human to notice it will eventually not be noticed. Where a condition is checkable, check it.**
+
+  §0.12 built `vacuous` precisely so a pass over nothing would be distinguishable from a real pass, and it did its job perfectly — printing `vacuous pass, 0 citations` beside a nine-entry timeline in every T-033 payload. The mechanism was not the problem. **Reading was the problem**, and reading is not a mechanism.
+- **Evidence:** `grounding.claims_present`, `_refuse_unmeasured`; 6 tests. `1377 passed`, lint clean.
+- **What I did:** Three things.
+
+  **1. Audited every reader-facing flag in the package, and deliberately changed only one.** `unattributed_kept`, `repairs`, `retries` and `unaccounted_lines` all stay informational. The distinction that decides it: a **contradiction** (the verdict says it measured nothing, the payload says it asserted things) is raised; a **fact** (the noise filter kept 8 records it could not attribute) is reported. Nothing is inconsistent about a fact.
+
+  This narrowness is load-bearing rather than conservatism. **Turning every reader-facing number into an error is the same failure wearing the opposite sign** — it produces a stream of warnings people learn to skip, which is exactly how the T-033 warning went unread in the first place. A rule against unread warnings that generates unread warnings has defeated itself.
+
+  **2. It caught a case I had not looked for.** `{"correlation": {"found": true}, "timeline": []}` — a positive correlation asserting a result with no cited event — was previously accepted by every gate. That is the purest form of the defect and it was reachable before this change.
+
+  **3. Three existing tests failed, and all three were asserting the old, weaker behaviour.** `test_presence_is_not_weakened_by_a_coverage_gap` passed a bare `found: true` with no timeline and no window; rewritten to use a real cited timeline, because *"presence survives a coverage gap"* is a claim about **cited** presence, not about the word `true`. Two malformed-correlation cases asserted `result.ok` for payloads that were already malformed; they now assert the narrow property they were about (the absence rule does not fire) **and** that the gate refuses them anyway.
+
+  Worth noting the shape: **the new check's first act was to expose three tests that had been encoding the defect as expected behaviour.** They passed before because the code and the tests shared the premise — §0.13's tests face, caught this time by a change rather than by an incident.
+
+  One precision the tests pin: on the exact T-033 shape the failure raised is `uncited_timeline`, **not** `verified_nothing`. The timeline check *ran*, found no window, and refused. `verified_nothing` is the backstop for when nothing examined the payload at all — a gate that refused something did not measure nothing, and conflating the two would make the specific diagnosis disappear behind the generic one.
+- **Needs human review:** no
+- **Blocks:** none — T-034 next.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**
