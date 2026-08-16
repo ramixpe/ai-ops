@@ -957,6 +957,63 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-049 · T-011 · Second waiver: `broken` captured with both uplinks — and it paid for itself immediately
+
+- **Kind:** decision-made
+- **Escalation:** **HALT-waived**
+- **Model:** opus-5
+- **What happened:** The operator granted a second scoped §0.11 waiver — PE2 `Gi0/0/0/0` **and** `Gi0/0/0/1` shut in **one commit**, so the fabric never passes through the half-isolated state that made the first attempt useless. Same terms: restore immediately on any failure at any stage, never leave the fabric shut, waiver expires on reporting the restore.
+
+  | Time (UTC) | Event |
+  |---|---|
+  | 07:41:43 | shut issued, both interfaces, one commit |
+  | 07:41:54 | commit accepted |
+  | 07:44:08 | **propagation confirmed after ~134s** — consistent with the 180s BGP hold time |
+  | 07:44:36–07:49:15 | capture, 216 files, zero errors |
+  | 07:50:16 | restore issued — **failed** |
+  | 07:50:48 | restore retried — also raised, but the config had applied |
+  | 07:51+ | restoration verified three ways |
+
+  Both uplinks was the right diagnosis. Where one changed nothing above the link layer, two isolated PE2 completely: adjacencies 2→0, both interfaces `admin-down`, `RR1 → 10.255.0.12` Idle, and PE2's route to RR1's loopback gone entirely.
+
+  **The restore reported failure twice while actually succeeding.** Both attempts raised `netmiko.exceptions.ReadTimeout: Pattern not detected: '[#\$]'` — the second from inside `exit_config_mode`, *after* `send_config_set` had applied the change. So the `no shutdown` committed and the script's post-commit prompt handling is what broke. I did not trust either the failure or the eventual success: I read the device directly, then confirmed against RR1 and against gNMI telemetry.
+- **Evidence:** Restoration verified three independent ways — PE2 direct read: `Gi0/0/0/0` and `Gi0/0/0/1` both `up/up`, `Total adjacency count: 2`. RR1: `10.255.0.12` numeric with uptime `00:00:44`, re-established. Telemetry: PE2 = 2 adjacencies, **all 16 BGP sessions `bgp-st-estab`**.
+- **What I did:** Followed the failure rule, and the ordering mattered. When verification of the *capture* turned up four parser defects, I **restored first and fixed the parsers afterwards from the committed fixtures** — the fabric was degraded and I no longer needed it. Keeping it shut to write regexes would have been indefensible.
+
+  Recording the script defect honestly: **a script that reports failure on success is worse than one that fails cleanly**, because the operator's instruction was "if restore fails, retry, then halt loudly" — and following that literally would have had me halt while the fabric was already healthy. What saved it was refusing to believe the script and reading the device instead. `--restore` is idempotent, so the retry was safe; had it not been, the second attempt could have caused harm on a fabric that was already fine.
+
+  **The waiver is discharged.** §0.11 is in force again, and this is not precedent for anything.
+- **Needs human review:** no
+- **Blocks:** none. **T-011 is now DONE rather than PARTIAL.**
+
+---
+
+## OBS-050 · T-011 · The `broken` label found four parser defects the healthy set could not reach
+
+- **Kind:** surprise
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** The operator's stated reason for wanting this label was that a fixture where rung 1 is Idle *and* rungs 2–5 carry real output is what proves `descent.py` descends rather than stopping at the first thing it looks at. It paid off before `descent.py` exists. Within minutes of the capture, four defects surfaced that **158 healthy fixtures are structurally incapable of producing**:
+
+  | Defect | How it surfaced |
+  |---|---|
+  | `BGP state = Idle (No route to multi-hop neighbor)` — parenthetical unparsed | `unaccounted_lines` (§0.10) |
+  | `line protocol is administratively down` | **hard `PARSE_FAILED`** on 2 fixtures |
+  | Socket "not armed" down-variant | `unaccounted_lines` |
+  | Notification error-code / payload / timing lines | `unaccounted_lines` |
+
+  Both failure modes behaved exactly as designed: §0.10 made three of them *visible*, and the fourth was loud on its own.
+- **Evidence:** Both labels now round-trip 100% clean — **healthy 158/158, broken 153/153**. 1030 passed.
+- **What I did:** Captured the BGP parenthetical as a new `state_reason` meta key rather than ignoring it — it is the single most diagnostic field in the command, since it says *why* the session is down, and `bgp_transport`'s check at T-020 will want it. Always present, `None` when established, tested both directions. Normalised `line_state`'s `administratively down` to `admin-down` so consumers see one vocabulary rather than two spellings.
+
+  Declared the other five down-session lines as ignore rules rather than extracting them. `state_reason` already carries the diagnostic that matters, and **widening the schema mid-stream to chase adjacent detail is how a parser contract stops being reviewable** — the same discipline that kept `bgp_neighbor` to 48 explained rules instead of 130 extracted fields.
+
+  **This also closes OBS-044's honest gap.** The `admin_state` normalisation was recorded as implemented-but-untested because all 45 healthy fixtures are admin-up. PE2's shut interfaces now test it against real output — and revealed that the *line protocol* half had never worked at all.
+- **Needs human review:** no
+- **Blocks:** none.
+
+---
+
 <!--
 Copy this block for each new entry.
 
@@ -984,7 +1041,7 @@ Anything logged with `Needs human review: yes` is mirrored here so the review ha
 | Q-002 | T-004 | Is syslog-ng shipping to Loki, and do IOS-XR mnemonics survive into a queryable label? | No — affects Stage 2 only | **Resolved (OBS-013)** — ships to file *and* Loki; mnemonics survive on 100% of lines but in the body, not as a label. Extraction belongs in T-015's parser. |
 | Q-014 | T-008 | `ttp` added as a **core** dependency rather than an optional extra, deviating from T-008's wording. Rationale: `run_template` attaches parsed data on every call from T-018, so an extra would make the descent silently unavailable on a default install. | No — decided and green | **Closed (OBS-035)** — accepted; an extra would be silent degradation on a default install |
 | **Q-015** | **T-011** | **HALT.** Executing the PE2 `Gi0/0/0/0` shutdown is a device state change — §0.11's absolute HALT, under a standing instruction that explicitly overrides later session instructions. The script is written and ready. **Does the operator waive §0.11 for this single pre-planned, reversible action, or run it themselves?** | **Yes — blocks T-011 and everything after it** | **Resolved (OBS-038)** — waiver granted, exercised, discharged. Fabric verified restored. |
-| **Q-016** | **T-011** | Shutting one uplink does not isolate PE2 — it has two, and the IGP routed around it (OBS-039). Isolating it needs **both** `Gi0/0/0/0` and `Gi0/0/0/1` shut in one commit. Schedule a second window, or accept `healthy` + `t0` as sufficient for MVP-0? **T-025/M3 are not blocked either way.** | No — nothing downstream is blocked | Open (OBS-039) |
+| **Q-016** | **T-011** | Shutting one uplink does not isolate PE2 — it has two, and the IGP routed around it (OBS-039). Isolating it needs **both** `Gi0/0/0/0` and `Gi0/0/0/1` shut in one commit. Schedule a second window, or accept `healthy` + `t0` as sufficient for MVP-0? **T-025/M3 are not blocked either way.** | No — nothing downstream is blocked | **Resolved (OBS-049)** — second window run, both uplinks in one commit, PE2 fully isolated, 216 files captured |
 | Q-013 | T-022 | Does a `Rung` carry its own device scope? The `bgp_session` descent's lower rungs (route, IGP adjacency, interface) concern the *path*, not the subject device — checking RR1's own IS-IS adjacencies would miss that PE2 is the isolated one. | **Yes — blocks T-022/T-023/T-024** | Open (OBS-020) — decide at T-022. **Operator: add the field when the dataclass is defined; retrofitting after `descent.py` exists is not cheap** (OBS-035) |
 | Q-011 | T-004 | Should the devices' `logging trap` level be lowered so severity-5 events (`%BGP-5-ADJCHANGE`, IS-IS transitions) reach Loki? Today only `err`/`warning` arrive, so the events T-028 correlates against are absent entirely. Operator decision — it changes log volume on a pipeline already carrying 97% self-generated noise. | No for MVP-0 · **yes for a useful historical axis** | Open (OBS-014) |
 | Q-003 | T-005 | Does Alertmanager have a webhook receiver, and can it replace n8n as the Stage 2 trigger? | No — Stage 2 | **Resolved (OBS-016)** — yes to both. Gap is that no alert rule carries a device label; that is rule authoring, not infrastructure. |
@@ -994,7 +1051,7 @@ Anything logged with `Needs human review: yes` is mirrored here so the review ha
 | Q-007 | T-035 | Telegram or Mattermost? Hosted means device names, IPs and RCA text leave the estate; self-hosted keeps them in. Decide before implementing — only one provider gets built. | Yes for T-035 | Open |
 | Q-008 | T-035 | Which host runs `nettools` in the target deployment, and does it have outbound egress to the chosen channel? | Yes for T-035 | Open |
 | Q-010 | T-003 | The MiniMax provider uses the OpenAI **Responses** API, not Chat Completions, so `BUILD-PLAN.md` T-003 step 4 (`reasoning_split`, `max_completion_tokens`) does not apply. Both behaviours it targeted are achieved structurally on that route. Confirm the route choice before the MVP-1 gate is built on it. | No for MVP-0 · **yes for the MVP-1 gate** | Open — decided and evidenced (OBS-010) |
-| Q-012 | T-005 | **The lab was rebuilt ~2 days ago and is now healthy** — all 16 BGP sessions Established, PE2/PE4 back to 2 IS-IS adjacencies. T-011 says to capture "against the current broken state", which no longer exists. Re-break the lab, capture a new consistent healthy label, or build the broken case synthetically in-test? | **Yes for T-011** (T-025/M3 unaffected — fixtures still hold the broken state) | **Resolved (OBS-019)** — options 1+2: keep `t0`/`t1` frozen, add complete `healthy` and `broken` labels; operator runs the break, capture coordinated at T-011 |
+| Q-012 | T-005 | **The lab was rebuilt ~2 days ago and is now healthy** — all 16 BGP sessions Established, PE2/PE4 back to 2 IS-IS adjacencies. T-011 says to capture "against the current broken state", which no longer exists. Re-break the lab, capture a new consistent healthy label, or build the broken case synthetically in-test? | **Yes for T-011** (T-025/M3 unaffected — fixtures still hold the broken state) | **Closed (OBS-049)** — `broken` captured 2026-08-16 with both uplinks. Originally (OBS-019) — options 1+2: keep `t0`/`t1` frozen, add complete `healthy` and `broken` labels; operator runs the break, capture coordinated at T-011 |
 | Q-009 | T-002 | Should `MINIMAX_API_KEY` **and the lab device credentials** be rotated after this build? Both were pasted into the transcript (OBS-008, OBS-037). It was pasted into the session transcript, which no control in this repository can revoke. | No — nothing is blocked on it | Open — recommended (OBS-008) |
 
 ---

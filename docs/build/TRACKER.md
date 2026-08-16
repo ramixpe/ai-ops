@@ -55,7 +55,7 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 | Task | Title | Status | Model | Commit | Findings | Notes |
 |------|-------|--------|-------|--------|----------|-------|
 | T-010 | `template_parsers.py` skeleton and contract | DONE | opus-5 | `6a56734` | OBS-032, OBS-033 | Contract + §0.10 accounting helper. 27 new tests, 594 passed |
-| T-011 | Extend capture to templates | **PARTIAL** | opus-5 | `24fc1f4`, `2fd50bf`, `f8c5a9a` | OBS-034…039 | `run_templates` batching done; **`healthy` captured+verified (217 files)**. `broken` NOT captured — one uplink does not isolate PE2 (Q-016) |
+| T-011 | Extend capture to templates | **DONE** | opus-5 | `24fc1f4`, `2fd50bf`, `f8c5a9a` | OBS-034…039, 049, 050 | `run_templates` batching done; **`healthy` captured+verified (217 files)**. `broken` NOT captured — one uplink does not isolate PE2 (Q-016) |
 | T-012 | `bgp_neighbor` parser | DONE | sonnet-5 (opus-5 spec + review) | `5360adc` | OBS-040, OBS-041 | 41 fixtures round-trip, unaccounted=[]. §0.10 verified by mutation. 662 passed |
 | T-013 | `route` parser | DONE | sonnet-5 (opus-5 spec + review) | `d690246` | OBS-042 | 44 fixtures; a third output shape found that the spec missed. 719 passed |
 | T-014 | `interface` parser | DONE | sonnet-5 (opus-5 spec + review) | `04a0bf1` | OBS-043, OBS-044 | 45 fixtures, 3 shapes. Line-down omits error counters — binds T-020. 776 passed |
@@ -125,6 +125,7 @@ Every HALT under §0.11. A populated row here means the run stopped and a human 
 
 | # | Task | Reason | Question ID | Resolved |
 |---|------|--------|-------------|----------|
+| 2 | T-011 | Second scoped waiver: shut PE2 `Gi0/0/0/0` **and** `Gi0/0/0/1` in one commit to capture the `broken` label. | Q-016 | **Yes** — granted, exercised 07:41–07:51Z 2026-08-16, discharged. Fabric verified restored three ways (OBS-049) |
 | 1 | T-011 | Asked to execute a device configuration change (shut PE2 `Gi0/0/0/0`). §0.11 makes any device state change an absolute HALT, under a standing instruction that overrides later session instructions. Script written and verified; not run until authorised. | Q-015 | **Yes** — operator granted a scoped one-action waiver; exercised 23:01-23:07Z and discharged. Fabric verified restored (OBS-038) |
 
 ---
@@ -135,4 +136,4 @@ One row per working session, so elapsed effort is visible without reading git.
 
 | Date | Tasks attempted | Tasks completed | Halted? | Notes |
 |------|-----------------|-----------------|---------|-------|
-| 2026-08-15/16 | T-001…T-018 | T-001…T-010, T-012…T-018; T-011 partial | HALT raised + waived | Required reading done; OBS-001/OBS-002 logged for the pre-plan install gap; baseline green; MiniMax contract verified and Q-001 resolved; MiniMax provider wired (567 tests); Loki + alerting discovery done; found the lab has been repaired (Q-012); L3VPN mapped; capture manifest written; TTP chosen; **M1 + M2 reached**; all six parsers done; blocking gap closed |
+| 2026-08-15/16 | T-001…T-018 | **T-001…T-018 all DONE** | HALT raised + waived | Required reading done; OBS-001/OBS-002 logged for the pre-plan install gap; baseline green; MiniMax contract verified and Q-001 resolved; MiniMax provider wired (567 tests); Loki + alerting discovery done; found the lab has been repaired (Q-012); L3VPN mapped; capture manifest written; TTP chosen; **M1 + M2 reached**; all six parsers done; blocking gap closed |

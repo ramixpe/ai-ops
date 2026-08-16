@@ -99,6 +99,7 @@ Not tied to a stage. Several are cheap enough to slot into any gap.
 | **B-408** | **Active probe budgeting** | Ping and TCP checks are already gated; at Stage 2 an event storm needs a rate limit, not just an on/off switch | Stage 2 | S | D13 |
 | **B-409** | **Scale test** — descent against a fabric an order of magnitude larger | The tool surface and flow count are device-count independent by construction. Prove it | MVP-1 | M | Part 6 |
 | **B-410** | **Runbook and on-call handover** | What an engineer does when the agent is wrong, and how they turn it off | Stage 2 | S | D3 |
+| **B-411** | **A read timeout returns partial output with `status: success` and `errors: []`** | `_netmiko_send_commands` returns whatever arrived when a per-command `read_timeout` expires, with no error recorded — so a caller cannot distinguish "the device said this" from "we stopped listening". Measured twice: a `traceroute` to an unreachable address produced an **8-byte** file containing a single line, reported as a clean success. **Silent degradation behind a green flag is the worst failure mode in this system**, and this is its third instance — OBS-006 (MiniMax empty content with `finish_reason: length`), OBS-043 (this), OBS-044 (absent counters readable as zero). The fix belongs in the transport path: mark a timed-out command as an error rather than returning what arrived | — | S | OBS-043 · D19 |
 
 ---
 
