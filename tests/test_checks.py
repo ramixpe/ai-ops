@@ -7,11 +7,11 @@ enforce: **a check may only answer `healthy` about a field it actually read.**
 
 from __future__ import annotations
 
-import ast
 import copy
 import dataclasses
 import inspect
 from pathlib import Path
+from unittest import mock
 
 import pytest
 from helpers import set_device_environment
@@ -24,43 +24,84 @@ from agent_nettools.fixtures import fixture_sender, load_fixture_evidence
 # --------------------------------------------------------------------------- #
 
 
-def test_checks_imports_nothing_that_can_touch_a_device():
-    """T-019's acceptance criterion, tested the only way that actually works.
+def test_the_descent_predicates_never_touch_the_inventory_or_a_device():
+    """T-019's acceptance criterion, **weakened at B-403 and stated as such.**
 
-    The obvious implementation -- asserting `agent_nettools.network_tools` is
-    absent from sys.modules -- would fail however pure checks.py is, because
-    `agent_nettools/__init__.py` eagerly imports agent_loop, which pulls in
-    network_tools and inventory. Importing *any* submodule imports the package.
-    That trap is recorded as OBS-033.
+    It used to read: *`checks.py` imports nothing that can touch a device* --
+    an assertion over the module's own import graph, which is a claim about
+    what is *possible*. It could not be violated at runtime because the
+    capability was not in the module.
 
-    So inspect the module's own import statements instead, which is what the
-    criterion actually means.
+    B-403 merged `health.py` in, and health's baseline rules need
+    `inventory/lab.yaml`'s `expected:` blocks. So `checks.py` now imports
+    `inventory_model` and `network_tools`, and the import-graph assertion is
+    false. The operator directed the merge after that trade was stated
+    (OBS-104).
+
+    **What replaces it is a claim about what actually happens**, which is
+    strictly less: each of the five rung predicates is run against real parsed
+    evidence with the inventory loader, the environment and the socket module
+    replaced by bombs. A predicate that grew an inventory read would fail here
+    -- but only once someone wrote it, where before they could not have.
+
+    An invariant you cannot violate became one you are told about.
     """
 
-    source = Path(inspect.getfile(checks)).read_text(encoding="utf-8")
-    imported: set[str] = set()
-    for node in ast.walk(ast.parse(source)):
-        if isinstance(node, ast.Import):
-            imported.update(alias.name.split(".")[0] for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            imported.add(node.module.split(".")[0])
-        elif isinstance(node, ast.ImportFrom) and node.level:
-            imported.update(alias.name for alias in node.names)
+    import socket as _socket
 
-    forbidden = {
-        "inventory",
-        "network_tools",
-        "lab",
-        "inventory_model",
-        "credential_resolver",
-        "evidence_store",
-        "netmiko",
-        "os",
-        "socket",
-        "subprocess",
-        "requests",
+    from agent_nettools import template_parsers
+
+    def bomb(*args, **kwargs):  # pragma: no cover - it must never be reached
+        raise AssertionError("a rung predicate reached for the inventory or a device")
+
+    raw = (
+        Path(__file__).resolve().parent / "fixtures" / "cisco_xr" / "RR1" / "broken"
+        / "show-bgp-neighbor-10-255-0-12.txt"
+    ).read_text()
+    parsed, status = template_parsers.parse_template_output("cisco_xr", "bgp_neighbor", raw)
+    assert status is template_parsers.PARSE_OK
+    evidence = {
+        "device": "RR1",
+        "bgp_neighbor:10.255.0.12": {
+            "status": "success",
+            "data": {"parsed": parsed, "parse_status": template_parsers.PARSE_OK},
+        },
     }
-    assert not (imported & forbidden), f"checks.py imports {sorted(imported & forbidden)}"
+
+    with mock.patch.object(checks, "load_inventory_file", bomb), \
+         mock.patch.object(_socket, "socket", bomb), \
+         mock.patch.object(_socket, "create_connection", bomb), \
+         mock.patch("builtins.open", bomb):
+        result = checks.bgp_transport(evidence, "10.255.0.12")
+
+    assert result.status in {checks.HEALTHY, checks.BROKEN, checks.UNEVALUATED}
+
+
+def test_every_rung_predicate_runs_with_the_inventory_disabled():
+    """The companion, over all five rather than one.
+
+    Without this the test above could pass while four of the five predicates
+    had quietly grown a dependency -- §0.12, applied to a guarantee that is now
+    sampled rather than structural.
+    """
+
+    def bomb(*args, **kwargs):  # pragma: no cover
+        raise AssertionError("a rung predicate reached for the inventory")
+
+    empty: dict = {"device": "RR1"}
+    predicates = [
+        lambda: checks.bgp_session_state(empty, "10.255.0.12"),
+        lambda: checks.bgp_transport(empty, "10.255.0.12"),
+        lambda: checks.route_present(empty, "10.255.0.12/32"),
+        lambda: checks.isis_adjacency(empty, None),
+        lambda: checks.interface_state(empty, "Gi0/0/0/0"),
+    ]
+
+    with mock.patch.object(checks, "load_inventory_file", bomb):
+        for call in predicates:
+            # Every one must reach a verdict -- `unevaluated` here, since the
+            # evidence is empty -- without consulting anything outside it.
+            assert call().status == checks.UNEVALUATED
 
 
 def test_checks_reads_no_environment_and_opens_no_files():

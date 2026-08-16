@@ -2932,6 +2932,40 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-104 · B-403 · Implemented on operator instruction — and it cost T-019's acceptance criterion
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** I closed B-403 as won't-do at OBS-101, arguing that consolidation makes one module worse whichever way it goes. **The operator reviewed that and directed the merge anyway.** Implemented: `health.py`'s 655 lines moved into `checks.py`, which is now 1,405 lines; `health.py` is a 69-line re-export shim so the nine importers keep working. **1689 pass, lint clean, the descent works end to end.**
+
+  **What it cost, measured rather than argued.**
+
+  ```
+  checks.py now imports, from the previously-forbidden set:
+      inventory_model, network_tools
+  ```
+
+  Those two names were in a **declared forbidden list** in `test_checks_imports_nothing_that_can_touch_a_device`, which is **T-019's stated acceptance criterion**. Not a test somebody wrote — a criterion in the build plan, pinned. The merge makes it false, and it failed on the first run, which is the design saying exactly what I had predicted at OBS-101.
+
+  **This is more than the trade I put to the operator.** My question offered *"you lose either fixture-reproducibility or the severity ordering"*. It did not say *"this falsifies a completed task's acceptance criterion"*, because I had not yet found the test that pins it. A reasonable person could answer that question differently knowing the larger version. Recorded here so the choice can be revisited with the full cost visible; the merge is one `git revert` away.
+- **Evidence:** `1689 passed`. Import-graph check run directly. Offline demo verified end to end.
+- **What I did:** Implemented it, replaced the criterion with the strongest thing that survives, and did not quietly delete anything.
+
+  **The replacement, and what it is not.** The old test asserted over `checks.py`'s *import graph* — a claim about what is **possible**. It could not be violated at runtime, because the capability was not in the module. The new tests run each of the five rung predicates against real parsed evidence with `load_inventory_file`, `socket` and `open` replaced by bombs — a claim about what **actually happens**.
+
+  > **An invariant you cannot violate became one you are told about.**
+
+  A predicate that grows an inventory read now fails a test. Before, nobody could have written one. That is strictly less, it is the honest maximum after the merge, and it is stated in the test's own docstring rather than left for a reader to work out.
+
+  **The one thing genuinely gained.** `_is_numeric` existed twice, and the documented copy said so in as many words: *"Deliberately re-declared rather than imported from `health.py` — the two rule sets coexist on purpose and neither should have to import the other to share one three-line predicate."* That duplication is gone. It is three lines.
+
+  **What I would say if asked again.** The merge works and nothing is broken. The exchange rate was three duplicated lines for a structural guarantee that the descent's predicates cannot reach a device — and `descent.py` now sits, through one import, on top of the SSH, credential and metrics layer. §0.14: the item was filed as *"consolidation"*, which sounds like a tidying decision, and is a decision about a dependency boundary.
+- **Needs human review:** **yes** — the full cost was not visible when the instruction was given
+- **Blocks:** none
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**

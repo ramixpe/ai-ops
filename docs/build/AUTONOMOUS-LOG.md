@@ -34,7 +34,7 @@ Purpose: a running record of **what was done, what was asked, and what was answe
 | — | session opened | 1391 | 64 backlog items; 13 defect-class targeted |
 | **B-404** | ✅ closed | 1688 | Sonnet 5. 54 ignore rules, 7 deferred; behaviour byte-identical across 216 combinations, verified independently. Surfaced **OBS-103** and **B-435** |
 | **B-421** | ✅ closed | 1464 | Sonnet 5, **corrected on review**: payloads had lost their headings. Cacheable prefix 4,432 / 6,446 chars |
-| **B-403** | 🚫 **won't do** | 1451 | Closed with reasoning, not implemented. Consolidation makes one module worse either direction; the overlap is 3 of 15 rules and already has a witness |
+| **B-403** | ⚠️ **done on instruction** | 1689 | Closed won't-do (OBS-101), then implemented when the operator directed it (OBS-104). Cost T-019's acceptance criterion; gained three duplicated lines |
 | **B-402** | ✅ closed | 1451 | Schema + 12 seeded notes. `revisit_when` added beyond the spec — a fact with no expiry becomes folklore |
 | **B-434** | ✅ closed | 1446 | 74 ignore rules classified; **15 deferred** and now visible. `NOT_NEEDED_YET` vs `NO_EXTRACTABLE_FIELD` |
 | **B-432** | ✅ closed | 1442 | Option A, with **no new command**: the TCP signal was already in `show bgp neighbor`, filed as two `IgnoreRule`s. `cause_not_localised` reachable. Surfaced **B-434** |
