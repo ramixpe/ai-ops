@@ -1103,6 +1103,37 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-054 · T-021 · The agreement test passes — no HALT — and it caught itself being vacuous twice
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** **`checks.py` and `health.py` do not contradict each other anywhere in the corpus.** 92 comparisons across all four labels × nine devices, plus a per-peer BGP comparison. No genuine disagreement, so **no HALT**.
+
+  Agreement is meaningful rather than accidental — the verdicts track the real fabric:
+
+  | | `t0`/`t1` | `healthy` | `broken` |
+  |---|---|---|---|
+  | `isis_adjacency` broken on | PE2, PE4 | none | PE2 |
+  | `bgp_session_state` broken on | PE2, RR1 | none | PE2, RR1 |
+
+  In every case `health.py`'s corresponding rule fires on exactly the same devices.
+- **Evidence:** `tests/test_checks_agree_with_health.py`, 92 passed / 18 skipped (the skips are devices with no BGP process, which is correct). Full suite **1161 passed**.
+- **What I did:** Wrote the test myself rather than delegating — §0.9 assigns T-021 to Sonnet, but this is the one task the plan singles out as a HALT trigger, and I had already run the whole comparison by hand while judging T-020. Logged as a deviation for the same reason as OBS-031 and OBS-048.
+
+  **The test was wrong twice before it was right, and both failures are worth recording, because a green agreement test is exactly the kind of thing that gets trusted without inspection.**
+
+  1. **It passed vacuously on the first run.** 36 comparisons, all green — because `load_fixture_evidence` replays through `collect_evidence`, which resolves a device *before* the injected sender runs, so without credentials every section errored, every check returned `unevaluated`, and every assertion was trivially satisfied. What caught it was the anti-vacuity test I had written into the same file: it asserts the corpus actually produces both `healthy` and `broken` verdicts. **Without that guard I would have committed a test that compared nothing and reported success** — which is the same silent-degradation shape as OBS-006, OBS-043 and OBS-044, this time in a test rather than in the code.
+  2. **It then failed for a wrong reason.** Eight interface comparisons "disagreed" — but `health.py` names the object in its finding as `subject`, and I had read `interface`. The lookup set was `{None}`, nothing ever matched, and every line-down interface looked like a conflict. Read at face value, that is eight HALTs. It was one typo.
+
+  The second is the more instructive: **a red agreement test is not evidence of disagreement any more than a green one is evidence of agreement.** That is the same lesson as §0.11's new paragraph about tools reporting failure, arriving one layer up. I verified the finding shape directly before concluding anything, and the fabric turned out to agree with itself all along.
+
+  The documented `admin-down` divergence (OBS-053) is encoded as a narrow allowance and is **genuinely exercised** — PE2's two shut uplinks take that path, so it is not dead code. Anything else disagreeing still fails.
+- **Needs human review:** no
+- **Blocks:** none — Part 3's checks are complete. **T-022 next, and it needs Q-013 answered.**
+
+---
+
 <!--
 Copy this block for each new entry.
 

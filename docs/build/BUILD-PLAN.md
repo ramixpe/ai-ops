@@ -590,7 +590,7 @@ Each returns a `CheckResult` populated with the evidence keys it read.
 
 ---
 
-## T-021 · The agreement test `[STATUS: TODO]`
+## T-021 · The agreement test `[STATUS: DONE]`
 
 **Goal.** Let `checks.py` and `health.py` coexist safely without refactoring either.
 

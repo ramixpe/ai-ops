@@ -26,7 +26,7 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 | Baseline test count | **550 passed, 4 skipped, 0 failed** (554 total; the 4 are `live_lab`, skipped by default) |
 | Run started | 2026-08-15 |
 | Last updated | 2026-08-16 |
-| Current task | T-021 — **Q-013 due at T-022** |
+| Current task | **T-022 — BLOCKED pending Q-013** |
 | Halted? | no — Q-015 resolved, waiver discharged (OBS-038) |
 | Operator decisions pending capture | **Lab must stay healthy until T-011** — `healthy` then `broken` captured in one coordinated window (OBS-019) |
 
@@ -69,8 +69,8 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 | Task | Title | Status | Model | Commit | Findings | Notes |
 |------|-------|--------|-------|--------|----------|-------|
 | T-019 | `checks.py` and `CheckResult` | DONE | opus-5 | `1437059` | OBS-051 | Contract + "absence is unevaluated" rule. 17 tests, 1047 passed |
-| T-020 | The five checks | DONE | sonnet-5 (opus-5 spec + review) | _next commit_ | OBS-052, OBS-053 | **Q-005 closed** (rate, not total). 1069 passed. Divergence from `health.py` recorded for T-021 |
-| T-021 | Agreement test with `health.py` | TODO | sonnet-5 | | | HALT on disagreement |
+| T-020 | The five checks | DONE | sonnet-5 (opus-5 spec + review) | `fcc2210` | OBS-052, OBS-053 | **Q-005 closed** (rate, not total). 1069 passed. Divergence from `health.py` recorded for T-021 |
+| T-021 | Agreement test with `health.py` | DONE | opus-5 (HALT-sensitive) | _next commit_ | OBS-054 | **No disagreement. No HALT.** 92 comparisons, 1161 passed |
 | T-022 | `flows.py` registry and dataclasses | TODO | opus-5 | | | contract task |
 | T-023 | The `bgp_session` descent | TODO | sonnet-5 | | | |
 | T-024 | `descent.py` walker | TODO | opus-5 | | | semantics task |
