@@ -1320,6 +1320,44 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-062 · T-028 · Window shaping in code; and `show logging` turns out to be *better* than Loki here, not a fallback
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** `correlate.v1.txt`, `log_window.py`, and 16 golden tests. **1235 passed.**
+
+  **The operator's question — filter in code or leave it to the model — decided as code**, and the measurement is the argument. PE2's `broken` window is 200 entries / 37,962 characters, of which **137 are the collector's own SSH sessions** and 43 more are `exec`-session registration churn from those same sessions. **20 genuine network events remain.** Three reasons, in increasing order of weight: context budget (~34,000 characters of noise re-read on every call); testability ("the model usually ignores SSH churn" is not a property anything can assert); and **determinism** — the same window must yield the same filtered set every time, or two runs of one investigation can correlate against different evidence. Handing that to a probabilistic step at the last moment would give away the reproducibility the whole deterministic-descent argument rests on.
+
+  Because filtering is code, **what was dropped is knowable**: `shape_window` reports the counts, so a report can say "20 of 200 entries were network events" rather than presenting 20 and implying that was all there was.
+
+  **The 20 events are the entire incident, timestamped:**
+
+  ```
+  07:41:54.688  Gi0/0/0/0 -> Administratively Down
+  07:41:54.688  Gi0/0/0/1 -> Administratively Down
+  07:41:54.688  ISIS adjacency to P1 Down
+  07:41:54.690  ISIS adjacency to P3 Down
+  07:41:54.712  Configuration committed by user 'clab'
+  07:44:28.097  BGP neighbor 10.255.0.31 Down - hold time expired
+  ```
+
+  That is D6's stated value of the historical axis, present and checkable: the descent says the interface is down, the logs say *when*, and whether it coincided with a commit. It did — in the same second, 154 seconds before BGP followed.
+- **Evidence:** `tests/test_correlate_prompt.py`, 16 passed. Both golden cases captured whole, neither composed.
+- **What I did:** Three findings worth separating from the task.
+
+  **1. `show logging` is not a fallback for this fabric — it is strictly better than Loki.** Every one of those causal events is severity 5 or 6 (`ADJCHANGE`, `CHANGED`, `LINEPROTO`, `DB_COMMIT`), and per OBS-041/B-206a **none of them reaches Loki at all.** The operator approved `show logging` as a substitute for a blocked path; measured, it is the only path that carries the evidence. B-206 remains worth doing for cross-device and device-unreachable cases, but it should not be described as an upgrade to this.
+
+  **2. A measured correction to OBS-014.** That finding saw one event stored 1,346 times and concluded any count over the corpus is fiction without deduplication. True of **Loki**; **not** true of the device's own buffer, where deduplicating removes **exactly zero** records. The duplication is introduced by the syslog pipeline, not present at source. `dedupe` is kept and pinned by a test asserting it is a no-op here — load-bearing for B-206, dead-looking until then, and now documented so nobody removes it.
+
+  **3. Subject filtering exists and is off by default, because using it would discard the cause.** The events explaining an isolated peer never name the peer: on the `broken` label the causal lines say `GigabitEthernet0/0/0/0` and `P1`, not `10.255.0.12`. Filtering a `bgp_session` window to its subject throws away exactly what correlation needs. Tested in that direction.
+
+  Also: **my own T-026 rule was too narrow and failed on its second prompt.** `test_every_prompt_names_its_refusal_path` asserted the literal word `undetermined`, which is `report`'s refusal but not `correlate`'s — a correlation with nothing to correlate returns `found: false`. The rule was right, the check was written from a single example. Each prompt's case file now declares its own `refusal_marker` and the test reads it. Same shape as three of the six parser specs: **a rule generalised from one instance fits one instance.**
+- **Needs human review:** no
+- **Blocks:** none — T-029 next.
+
+---
+
 <!--
 Copy this block for each new entry.
 

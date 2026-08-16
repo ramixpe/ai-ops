@@ -27,8 +27,16 @@ from functools import lru_cache
 from pathlib import Path
 
 from .descent import DescentResult
+from .log_window import ShapedWindow
 
-__all__ = ["PROMPTS_DIR", "build_report_prompt", "descent_payload", "load_prompt"]
+__all__ = [
+    "PROMPTS_DIR",
+    "build_correlate_prompt",
+    "build_report_prompt",
+    "descent_payload",
+    "finding_payload",
+    "load_prompt",
+]
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "prompts"
 
@@ -107,3 +115,55 @@ def build_report_prompt(result: DescentResult, *, version: int = 1) -> str:
     # its anchor and expected-output blocks, and format() would try to read
     # every one of them as a field.
     return template.replace("{descent_json}", payload)
+
+
+def finding_payload(result: DescentResult) -> dict:
+    """The finding alone, for correlation. No chain, no rung detail.
+
+    Correlation asks *when*, not *why* -- the descent already settled why. A
+    payload carrying the full chain would invite the model to re-litigate the
+    diagnosis against log text, which is the one thing the deterministic walk
+    exists to stop.
+    """
+
+    return {
+        "flow": result.flow,
+        "device": result.device,
+        "subject": result.subject,
+        "finding": result.finding,
+        "cause": (
+            {"rung": result.cause.rung, "device": result.cause.device}
+            if result.cause is not None
+            else None
+        ),
+    }
+
+
+def build_correlate_prompt(
+    result: DescentResult, window: ShapedWindow, *, version: int = 1
+) -> str:
+    """Render the correlate prompt for one finding and one shaped window.
+
+    The window arrives already filtered by :func:`log_window.shape_window`, and
+    its removal counts travel with it -- so the model can say how much of the
+    window it is seeing rather than presenting a filtered set as the whole.
+    """
+
+    template = load_prompt("correlate", version)
+    window_payload = {
+        "entries": [
+            {
+                "at": record.get("timestamp"),
+                "mnemonic": record.get("mnemonic"),
+                "severity": record.get("severity"),
+                "text": record.get("text"),
+            }
+            for record in window.records
+        ],
+        "shaping": window.summary(),
+        "entries_shown": len(window.records),
+        "entries_collected": window.total_in,
+    }
+    return template.replace("{finding_json}", json.dumps(finding_payload(result), indent=2)).replace(
+        "{window_json}", json.dumps(window_payload, indent=2)
+    )

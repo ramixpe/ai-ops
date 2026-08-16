@@ -1,0 +1,64 @@
+{
+  "prompt": "correlate.v1.txt",
+  "note": "Golden cases for the correlate prompt. Read by tests/test_correlate_prompt.py -- load-bearing, not documentation. Both cases are captured whole from committed fixtures; neither is composed.",
+  "window_shaping": {
+    "decision": "Deduplication and collector-noise filtering happen in CODE, before the model sees the window -- log_window.shape_window(). Deterministic, testable, and it keeps the context budget honest.",
+    "measured": "PE2's broken window is 200 entries / 37,962 chars, of which 137 are the collector's own SSH sessions and 43 are exec-session registration churn from the same source. 20 genuine network events remain.",
+    "counts_are_reported": "shape_window returns what it removed, so a report can say '20 of 200 entries were network events' rather than presenting 20 and implying that was all there was."
+  },
+  "output_schema": {
+    "timeline": [
+      {
+        "at": "device timestamp, verbatim",
+        "event": "string",
+        "mnemonic": "string"
+      }
+    ],
+    "correlation": {
+      "found": "bool",
+      "summary": "string",
+      "followed_a_commit": "bool",
+      "recurrence": "string"
+    }
+  },
+  "cases": [
+    {
+      "name": "correlating_events",
+      "source": "PE2, the `broken` label -- the window covering the deliberate isolation",
+      "window": {
+        "entries_collected": 200,
+        "entries_retained": 20,
+        "collector_noise_removed": 180
+      },
+      "expect": {
+        "mnemonics_present": [
+          "PKT_INFRA-LINK-5-CHANGED",
+          "ROUTING-ISIS-5-ADJCHANGE",
+          "MGBL-CONFIG-6-DB_COMMIT",
+          "ROUTING-BGP-5-ADJCHANGE"
+        ],
+        "correlation_found": true,
+        "followed_a_commit": true
+      },
+      "why": "The window contains the complete timestamped story: both uplinks going administratively down at 07:41:54.688, both IS-IS adjacencies dropping in the same instant, a configuration commit in the same second, and BGP following 154 seconds later when the hold timer expired. This is D6's stated value of the historical axis -- the descent says the interface is down, the logs say when and whether it coincided with a commit.",
+      "note": "Every one of these is severity 5 or 6, which per OBS-041 and B-206a never reaches Loki. For this fabric the `show logging` source is not merely a fallback -- it is strictly better than the Loki path, which would have shown none of these events."
+    },
+    {
+      "name": "no_correlating_events",
+      "source": "PE2, the `healthy` label",
+      "window": {
+        "entries_collected": 200,
+        "entries_retained": 0
+      },
+      "expect": {
+        "entries_retained": 0,
+        "is_empty": true,
+        "correlation_found": false,
+        "summary_contains": "no correlating events in window"
+      },
+      "why": "The refusal path, and the more likely case in practice. After filtering, a healthy device's window contains zero network events. The failure to guard against is a model reaching for the nearest line in time and describing it as related -- an unrelated event presented as context reads exactly like a correlated one, and the reader cannot tell the difference."
+    }
+  ],
+  "refusal_marker": "no correlating events in window",
+  "refusal_note": "GRACE's C slot requires a named refusal path. The marker differs per prompt because the refusals differ in kind: a report that cannot determine a cause returns `undetermined`, while a correlation with nothing to correlate returns `found: false`. Enforced by tests/test_prompts.py, which reads this field rather than assuming one vocabulary fits both."
+}

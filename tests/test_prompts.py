@@ -52,14 +52,30 @@ def test_every_prompt_names_its_refusal_path(prompt):
     """GRACE's Constraints slot requires it explicitly.
 
     A prompt with no named refusal path leaves the model to invent one under
-    pressure, and the invented one is usually a confident guess. `undetermined`
-    has to be an available answer, spelled out.
+    pressure, and the invented one is usually a confident guess.
+
+    The marker is read from the prompt's own case file rather than hardcoded,
+    because **the refusals differ in kind**: a report that cannot determine a
+    cause returns `undetermined`, while a correlation with nothing to correlate
+    returns `found: false` and "no correlating events in window". The first
+    version of this test assumed one vocabulary fitted both and failed on
+    `correlate.v1.txt` -- the rule was right, the check was written from a
+    single example.
     """
 
-    text = prompt.read_text(encoding="utf-8").lower()
-    assert "undetermined" in text, (
-        f"{prompt.name} does not name a refusal path; GRACE's C slot requires "
-        f'"if the evidence does not support a conclusion, return undetermined"'
+    import json
+
+    stem = prompt.name.split(".")[0]
+    case_file = CASES_DIR / f"{stem}.cases.json"
+    assert case_file.is_file(), f"{prompt.name} has no case file declaring its refusal marker"
+    marker = json.loads(case_file.read_text(encoding="utf-8")).get("refusal_marker")
+    assert marker, f"{case_file.name} declares no refusal_marker"
+
+    text = " ".join(prompt.read_text(encoding="utf-8").split()).lower()
+    assert marker.lower() in text, (
+        f"{prompt.name} does not name its declared refusal path {marker!r}; GRACE's "
+        f"C slot requires the model be told what to return when the evidence does "
+        f"not support a conclusion"
     )
 
 

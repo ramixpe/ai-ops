@@ -90,5 +90,7 @@
       },
       "why": "The single most valuable thing the Constraints slot buys. A model that fills an unread rung with a plausible cause produces something indistinguishable from a finding -- the same silent-degradation shape as OBS-006, OBS-043 and OBS-044, arriving in the report layer."
     }
-  ]
+  ],
+  "refusal_marker": "undetermined",
+  "refusal_note": "GRACE's C slot requires a named refusal path. The marker differs per prompt because the refusals differ in kind: a report that cannot determine a cause returns `undetermined`, while a correlation with nothing to correlate returns `found: false`. Enforced by tests/test_prompts.py, which reads this field rather than assuming one vocabulary fits both."
 }

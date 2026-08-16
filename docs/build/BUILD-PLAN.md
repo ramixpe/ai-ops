@@ -779,7 +779,7 @@ Observations cite evidence keys. Interpretations cite observations. The recommen
 
 ---
 
-## T-028 · The `correlate` prompt `[STATUS: TODO]`
+## T-028 · The `correlate` prompt `[STATUS: DONE]`
 
 **Input:** a finding plus the log window filtered to the subject.
 **Output:** a timeline linking the finding to log events, or an explicit "no correlating events in window".
