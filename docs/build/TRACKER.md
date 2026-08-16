@@ -26,7 +26,7 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 | Baseline test count | **550 passed, 4 skipped, 0 failed** (554 total; the 4 are `live_lab`, skipped by default) |
 | Run started | 2026-08-15 |
 | Last updated | 2026-08-16 |
-| Current task | T-033 |
+| Current task | T-034 |
 | Halted? | no — Q-013 and Q-017 resolved by the operator |
 | Operator decisions pending capture | **Lab must stay healthy until T-011** — `healthy` then `broken` captured in one coordinated window (OBS-019) |
 
@@ -93,7 +93,7 @@ T-035 is optional and does not gate the definition of done.
 | T-030 | `investigation.py` runner | DONE | opus-5 | 8054be1 | OBS-070 | No gate: descent byte-identical with and without a model. Window read from the *cause* device. Coverage shortfall downgrades. 22 tests, 1319 passed |
 | T-031 | CLI wiring | DONE | opus-5 | a85ead6 | OBS-072, OBS-073 | Exit 1 = network problem, 2 = answer problem, decided in the open. `--from-fixtures` needed a password until OBS-072. 19 tests, 1338 passed |
 | T-032 | End-to-end offline test | DONE | opus-5 | 13b58ae | OBS-074 | Both labels, opposite answers, grounded reports. Mock model reads its own prompt. netmiko replaced with a module that raises. 10 tests, 1348 passed |
-| T-033 | Live lab run | BLOCKED | opus-5 | | OBS-075 | Q-018: PE3 has 0 IS-IS adjacencies. B-412 recurred a third time in the harness written to prevent it; reopened as blocking |
+| T-033 | Live lab run | DONE | opus-5 | _next commit_ | OBS-076, OBS-077 | **Q-006 resolved: agent and engineer reached the same rung.** 114.2s, exit 1, report grounded 5/5. Run found 2 defects the suite could not (B-424, `_log_window`) |
 | T-034 | Documentation update | TODO | sonnet-5 | | | |
 | T-035 | Report relay — outbound only | TODO | sonnet-5 | | | **optional fast-follow**; residency decision first |
 

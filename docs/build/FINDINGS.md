@@ -1813,6 +1813,81 @@ transport path disappearing rather than a direct session teardown.
 
 ---
 
+## OBS-077 · T-033 · **Q-006 answered: the agent and the engineer reached the same rung** — and the run found two defects
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5 (descent, deterministic) · MiniMax (report, correlation)
+- **What happened:** Live run against the real fabric, `RR1 → 10.255.0.13`, fault applied by the operator, ground truth sealed. The hand diagnosis was recorded and committed at **14:11:50 UTC** (OBS-076, commit `093d665`); the agent ran at **14:12:02 UTC**.
+
+  **They agree exactly.**
+
+  | | Hand diagnosis | Agent |
+  |---|---|---|
+  | Rung | `igp_adjacency` | `igp_adjacency` |
+  | Device | PE3 | PE3 |
+  | Finding | `igp_isolated` | `igp_isolated` |
+  | Rung 5 | healthy, subinterface excluded | `HEALTHY — 3 of 3 members healthy` |
+  | Broken above | rungs 1 and 3 named | `bgp_session`, `transport`, `route_to_peer` |
+
+  The agent's causal chain carries `transport` explicitly, which the hand diagnosis implied but did not enumerate; otherwise the two are the same argument.
+
+  **Q-006 is answered yes**, and on the case worth answering it with. The symptom from RR1 — BGP Idle, no route to the loopback — is *indistinguishable* from the captured `broken` label, where the cause was `interface` on PE2. Anything pattern-matching the symptom lands on the wrong rung. Both the engineer and the descent walked past a **healthy** interface rung to report the broken IGP rung above it, which is the corrected Q-017 semantics doing the work it was rewritten for, on real state, for the first time.
+
+  **Run metrics**
+
+  | | |
+  |---|---|
+  | Wall clock | **114.2 s** (healthy baseline 103 s, **+11%**) |
+  | Exit code | **1** — a fault, and the answer is trustworthy |
+  | Report | emitted, **grounded: 7 observations, 14 citations, 5/5 rungs cited** |
+  | Correlation | emitted, `found: true`, timeline of 9 events |
+  | Coverage | `device_buffer`, 200 of **684** records, `complete: false` — and the model said so unprompted in its summary |
+  | Repairs | none — no markdown fence, valid JSON both calls |
+  | Prompt size | 6,673 chars report + 13,218 correlate ≈ **5k tokens** per investigation |
+
+  Every report citation resolved. The model's recommendation is correctly scoped and flagged: *"Verify PE3's IS-IS configuration … before touching the interfaces"* — it declined to blame the layer that was healthy.
+- **Evidence:** `docs/build/FINDINGS.md` OBS-076 committed at `093d665` before the run. Run output and payload captured.
+- **What I did:** **The live run found two defects. Both were invisible to 1,348 passing tests.**
+
+  **Defect 1 — `_log_window` never worked, and no test could have found it.** The first run exited **2** with the correlation withheld. Two bugs in one function:
+
+  * `count=200` passed as an `int`, where `render_command` requires text — canonicalize-by-reconstruction rejects it at the boundary rather than coercing. Every log read on every device failed with `count: expected a string, got int`.
+  * the output read from `data["outputs"]`, where `run_template` writes `data["commands"]`.
+
+  Neither raised. A structured error became an empty window with no coverage, which `check_absence_coverage` then correctly refused to let anything claim absence over. **The only symptom was a missing timeline.**
+
+  `_log_window` was written in T-030 and **every test in the suite passes `window=`**, so the real function was never executed. §0.13's tests face, exactly: *the tests confirmed the stub.* Fixed, and now covered by two tests that call it for real — one asserting a successful read produces coverage, one asserting a failed read produces a window with **no** coverage rather than an empty one, since flattening those two is what would turn a broken log read into a confident "no correlating events".
+
+  **Worth noting what went right here:** exit 2 was correct. The scheme refused to call the run trustworthy while part of the pipeline had silently failed, and that is the behaviour I argued for at T-031 — a defect surfacing as a distinct exit code instead of hiding in the noise of routine faults. The tool caught its own bug.
+
+  **Defect 2 — the correlation path has no citation check at all, and it fabricated a timestamp.** The emitted timeline contains:
+
+  ```
+  Aug 14 04:28.238 UTC   ROUTING-ISIS-5-ADJCHANGE   Adjacency to P2 ... Down
+  ```
+
+  The real record is `Aug 16 14:04:28.238 UTC`. The model dropped characters and produced a **malformed date, two days earlier**, in the one field `correlate.v3` constraint 2 says to quote exactly. Verified against the window: **1 of 9 timeline timestamps does not exist in the evidence.**
+
+  **Grounding passed it.** `ground_correlation` runs `check_absence_coverage` only, which returns a *vacuous pass* whenever `found` is not `False`. So a correlation asserting presence is emitted with **zero verification** — `correlation grounding: vacuous pass — 0 observations, 0 citations` is printed in the payload, and I did not read it as the warning it was until the timestamp caught my eye.
+
+  This is the precise mirror of the gap T-029a closed, and I missed it *because* I closed that one:
+
+  | | presence | absence |
+  |---|---|---|
+  | **report** | checked — every `evidence_key` must be one the descent read | n/a |
+  | **correlation** | **unchecked** | checked (T-029a) |
+
+  T-029a asked "what does grounding not check for correlations?", found absence, fixed it, and the symmetry with the report's presence check made the other half *feel* covered. It was not. The `vacuous` flag was even reporting it truthfully in every payload.
+
+  **Not fixed** — §0.3: a defect outside the current task's scope is logged, not fixed. Filed as **B-424** and recommended as **T-029b before T-034**, mirroring how B-420 became T-029a. The fix is small and already specified by the existing code: every timeline entry's `at` must be a timestamp present in the shaped window and its `mnemonic` must match the record at that timestamp — `check_grounding`'s evidence-key rule, applied to the other output.
+
+  **Token accounting is not instrumented.** `complete_prompt` returns text only; neither the Anthropic nor the OpenAI/MiniMax path surfaces `usage`. T-033 asks for token usage and I can only report the proxy above (~5k tokens of prompt per investigation, response excluded). Filed as **B-425** rather than reported as a number I did not measure.
+- **Needs human review:** **yes** — defect 2 is a grounding hole that emitted a fabricated timestamp to a user
+- **Blocks:** none for T-034, but B-424 should land first.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**
@@ -1844,12 +1919,12 @@ Anything logged with `Needs human review: yes` is mirrored here so the review ha
 | Q-003 | T-005 | Does Alertmanager have a webhook receiver, and can it replace n8n as the Stage 2 trigger? | No — Stage 2 | **Resolved (OBS-016)** — yes to both. Gap is that no alert rule carries a device label; that is rule authoring, not infrastructure. |
 | Q-004 | T-006 | What is the subject naming scheme for an L3VPN service object? | No — flow not in MVP-0 | **Accepted (OBS-035)** — `<pe>:<vrf>` recommended; `<vrf>:<rd>` eliminated because RD is reused across PEs. Confirm at T-022. |
 | Q-005 | T-020 | What error-counter threshold should `interface_state` treat as broken? **And what does it do when the counters are absent?** A line-down interface omits them entirely (OBS-044) — the answer must be `unevaluated`, never "0 errors, healthy". | No — but the absent-counter half is a correctness trap | **Both halves answered.** First: a rate, not a total (OBS-052). Second (OBS-051) — `unevaluated`, now a stated rule in `checks.py`. Threshold value still open for T-020. |
-| Q-006 | T-025 | Does the descent's stopping rung match what a network engineer would conclude by hand from the same fixtures? | **Yes — this validates the architecture** | Open |
+| Q-006 | T-025 | Does the descent's stopping rung match what a network engineer would conclude by hand from the same fixtures? | **Yes — this validates the architecture** | **Resolved (OBS-076, OBS-077)** — hand diagnosis recorded and committed at 14:11:50 UTC, agent ran at 14:12:02. Identical: `igp_adjacency` on PE3, `igp_isolated`, interface rung healthy. Answered on a case whose *symptom* is indistinguishable from the captured `broken` label, where the cause was a different rung. |
 | Q-007 | T-035 | Telegram or Mattermost? Hosted means device names, IPs and RCA text leave the estate; self-hosted keeps them in. Decide before implementing — only one provider gets built. | Yes for T-035 | Open |
 | Q-008 | T-035 | Which host runs `nettools` in the target deployment, and does it have outbound egress to the chosen channel? | Yes for T-035 | Open |
 | Q-010 | T-003 | The MiniMax provider uses the OpenAI **Responses** API, not Chat Completions, so `BUILD-PLAN.md` T-003 step 4 (`reasoning_split`, `max_completion_tokens`) does not apply. Both behaviours it targeted are achieved structurally on that route. Confirm the route choice before the MVP-1 gate is built on it. | No for MVP-0 · **yes for the MVP-1 gate** | Open — decided and evidenced (OBS-010) |
 | Q-012 | T-005 | **The lab was rebuilt ~2 days ago and is now healthy** — all 16 BGP sessions Established, PE2/PE4 back to 2 IS-IS adjacencies. T-011 says to capture "against the current broken state", which no longer exists. Re-break the lab, capture a new consistent healthy label, or build the broken case synthetically in-test? | **Yes for T-011** (T-025/M3 unaffected — fixtures still hold the broken state) | **Closed (OBS-049)** — `broken` captured 2026-08-16 with both uplinks. Originally (OBS-019) — options 1+2: keep `t0`/`t1` frozen, add complete `healthy` and `broken` labels; operator runs the break, capture coordinated at T-011 |
-| **Q-018** | **T-033** | **PE3 has 0 IS-IS adjacencies as of 2026-08-16** (every other device is at its expected 2, and PE3 had 2 in the pre-proposal baseline). Intended — the T-033 fault applied and in place — or an unrestored fault from the OBS-075 harness incident? I did not read further to distinguish them, because if it is the former those reads are the diagnosis the Q-006 protocol keeps closed. | **Yes — blocks T-033** | Open (OBS-075) |
+| **Q-018** | **T-033** | **PE3 has 0 IS-IS adjacencies as of 2026-08-16** (every other device is at its expected 2, and PE3 had 2 in the pre-proposal baseline). Intended — the T-033 fault applied and in place — or an unrestored fault from the OBS-075 harness incident? I did not read further to distinguish them, because if it is the former those reads are the diagnosis the Q-006 protocol keeps closed. | **Yes — blocks T-033** | **Resolved** — intended; the T-033 fault, confirmed live by the operator. |
 | Q-009 | T-002 | Should `MINIMAX_API_KEY` **and the lab device credentials** be rotated after this build? Both were pasted into the transcript (OBS-008, OBS-037). It was pasted into the session transcript, which no control in this repository can revoke. | No — nothing is blocked on it | Open — recommended (OBS-008) |
 
 ---

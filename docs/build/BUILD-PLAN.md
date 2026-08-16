@@ -994,11 +994,17 @@ Full pipeline against fixtures with the model mocked. Assert: descent runs, repo
 
 ---
 
-## T-033 · Live lab run `[STATUS: TODO]`
+## T-033 · Live lab run `[STATUS: DONE]`
 
 Add to `tests/test_live_lab.py` under the existing `live_lab` marker, self-skipping unless `NETTOOLS_LIVE_LAB=1`.
 
 Then run manually against the real fabric with MiniMax configured, and record in observations: the rung reached, wall-clock time, token usage, whether the report's citations all resolved, and — most importantly — **whether a network engineer would agree with the conclusion.**
+
+**Protocol for the last of those, set by the operator and binding on any repeat.** Do not show the descent output and ask whether it looks right — that tests agreement with a stated conclusion, which people give too easily. The engineer diagnoses the same subject independently and by hand; that diagnosis is **recorded verbatim and committed before the agent runs**, so the ordering is a fact in git history rather than a claim. Then compare. If the rungs match, that is evidence. If they differ, which one is wrong and why is worth more than a nod.
+
+**Result: they matched** — `igp_adjacency` on PE3, `igp_isolated`, interface rung healthy, on a fault whose *symptom* from RR1 is indistinguishable from the captured `broken` label where the cause was a different rung. Q-006 resolved. Hand diagnosis OBS-076 (`093d665`, 14:11:50 UTC); agent run OBS-077 (14:12:02 UTC). 114.2 s against a 103 s healthy baseline; exit 1; report grounded with 5/5 rungs cited.
+
+**The run found two defects that 1,348 passing tests could not.** `_log_window` had never worked — `count` passed as an `int` where the template layer requires text, and output read from the wrong key — and no test executed it, because every test injects `window=`. And the correlation path has **no citation check at all**, which let a fabricated timestamp through (**B-424**, recommended as T-029b before T-034). Both are §0.13's tests face: the suite agreed with the premise it was written from.
 
 ---
 

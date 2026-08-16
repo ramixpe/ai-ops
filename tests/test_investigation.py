@@ -440,3 +440,58 @@ def test_a_healthy_descent_calls_the_model_once():
 
     assert len(analyst.prompts) == 1
     assert not any("LOG WINDOW" in p for p in analyst.prompts)
+
+
+# --------------------------------------------------------------------------- #
+# `_log_window` itself -- the function every other test in this file stubs out
+# --------------------------------------------------------------------------- #
+
+
+def test_the_real_log_window_reads_and_shapes_a_window():
+    """The function T-033 found broken, tested against a real read.
+
+    Every other test here passes `window=`, so `_log_window` was never executed
+    by the suite -- the tests confirmed the stub, not the code. It shipped with
+    two defects that made every log read fail silently: `count` passed as an
+    `int` where `render_command` requires text, and the output read from
+    `data["outputs"]` where `run_template` writes `data["commands"]`.
+
+    Neither raised. `run_template` returns a structured error and `_log_window`
+    turned it into an empty window with no coverage -- which then correctly
+    withheld the correlation, so the *only* symptom was a missing timeline.
+    §0.13's tests face: a stub cannot fail the way the real thing does.
+    """
+
+    shaped = investigation._log_window("PE2", sender=fixture_sender(label="broken"))
+
+    assert shaped.total_in == 200, "the read must actually return the window"
+    assert len(shaped.records) == 28
+    assert shaped.coverage is not None, "a successful read must carry coverage"
+    assert shaped.coverage.records_available == 593
+    assert shaped.coverage.device == "PE2"
+
+
+def test_a_failed_log_read_is_a_window_with_no_coverage_not_an_empty_one():
+    """The distinction that makes the failure above recoverable.
+
+    A read that did not happen must not look like a device with nothing in its
+    buffer. No coverage record means `check_absence_coverage` refuses to let
+    anything claim absence over it -- which is exactly what happened live, and
+    is why a broken log read surfaced as a withheld correlation and exit 2
+    rather than as a confident "no correlating events".
+    """
+
+    def broken_sender(device, command):
+        raise RuntimeError("device unreachable")
+
+    shaped = investigation._log_window("PE2", sender=broken_sender)
+
+    assert shaped.coverage is None
+    assert shaped.is_empty
+
+    from agent_nettools.grounding import ground_correlation
+
+    refusal = {"correlation": {"found": False, "summary": "no correlating events"}}
+    verdict = ground_correlation(refusal, shaped.coverage)
+    assert not verdict.ok
+    assert verdict.failures[0].kind == "unbacked_absence_claim"

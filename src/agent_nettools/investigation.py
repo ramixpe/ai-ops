@@ -329,9 +329,18 @@ def _log_window(device: str, *, sender=None, count: int = 200) -> ShapedWindow:
     be flattened here into "we got nothing back".
     """
 
-    result = run_template(device, "logging", sender=sender, count=count)
-    outputs = (result.get("data") or {}).get("outputs") or {}
-    raw = next(iter(outputs.values()), "") if isinstance(outputs, dict) else ""
+    # `count` must be a *string*: every template parameter is parsed from text by
+    # `render_command` (canonicalize by reconstruction), so an int is rejected at
+    # the boundary rather than coerced. Passing 200 instead of "200" made every
+    # log read fail with `count: expected a string, got int` -- OBS-077.
+    result = run_template(device, "logging", sender=sender, count=str(count))
+
+    # `commands`, not `outputs`. `run_template` stores output under the same key
+    # `run_intent` uses, keyed by the rendered command, precisely so a generic
+    # consumer does not have to know which produced it. This function knew the
+    # wrong one and silently found nothing.
+    commands = (result.get("data") or {}).get("commands") or {}
+    raw = next(iter(commands.values()), "") if isinstance(commands, dict) else ""
 
     if result.get("status") != "success" or not raw:
         return ShapedWindow(total_in=0, coverage=None)
