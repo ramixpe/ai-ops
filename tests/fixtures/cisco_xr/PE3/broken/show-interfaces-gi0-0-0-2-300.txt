@@ -1,0 +1,21 @@
+
+Sun Aug 16 07:48:27.595 UTC
+GigabitEthernet0/0/0/2.300 is up, line protocol is down 
+  Interface state transitions: 1
+  Hardware is VLAN sub-interface(s), address is aac1.ab51.80d4
+  Description: EVPN-ELAN-BD300
+  Internet address is Unknown
+  MTU 1514 bytes, BW 1000000 Kbit (Max: 1000000 Kbit)
+     reliability 255/255, txload 0/255, rxload 0/255
+  Encapsulation 802.1Q Virtual LAN,  loopback not set,
+  Last link flapped 2d14h
+  Last input never, output never
+  Last clearing of "show interface" counters never
+  5 minute input rate 0 bits/sec, 0 packets/sec
+  5 minute output rate 0 bits/sec, 0 packets/sec
+     0 packets input, 0 bytes, 0 total input drops
+     0 drops for unrecognized upper-level protocol
+     Received 0 broadcast packets, 0 multicast packets
+     0 packets output, 0 bytes, 0 total output drops
+     Output 0 broadcast packets, 0 multicast packets
+

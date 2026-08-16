@@ -1,0 +1,31 @@
+
+Sun Aug 16 07:48:27.225 UTC
+GigabitEthernet0/0/0/0 is up, line protocol is up 
+  Interface state transitions: 1
+  Hardware is GigabitEthernet, address is aac1.ab9d.0dc3 (bia aac1.ab9d.0dc3)
+  Description: TO-P2
+  Internet address is 10.0.1.8/31
+  MTU 1514 bytes, BW 1000000 Kbit (Max: 1000000 Kbit)
+     reliability 255/255, txload 0/255, rxload 0/255
+  Encapsulation ARPA,
+  Full-duplex, 1000Mb/s, unknown, link type is force-up
+  output flow control is off, input flow control is off
+  Carrier delay (up) is 10 msec
+  loopback not set,
+  Last link flapped 2d14h
+  ARP type ARPA, ARP timeout 04:00:00
+  Last input 00:00:01, output 00:00:01
+  Last clearing of "show interface" counters never
+  5 minute input rate 0 bits/sec, 0 packets/sec
+  5 minute output rate 0 bits/sec, 0 packets/sec
+     866622438 packets input, 447137160284 bytes, 0 total input drops
+     0 drops for unrecognized upper-level protocol
+     Received 0 broadcast packets, 86600 multicast packets
+              0 runts, 0 giants, 0 throttles, 0 parity
+     0 input errors, 0 CRC, 0 frame, 0 overrun, 0 ignored, 0 abort
+     183701 packets output, 56898762 bytes, 0 total output drops
+     Output 2 broadcast packets, 86647 multicast packets
+     0 output errors, 0 underruns, 0 applique, 0 resets
+     0 output buffer failures, 0 output buffers swapped out
+     1 carrier transitions
+

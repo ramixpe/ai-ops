@@ -1,0 +1,6 @@
+
+Sun Aug 16 07:46:43.273 UTC
+Type escape sequence to abort.
+Sending 5, 100-byte ICMP Echos to 10.255.0.31 timeout is 2 seconds:
+.....
+Success rate is 0 percent (0/5)
