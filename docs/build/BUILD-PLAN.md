@@ -888,7 +888,7 @@ Read the **buffer** level, not the trap level. `show logging` returns the buffer
 
 ---
 
-## T-030 · `investigation.py` — the MVP-0 runner `[STATUS: TODO]`
+## T-030 · `investigation.py` — the MVP-0 runner `[STATUS: DONE]`
 
 ```python
 def investigate(device: str, subject: str, *, flow: str, collector=None) -> InvestigationResult
@@ -899,6 +899,17 @@ Order: resolve scope → run descent → correlate (model) → write report (mod
 **No gate and no narrowing pass in MVP-0.** The descent is deterministic and terminal. The gate is MVP-1.
 
 `agent_loop.py` is untouched and remains the general-purpose bounded loop for questions that do not map to a flow.
+
+**Decisions taken during implementation.**
+
+1. **`report` is `None` whenever grounding failed** — not populated with a flag beside it. "The report is not emitted" has to be structural, or a caller writing `result.report or "..."` prints rejected prose. Third application of OBS-061's containment rule.
+2. **The log window is read from the device the *cause* is on**, not the device the investigation started from. `RR1 → 10.255.0.12` finds its cause on PE2, and PE2's buffer holds the interface and IS-IS events. Reading RR1's logs would correlate a PE2 event against a device that never saw it and return "no correlating events" with perfect confidence.
+3. **`absence_claim_exceeds_coverage` downgrades; it does not discard** (T-029a). The result is kept and labelled `coverage_limited`. Discarding loses a usable answer; emitting it as a negative overstates it. Every other grounding failure withholds.
+4. **A markdown fence is stripped and the repair is recorded. Nothing else is repaired.** Stripping a fence cannot change what the JSON says; anything that reaches into the content is a regex second-guessing the model. Recording it makes a model that keeps ignoring an explicit instruction visible as a prompt problem.
+5. **No analyst is a mode, not a degraded run.** The descent is a complete result — it is the half with no model in it — and both model outputs report `not_attempted` rather than being absent.
+6. **`inventory_resolver` raises on an unknown subject** rather than falling back to the local device, matching `_resolve_devices`. A wrong-device read looks exactly like a healthy one.
+
+**Tests:** 22, against both labels with a scripted analyst — no model, no network. Three carry the weight: `test_the_model_cannot_influence_the_diagnosis` (the descent is byte-identical with and without an analyst, which is the claim the whole layer rests on and which nothing else would catch), `test_the_log_window_comes_from_the_cause_device_not_the_local_one`, and `test_the_runner_grounds_through_ground_report` — asserted by name, bluntly, because a future edit swapping it for `check_grounding` would leave every behavioural test passing. §0.13.
 
 ---
 

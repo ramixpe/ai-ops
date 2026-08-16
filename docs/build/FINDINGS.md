@@ -1577,6 +1577,37 @@ Copy this block for each new entry.
 
 ---
 
+## OBS-070 · T-030 · The runner — and the wiring mistake that would have looked like a clean result
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** `investigation.py`, the MVP-0 runner: resolve scope → descend → correlate → report → ground → emit. 22 tests against both labels with a scripted analyst — no model, no network. The thing under test is the *wiring*, and a real model would make every assertion probabilistic while testing none of them better.
+
+  **The decision that mattered most was where to read the log window from.** The obvious wiring reads it from `device` — the device the investigation was launched against. That is wrong, and wrong in the worst way: `RR1 → 10.255.0.12` finds its cause on **PE2**, and PE2's buffer is where the interface and IS-IS events are. Reading RR1's logs would correlate a PE2 interface event against a device that never saw it and return **"no correlating events" with perfect confidence** — a clean, plausible, wrong answer, and one that would have passed every test I would naturally have written.
+
+  It is the same shape as Q-013's wrong-device reading, one layer up: the descent already learned that a rung must be evaluated on the device the *subject* lives on, and correlation inherits the same requirement from the *cause*. Pinned by a test that captures which device the window callable is asked for.
+- **Evidence:** `src/agent_nettools/investigation.py`; `tests/test_investigation.py`, 22 tests. **1319 passed, lint clean.**
+- **What I did:** Five decisions beyond the spec, and one test I would not have written a week ago.
+
+  **1. `report` is `None` whenever grounding failed** — not populated with a flag beside it. "A failed grounding check means the report is not emitted" is worth nothing if a caller writing `result.report or "..."` prints the rejected prose anyway. Third application of OBS-061: make it structurally impossible rather than remembered. `withheld_because()` returns grounding failures, which carry loci and never claims.
+
+  **2. A coverage shortfall downgrades, it does not discard.** `absence_claim_exceeds_coverage` means a real answer at the wrong strength — "no correlating events" over a buffer that returned 200 of 593. Discarding loses a usable result; emitting it as a negative overstates it. It is kept and labelled `coverage_limited`. Every *other* grounding failure withholds, and the scoping is tested in both directions so the downgrade cannot quietly become "accept everything".
+
+  **3. A markdown fence is stripped; nothing else is.** The line is that stripping a fence cannot change what the JSON says, whereas anything reaching into the content is a regex second-guessing the model. Trailing prose after the JSON is withheld, not salvaged. The repair is *recorded* rather than silently applied, because a model that keeps ignoring "no markdown fences" is a prompt problem someone should see.
+
+  **4. No analyst is a mode, not a degraded run.** A descent is a complete result — it is the half with no model in it — and both model outputs report `not_attempted` rather than being absent.
+
+  **5. `inventory_resolver` raises on an unknown subject** rather than falling back to the local device, matching `_resolve_devices`'s refusal for the same reason: a wrong-device read looks exactly like a healthy one.
+
+  **The test I would not have written a week ago** is `test_the_model_cannot_influence_the_diagnosis`: run the same investigation with and without an analyst and assert the descents are identical — finding, rung path, evidence keys, every outcome's reason. "There is no gate in MVP-0" is the claim the entire architecture rests on, and until now it was a property of how the code happened to be arranged. **Nothing else in the suite would catch a model call leaking into evidence collection or rung selection**, because such a leak would still produce a plausible descent. §0.13: the behavioural tests all agree with the premise, so the premise needs its own test.
+
+  For the same reason `test_the_runner_grounds_through_ground_report` asserts the call *by name*. That is blunt and I would normally avoid it — but swapping `ground_report` for `check_grounding` would leave every behavioural test in this file passing while turning the chain requirement off, which is exactly the failure §0.13 names.
+- **Needs human review:** no
+- **Blocks:** none — T-031 (CLI wiring) next.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**
