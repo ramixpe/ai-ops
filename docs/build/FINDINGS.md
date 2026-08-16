@@ -2729,6 +2729,56 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-099 · B-411 · **HALT** — the item describes a mechanism netmiko does not have
+
+- **Kind:** assumption-wrong
+- **Escalation:** **HALT** (item skipped, session continues per the operator's standing answer)
+- **Model:** opus-5
+- **What happened:** B-411 says *"`_netmiko_send_commands` returns whatever arrived when a per-command `read_timeout` expires, with no error recorded"*, and proposes fixing it in the transport path. **Measured, that is not what happens**, and both layers the item calls blind are not.
+
+  **netmiko 4.7's `read_timeout` is an absolute wall-clock budget that raises.** From `BaseConnection.send_command`:
+
+  ```
+  while time.time() - start_time < read_timeout:
+      ...
+  else:  # nobreak
+      raise ReadTimeout(msg)
+  ```
+
+  Not a quiet-period timeout, and expiry does not return partial output.
+
+  **Measured with a fake netmiko whose `send_command` raises:**
+
+  ```
+  outputs: {}
+  errors : ["traceroute 10.0.0.1: Pattern not detected '[#\\$]'"]
+  ```
+
+  Already a structured error, already no output. The transport path the item targets is correct.
+
+  **And the parse layer catches the residual case too.** Feeding a truncated capture — the 8-byte shape the item measured — to both active-probe parsers:
+
+  ```
+  ping        -> parse_status = 'failed'
+  traceroute  -> parse_status = 'failed'
+  ```
+
+  So a prematurely-returned command reaches `require_parsed`, fails, and becomes **`unevaluated`** — which is the correct verdict and the one the whole `unevaluated` discipline exists to produce.
+- **Evidence:** `netmiko 4.7.0` source read directly; both behaviours reproduced offline with a fake transport and the real parsers.
+- **What I did:** **Halted the item and implemented nothing**, per the standing instruction. Writing a transport-layer truncation guard would have been a fix for a defect that is not there, over code that already handles the case correctly — and it would have looked like progress.
+
+  **The observation behind B-411 was real; the diagnosis was not.** An 8-byte `traceroute` fixture file with a clean success genuinely existed (OBS-043). Given the above, the mechanism cannot have been a read timeout. The likely one is a **premature prompt match** — netmiko returning normally because it saw the prompt pattern in partial output, which is fast rather than slow and so invisible to any timeout-based check.
+
+  **Where that still bites is capture, not investigation.** `nettools capture` gates on `capture["errors"]` and **not** on parse status, so a prematurely-returned command writes a truncated fixture and exits 0. Investigation is safe — the parser fails and the rung goes `unevaluated` — but a *fixture corpus* can silently acquire a truncated file, and every test built on it inherits the truncation.
+
+  **Recommended re-scope**, for the operator rather than decided here: B-411 becomes *"`nettools capture` does not gate on parse status"*, in the capture path, with the check being `parse_status is PARSE_OK` before a fixture is written. That is a different file, a different failure, and a much smaller change than the one filed.
+
+  Worth noting what caught this: **the item was written from an observed symptom and a plausible mechanism, and the mechanism was never checked against the transport.** §0.14 — a symptom filed as a diagnosis. The measurement took four minutes and the fix it would have prompted would have been permanent.
+- **Needs human review:** **yes — HALT, and the item needs re-scoping before anyone works it**
+- **Blocks:** B-411 only. Session continues.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**

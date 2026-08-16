@@ -32,6 +32,7 @@ Purpose: a running record of **what was done, what was asked, and what was answe
 | Item | Outcome | Tests | Notes |
 |---|---|---|---|
 | — | session opened | 1391 | 64 backlog items; 13 defect-class targeted |
+| **B-411** | ⛔ **HALTED** | 1432 | Item's mechanism does not exist in netmiko 4.7. Nothing implemented. Needs re-scoping to the capture path — see OBS-099 |
 | **B-422** | ✅ closed | 1432 | `_note` → stderr. Verified end to end: `... --format json 2>/dev/null \| jq` now works |
 | **B-430** | ✅ closed | 1429 | The audit built at B-433 **fired on its first real use**, one commit later, in both directions — count moved 5→7 and `last_reset_reason` left `EXPLANATORY` |
 | **B-431** | ✅ closed | 1425 | Table covers `TenGigE`/`HundredGigE`/`Bundle-Ether` — every one silently excluded before. `UNKNOWN` surfaced, not defaulted. Empty set → `unevaluated` |
