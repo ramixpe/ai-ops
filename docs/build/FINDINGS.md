@@ -903,6 +903,25 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-047 · T-017 · Last parser accepted; the one uncovered shape fails loudly rather than silently
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5 (judgement) · sonnet-5 (implementation)
+- **What happened:** Accepted with no correction — **861 passed**, all 9 fixtures clean, and the first of the six specs to survive contact with the fixtures without a gap. The trap the spec was written to prevent held: **`completed` is `True` on all 9 fixtures even though not one of them ends at the traced target**, because the destination replies from `10.0.1.16`/`10.0.1.18` — its own interface addresses — rather than from its loopback. A `last_hop == target` implementation would have been wrong on 100% of the data while looking obviously right.
+
+  Sonnet flagged a real narrowing rather than hiding it: **a fully-timed-out hop (` 3  * * * `, no address at all) is not supported**, because no fixture contains one and the plan forbids writing parsers against invented output. It declined to build for an unobserved shape, which is the correct reading.
+- **Evidence:** `PE1` trace parses to `hops=2 completed=True`, records `[{hop:1, address:10.0.1.1, mpls_label:24010, rtt_msec:["1","1","1"]}, {hop:2, address:10.0.1.16, mpls_label:null, rtt_msec:["2",null,"2"], probes_lost:"1"}]`.
+- **What I did:** Accepted, after checking the property that makes the gap tolerable rather than taking it on trust. **Appending ` 3  * * * ` to a real fixture yields `unparsed_rows=1`, not a silent drop and not an `unaccounted_lines` entry.** So the shape is *visible* when it arrives: the round-trip test asserts `unparsed_rows == 0`, which means the first real capture containing a fully-timed-out hop fails loudly instead of quietly losing a hop from the path.
+
+  That is the right resolution of a genuine tension. Supporting the shape would mean guessing the device's exact formatting — forbidden, and the class of guess that produced this project's `intent`/`domain` confusion in the first place. Leaving it unsupported *and invisible* would be worse still. Unsupported and loud is the honest third option, and it is precisely what `unparsed_rows` was separated from `unaccounted_lines` to express: "the template knows what this should be and it did not fit."
+
+  **All six parsers are now complete**, and a cross-parser sweep confirms every one of the 148 template fixtures round-trips with `unaccounted_lines == []` and `unparsed_rows == 0`.
+- **Needs human review:** no
+- **Blocks:** none — unblocks T-018, the last task in Part 2.
+
+---
+
 <!--
 Copy this block for each new entry.
 

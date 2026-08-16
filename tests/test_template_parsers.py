@@ -1280,3 +1280,240 @@ def test_ping_unrecognised_line_surfaces_in_unaccounted_lines():
 
     assert status is tp.PARSE_OK
     assert parsed["meta"]["unaccounted_lines"] == ["Some New Vendor Field: 42"]
+
+
+# --------------------------------------------------------------------------- #
+# T-017: the traceroute parser
+# --------------------------------------------------------------------------- #
+
+_TRACEROUTE_FIXTURES = sorted(FIXTURE_DIR.glob("cisco_xr/*/healthy/traceroute-*.txt"))
+
+# Every key the T-017 spec's meta table requires, present in every case --
+# ``None`` where not applicable, never absent.
+_TRACEROUTE_META_KEYS = (
+    "target",
+    "hops",
+    "completed",
+    "max_hop_reached",
+)
+
+
+def test_all_nine_traceroute_fixtures_are_on_disk():
+    """A sanity check on the parametrization source below -- one traceroute
+    per device. If this ever fails, the round-trip test below would be
+    silently parametrized over a shrunk list rather than failing loudly on
+    its own."""
+
+    assert len(_TRACEROUTE_FIXTURES) == 9
+
+
+@pytest.mark.parametrize("fixture_path", _TRACEROUTE_FIXTURES, ids=lambda p: str(p.relative_to(FIXTURE_DIR)))
+def test_every_committed_traceroute_fixture_round_trips_clean(fixture_path: Path):
+    """Section 0.10, pinned against every real fixture on disk."""
+
+    raw = fixture_path.read_text()
+    parsed, status = tp.parse_template_output("cisco_xr", "traceroute", raw)
+    assert status is tp.PARSE_OK, f"{fixture_path}: {status}"
+    assert parsed["meta"]["unaccounted_lines"] == [], f"{fixture_path}: {parsed['meta']['unaccounted_lines']}"
+    assert parsed["meta"]["unparsed_rows"] == 0
+
+
+def test_pe1_traceroute_carries_an_mpls_label_and_a_lossy_final_hop():
+    """PE1 -> 10.255.0.31: two hops, the first carrying an MPLS label, the
+    second losing exactly one of its three probes -- the standard shape
+    every two-hop fixture in this fabric shares."""
+
+    raw = _load_fixture("cisco_xr", "PE1", "healthy", "traceroute-10-255-0-31.txt")
+    parsed, status = tp.parse_template_output("cisco_xr", "traceroute", raw)
+    assert status is tp.PARSE_OK
+
+    meta = parsed["meta"]
+    assert meta["target"] == "10.255.0.31"
+    assert meta["hops"] == "2"
+
+    records = parsed["records"]
+    assert len(records) == 2
+    assert records[0]["hop"] == "1"
+    assert records[0]["mpls_label"] == "24010"
+    assert records[1]["hop"] == "2"
+    assert records[1]["rtt_msec"] == ["2", None, "2"]
+    assert records[1]["probes_lost"] == "1"
+
+
+def test_completed_is_true_on_every_fixture_even_though_none_end_at_the_target():
+    """The trap this spec exists to prevent: defining ``completed`` as 'the
+    last hop's address equals the target' would call all nine of these
+    successful traces incomplete, because every trace in this fabric ends
+    at one of RR1's own interface addresses (10.0.1.16 / 10.0.1.18 / the
+    RR1-fixture's own 10.0.1.0), never at the target itself -- the
+    destination replies from whichever interface the probe arrived on, not
+    from its loopback. The correct definition -- the final hop returned at
+    least one non-'*' probe -- must be True on all nine real fixtures
+    despite that."""
+
+    known_non_target_last_hops = {"10.0.1.16", "10.0.1.18", "10.0.1.0"}
+
+    for fixture_path in _TRACEROUTE_FIXTURES:
+        raw = fixture_path.read_text()
+        parsed, status = tp.parse_template_output("cisco_xr", "traceroute", raw)
+        assert status is tp.PARSE_OK
+        assert parsed["meta"]["completed"] is True, fixture_path
+        last_hop_address = parsed["records"][-1]["address"]
+        assert last_hop_address in known_non_target_last_hops, (
+            f"{fixture_path}: last hop {last_hop_address} was not one of the addresses "
+            "this test documents as never being the target itself"
+        )
+        assert parsed["meta"]["target"] not in {r["address"] for r in parsed["records"]}
+
+
+def test_a_synthetic_all_lost_final_hop_gives_completed_false():
+    """No fixture shows a final hop with zero replies -- every one of the 9
+    has at least one successful probe at its last hop -- but '*' is a
+    legitimate device output token already proven by every one of those
+    real fixtures, and three of them in a row is not an invented format,
+    just the same proven token repeated. This is the case ``completed``
+    exists to catch."""
+
+    raw = (
+        "\n"
+        "Sat Aug 15 18:06:00.315 UTC\n"
+        "\n"
+        "Type escape sequence to abort.\n"
+        "Tracing the route to 10.255.0.31\n"
+        "\n"
+        " 1  10.0.0.5 [MPLS: Label 24008 Exp 0] 2 msec  2 msec  2 msec \n"
+        " 2  10.0.1.18 * * * \n"
+    )
+
+    parsed, status = tp.parse_template_output("cisco_xr", "traceroute", raw)
+    assert status is tp.PARSE_OK
+    assert parsed["meta"]["unaccounted_lines"] == []
+    assert parsed["meta"]["unparsed_rows"] == 0
+
+    assert parsed["meta"]["completed"] is False
+    assert parsed["meta"]["hops"] == "2"
+    assert parsed["meta"]["max_hop_reached"] == "2"
+    assert parsed["records"][-1]["rtt_msec"] == [None, None, None]
+    assert parsed["records"][-1]["probes_lost"] == "3"
+
+
+@pytest.mark.parametrize("fixture_path", _TRACEROUTE_FIXTURES, ids=lambda p: str(p.relative_to(FIXTURE_DIR)))
+def test_every_traceroute_meta_key_is_present(fixture_path: Path):
+    """Every key in the T-017 meta table, present -- ``None`` rather than
+    absent."""
+
+    raw = fixture_path.read_text()
+    parsed, status = tp.parse_template_output("cisco_xr", "traceroute", raw)
+    assert status is tp.PARSE_OK
+    for key in _TRACEROUTE_META_KEYS:
+        assert key in parsed["meta"], f"{fixture_path}: missing {key}"
+
+
+def test_traceroute_volatile_fields_are_rtt_and_loss_not_address_or_completion():
+    """rtt_msec and probes_lost move on every capture of an unchanged path --
+    ordinary jitter and transient probe loss, not a signal. address, hops,
+    completed, and mpls_label are deliberately NOT volatile: a path
+    changing length, a hop's address changing, a trace ceasing to complete,
+    or a label changing are all real events worth diffing -- the same trap
+    bgp_neighbor's last_reset_reason avoids. Both directions are asserted --
+    the negative half is the point."""
+
+    volatile = tp.template_volatile_fields("cisco_xr", "traceroute")
+
+    assert "rtt_msec" in volatile
+    assert "probes_lost" in volatile
+
+    assert "address" not in volatile
+    assert "hops" not in volatile
+    assert "completed" not in volatile
+    assert "mpls_label" not in volatile
+
+
+def test_traceroute_record_key_is_hop_not_address():
+    """The hop number, not the address, is the stable identity across two
+    captures -- a hop's address can legitimately change when the path
+    moves, and that must show up as a difference, not vanish as a changed
+    identity."""
+
+    assert tp.template_record_key("cisco_xr", "traceroute") == "hop"
+
+
+def test_traceroute_garbage_input_raises_parse_error_and_reports_parse_failed():
+    """Something clearly not traceroute output must not be silently
+    accepted."""
+
+    garbage = "lorem ipsum\nnot a traceroute"
+
+    with pytest.raises(tp.ParseError):
+        tp.parse_xr_traceroute(garbage)
+
+    parsed, status = tp.parse_template_output("cisco_xr", "traceroute", garbage)
+    assert parsed is None
+    assert status is tp.PARSE_FAILED
+
+
+def test_traceroute_truncated_output_does_not_raise_and_still_accounts_cleanly():
+    """Truncated right after the header -- 'Type escape sequence to abort.'
+    and 'Tracing the route to ...', before any hop line arrives. Must not
+    raise: the device simply has not finished answering yet, exactly as
+    parse_xr_logging's and parse_xr_ping's header-only truncations are not
+    errors either."""
+
+    raw = _load_fixture("cisco_xr", "PE1", "healthy", "traceroute-10-255-0-31.txt")
+    lines = raw.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.strip() == "Type escape sequence to abort.")
+    truncated = "\n".join(lines[start : start + 2])
+
+    parsed, status = tp.parse_template_output("cisco_xr", "traceroute", truncated)
+
+    assert status is tp.PARSE_OK
+    assert parsed["meta"]["unaccounted_lines"] == []
+    assert parsed["meta"]["unparsed_rows"] == 0
+    assert parsed["records"] == []
+    assert parsed["meta"]["hops"] == "0"
+    assert parsed["meta"]["completed"] is False
+    assert parsed["meta"]["target"] == "10.255.0.31"
+    assert parsed["meta"]["max_hop_reached"] is None
+
+
+def test_traceroute_unrecognised_line_surfaces_in_unaccounted_lines():
+    """The 0.10 guardrail: a line the template cannot know about must be
+    surfaced, not silently swallowed. Proves the accounting is not
+    decorative."""
+
+    raw = _load_fixture("cisco_xr", "PE1", "healthy", "traceroute-10-255-0-31.txt")
+    injected = raw.replace(
+        "Tracing the route to 10.255.0.31",
+        "Tracing the route to 10.255.0.31\nSome New Vendor Field: 42",
+    )
+
+    parsed, status = tp.parse_template_output("cisco_xr", "traceroute", injected)
+
+    assert status is tp.PARSE_OK
+    assert parsed["meta"]["unaccounted_lines"] == ["Some New Vendor Field: 42"]
+
+
+def test_a_malformed_hop_line_increments_unparsed_rows_not_unaccounted_lines():
+    """Proves the two counters are actually distinct: a line whose outer
+    shape (a leading hop number followed by more content) the template
+    recognises as 'probably a hop line', but whose probe fields do not fit
+    the strict three-probe shape, is a *known* shape with malformed content
+    -- not an *unknown* line. It must therefore be consumed (never surface
+    in unaccounted_lines) while still incrementing unparsed_rows, and it
+    must not produce a record."""
+
+    raw = _load_fixture("cisco_xr", "PE1", "healthy", "traceroute-10-255-0-31.txt")
+    mangled = raw.replace(
+        " 2  10.0.1.16 2 msec  *  2 msec \n",
+        " 2  10.0.1.16 2 msec  garbled  2 msec \n",
+        1,
+    )
+    assert mangled != raw  # the replacement actually happened
+
+    parsed, status = tp.parse_template_output("cisco_xr", "traceroute", mangled)
+
+    assert status is tp.PARSE_OK
+    assert parsed["meta"]["unparsed_rows"] == 1
+    assert parsed["meta"]["unaccounted_lines"] == []
+    assert len(parsed["records"]) == 1
+    assert parsed["records"][0]["hop"] == "1"

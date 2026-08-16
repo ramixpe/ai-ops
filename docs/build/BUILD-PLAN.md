@@ -503,7 +503,7 @@ Implements LLD Phase 9. Nothing downstream is possible without this part.
 
 ---
 
-## T-012 to T-017 · The parsers `[STATUS: T-012…T-016 DONE; T-017 TODO]`
+## T-012 to T-017 · The parsers `[STATUS: T-012…T-017 ALL DONE]`
 
 One task each, in this order. **Do not start a parser before the previous one is `DONE` and its tests are green.**
 

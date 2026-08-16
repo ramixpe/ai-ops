@@ -87,6 +87,7 @@ __all__ = [
     "TEMPLATE_PARSERS",
     "TEMPLATE_RECORD_KEYS",
     "TEMPLATE_VOLATILE_FIELDS",
+    "TRACEROUTE_IGNORES",
     "XR_COMMON_IGNORES",
     "IgnoreRule",
     "ParseError",
@@ -99,6 +100,7 @@ __all__ = [
     "parse_xr_logging",
     "parse_xr_ping",
     "parse_xr_route",
+    "parse_xr_traceroute",
     "template_record_key",
     "template_volatile_fields",
 ]
@@ -1263,6 +1265,190 @@ def parse_xr_ping(output: str) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
+# cisco_xr: traceroute  (T-017)
+# --------------------------------------------------------------------------- #
+#
+# ``traceroute <address>`` answers one shape on this fabric, surveyed across
+# all 9 committed fixtures: a two-line header, then one hop line per hop --
+#
+#   Type escape sequence to abort.
+#   Tracing the route to 10.255.0.31
+#
+#    1  10.0.0.5 [MPLS: Label 24008 Exp 0] 2 msec  2 msec  2 msec
+#    2  10.0.1.18 2 msec  *  2 msec
+#
+# Three probes per hop, each either "<N> msec" or "*" (no reply); the
+# "[MPLS: Label <N> Exp <N>]" clause is optional per hop. Every one of the 9
+# fixtures has a ``*`` somewhere in its final hop -- partial loss is the
+# normal case on this fabric's MPLS core, not an anomaly.
+#
+# **``completed`` is deliberately NOT "the last hop's address equals the
+# target".** Every trace to 10.255.0.31 in these fixtures ends at 10.0.1.16
+# or 10.0.1.18 -- both are RR1's own interface addresses (verified against
+# RR1/healthy/show-interfaces-gi0-0-0-0.txt: "Internet address is
+# 10.0.1.16/31", and -gi0-0-0-1.txt: "10.0.1.18/31"), because the
+# destination replies from whichever interface the probe arrived on, not
+# from its loopback. The target address therefore never appears in a
+# completed trace on this fabric, and a "last_hop == target" definition
+# would call all nine successful traces incomplete -- wrong on 100% of the
+# fixtures despite looking correct. A parser reads one command's text and
+# has no inventory access -- it cannot know whether the destination was
+# reached, since that requires resolving which router owns an interface
+# address, and that resolution is ``descent.py``'s job, not a parser's. So
+# ``completed`` is defined as exactly what the text supports: the final hop
+# line returned at least one non-``*`` probe. This is NOT a claim that the
+# destination was reached -- only that the trace did not go completely dark
+# at its last hop. A consumer needing the stronger claim must resolve the
+# address against the inventory itself.
+#
+# ``records``' shape deviates from the LLD's ``{hop, address, rtt}`` in one
+# respect: ``rtt`` is generalised to ``rtt_msec``, and it is a **list** of
+# three entries (one per probe, ``None`` for a ``*``), not a single number --
+# collapsing three measured probes into one value would discard data the
+# device actually reported, the same "don't fold repeated structure into one
+# field" reasoning that keeps bgp_neighbor's address families as separate
+# records rather than one summary.
+#
+# No "device answered with an error" shape has been observed for this
+# command (no fixture shows one) -- exactly like ping, the line establishing
+# recognisable traceroute output is the "Tracing the route to ..." line, the
+# first traceroute-specific content the device prints. Output that never
+# gets that far raises ParseError; a capture cut off after it (no hop lines
+# yet) is not an error, exactly as parse_xr_logging's and parse_xr_ping's
+# header-only truncations are not errors either.
+
+_TRACING = re.compile(r"^Tracing the route to (?P<target>\S+)$")
+
+# The strict hop-line shape: a hop number, an address, an optional MPLS
+# clause, then exactly three probes (each "<N> msec" or "*"). ``\s+`` rather
+# than literal single/double spaces because the device pads the probe
+# separators with two spaces but the hop-number/address gap with one --
+# matching on whitespace class is simpler and no less specific than encoding
+# both counts literally.
+_HOP_LINE = re.compile(
+    r"^(?P<hop>\d+)\s+(?P<address>\S+)"
+    r"(?:\s+\[MPLS: Label (?P<mpls_label>\d+) Exp (?P<mpls_exp>\d+)\])?"
+    r"\s+(?P<probe1>\d+ msec|\*)\s+(?P<probe2>\d+ msec|\*)\s+(?P<probe3>\d+ msec|\*)$"
+)
+# A broader "this looks like a hop line" check, used only to classify a line
+# that fails _HOP_LINE as a malformed row (unparsed_rows) rather than letting
+# it fall through to unaccounted_lines -- the same "known shape, malformed
+# content" vs. "unknown shape" distinction parse_xr_logging draws for a
+# mnemonic that will not split.
+_HOP_LOOSE = re.compile(r"^\d+\s+\S")
+
+# Section 0.10 accounting. A single, anchored, specific rule -- the same
+# operator-hint line PING_IGNORES declares, since IOS-XR prints it before
+# both ping and traceroute.
+TRACEROUTE_IGNORES: tuple[IgnoreRule, ...] = (
+    IgnoreRule(
+        r"^Type escape sequence to abort\.$",
+        "operator hint IOS-XR prints before every ping/traceroute; not traceroute-specific data",
+    ),
+)
+
+_TRACEROUTE_META_KEYS: tuple[str, ...] = (
+    "target",
+    "hops",
+    "completed",
+    "max_hop_reached",
+)
+
+
+def _empty_traceroute_meta() -> dict[str, Any]:
+    """Every key present, ``None`` unless known -- never absent.
+
+    ``hops`` is the one exception: like ``route``'s ``path_count`` and
+    ``logging``'s ``lines``, it is always a count, ``"0"`` with no hop lines,
+    never ``None``. ``completed`` defaults ``False`` for the same reason: a
+    trace with zero hop lines returned nothing, let alone a reply.
+    """
+
+    meta: dict[str, Any] = dict.fromkeys(_TRACEROUTE_META_KEYS)
+    meta["hops"] = "0"
+    meta["completed"] = False
+    return meta
+
+
+def parse_xr_traceroute(output: str) -> dict[str, Any]:
+    """Parse ``traceroute <address>``.
+
+    One legitimate shape -- see the section comment above -- plus a
+    truncated variant (header only, zero hop lines) that is not an error:
+    the device is still mid-response, exactly as ``parse_xr_logging``'s and
+    ``parse_xr_ping``'s header-only truncations are not errors either.
+    Raises :class:`ParseError` only when no recognisable "Tracing the route
+    to ..." header line is found at all: genuinely unrecognised output.
+
+    A hop line that looks like a hop (starts with a hop number followed by
+    more content) but whose probe fields do not fit the strict three-probe
+    shape counts as one malformed row (``meta["unparsed_rows"]``) rather
+    than vanishing -- it is still *consumed*, so it does not also show up in
+    ``unaccounted_lines``.
+
+    ``completed`` is the final hop line having returned at least one
+    non-``*`` probe -- see the section comment above for why this is
+    deliberately *not* a claim that the destination itself was reached.
+    """
+
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+
+    meta = _empty_traceroute_meta()
+    consumed: list[str] = []
+    records: list[dict[str, Any]] = []
+    unparsed_rows = 0
+    found_header = False
+    max_hop = 0
+
+    for line in lines:
+        if match := _TRACING.match(line):
+            meta["target"] = match["target"]
+            found_header = True
+            consumed.append(line)
+            continue
+        if match := _HOP_LINE.match(line):
+            probes = [match["probe1"], match["probe2"], match["probe3"]]
+            rtt_msec = [None if probe == "*" else probe.split()[0] for probe in probes]
+            records.append(
+                {
+                    "hop": match["hop"],
+                    "address": match["address"],
+                    "mpls_label": match["mpls_label"],
+                    "mpls_exp": match["mpls_exp"],
+                    "rtt_msec": rtt_msec,
+                    "probes_sent": str(len(probes)),
+                    "probes_lost": str(sum(1 for probe in probes if probe == "*")),
+                }
+            )
+            max_hop = max(max_hop, int(match["hop"]))
+            consumed.append(line)
+            continue
+        if _HOP_LOOSE.match(line):
+            unparsed_rows += 1
+            consumed.append(line)
+            continue
+
+    if not found_header:
+        raise ParseError(
+            "output does not contain a recognisable 'Tracing the route to ...' header line"
+        )
+
+    meta["hops"] = str(len(records))
+    if records:
+        meta["max_hop_reached"] = str(max_hop)
+        meta["completed"] = any(probe is not None for probe in records[-1]["rtt_msec"])
+
+    return finalize(
+        raw=output,
+        meta=meta,
+        records=records,
+        consumed=consumed,
+        ignores=TRACEROUTE_IGNORES,
+        unparsed_rows=unparsed_rows,
+    )
+
+
+# --------------------------------------------------------------------------- #
 # The registry
 # --------------------------------------------------------------------------- #
 
@@ -1274,6 +1460,7 @@ TEMPLATE_PARSERS: dict[tuple[str, str], Callable[[str], dict[str, Any]]] = {
     ("cisco_xr", "interface"): parse_xr_interface,
     ("cisco_xr", "logging"): parse_xr_logging,
     ("cisco_xr", "ping"): parse_xr_ping,
+    ("cisco_xr", "traceroute"): parse_xr_traceroute,
 }
 
 # Fields that move on their own between two captures of an unchanged device --
@@ -1328,6 +1515,15 @@ TEMPLATE_VOLATILE_FIELDS: dict[tuple[str, str], frozenset[str]] = {
     # trap bgp_neighbor's last_reset_reason avoids above by staying out of
     # that template's volatile set.
     ("cisco_xr", "ping"): frozenset({"rtt_min", "rtt_avg", "rtt_max", "result_string"}),
+    # rtt_msec and probes_lost move on every capture of an unchanged path --
+    # ordinary jitter and transient probe loss, not a signal. address, hops,
+    # completed and mpls_label are deliberately NOT volatile: a path
+    # changing length, a hop's address changing (the path itself moved), a
+    # trace ceasing to complete, or a label changing are all real events
+    # worth diffing -- masking any of them out would hide exactly the change
+    # this template exists to surface, the same trap bgp_neighbor's
+    # last_reset_reason and ping's success_pct/loss_pct avoid above.
+    ("cisco_xr", "traceroute"): frozenset({"rtt_msec", "probes_lost"}),
 }
 
 # The field identifying a record across two captures. ``None`` means records
@@ -1354,6 +1550,14 @@ TEMPLATE_RECORD_KEYS: dict[tuple[str, str], str | None] = {
     # place -- not "no stable identity among several records" (logging's
     # case) but "there is nothing to identify".
     ("cisco_xr", "ping"): None,
+    # The hop *number* is the stable identity across two captures of an
+    # unchanged path -- the address at a given hop can legitimately change
+    # when the path moves, and that is a difference worth seeing rather than
+    # an identity change that hides it. Unlike route's next_hop, the address
+    # here is deliberately NOT the identity key: a routing entry's paths are
+    # identified by their next hop, but a traceroute's hops are identified
+    # by their position in the path.
+    ("cisco_xr", "traceroute"): "hop",
 }
 
 
