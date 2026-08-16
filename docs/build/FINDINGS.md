@@ -1247,6 +1247,23 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-059 · T-026 · `llm_analysis.py` carries a live instance of the clause the prompt library bans
+
+- **Kind:** defect
+- **Escalation:** NOTE
+- **Model:** opus-5
+- **What happened:** `tests/test_prompts.py` bans `"verify that every claim is supported by the provided data"` from any file in `prompts/`. **That exact sentence is live in `llm_analysis.py`'s `TROUBLESHOOTING_PROMPT` today**, as its `Evaluation:` section — it has been there since before this build started, and it is what the ban was written against.
+
+  It is harmless in the sense that nothing depends on it working: it asks the model to check its own output, the model complies or does not, and either way the answer is unverified. That is precisely the objection. It reads as a guarantee and provides none, and a reader comparing it against `prompts/README.md` would find the repository contradicting itself about whether self-evaluation is part of the assurance story.
+- **Evidence:** `src/agent_nettools/llm_analysis.py`, `TROUBLESHOOTING_PROMPT`, the `Evaluation:` block. The ban: `tests/test_prompts.py::test_no_prompt_asks_the_model_to_mark_its_own_work`.
+- **What I did:** **Logged, not fixed** — that prompt predates the library, is not covered by its rules, and is consumed by `analyze_evidence`/`analyze_fabric`, neither of which is in MVP-0's path. Changing it now would be an out-of-scope edit to a shipped prompt whose output is pinned by existing tests, for no benefit to the current task.
+
+  Filed as **B-413**, to be removed when that prompt is next touched — which under the library's own rules is a version bump, not an in-place edit. Recording it rather than leaving it because a banned pattern living in the codebase is exactly how a ban erodes: the next person to read `README.md` and then `llm_analysis.py` learns the rule is aspirational.
+- **Needs human review:** no
+- **Blocks:** none.
+
+---
+
 <!--
 Copy this block for each new entry.
 
