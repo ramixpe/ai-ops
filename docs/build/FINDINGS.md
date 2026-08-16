@@ -1769,6 +1769,50 @@ Copy this block for each new entry.
 
 ---
 
+## OBS-076 · T-033 · Q-006 — the independent hand diagnosis, recorded before the agent run
+
+- **Kind:** decision-made
+- **Escalation:** NOTE
+- **Model:** — (human operator)
+- **What happened:** Q-006 asks whether the descent's stopping rung matches what a network engineer would conclude by hand from the same fabric. The operator's protocol for answering it: the hand diagnosis is written **first**, recorded verbatim, and committed **before** the agent runs — so the ordering is a fact in git history rather than a claim in a document.
+
+  Recorded here without comment or evaluation, exactly as given. Subject: `RR1 10.255.0.13`. Fault live. Ground truth sealed.
+
+```
+---- BEGIN INDEPENDENT DIAGNOSIS (recorded 14:08 UTC, before agent run) ----
+Rung: igp_adjacency, on PE3.  Finding: igp_isolated.
+
+Evidence:
+  - RR1 BGP to 10.255.0.13 is Idle (rung 1 broken)
+  - RR1 `show route 10.255.0.13` returns only the static default 0.0.0.0/0 via
+    MgmtEth. No specific route to PE3's loopback (rung 3 broken)
+  - RR1's own IS-IS is healthy: P1 and P4 both Up for 2d20h. The fault is not on RR1
+  - PE3 has zero IS-IS adjacencies
+  - PE3 physical interfaces Gi0/0/0/0, Gi0/0/0/1, Gi0/0/0/2 are all up/up
+    (rung 5 healthy)
+
+Lowest broken rung is 4. IS-IS is down on PE3 while the physical layer is intact,
+so IS-IS was disabled at the protocol level on the core interfaces rather than the
+links failing.
+
+Gi0/0/0/2.300 is line-down but is the pre-existing subinterface condition, excluded
+by EACH_PHYSICAL_INTERFACE.
+
+Corroboration: session shows Up/Down 00:00:05 at 14:07:23, so it dropped ~170s after
+the change landed at 14:04:28 — the BGP hold timer expiring, consistent with the
+transport path disappearing rather than a direct session teardown.
+---- END INDEPENDENT DIAGNOSIS ----
+```
+
+- **Evidence:** This entry, committed before the agent run. The agent's result is OBS-077.
+- **What I did:** Recorded it and committed, before running anything.
+
+  One note on what the ordering does and does not buy, because it is worth being precise rather than ceremonial. **The descent itself cannot be contaminated by my having read the above**: `run_descent` is deterministic code with no model in it, so the rung it reaches is a function of the device output alone. The ordering matters for the two places judgement enters — the *report prose*, which a model writes, and *my acceptance judgement*, which is exactly the thing the operator's protocol is protecting. Reading a conclusion before assessing an answer is how agreement gets given too easily, and that risk is real regardless of the determinism below it.
+- **Needs human review:** no
+- **Blocks:** none — OBS-077 is the agent run.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**
