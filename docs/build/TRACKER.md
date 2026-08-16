@@ -73,8 +73,8 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 | T-021 | Agreement test with `health.py` | DONE | opus-5 (HALT-sensitive) | _next commit_ | OBS-054 | **No disagreement. No HALT.** 92 comparisons, 1161 passed |
 | T-022 | `flows.py` registry and dataclasses | DONE | opus-5 | `b6dd595` | OBS-055, OBS-056 | `DeviceScope` + `Aggregation` on `Rung`; 7 declared, 2 implemented |
 | T-023 | The `bgp_session` descent | DONE | opus-5 | `b6dd595` | OBS-056 | 5 rungs, scopes settled by measurement. 1181 passed |
-| T-024 | `descent.py` walker | DONE | opus-5 | _next commit_ | OBS-057 | Corrected walk; `SubjectRule` added to close a contract gap |
-| T-025 | **Acceptance test — RR1 → 10.255.0.12** | DONE | opus-5 | _next commit_ | OBS-057 | **M3.** `broken` → `interface_line_down` on PE2 with a 4-rung causal chain |
+| T-024 | `descent.py` walker | DONE | opus-5 | `3e67cc2` | OBS-057 | Corrected walk; `SubjectRule` added to close a contract gap |
+| T-025 | **Acceptance test — RR1 → 10.255.0.12** | DONE | opus-5 | `3e67cc2` | OBS-057 | **M3.** `broken` → `interface_line_down` on PE2 with a 4-rung causal chain |
 
 ## Part 4 — Prompts, grounding, MVP-0
 
