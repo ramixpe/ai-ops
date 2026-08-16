@@ -249,30 +249,55 @@ The companion takes one of two forms: assert the collection is currently empty (
 
 ---
 
-## 0.13 A test cannot validate the premise it was written from
+## 0.13 Evidence bounds conclusion, and the bound is invisible from inside
 
-**A test written from the same premise as the implementation confirms the premise, not the implementation. Green tests are not by themselves evidence that a component is correct — only that it agrees with the assumption it was built on. Where a component encodes a judgement about the world, specify it independently of the code and read the specification against the implementation, never the reverse.**
+> **Evidence bounds conclusion, and the bound is invisible from inside.**
+>
+> - a survey is a sample — *(data)*
+> - a rule generalised from one instance fits one instance — *(rules)*
+> - a test sharing the implementation's premise confirms it — *(tests)*
+> - a corpus shows width only in dimensions where it varies — *(identity)*
+>
+> **Before trusting any of the four, ask what the evidence could not have shown you.**
 
-The standing example is T-028's noise filter. `drop_collector_noise` deleted every record in two facilities, which is a content rule wearing a provenance label. **Sixteen tests passed over it.** They passed because they were written from the same assumption the code was — that `SECURITY-SSHD_SYSLOG_PRX` means "the collector" — and no test in the suite could have caught it, because the suite and the defect shared an author and a premise. The measured cost was eight severity-3 records deleted unattributed, one of them an interactive session dying 22.7 seconds before the incident.
+One family, four faces. Each has cost this build real time, and in every case the artefact was internally consistent — which is why the question has to be asked deliberately rather than noticed.
 
-What caught it was `evidence-reduction.md` §3.2, written from the problem rather than from the code: *filter by source, not by content*. The violation is visible the moment the code is read against that sentence.
+**The buffer-level trap is the same family.** `show logging` returns the device *buffer* (level `debugging`, severities 0–7); the *trap* level governs what is shipped to the collector (`informational`, 0–6). Reading the trap level to describe local coverage **understates the source by exactly the class in question**, while looking entirely correct. The evidence — a header line stating a level — cannot show you that you read the wrong line.
 
-**This is the fifth distinct silent-failure shape in this build, and the widest.** The others are recoverable by looking harder at the artefact; this one is not, because the artefact is internally consistent.
+### The four faces, with their standing examples
+
+| Face | Standing example | Fix |
+|---|---|---|
+| **Data** — a survey is a sample | T-013: 44 route fixtures grouped by line 4, which is identical across all three route shapes. A directly-connected route has no next hop at all | Survey for the *shape*, then let §0.10 line accounting fail the spec that missed one |
+| **Rules** — one instance fits one instance | T-026: "every prompt names its refusal path as `undetermined`" — `report`'s refusal, not `correlate`'s | Move the value into data the instance declares |
+| **Tests** — a shared premise confirms itself | T-028: **sixteen green tests** over a filter deleting eight severity-3 records unattributed. The suite and the defect shared an author and a premise | Specify independently of the code, and read the specification against the implementation |
+| **Identity** — width only where the corpus varies | T-029a: `refusal_marker` moved into data and keyed by *prompt family*, then failed again when a second **version** appeared | Key by the finest identity the thing has — a filename, not a family name |
+
+The **tests** face deserves the extra sentence, because it is the one that cannot be caught by looking harder at the artefact: *green tests are not by themselves evidence that a component is correct — only that it agrees with the assumption it was built on.* Where a component encodes a judgement about the world, specify it independently.
+
+Two practical consequences:
+
+- **When a design document arrives for code that already exists, read the document against the code.** The other direction finds nothing — every line of code justifies itself, and the reading converges on "yes, that is what it does".
+- **Do not treat a passing suite as acceptance for a component that encodes a judgement.** Parsers, filters, checks and thresholds all make a claim about the world.
+
+### The six silent-failure shapes
+
+A different taxonomy, and worth keeping beside the family: these are the *symptoms*, §0.13 is a *cause* several of them share. All six are green things that verify nothing.
 
 | # | Shape | Instances |
 |---|---|---|
 | 1 | Green flag over a degraded read | OBS-006, OBS-043, OBS-044 |
 | 2 | Absence read as a healthy value | OBS-044, OBS-051 — answered by `unevaluated` |
 | 3 | A guardrail passing over an empty set | §0.12 |
-| 4 | A rule generalised from one instance | OBS-021, OBS-062, OBS-063 |
-| 5 | **A test agreeing with the code by construction** | **§0.13** — OBS-064 |
+| 4 | A rule generalised from one instance | OBS-021, OBS-062, OBS-063, OBS-069 |
+| 5 | A test agreeing with the code by construction | OBS-064 |
+| 6 | **Wrong evidence read as right evidence** | **OBS-071** |
 
-All five are green things that verify nothing. Numbers 3, 4 and 5 are undetectable from inside the artefact that has the problem, which is why each has a rule rather than a habit.
+**Shape 6 is new and is not a variant of the others.** Shapes 1–5 are all *absence* presented as presence: something was not measured and the gap is invisible. Shape 6 is *presence of the wrong thing*: the evidence is real, correctly timestamped, internally consistent — and about a different event.
 
-Two practical consequences:
+The measured instance: querying the log platform for PE2's isolation window returns two genuine severity-3 `PKT_INFRA-LINK-3-UPDOWN` records **from the previous day's restore**, and nothing from the isolation. Not an empty result. A plausible, non-empty, confidently wrong one.
 
-- **When a design document arrives for code that already exists, read the document against the code.** The other direction finds nothing — every line of code justifies itself, and the reading converges on "yes, that is what it does".
-- **Do not treat a passing suite as acceptance for a component that encodes a judgement.** Parsers, filters, checks and thresholds all make a claim about the world. The suite tells you the code is self-consistent; only an independent statement of the claim tells you the claim is right.
+An empty result is honest and visibly incomplete. A partial result is neither, and **nothing downstream can detect it** — every consistency check it could face, it passes. Only coverage metadata (§7 of `evidence-reduction.md`, T-029a) makes it visible, by stating what the source could not have carried.
 
 ---
 

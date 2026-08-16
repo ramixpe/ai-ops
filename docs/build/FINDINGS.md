@@ -1608,6 +1608,38 @@ Copy this block for each new entry.
 
 ---
 
+## OBS-071 · pattern · Wrong evidence read as right evidence — a sixth silent-failure shape, and not a variant of the other five
+
+- **Kind:** insight
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** Correcting revision 2's claim that "none of the causal events reach the platform" surfaced a failure shape this build had not named.
+
+  The claim is true and it *reads* as "the platform would have returned nothing". It would not. Two records in the same window are severity 3 and would be delivered:
+
+  ```
+  Aug 15 23:07:29.168  sev3  PKT_INFRA-LINK-3-UPDOWN
+  Aug 15 23:07:29.189  sev3  PKT_INFRA-LINK-3-UPDOWN
+  ```
+
+  Those are line-state changes from **the previous day's restore** — a different incident. An investigator querying the platform for this device and a generous window receives two real, correctly-timestamped link events belonging to the wrong event, and nothing at all from the isolation under investigation.
+
+  **Everything before this was absence read as presence.** Shapes 1–5 are all the same underlying thing: something was not measured, and the gap is invisible, so a green result or a plausible conclusion fills the space. Shape 6 is the opposite polarity — the evidence is *present*, real, correctly parsed, correctly timestamped, and internally consistent. It is simply about a different event.
+
+  That is why no consistency check can catch it. There is nothing inconsistent to find. Timestamps are ordered, severities are genuine, the mnemonic is right for a link event, and a correlation built from them would read as a competent timeline. An empty result announces its own incompleteness; a partial result does not.
+- **Evidence:** OBS-067, and the measured Loki reachability of PE2's `broken` window: two severity-3 records deliverable, all six causal events (severity 5 and 6) not.
+- **What I did:** Recorded as a distinct shape rather than folded into shape 1, and added to BUILD-PLAN §0.13's table with that distinction stated — a taxonomy whose sixth entry is a restatement of its first is worse than five entries.
+
+  The practical consequence is that **only coverage metadata makes shape 6 visible**, which is a stronger argument for T-029a than the one I built it on. `unevaluated` and grounding both work by noticing that something is *missing*. Neither can notice that what arrived is about something else. The coverage record can, because it states what the source *could not have carried* — and severity 5 and 6 being absent from a source is a fact about the source, knowable without knowing what the answer should have been.
+
+  The generalisation worth carrying:
+
+  > **A source that filters what it delivers does not return less of the truth. It returns a different, complete-looking truth.**
+- **Needs human review:** no
+- **Blocks:** none
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**
