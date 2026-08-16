@@ -226,7 +226,18 @@ _NEIGHBOR_NOT_FOUND = re.compile(r"^% Neighbor not found$")
 _NEIGHBOR_IS = re.compile(r"^BGP neighbor is (?P<neighbor>\S+)$")
 _REMOTE_LOCAL_AS = re.compile(r"^Remote AS (?P<remote_as>\d+), local AS (?P<local_as>\d+), \S+ link$")
 _ROUTER_ID = re.compile(r"^Remote router ID (?P<router_id>\S+)$")
-_STATE = re.compile(r"^BGP state = (?P<state>[A-Za-z]+)(?:, up for (?P<up_for>\S+))?$")
+# Two real forms, both captured:
+#   "BGP state = Established, up for 2d12h"
+#   "BGP state = Idle (No route to multi-hop neighbor)"
+# The parenthetical appears only on a down session and is the single most
+# diagnostic field in the whole command -- it says *why* -- so it is captured
+# as `state_reason` rather than ignored. Found by the `broken` label; no
+# healthy fixture can produce it.
+_STATE = re.compile(
+    r"^BGP state = (?P<state>[A-Za-z]+)"
+    r"(?:, up for (?P<up_for>\S+))?"
+    r"(?: \((?P<state_reason>[^)]+)\))?$"
+)
 _PREVIOUS_STATE = re.compile(r"^Previous State: (?P<previous_state>.+)$")
 _HOLD_KEEPALIVE = re.compile(
     r"^Hold time is (?P<hold_time>\d+), keepalive interval is (?P<keepalive>\d+) seconds$"
@@ -336,6 +347,26 @@ BGP_NEIGHBOR_IGNORES: tuple[IgnoreRule, ...] = (
         r"^Peer reset reason: .+$",
         "reset-reason detail beyond the required last_reset_reason summary, present only after a remote-initiated reset",
     ),
+    # --- down-session-only lines. None can appear on an established session,
+    # so they were unreachable until the `broken` label was captured. Declared
+    # rather than extracted: `state_reason` already carries the diagnostic that
+    # matters ("No route to multi-hop neighbor"), and widening the schema
+    # mid-stream to chase adjacent detail is how a contract stops being
+    # reviewable.
+    IgnoreRule(
+        r"^Socket not armed for io, not armed for read, not armed for write$",
+        "socket bookkeeping, the down-session variant of the armed-for-read line above",
+    ),
+    IgnoreRule(
+        r"^Error Code: .+$",
+        "error code from the last BGP notification; state_reason carries the current cause",
+    ),
+    IgnoreRule(r"^Notification data sent:$", "header for the notification payload dump"),
+    IgnoreRule(r"^None$", "the notification payload itself, empty in every observed case"),
+    IgnoreRule(
+        r"^Time since last notification sent to neighbor: \S+$",
+        "volatile notification bookkeeping",
+    ),
 )
 
 _BGP_NEIGHBOR_META_KEYS: tuple[str, ...] = (
@@ -347,6 +378,7 @@ _BGP_NEIGHBOR_META_KEYS: tuple[str, ...] = (
     "previous_state",
     "last_reset_reason",
     "last_reset_ago",
+    "state_reason",
     "hold_time",
     "keepalive",
     "local_as",
@@ -461,6 +493,7 @@ def parse_xr_bgp_neighbor(output: str) -> dict[str, Any]:
         elif match := _STATE.match(line):
             meta["state"] = match["state"]
             meta["connection_state"] = match["state"]
+            meta["state_reason"] = match["state_reason"]
             if match["up_for"]:
                 meta["up_for"] = match["up_for"]
             consumed.append(line)
@@ -709,7 +742,10 @@ def parse_xr_route(output: str) -> dict[str, Any]:
 
 _HEADER = re.compile(
     r"^(?P<interface>\S+) is (?P<admin_state>administratively down|up|down), "
-    r"line protocol is (?P<line_state>up|down)$"
+    # line protocol reads "administratively down" too when the interface is
+    # shut -- not just "down". Found by the `broken` label; every healthy
+    # fixture is "up", so this branch was unreachable until PE2 was isolated.
+    r"line protocol is (?P<line_state>administratively down|up|down)$"
 )
 _STATE_TRANSITIONS = re.compile(r"^Interface state transitions: (?P<n>\d+)$")
 # Three ``Hardware is`` shapes are on disk: a physical interface (hardware
@@ -885,7 +921,12 @@ def parse_xr_interface(output: str) -> dict[str, Any]:
             meta["admin_state"] = (
                 "admin-down" if raw_admin_state == "administratively down" else raw_admin_state
             )
-            meta["line_state"] = match["line_state"]
+            # Normalised the same way as admin_state, so a consumer sees one
+            # vocabulary -- "admin-down" -- rather than two spellings of it.
+            raw_line_state = match["line_state"]
+            meta["line_state"] = (
+                "admin-down" if raw_line_state == "administratively down" else raw_line_state
+            )
             found_interface = True
             consumed.append(line)
             continue

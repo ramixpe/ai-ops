@@ -1517,3 +1517,127 @@ def test_a_malformed_hop_line_increments_unparsed_rows_not_unaccounted_lines():
     assert parsed["meta"]["unaccounted_lines"] == []
     assert len(parsed["records"]) == 1
     assert parsed["records"][0]["hop"] == "1"
+
+
+# --------------------------------------------------------------------------- #
+# The `broken` label (T-011) -- shapes no healthy fixture can produce
+# --------------------------------------------------------------------------- #
+
+_BROKEN_TEMPLATE_FIXTURES = sorted(
+    p
+    for pattern in (
+        "show-bgp-neighbor-*.txt",
+        "show-route-*.txt",
+        "show-interfaces-*.txt",
+        "show-logging-last-*.txt",
+        "ping-*.txt",
+        "traceroute-*.txt",
+    )
+    for p in FIXTURE_DIR.glob(f"cisco_xr/*/broken/{pattern}")
+    if "brief" not in p.name
+)
+
+_BROKEN_TEMPLATE_BY_PREFIX = {
+    "show-bgp-neighbor-": "bgp_neighbor",
+    "show-route-": "route",
+    "show-interfaces-": "interface",
+    "show-logging-last-": "logging",
+    "ping-": "ping",
+    "traceroute-": "traceroute",
+}
+
+
+def _template_for_fixture(path):
+    for prefix, template in _BROKEN_TEMPLATE_BY_PREFIX.items():
+        if path.name.startswith(prefix):
+            return template
+    raise AssertionError(f"no template maps to {path.name}")
+
+
+def test_the_broken_label_actually_exists():
+    """Guards against the whole suite passing because the label is empty."""
+
+    assert len(_BROKEN_TEMPLATE_FIXTURES) > 140, len(_BROKEN_TEMPLATE_FIXTURES)
+
+
+@pytest.mark.parametrize(
+    "fixture", _BROKEN_TEMPLATE_FIXTURES, ids=lambda p: f"{p.parent.parent.name}/{p.name}"
+)
+def test_every_broken_fixture_round_trips_cleanly(fixture):
+    """§0.10 over the isolated-PE2 capture.
+
+    The `broken` label exposed four parser gaps the healthy set could not
+    reach. This is what stops them regressing.
+    """
+
+    template = _template_for_fixture(fixture)
+    parsed, status = tp.parse_template_output("cisco_xr", template, fixture.read_text())
+
+    assert status is tp.PARSE_OK
+    assert parsed["meta"]["unaccounted_lines"] == []
+    assert parsed["meta"]["unparsed_rows"] == 0
+
+
+def test_a_down_bgp_session_captures_why_it_is_down():
+    """`BGP state = Idle (No route to multi-hop neighbor)`.
+
+    The parenthetical is the single most diagnostic field in the command --
+    it says *why* -- and it cannot appear on an established session, so no
+    healthy fixture contains one.
+    """
+
+    raw = (
+        FIXTURE_DIR / "cisco_xr" / "RR1" / "broken" / "show-bgp-neighbor-10-255-0-12.txt"
+    ).read_text()
+    parsed, status = tp.parse_template_output("cisco_xr", "bgp_neighbor", raw)
+
+    assert status is tp.PARSE_OK
+    assert parsed["meta"]["state"] == "Idle"
+    assert parsed["meta"]["connection_state"] == "Idle"
+    assert parsed["meta"]["state_reason"] == "No route to multi-hop neighbor"
+
+
+def test_an_established_session_has_no_state_reason():
+    """The other direction: the key is always present, and None when up."""
+
+    raw = (
+        FIXTURE_DIR / "cisco_xr" / "RR1" / "healthy" / "show-bgp-neighbor-10-255-0-11.txt"
+    ).read_text()
+    parsed, _status = tp.parse_template_output("cisco_xr", "bgp_neighbor", raw)
+
+    assert parsed["meta"]["state"] == "Established"
+    assert parsed["meta"]["state_reason"] is None
+
+
+@pytest.mark.parametrize("interface", ["gi0-0-0-0", "gi0-0-0-1"])
+def test_a_shut_interface_reports_admin_down_on_both_states(interface):
+    """IOS-XR says "is administratively down, line protocol is administratively down".
+
+    OBS-044 recorded the admin_state normalisation as implemented but
+    untested, because all 45 healthy fixtures are admin-up. This is the
+    fixture that closes that gap -- and the *line protocol* half was an
+    outright parse failure until the `broken` capture found it.
+    """
+
+    raw = (
+        FIXTURE_DIR / "cisco_xr" / "PE2" / "broken" / f"show-interfaces-{interface}.txt"
+    ).read_text()
+    parsed, status = tp.parse_template_output("cisco_xr", "interface", raw)
+
+    assert status is tp.PARSE_OK
+    assert parsed["meta"]["admin_state"] == "admin-down"
+    assert parsed["meta"]["line_state"] == "admin-down"
+
+
+def test_an_isolated_device_reports_no_route_to_the_route_reflector():
+    """PE2 loses its route to RR1's loopback entirely -- the `route_present`
+    check's broken branch, now backed by a real capture instead of TEST-NET-1."""
+
+    raw = (
+        FIXTURE_DIR / "cisco_xr" / "PE2" / "broken" / "show-route-10-255-0-31-32.txt"
+    ).read_text()
+    parsed, status = tp.parse_template_output("cisco_xr", "route", raw)
+
+    assert status is tp.PARSE_OK
+    assert parsed["meta"]["found"] is False
+    assert parsed["records"] == []
