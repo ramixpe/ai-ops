@@ -1490,6 +1490,36 @@ Copy this block for each new entry.
 
 ---
 
+## OBS-067 · merge · `evidence-reduction` revisions 1 and 2 — and what the log platform would actually have returned
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** Revision 2 arrived restructured, with five capabilities revision 1 did not have (relationship-aware projection, episodes, coverage metadata, progressive disclosure, rarity baselines) and with §3.2/§3.4/§3.5/§4/§6 written to incorporate the six measured divergences. Merged into a single document; the v2 file deleted. All six divergences verified against the fixtures again rather than trusted from the summary, and **three of revision 2's claims were wrong**.
+
+  **1. "All fabric SSH records name one of four management hosts."** 2,558 of 2,723 do. **165 name no address at all** and are kept as unattributable. That remainder is not a rounding error — it is the entire point of the rule, because those 165 are exactly the records a facility drop deletes and an attribution rule keeps. Stating "all" would have made the unattributable case look like an edge condition rather than the mechanism.
+
+  **2. "Every causal event was severity 5 or 6, and none reach the platform."** True as stated, and it reads as "the platform would have returned nothing." **It would not.** Two records in the same window are severity 3 and would be delivered:
+
+  ```
+  Aug 15 23:07:29.168  sev3  PKT_INFRA-LINK-3-UPDOWN
+  Aug 15 23:07:29.189  sev3  PKT_INFRA-LINK-3-UPDOWN
+  ```
+
+  Those are line-state changes from **the previous day's restore** — a different incident. So an investigator querying the platform for this device receives two real, correctly-timestamped link events belonging to the wrong event, and nothing at all from the isolation under investigation.
+
+  **An empty result is honest and visibly incomplete. A partial result is neither.** A severity filter that removes the consequences of an event while retaining superficially similar events from elsewhere in the buffer does not degrade a timeline — it fabricates one. This is the strongest argument for coverage metadata in the document, and I would not have found it without re-deriving the claim.
+
+  **3. §6's episode example used invented mnemonics** (`OPTICS_RX_LOW`, `BFD_SESSION_DOWN`). The fabric produced a real six-event episode, so the invented one was replaced — and replacing it earned something the invented version could not have: a correspondence table between the descent's five rungs and the episode's events in which **two rungs have no log event at all**. That gap is what makes an episode corroboration of a descent rather than a substitute for one, and a fabricated example with one event per layer would have implied the opposite.
+- **Evidence:** `docs/design/evidence-reduction.md`, merged, 16 sections. Measurements re-derived: 3,600 records across 18 fixtures, dedupe removes zero; 2,723 SSH records, 165 unattributable; 8 severity-3 records recovered by the §3.2 correction; 0 of 28 retained under subject projection.
+- **What I did:** Added one measured constraint revision 2 did not have. **The gap between the interface event and the BGP event is 154 seconds** — the hold timer expiring, not processing delay. A naive temporal-proximity threshold of a few seconds splits the episode in two and severs exactly the link it exists to preserve. So B-416's proximity bound must be derived from **protocol timers, not human intuitions about "at the same time"**: BGP's default hold timer is 180s, IS-IS's is 30s, and any window shorter than the slowest timer in the dependency chain systematically breaks the chains that matter. Recorded against B-416 as a design constraint rather than left to be rediscovered.
+
+  Also widened one measurement before restating it: dedupe-removes-zero was measured on PE2 alone at T-028. Re-run across all 18 committed `show logging` fixtures — 3,600 records, zero removed. The claim in the document is now the wider one.
+- **Needs human review:** no
+- **Blocks:** none. T-029a next, then T-030.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**
