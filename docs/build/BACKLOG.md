@@ -50,7 +50,7 @@ The agent stops being asked and starts being woken. The architectural change is 
 
 | ID | Item | Why | Depends on | Size | Decision |
 |---|---|---|---|---|---|
-| **B-201** | **Trigger intake** — Alertmanager webhook receiver | Alertmanager already does grouping, dedupe, inhibition and silencing better than we would build it | T-005 finding | M | D4 |
+| **B-201** | **Trigger intake** — Alertmanager webhook receiver | Alertmanager already does grouping, dedupe, inhibition and silencing better than we would build it. **B-426 is how this gets tested end to end.** `inject → device syslog → Alertmanager → agent wakes → investigates → reports` is the entire Stage 2 loop, and fault injection is the only way to exercise it as one thing rather than as five components that each pass in isolation. A webhook receiver verified against a hand-crafted POST verifies the receiver; it says nothing about whether a real fault on a real device produces an alert that produces an investigation | T-005 finding | M | D4 · B-426 |
 | **B-202** | **Mnemonic → flow lookup** | Flow selection for event-driven runs is a table lookup, not a model judgement. Syslog mnemonics are stable, enumerable identifiers | T-004, T-015 | S | D5 |
 | **B-203** | **Operational memory: schema and writer** | `{timestamp, device, object, event_type, from_state, to_state, evidence_ref}`, written by code from validated envelopes  **Historical baselines and rarity are the same capability, arriving from the evidence-reduction side** (`evidence-reduction.md` §10): raw frequency is meaningless without a baseline — three BGP adjacency changes is severe if the historical expectation is zero, and thirty-one CPU threshold events is routine if the device normally produces twenty-eight to thirty-five. Both need schema'd events keyed by object, written by code from validated envelopes, queryable for "how often does this normally happen". **Build it once.** | MVP-1 complete | M | D14 |
 | **B-204** | **Operational memory: query surface** | "Has this happened before, how often, when last" — the fourth evidence axis  **Historical baselines and rarity are the same capability, arriving from the evidence-reduction side** (`evidence-reduction.md` §10): raw frequency is meaningless without a baseline — three BGP adjacency changes is severe if the historical expectation is zero, and thirty-one CPU threshold events is routine if the device normally produces twenty-eight to thirty-five. Both need schema'd events keyed by object, written by code from validated envelopes, queryable for "how often does this normally happen". **Build it once.** | B-203 | M | D14 |
@@ -114,6 +114,52 @@ Not tied to a stage. Several are cheap enough to slot into any gap.
 | **B-423** | **CI job: run `--from-fixtures` in a clean environment** | A container with **no `.env`, no `DEVICE_*`, no API key and no network**, running `nettools investigate RR1 10.255.0.12 --from-fixtures` and asserting exit 1 and the causal chain in the output. **The offline demo's entire value is that it needs nothing, so nothing is the only environment that tests it.** The in-suite test (`tests/test_cli_investigate.py`) strips the environment with `monkeypatch`, which catches the code path but not a future dependency on a file, a socket, or a package that happens to be installed on a developer's machine. This is the **setup** face of §0.13 given a permanent guard: the failure it prevents is invisible from inside the repository, so the fix has to be an environment rather than an inspection. Cheap — one job, no services, and it is also the fastest signal in CI | — | S | §0.13 · OBS-072 |
 | **B-424** | **The correlation path has no citation check — and it fabricated a timestamp** | `ground_correlation` runs `check_absence_coverage` only, which returns a **vacuous pass** whenever `found` is not `False`. A correlation asserting *presence* is therefore emitted with zero verification. Measured live at T-033: the model emitted `Aug 14 04:28.238 UTC` for a record whose real timestamp is `Aug 16 14:04:28.238 UTC` — a malformed date two days earlier, in the one field `correlate.v3` constraint 2 says to quote exactly — and **1 of 9 timeline timestamps did not exist in the window**. Grounding passed it. The exact mirror of the gap T-029a closed: the report checks presence and (n/a) absence; the correlation checks absence and **not** presence. The fix is already specified by the existing code — every timeline entry's `at` must be a timestamp present in the shaped window and its `mnemonic` must match the record at that timestamp, which is `check_grounding`'s evidence-key rule applied to the other output. **Recommended as T-029b, before T-034**, mirroring B-420 → T-029a | — | S | OBS-077 · T-029a |
 | **B-425** | **Token usage is not instrumented on the rendered-prompt path** | `complete_prompt` returns text only; neither the Anthropic nor the OpenAI/MiniMax route surfaces `usage`, so T-033 could report only a proxy (~5k tokens of prompt per investigation — 6,673 chars report + 13,218 correlate — response excluded). Cost per investigation is a number this project will be asked for, and estimating it from character counts is the kind of measurement that quietly becomes folklore. Return usage alongside the text and thread it into `InvestigationResult`. Pairs naturally with **B-421** (prompt caching), since caching is only worth doing if its effect can be measured | — | S | OBS-077 · T-033 |
+| **B-426** | **Fault injection harness — and the Stage 2 acceptance vehicle** | **Larger than a normal item; see the block below the table.** An injector that is **not the agent and shares no context with it**, so a trial is blind by construction rather than by discipline | B-201 · four manual rounds first | L | D6 · D19 · OBS-078 |
+| **B-427** | **Evaluation corpus and confusion matrix** | Predicted rung vs actual rung across trials, as a matrix rather than a pass rate: *which* rung the descent lands on when it is wrong is the whole diagnostic signal, and an aggregate score discards it. Cluster failures by rung, by device, and by fault class — a descent that is reliable on `interface` and unreliable on `transport` is a different problem from one that fails on PE4 specifically, and both look like "87%". **Re-runnable after every change, as a regression suite**, which is what turns one-off trials into a corpus. Grows from the manual rounds: each round is a row before the harness exists, and the harness only automates the row-producing | B-426 | M | D19 · OBS-078 |
+
+---
+
+# B-426 in full — fault injection
+
+Larger than a backlog row, and framed deliberately as **the Stage 2 acceptance vehicle rather than a test tool**.
+
+## Why it is not just a test tool
+
+Stage 2 is `inject → device syslog → Alertmanager → agent wakes → investigates → reports`. Every component of that can be verified alone and the loop still not work: a webhook receiver tested against a hand-crafted POST tells you the receiver parses JSON, not that a real fault on a real device produces an alert carrying a device label that resolves to a flow that produces an investigation. **Injection is the only way to exercise the loop as one thing.** Noted against B-201.
+
+## Mandatory requirements
+
+| | Requirement | Why |
+|---|---|---|
+| 1 | **A supervisor process independent of the injector**, periodically diffing the whole fabric against the golden snapshot and force-restoring | OBS-075: the injector's own `restore()` reported failure on a healthy fabric and would have retried a non-idempotent write. A restorer that shares a process with the injector shares its bugs. `save_golden_snapshot`/`diff_evidence` already exist and are the right primitives |
+| 2 | **Max one concurrent fault, a hard hold ceiling, and a kill switch** | Two faults is a *deliberate* experiment (below), never an accident of overlapping drills. The ceiling bounds the blast radius of a supervisor that has itself died |
+| 3 | **The agent must not know a drill is running** | A blind trial is the only kind whose agreement means anything. See the operating rule below |
+| 4 | **A holdout fault set, never used for tuning — only for validating fixes** | Otherwise every fix is fitted to the faults that found the bugs, and the corpus stops measuring generalisation. The same reasoning as `evidence-reduction.md`'s "tuning until output looks reasonable" |
+| 5 | **Two-fault combinations** | Currently untested, and the place D6's "lowest broken rung is the root cause" may simply be wrong — see D6's open section and OBS-078 |
+
+## Operating rule — the agent never runs the injector
+
+**Two independent reasons, and the second is the one that is easy to forget.**
+
+1. **It writes to devices.** §0.11, unwaived. Nothing about a drill changes that.
+2. **Running it would put the fault identity in the agent's context, which destroys the blinding the trial depends on.** This is a *different* kind of prohibition from §0.11's: not "this action is dangerous" but **"performing this action makes me a worse witness."** The harm is not to the fabric, it is to the evidence — and it is silent, because a contaminated trial produces exactly the same confident agreement a clean one does.
+
+The injector is operated by a human or by a separate process. Recorded in `BUILD-PLAN.md` §0.11 so it is binding rather than advisory.
+
+## Sequencing — four manual rounds before any of this is built
+
+**One match is one data point.** T-033 produced agreement on `igp_adjacency`; that is encouraging and it is not a pattern. Build the harness only if agreement holds **across four rounds landing on different rungs** — four rounds of the same fault shape is one data point sampled four times, which is §0.13's data face.
+
+Suggested coverage, chosen so the rounds differ in kind and not just in device:
+
+| Round | Target | Why this one |
+|---|---|---|
+| 1 ✓ | `igp_adjacency` on PE3 | Done (OBS-077). Symptom identical to a different-rung fault |
+| 2 | `interface` | The captured `broken` shape, live and on a device that is not PE2 |
+| 3 | `cause_not_localised` | BGP session administratively shut with a healthy underlay. **The only composed fixture in the build** — this round would replace it with a captured one |
+| 4 | `all_layers_healthy` under perturbation | One uplink shut so the IGP reconverges. A **true negative** is the outcome a corpus of faults never tests, and the one a false-positive-prone system fails |
+
+Each round produces a row for B-427 before the harness exists. The harness automates producing rows, not deciding what they mean.
 
 ---
 

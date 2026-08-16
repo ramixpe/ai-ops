@@ -224,6 +224,21 @@ A tool's report of failure is not evidence of failure. Before acting on either a
 
 The independent check that caught it was a human watching the device console. **Nothing inside the tool would have** — which is the standing argument for a witness outside the thing being verified, and the same reasoning as §0.13's setup face.
 
+### The agent never runs a fault injector
+
+**Binding, and for two independent reasons.** The second is the one that is easy to forget, because it is not a safety rule.
+
+1. **An injector writes to devices.** §0.11 applies unchanged and is not waived by a drill being planned, approved, or reversible.
+2. **Running it would put the fault identity in the agent's context, destroying the blinding the trial depends on.** That is a different kind of prohibition: not *"this action is dangerous"* but **"performing this action makes me a worse witness."**
+
+The distinction matters because the two failure modes look nothing alike. A §0.11 violation damages the fabric and is visible. This one damages only the *evidence*, and it is **silent** — a contaminated trial produces exactly the same confident agreement a clean one does, and neither the agent nor the reader can tell them apart afterwards. Q-006 is worth something only because OBS-076 was written and committed before OBS-077 existed.
+
+Generalised, because it will recur wherever the agent is both actor and assessor:
+
+> **Some actions are forbidden not because they are unsafe but because taking them makes you unable to judge the result. Where you are both the actor and the assessor, refraining is part of the method, not caution about it.**
+
+The injector is operated by a human or by a separate process (**B-426**).
+
 On HALT: mark the task `BLOCKED`, write a finding with `Needs human review: yes`, add a row to the Open Questions table in `FINDINGS.md`, update `TRACKER.md`, and **stop**.
 
 ### DECIDE-AND-LOG — choose, record, continue

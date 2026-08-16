@@ -227,6 +227,21 @@ Two things about this are easy to get wrong, and both were.
 
 Where the walk finds rungs broken above but everything healthy below, there is nothing beneath to explain them, and the honest terminal finding is `cause_not_localised` rather than a guess.
 
+### Open: is "lowest broken rung" still right under *two* simultaneous faults?
+
+**Unanswered, and recorded here rather than assumed away (OBS-078).** Everything above assumes the broken rungs form a *chain* — each one broken because of the one below, so fixing the lowest fixes all of them. Two independent faults break that assumption without changing anything the descent can see.
+
+Concretely: an interface admin-down **and** the BGP neighbour administratively shut. The lowest broken rung is the interface, the descent reports it, and it is genuinely broken — but **fixing it will not bring the session up.** The report is correct and incomplete, and "correct and incomplete" is indistinguishable from "correct" in every output this system produces.
+
+The sharp version of the problem: **the descent cannot tell one fault from two.** A single interface fault and an interface fault plus a BGP shut produce *identical rung verdicts* — every rung broken, lowest is the interface. One is a complete answer and the other is half of one, and the rung table is byte-identical. Any fault above the lowest one is masked, and it is masked precisely because the layer beneath it is also broken, which is the normal case the ladder was designed for.
+
+Two candidate signals exist, neither validated:
+
+- **Timeline.** Two independent faults rarely land in the same instant. One fault produces one commit; two produce two, separated in time. This is exactly what episodes (B-416) would surface, and it is the strongest argument for building them.
+- **Forward consistency.** After localising, ask whether the rungs *above* look the way this cause alone predicts. An interface down predicts a BGP session that timed out; an administratively shut session reports a distinguishable state. A mismatch between predicted and observed upper rungs is evidence of a second, masked fault.
+
+Neither can be settled by reasoning, and neither can be settled by the fixture corpus, which contains no two-fault capture. **Only fault injection answers it** — see B-426, whose holdout set and two-fault combinations exist for this question specifically.
+
 ### D6a. Which interfaces the interface rung checks
 
 **Question.** The interface rung fans out over a device's interfaces. Which ones?

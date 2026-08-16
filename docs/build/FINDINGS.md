@@ -1888,6 +1888,39 @@ transport path disappearing rather than a direct session teardown.
 
 ---
 
+## OBS-078 · D6 · Two simultaneous faults — the descent cannot tell one from two, and the output is identical
+
+- **Kind:** risk
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5 · raised by the operator
+- **What happened:** D6's stopping rule — *the lowest broken rung is the root cause* — assumes the broken rungs form a **chain**: each is broken because of the one below it, so fixing the lowest fixes all of them. Under two independent simultaneous faults that assumption fails, and **nothing the descent can see changes.**
+
+  The operator's example: an interface admin-down **and** the BGP neighbour administratively shut. The lowest broken rung is the interface. The descent reports it. It is genuinely broken — and **fixing it will not bring the session up.**
+
+  The sharp version, which is worse than the example suggests:
+
+  > A single interface fault, and an interface fault plus a BGP shut, produce **identical rung verdicts**. Every rung broken, lowest is the interface. One is a complete answer and the other is half of one, and the rung table is byte-identical.
+
+  Any fault *above* the lowest one is masked, and it is masked precisely *because* the layer beneath it is also broken — which is the normal, correct case the ladder was designed for. The masking is not a bug in the walk; it is the walk working as specified against a situation the specification did not consider.
+
+  This is the sixth silent-failure shape (§0.13) in a new place: not absence read as presence, and not wrong evidence read as right, but **a correct answer indistinguishable from a complete one.**
+- **Evidence:** Unanswerable from the fixture corpus — there is no two-fault capture in `tests/fixtures/`, on any label. That absence is itself the point: every label was produced by one deliberate change.
+- **What I did:** Recorded it in D6 directly, as an open section rather than a footnote, and filed the experiment that answers it.
+
+  **Two candidate signals, neither validated, both worth stating so the experiment has hypotheses rather than just data:**
+
+  **1. Timeline.** Two independent faults rarely land in the same instant. One fault produces one configuration commit; two produce two, separated in time. The T-033 window shows this shape already — adjacencies down at 14:04:28.238 coincident with a commit, BGP following 165 s later on the hold timer. A *second* commit elsewhere in the window, unexplained by the localised cause, is the signature. **This is the strongest argument yet for episodes (B-416)**, and it upgrades that item from "better rendering" to "the mechanism for detecting a masked second fault".
+
+  **2. Forward consistency.** After localising, ask whether the rungs *above* look the way this cause **alone** predicts. An interface down predicts a session that timed out; an administratively shut session reports a distinguishable state. A mismatch between predicted and observed upper rungs is positive evidence of a masked fault. Note this is the inverse of everything the descent does — it currently reasons only downward, and never checks that the cause it found accounts for the symptoms it started from.
+
+  Neither can be settled by reasoning and neither by the current corpus. **Only injection answers it** — B-426, whose two-fault combinations exist for this question specifically.
+
+  **On sequencing, and I agree with the operator's instinct here.** T-033 produced agreement on one rung. That is one data point, and building a harness on it would be fitting infrastructure to a single observation. Four manual rounds first, and — the part worth adding — **landing on four different rungs**, because four rounds of the same fault shape is one data point sampled four times, which is §0.13's data face. The suggested coverage is in B-426, and round 4 is deliberately a **true negative** (`all_layers_healthy` under a perturbation the IGP absorbs), since a corpus made only of faults never tests the outcome a false-positive-prone system gets wrong.
+- **Needs human review:** **yes** — this is an unresolved question in a load-bearing decision
+- **Blocks:** nothing in MVP-0. D6's rule stands for single faults, which is every case the corpus contains.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**
@@ -1925,6 +1958,7 @@ Anything logged with `Needs human review: yes` is mirrored here so the review ha
 | Q-010 | T-003 | The MiniMax provider uses the OpenAI **Responses** API, not Chat Completions, so `BUILD-PLAN.md` T-003 step 4 (`reasoning_split`, `max_completion_tokens`) does not apply. Both behaviours it targeted are achieved structurally on that route. Confirm the route choice before the MVP-1 gate is built on it. | No for MVP-0 · **yes for the MVP-1 gate** | Open — decided and evidenced (OBS-010) |
 | Q-012 | T-005 | **The lab was rebuilt ~2 days ago and is now healthy** — all 16 BGP sessions Established, PE2/PE4 back to 2 IS-IS adjacencies. T-011 says to capture "against the current broken state", which no longer exists. Re-break the lab, capture a new consistent healthy label, or build the broken case synthetically in-test? | **Yes for T-011** (T-025/M3 unaffected — fixtures still hold the broken state) | **Closed (OBS-049)** — `broken` captured 2026-08-16 with both uplinks. Originally (OBS-019) — options 1+2: keep `t0`/`t1` frozen, add complete `healthy` and `broken` labels; operator runs the break, capture coordinated at T-011 |
 | **Q-018** | **T-033** | **PE3 has 0 IS-IS adjacencies as of 2026-08-16** (every other device is at its expected 2, and PE3 had 2 in the pre-proposal baseline). Intended — the T-033 fault applied and in place — or an unrestored fault from the OBS-075 harness incident? I did not read further to distinguish them, because if it is the former those reads are the diagnosis the Q-006 protocol keeps closed. | **Yes — blocks T-033** | **Resolved** — intended; the T-033 fault, confirmed live by the operator. |
+| **Q-019** | **D6** | **Is "lowest broken rung is the root cause" still right under two simultaneous faults?** Interface down *and* BGP neighbour admin-shut gives the interface as the lowest broken rung — correctly — but fixing it will not bring the session up, and the rung table is identical to the single-fault case. Two candidate signals (a second unexplained commit in the timeline; forward consistency of the upper rungs against what the cause alone predicts), neither validated. | No for MVP-0 — every corpus label is a single fault | Open (OBS-078) — **only injection answers it (B-426)** |
 | Q-009 | T-002 | Should `MINIMAX_API_KEY` **and the lab device credentials** be rotated after this build? Both were pasted into the transcript (OBS-008, OBS-037). It was pasted into the session transcript, which no control in this repository can revoke. | No — nothing is blocked on it | Open — recommended (OBS-008) |
 
 ---
