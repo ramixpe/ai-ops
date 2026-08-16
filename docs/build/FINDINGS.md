@@ -2365,6 +2365,80 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-092 · round 3 · The refutation condition fired — and the tool collected the answer without looking at it
+
+- **Kind:** defect-found
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5 (descent) · MiniMax (report, correlation)
+- **What happened:** Hand diagnosis committed `3598726` at **16:16:06 UTC**; agent ran at **16:16:17**.
+
+  | | Hand (primary) | Hand (refutation branch) | Agent |
+  |---|---|---|---|
+  | Rung | `bgp_session` | `transport` | **`transport`** |
+  | Finding | `cause_not_localised` | `transport_blocked` | **`transport_blocked`** |
+
+  **The refutation branch fired, and it was specified in advance**, including how to score it: *"the finding is that this fault class is indistinguishable from round 2's at the rung level — a corpus result, not a diagnostic error."* Scored that way. This is §6.1a's hedging rule paying for itself a second time; nothing about the outcome required a judgement made after seeing the output.
+
+  **It does not replace the composed fixture.** The round was intended to capture `cause_not_localised` from a real fabric. It did not produce it, so `report.cases.json`'s `cause_not_localised` case remains the build's only composed artefact — and §3 below explains why it may have to stay that way.
+
+  | | |
+  |---|---|
+  | Wall clock | **118.8 s** (rounds 1–2: 114.2, 121.7; healthy baseline 103) |
+  | Exit code | **1** |
+  | Report | emitted, **grounded: 5 observations, 10 citations, 5/5 rungs cited**, all resolving |
+  | Correlation | emitted |
+  | Coverage | RR1, **200 of 896**, incomplete |
+  | Repairs | none |
+  | Character proxy | ~5k tokens of prompt, stable across all three rounds |
+- **Evidence:** OBS-091 committed before the run. Both committed checks executed; results below.
+- **What I did:** Ran the two checks I committed to before the round, and both found something. The second is the most valuable result of the three rounds so far.
+
+  ### Check 1 — BV200 *was* excluded, and for the wrong reason
+
+  PE2's interfaces, and what the rung kept:
+
+  ```
+  KEPT   : Gi0/0/0/0, Gi0/0/0/1, Gi0/0/0/2
+  DROPPED: BV200, Lo0, Lo100, Nu0, Mg0/RP0/CPU0/0
+  ```
+
+  The rule is `name.startswith("Gi") and "." not in name` — **a naming filter, not a semantic one.** BV200 is excluded because it does not begin with `Gi`, not because anything in the system knows a bridge-group virtual interface is not a physical member. On this fabric every physical interface is a `GigabitEthernet`, so the rule is correct **by coincidence of naming**.
+
+  Three consequences, none of which this fabric can show:
+
+  * A physical interface named `TenGigE`, `HundredGigE`, `FortyGigE` or `Bundle-Ether` is **silently excluded from the rung that matters most.**
+  * If that leaves the member set empty, `_aggregate` raises **`IndexError: list index out of range`** from `results[0].subject` — unhandled, not caught by `_cmd_investigate`'s `(ValueError, KeyError)`, so it surfaces as a traceback. Loud rather than silent, which is the right direction, but it is an unhandled crash in the emit path — the thing `test_a_malformed_report_is_a_grounding_failure_not_a_crash` exists to prevent one layer up.
+  * The filter is **duplicated in three places** with two different definitions: `descent.py:166`, `investigation.py:312`, and `fixtures.py:152` (which uses `startswith("Gi") or name == "Lo0"`).
+
+  Filed as **B-431**.
+
+  ### Check 2 — `bgp_transport` reads one field, and the answer was in the next one
+
+  `bgp_transport` reads `meta["connection_state"]` and nothing else. Here is what RR1's own `show bgp neighbor 10.255.0.12` actually parsed to:
+
+  ```
+  connection_state    : Active
+  last_reset_reason   : BGP Notification received: administrative shutdown
+  ```
+
+  **The far end told RR1 exactly why the session is down, the parser captured it, and the check ignored it.**
+
+  The operator's hand diagnosis reached "PE2 administratively shut the neighbour" by logging into PE2 and reading `Idle (Admin)` from the other side. **That was not necessary.** The evidence was on the local device, in a record the tool had already collected and parsed, in a field named `last_reset_reason`.
+
+  This is not a wrong answer — `transport_blocked` is true, and the recommendation the model wrote from it is sound. It is a **wasted answer**: the descent had the material to say *"the peer administratively shut this session"* and said *"the transport is not established"* instead. Filed as **B-430**, and it is the strongest single argument yet for forward consistency (B-428), since "what does the upper rung say about *why*" is exactly the question that field answers.
+
+  ### 3. `cause_not_localised` may be unreachable for this flow
+
+  Falls out of check 2 and was not something I set out to test. Rung 1 reads the session state from `show bgp summary`; rung 2 reads `connection_state` from `show bgp neighbor`. **Two independent commands reporting the same FSM.** For `cause_not_localised` the walk needs rung 1 **broken** and every rung beneath it **healthy** — which here requires the summary table to say not-Established while the neighbour detail says Established.
+
+  That is not a fault state. It is an inconsistent device.
+
+  So one of the five findings `bgp_session` declares is, in practice, unreachable — and the golden case covering it is composed **because it has to be**, not because capturing it was inconvenient. The T-027 note said *"no consistently-behaving fabric can produce this"*; the operator corrected that to *"a fact about single faults"* (OBS-080). Both were close. The accurate version is narrower and more useful: **it is a fact about rung 2 restating rung 1's state machine.** A flow whose second rung tested something genuinely independent — reachability by probe, say — would reach it. Filed as **B-432**.
+- **Needs human review:** **yes** — B-430 and B-432 bear on the flow's design, not just its implementation
+- **Blocks:** none. Round 4 next, and its outcome is already predicted (OBS-082).
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**
