@@ -81,6 +81,7 @@ __all__ = [
     "PARSE_UNAVAILABLE",
     "BGP_NEIGHBOR_IGNORES",
     "INTERFACE_IGNORES",
+    "LOGGING_IGNORES",
     "ROUTE_IGNORES",
     "TEMPLATE_PARSERS",
     "TEMPLATE_RECORD_KEYS",
@@ -94,6 +95,7 @@ __all__ = [
     "parse_template_output",
     "parse_xr_bgp_neighbor",
     "parse_xr_interface",
+    "parse_xr_logging",
     "parse_xr_route",
     "template_record_key",
     "template_volatile_fields",
@@ -932,6 +934,197 @@ def parse_xr_interface(output: str) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
+# cisco_xr: logging  (T-015)
+# --------------------------------------------------------------------------- #
+#
+# ``show logging last <n>`` answers one shape on this fabric: an eight-line
+# header block, then <n> entries from "Log Buffer". Surveyed across all 9
+# healthy fixtures (1800 entries total): every single one matches one strict
+# pattern with zero exceptions --
+#
+#   RP/0/RP0/CPU0:Aug 14 08:21:51.298 UTC: ssh_syslog_proxy[1191]: %SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : sshd[55923]: Accepted authentication for clab from 172.20.250.6 port 38466 ssh2
+#
+# node : timestamp : process[pid] : %MNEMONIC : text -- note the space
+# before the colon after the mnemonic, which is real IOS-XR framing, not a
+# typo to normalise away. node is always "RP/0/RP0/CPU0" on this fabric, so
+# it is matched literally rather than with a wildcard.
+#
+# The mnemonic is the field this parser exists for. discovery-loki.md (T-004)
+# found it present on 100% of lines in the live Loki corpus too, in the same
+# FACILITY-SEVERITY-CODE shape -- and it is what lets Stage 2 route an event
+# to a flow by table lookup rather than a model judgement (D5). Splitting on
+# the *last two* hyphens (``str.rsplit("-", 2)``) rather than a fixed-arity
+# regex is deliberate: the facility half itself contains hyphens
+# (``PKT_INFRA-PQMON``, ``SECURITY-SSHD_SYSLOG_PRX``), but the code half does
+# not in any observed sample, so anchoring from the right is the one split
+# that is correct for every mnemonic on disk -- and it makes both a
+# full-mnemonic lookup table and a facility+code lookup table possible,
+# which is the whole point of extracting the split at all.
+#
+# The device's own embedded timestamp -- not the "Sat Aug 15 ... UTC" banner
+# IOS-XR prefixes the whole response with, and not any ingest time -- is the
+# only true event time: discovery-loki.md found that syslog-ng stamps Loki's
+# copy with ingest time (``timestamp("current")``), so the in-body timestamp
+# is authoritative and is kept as the device's literal string, never
+# reformatted or parsed into a datetime.
+#
+# No "device answered with an error" shape has been observed for this
+# command (unlike bgp_neighbor's "not active" / route's "not in table"), so
+# -- exactly as parse_xr_interface already does -- output with no
+# recognisable header line raises ParseError rather than modelling a
+# not-found meta shape with no fixture to justify it.
+
+_SYSLOG_LOGGING = re.compile(
+    r"^Syslog logging: (?P<enabled>enabled|disabled) "
+    r"\((?P<dropped>\d+) messages dropped, \d+ flushes, \d+ overruns\)$"
+)
+# Console/Monitor/Trap/Buffer logging share one line shape; only the level
+# feeds a different meta key. "Trap logging" is the OBS-041 field -- the
+# evidence that the drop diagnosed there is downstream of the device, not on
+# it, because the trap level is "informational" while only severities 3 and
+# 4 ever reach the log collector (discovery-loki.md, section 6.1).
+_LEVEL_LOGGING = re.compile(
+    r"^(?P<kind>Console|Monitor|Trap|Buffer) logging: level (?P<level>\S+), \d+ messages logged$"
+)
+_LOGGING_TO = re.compile(r"^Logging to (?P<address>\S+), \d+ message lines logged$")
+_LOG_BUFFER_SIZE = re.compile(r"^Log Buffer \((?P<size>\d+) bytes\):$")
+
+_LOG_ENTRY = re.compile(
+    r"^(?P<node>RP/0/RP0/CPU0):(?P<timestamp>\w{3}\s+\d+\s+\d{2}:\d{2}:\d{2}\.\d+\s+\w+): "
+    r"(?P<process>[A-Za-z0-9_]+)\[(?P<pid>\d+)\]: %(?P<mnemonic>[A-Za-z0-9_-]+) : (?P<text>.*)$"
+)
+
+_LEVEL_META_KEY: dict[str, str] = {
+    "Console": "console_level",
+    "Monitor": "monitor_level",
+    "Trap": "trap_level",
+    "Buffer": "buffer_level",
+}
+
+# Section 0.10 accounting: deliberately empty. Every non-blank line the
+# device emits for this command is either the IOS-XR timestamp banner /
+# blank separator (XR_COMMON_IGNORES) or is itself consumed into meta/records
+# below -- the header block has no decorative line that carries no
+# extractable field, and every one of the 1800 surveyed entries matches
+# ``_LOG_ENTRY``. Kept as a named, exported constant (rather than omitted)
+# so the pattern of "one IGNORES constant per template" holds even when a
+# template happens to need none, and so a future line shape that genuinely
+# needs ignoring has an obvious place to go.
+LOGGING_IGNORES: tuple[IgnoreRule, ...] = ()
+
+_LOGGING_META_KEYS: tuple[str, ...] = (
+    "lines",
+    "window_start",
+    "window_end",
+    "syslog_enabled",
+    "messages_dropped",
+    "console_level",
+    "monitor_level",
+    "trap_level",
+    "buffer_level",
+    "logging_to",
+    "buffer_size_bytes",
+)
+
+
+def _empty_logging_meta() -> dict[str, Any]:
+    """Every key present, ``None`` unless known -- never absent.
+
+    ``lines`` is the one exception: per the T-015 spec's meta table it is
+    always a count, ``"0"`` when there are no entries, never ``None``.
+    """
+
+    meta: dict[str, Any] = dict.fromkeys(_LOGGING_META_KEYS)
+    meta["lines"] = "0"
+    return meta
+
+
+def parse_xr_logging(output: str) -> dict[str, Any]:
+    """Parse ``show logging last <n>``.
+
+    One legitimate shape -- see the section comment above -- plus a
+    truncated variant (header only, zero entries) that is not an error: the
+    device answered correctly, there is simply nothing to report yet.
+    Raises :class:`ParseError` only when no recognisable header line
+    (``Syslog logging: enabled|disabled ...``) is found at all: genuinely
+    unrecognised output.
+
+    A log entry line whose outer shape matches but whose mnemonic does not
+    split cleanly into facility/severity/code counts as one malformed row
+    (``meta["unparsed_rows"]``) rather than vanishing -- it is still
+    *consumed*, so it does not also show up in ``unaccounted_lines``. The
+    two counters mean different things: one line cannot be both "unknown
+    shape" and "known shape, malformed content".
+    """
+
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+
+    meta = _empty_logging_meta()
+    consumed: list[str] = []
+    records: list[dict[str, Any]] = []
+    unparsed_rows = 0
+    found_header = False
+
+    for line in lines:
+        if match := _SYSLOG_LOGGING.match(line):
+            meta["syslog_enabled"] = match["enabled"] == "enabled"
+            meta["messages_dropped"] = match["dropped"]
+            found_header = True
+            consumed.append(line)
+        elif match := _LEVEL_LOGGING.match(line):
+            meta[_LEVEL_META_KEY[match["kind"]]] = match["level"]
+            consumed.append(line)
+        elif match := _LOGGING_TO.match(line):
+            meta["logging_to"] = match["address"]
+            consumed.append(line)
+        elif match := _LOG_BUFFER_SIZE.match(line):
+            meta["buffer_size_bytes"] = match["size"]
+            consumed.append(line)
+        elif match := _LOG_ENTRY.match(line):
+            mnemonic = match["mnemonic"]
+            parts = mnemonic.rsplit("-", 2)
+            if len(parts) != 3 or not parts[1].isdigit():
+                unparsed_rows += 1
+                consumed.append(line)
+                continue
+            facility, severity, code = parts
+            records.append(
+                {
+                    "timestamp": match["timestamp"],
+                    "node": match["node"],
+                    "process": match["process"],
+                    "pid": match["pid"],
+                    "mnemonic": mnemonic,
+                    "facility": facility,
+                    "severity": severity,
+                    "code": code,
+                    "text": match["text"],
+                }
+            )
+            consumed.append(line)
+
+    if not found_header:
+        raise ParseError(
+            "output does not contain a recognisable 'show logging' header line "
+            "('Syslog logging: enabled|disabled ...')"
+        )
+
+    meta["lines"] = str(len(records))
+    if records:
+        meta["window_start"] = records[0]["timestamp"]
+        meta["window_end"] = records[-1]["timestamp"]
+
+    return finalize(
+        raw=output,
+        meta=meta,
+        records=records,
+        consumed=consumed,
+        ignores=LOGGING_IGNORES,
+        unparsed_rows=unparsed_rows,
+    )
+
+
+# --------------------------------------------------------------------------- #
 # The registry
 # --------------------------------------------------------------------------- #
 
@@ -941,6 +1134,7 @@ TEMPLATE_PARSERS: dict[tuple[str, str], Callable[[str], dict[str, Any]]] = {
     ("cisco_xr", "bgp_neighbor"): parse_xr_bgp_neighbor,
     ("cisco_xr", "route"): parse_xr_route,
     ("cisco_xr", "interface"): parse_xr_interface,
+    ("cisco_xr", "logging"): parse_xr_logging,
 }
 
 # Fields that move on their own between two captures of an unchanged device --
@@ -980,6 +1174,11 @@ TEMPLATE_VOLATILE_FIELDS: dict[tuple[str, str], frozenset[str]] = {
             "total_output_drops",
         }
     ),
+    # The log window itself moves on every capture of a healthy device: more
+    # entries arrive, the oldest ones scroll out of the last-N buffer, and
+    # the dropped-message counter is live device state -- none of the three
+    # are a signal about what changed in the *content* of the log.
+    ("cisco_xr", "logging"): frozenset({"lines", "window_start", "window_end", "messages_dropped"}),
 }
 
 # The field identifying a record across two captures. ``None`` means records
@@ -988,6 +1187,18 @@ TEMPLATE_RECORD_KEYS: dict[tuple[str, str], str | None] = {
     ("cisco_xr", "bgp_neighbor"): "address_family",
     ("cisco_xr", "route"): "next_hop",
     ("cisco_xr", "interface"): "counter",
+    # Deliberately None, not "timestamp". A log entry has no stable identity
+    # across two captures: it is an append-only stream, not a set of named
+    # objects like an address family or a next hop. Two captures of the same
+    # device share history but the set of entries only grows -- there is no
+    # meaningful way to match "this record in capture A" to "this record in
+    # capture B" by any field, timestamp included (a duplicate device
+    # timestamp is not even guaranteed unique, per discovery-loki.md's
+    # duplication finding). None is this contract's documented way to say
+    # "positional, cannot be matched by identity" -- do not "fix" this to
+    # "timestamp"; that would make diff_evidence produce nonsense (every
+    # entry in a newer, longer window would misalign against the older one).
+    ("cisco_xr", "logging"): None,
 }
 
 

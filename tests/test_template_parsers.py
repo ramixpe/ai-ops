@@ -851,3 +851,211 @@ def test_interface_unrecognised_line_surfaces_in_unaccounted_lines():
 
     assert status is tp.PARSE_OK
     assert parsed["meta"]["unaccounted_lines"] == ["Some New Vendor Field: 42"]
+
+
+# --------------------------------------------------------------------------- #
+# T-015: the logging parser
+# --------------------------------------------------------------------------- #
+
+_LOGGING_FIXTURES = sorted(FIXTURE_DIR.glob("cisco_xr/*/healthy/show-logging-last-200.txt"))
+
+# Every key the T-015 spec's meta table requires, present in every case --
+# ``None`` where not applicable, never absent.
+_LOGGING_META_KEYS = (
+    "lines",
+    "window_start",
+    "window_end",
+    "syslog_enabled",
+    "messages_dropped",
+    "console_level",
+    "monitor_level",
+    "trap_level",
+    "buffer_level",
+    "logging_to",
+    "buffer_size_bytes",
+)
+
+
+def test_at_least_one_logging_fixture_per_device_is_on_disk():
+    """A sanity check on the parametrization source below.
+
+    If this ever fails, the round-trip test below would be silently
+    parametrized over an empty or lopsided list -- worth failing loudly on
+    its own rather than only as a mysteriously-shrunk parametrize count.
+    """
+
+    assert len(_LOGGING_FIXTURES) == 9  # one per device
+
+
+@pytest.mark.parametrize("fixture_path", _LOGGING_FIXTURES, ids=lambda p: str(p.relative_to(FIXTURE_DIR)))
+def test_every_committed_logging_fixture_round_trips_clean(fixture_path: Path):
+    """Section 0.10, pinned against every real fixture on disk.
+
+    Discovered from the filesystem rather than a hardcoded list, so a future
+    ``nettools capture`` run that adds a device is covered automatically
+    instead of silently going unchecked. All 200 entries per fixture must be
+    captured as records -- none dropped, none left unaccounted.
+    """
+
+    raw = fixture_path.read_text()
+    parsed, status = tp.parse_template_output("cisco_xr", "logging", raw)
+    assert status is tp.PARSE_OK, f"{fixture_path}: {status}"
+    assert parsed["meta"]["unaccounted_lines"] == [], f"{fixture_path}: {parsed['meta']['unaccounted_lines']}"
+    assert parsed["meta"]["unparsed_rows"] == 0
+    assert len(parsed["records"]) == 200
+
+
+def test_the_mnemonic_splits_into_facility_severity_and_code():
+    """The whole point of T-015: a lookup table keyed on facility+code, or on
+    the full mnemonic, must both be possible. The full mnemonic is stored
+    without its leading '%'."""
+
+    raw = _load_fixture("cisco_xr", "PE2", "healthy", "show-logging-last-200.txt")
+    parsed, status = tp.parse_template_output("cisco_xr", "logging", raw)
+    assert status is tp.PARSE_OK
+
+    record = next(
+        r for r in parsed["records"] if r["mnemonic"] == "SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL"
+    )
+    assert record["facility"] == "SECURITY-SSHD_SYSLOG_PRX"
+    assert record["severity"] == "6"
+    assert record["code"] == "INFO_GENERAL"
+    assert not record["mnemonic"].startswith("%")
+
+
+def test_severity_across_the_real_corpus_is_exactly_what_stage_2_can_route_on():
+    """Stage 2 routes an event to a flow by looking the mnemonic up in a
+    table -- that only works as a deterministic lookup if the severities
+    actually observed on this fabric are the small, fixed set discovery-loki.md
+    found (T-004): 3, 6, and 7. This pins that guarantee against all 1800
+    entries across all 9 devices, not just one fixture."""
+
+    severities: set[str] = set()
+    for fixture_path in _LOGGING_FIXTURES:
+        raw = fixture_path.read_text()
+        parsed, status = tp.parse_template_output("cisco_xr", "logging", raw)
+        assert status is tp.PARSE_OK
+        severities.update(r["severity"] for r in parsed["records"])
+
+    assert severities == {"3", "6", "7"}
+
+
+def test_trap_level_and_collector_address_are_the_obs_041_evidence():
+    """The evidence that diagnosed OBS-041: the trap level is
+    'informational' while only severities 3 and 4 ever reach the log
+    collector, which is how the drop was known to be downstream of the
+    device rather than on it. Pinned so a future parser change cannot
+    quietly lose either field."""
+
+    raw = _load_fixture("cisco_xr", "PE1", "healthy", "show-logging-last-200.txt")
+    parsed, status = tp.parse_template_output("cisco_xr", "logging", raw)
+    assert status is tp.PARSE_OK
+    assert parsed["meta"]["trap_level"] == "informational"
+    assert parsed["meta"]["logging_to"] == "172.20.250.101"
+
+
+@pytest.mark.parametrize("fixture_path", _LOGGING_FIXTURES, ids=lambda p: str(p.relative_to(FIXTURE_DIR)))
+def test_every_logging_meta_key_is_present(fixture_path: Path):
+    """Every key in the T-015 meta table, present -- ``None`` rather than
+    absent, so a consumer never has to distinguish 'missing' from 'not
+    applicable'."""
+
+    raw = fixture_path.read_text()
+    parsed, status = tp.parse_template_output("cisco_xr", "logging", raw)
+    assert status is tp.PARSE_OK
+    for key in _LOGGING_META_KEYS:
+        assert key in parsed["meta"], f"{fixture_path}: missing {key}"
+
+
+def test_logging_record_key_is_none_because_entries_have_no_stable_identity():
+    """A log entry is part of an append-only stream, not a set of named
+    objects: two captures share history but the set of entries only grows.
+    ``None`` is the contract's documented way to say 'positional, cannot be
+    matched by identity' -- do not 'fix' this to 'timestamp', which would
+    make diff_evidence produce nonsense."""
+
+    assert tp.template_record_key("cisco_xr", "logging") is None
+
+
+def test_logging_volatile_fields_are_the_four_that_move_on_every_capture():
+    volatile = tp.template_volatile_fields("cisco_xr", "logging")
+    assert {"lines", "window_start", "window_end", "messages_dropped"} <= volatile
+
+
+def test_logging_garbage_input_raises_parse_error_and_reports_parse_failed():
+    """Something clearly not logging output must not be silently accepted."""
+
+    garbage = "lorem ipsum\nnot a logging response"
+
+    with pytest.raises(tp.ParseError):
+        tp.parse_xr_logging(garbage)
+
+    parsed, status = tp.parse_template_output("cisco_xr", "logging", garbage)
+    assert parsed is None
+    assert status is tp.PARSE_FAILED
+
+
+def test_a_malformed_log_entry_increments_unparsed_rows_not_unaccounted_lines():
+    """Proves the two counters are actually distinct: a line whose outer
+    shape (node/timestamp/process[pid]) the template recognises, but whose
+    mnemonic does not split into facility-severity-code, is a *known* shape
+    with malformed content -- not an *unknown* line. It must therefore be
+    consumed (never surface in unaccounted_lines) while still incrementing
+    unparsed_rows, and it must not produce a record."""
+
+    raw = _load_fixture("cisco_xr", "PE2", "healthy", "show-logging-last-200.txt")
+    mangled = raw.replace(
+        "%SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL",
+        "%SECURITY_SSHD_SYSLOG_PRX_SIX_INFO_GENERAL",
+        1,
+    )
+    assert mangled != raw  # the replacement actually happened
+
+    parsed, status = tp.parse_template_output("cisco_xr", "logging", mangled)
+
+    assert status is tp.PARSE_OK
+    assert parsed["meta"]["unparsed_rows"] >= 1
+    assert parsed["meta"]["unaccounted_lines"] == []
+    assert len(parsed["records"]) == 199
+    assert not any(
+        r["mnemonic"] == "SECURITY_SSHD_SYSLOG_PRX_SIX_INFO_GENERAL" for r in parsed["records"]
+    )
+
+
+def test_logging_truncated_output_does_not_raise_and_still_accounts_cleanly():
+    """The header block alone, with no entries below it -- a real shape
+    (a fresh device, or a capture cut off right after the header). Must not
+    raise, and whatever is captured must still satisfy the 0.10 accounting."""
+
+    raw = _load_fixture("cisco_xr", "PE1", "healthy", "show-logging-last-200.txt")
+    header_only = "\n".join(
+        line
+        for line in raw.splitlines()
+        if not line.strip().startswith("RP/0/RP0/CPU0:")
+    )
+
+    parsed, status = tp.parse_template_output("cisco_xr", "logging", header_only)
+
+    assert status is tp.PARSE_OK
+    assert parsed["meta"]["unaccounted_lines"] == []
+    assert parsed["meta"]["unparsed_rows"] == 0
+    assert parsed["records"] == []
+    assert parsed["meta"]["lines"] == "0"
+    assert parsed["meta"]["trap_level"] == "informational"
+
+
+def test_logging_unrecognised_line_surfaces_in_unaccounted_lines():
+    """The 0.10 guardrail: a line the template cannot know about must be
+    surfaced, not silently swallowed. Proves the accounting is not
+    decorative."""
+
+    raw = _load_fixture("cisco_xr", "PE1", "healthy", "show-logging-last-200.txt")
+    injected = raw.replace(
+        "Log Buffer (4194303 bytes):",
+        "Log Buffer (4194303 bytes):\nSome New Vendor Field: 42",
+    )
+
+    parsed, status = tp.parse_template_output("cisco_xr", "logging", injected)
+
+    assert status is tp.PARSE_OK
+    assert parsed["meta"]["unaccounted_lines"] == ["Some New Vendor Field: 42"]

@@ -863,6 +863,29 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-045 · T-015 · The `logging` parser discards nothing — and the Stage 2 routing key is verified against 1,800 real entries
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5 (judgement) · sonnet-5 (implementation)
+- **What happened:** Accepted with no correction. **804 passed.** All 9 fixtures round-trip with `unaccounted_lines == []` and `unparsed_rows == 0`, 200 records each.
+
+  **`LOGGING_IGNORES` is empty — the only parser so far that declares no ignores at all.** That is not an omission, it is the strongest possible §0.10 outcome: every one of the 208 non-blank lines per file is *consumed* into either `meta` or a record. Nothing about this command's output is discarded. It also makes the accounting maximally sensitive — with no ignore rules to absorb anything, any future vendor line surfaces immediately. Verified by mutation: an injected header field appears in `unaccounted_lines`.
+
+  **The Stage 2 routing key is sound.** `mnemonic.rsplit("-", 2)` rather than a left-anchored regex, because the facility half legitimately contains hyphens (`SECURITY-SSHD_SYSLOG_PRX`, `PKT_INFRA-PQMON`) while the code half never does. I checked this the only way worth checking it — recomposing `facility-severity-code` back into the original mnemonic **for all 1,800 records across all 9 fixtures: 0 mismatches.** Severities are exactly `{"3", "6", "7"}`, matching the survey.
+
+  This is what makes D5's growth claim real: a Stage 2 trigger table can key on the full mnemonic or on `facility`+`code`, and both are now available as clean fields rather than as substring arithmetic at lookup time.
+- **Evidence:** Sample record: `{"timestamp": "Aug 14 08:21:51.298 UTC", "node": "RP/0/RP0/CPU0", "process": "ssh_syslog_proxy", "pid": "1191", "mnemonic": "SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL", "facility": "SECURITY-SSHD_SYSLOG_PRX", "severity": "6", "code": "INFO_GENERAL", "text": "sshd[55923]: Accepted authentication for clab ..."}`. `record_key = None`, volatile = `{lines, messages_dropped, window_start, window_end}`.
+- **What I did:** Accepted. Three things worth recording beyond the pass:
+
+  1. **`record_key` is deliberately `None`.** A log is an append-only stream with no stable per-record identity — two captures share history but the set grows, so matching records by identity would make `diff_evidence` produce nonsense. The contract's documented meaning of `None` is "positional, cannot be matched by identity", and that is exactly right here. It is commented in place, because `timestamp` looks like an obvious key and is not one.
+  2. **`unparsed_rows` is now demonstrably distinct from `unaccounted_lines`**, which no earlier parser had shown. A line matching the entry envelope but with a mnemonic that will not split increments `unparsed_rows` *and* is marked consumed, so it never also appears as unaccounted. "The template knows what this should be and it did not fit" and "the template does not know what this is" are finally two different, separately observable states rather than a distinction stated only in the docstring.
+  3. **The OBS-041 evidence is now pinned by a test.** `trap_level == "informational"` and `logging_to == "172.20.250.101"` hold on **every** fixture, not just one. That fact is what re-scoped backlog item B-206a, and a future parser change can no longer quietly lose it.
+- **Needs human review:** no
+- **Blocks:** none — unblocks T-016.
+
+---
+
 <!--
 Copy this block for each new entry.
 
