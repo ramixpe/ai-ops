@@ -1635,6 +1635,8 @@ Copy this block for each new entry.
   The generalisation worth carrying:
 
   > **A source that filters what it delivers does not return less of the truth. It returns a different, complete-looking truth.**
+
+- **Generalised 2026-08-16 (round 2, OBS-089).** That statement is about *one instance* of the shape and it reads as a claim about data pipelines. It is not. **Shape 6 is a property of inference from partial evidence; tools have nothing to do with it.** Four instances now, only one involving a filter: the Loki severity drop (here), a hand diagnosis reading a transit next-hop as a destination owner (OBS-089), a developer's own successful runs answering *"does this work in my environment"* when the question was *"does this work with nothing"* (OBS-072), and reading a device's trap level to describe what its buffer holds. **Two of the four are human inferences with no tool involved, and one occurred in a hand diagnosis written specifically to be an independent check on a tool.** The general form is in `BUILD-PLAN.md` §0.13: the evidence is real, correctly read, and **answers a different question than the one being asked of it.**
 - **Needs human review:** no
 - **Blocks:** none
 
@@ -2277,6 +2279,42 @@ finding, not a diagnostic error.
   **On the caveat itself, fairly.** It was hedged with an explicit "if so" and an explicit falsification condition, which is the correct way to record an uncertainty and is why it cost nothing. But the mechanism is worth naming: the next-hop address was **real, correctly read, and about a different thing** — a transit neighbour mistaken for a destination owner. That is silent-failure shape 6 (§0.13, OBS-071), occurring in a human hand diagnosis rather than in a log query. The shape is not a property of tools.
 - **Needs human review:** no — but B-427 gains a requirement
 - **Blocks:** none
+
+---
+
+## OBS-090 · round 2 · Two operator corrections, and what each one relocated
+
+- **Kind:** insight
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** Two corrections from round 2, both the operator's own, and both **relocate** a finding rather than fix it — which is §0.14's shape again: the original statements were true and filed under the wrong thing.
+
+  **1. Shape 6 is not about sources.** It was first recorded from a log-platform instance (OBS-071) and framed as *"a source that filters what it delivers returns a different, complete-looking truth"*. True, and it reads as a data-pipeline concern. **The general form is inference from partial evidence.** Four instances now, two of them human, and one — OBS-089 — occurring inside a hand diagnosis written specifically to be an independent check on a tool.
+
+  Relocating it changed what the fix is scoped to. `evidence-reduction.md` §7 now states plainly that **coverage metadata closes the source-side instance and no other**: it can state what a source could not have carried, and it cannot state that a correctly-read value is being asked the wrong question. A reader who took "coverage metadata solves shape 6" from that section would have taken the wrong lesson, and the section previously invited it.
+
+  **2. The resolver finding is a corpus-design defect, not a system defect.** I had recorded it as an observation about round 2. It is a **binding requirement on B-427**, now stated verbatim in the item: *a trial tests resolution only if the wrongly-resolved device differs in observable state from the correctly-resolved one.* The difference matters because the first framing invites "we should watch for that" and the second forbids constructing a trial that cannot fail.
+- **Evidence:** `BUILD-PLAN.md` §0.13; `evidence-reduction.md` §7; `chaos-harness.md` §6.1a; `BACKLOG.md` B-426/B-427.
+- **What I did:** Recorded both, and two things that follow from them.
+
+  **The hedging rule is now a protocol property**, in `chaos-harness.md` §6.1a rather than in a round writeup:
+
+  > **A hand diagnosis may include an alternative reading only if it states what would refute it. An uncertainty with a falsification condition is evidence; the same uncertainty without one is a second opinion that arrives too late to be independent.**
+
+  Round 2's caveat was wrong and cost nothing, because it named the condition that would refute it and that condition then fired. An unhedged version would have stood as a competing diagnosis with no stated way to settle it — and settling it after seeing the agent's output is precisely the judgement the blind protocol protects. The rule already applies on the agent's side (OBS-082's prediction lists what would falsify it); it is now symmetric.
+
+  **The opposite-pressure observation is now the stated reason for the sequence**, in B-426 rather than as a remark:
+
+  | | What the walk had to do |
+  |---|---|
+  | Round 1 | **descend past** a healthy rung to a broken one below |
+  | Round 2 | **not descend into** three healthy rungs, and report a cause above them |
+
+  A walk that stopped at the first broken rung passes round 2 and fails round 1. A walk that always reported the deepest evaluated rung passes round 1 and fails round 2. **Neither defect is distinguishable from correct behaviour by four rounds on one rung** — that is one data point sampled four times. Each round is now chosen for the *pressure it puts on the rule*, which is a sharper criterion than "different rungs" and happens to produce the same schedule.
+
+  **Round 3 gains a second purpose.** The operator will run it on a device that has not been a subject yet, *partly to give the resolver something it could get wrong*. Recorded in B-426's round table, because it is the first round designed to satisfy B-427's new requirement rather than to hit a rung.
+- **Needs human review:** no
+- **Blocks:** none — round 3 next.
 
 ---
 

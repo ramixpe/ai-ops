@@ -302,6 +302,10 @@ That is why no consistency check can catch it — there is nothing inconsistent 
 
 Recorded as the sixth silent-failure shape in `BUILD-PLAN.md` §0.13, and the only one whose polarity is presence rather than absence.
 
+**One correction to how that reads.** A filtered source is *an instance* of the shape, not its definition — §0.13 now states the general form, which is **inference from partial evidence**, and lists four instances of which only this one involves a filter. Another is a hand diagnosis reading a transit next-hop as a destination owner (OBS-089); another is a developer's own successful test runs answering *"does this work in my environment"* when the question was *"does this work with nothing"* (OBS-072).
+
+That matters here because it bounds what coverage metadata can do. **Coverage closes the source-side instance and no other.** It states what a source could not have carried; it cannot state that a correctly-read value is being asked the wrong question. For the source axis it is the right and sufficient answer — but a reader who takes "coverage metadata solves shape 6" away from this section has taken the wrong lesson.
+
 Every evidence response carries coverage:
 
 ```json

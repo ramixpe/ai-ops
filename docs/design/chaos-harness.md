@@ -279,6 +279,24 @@ A single accuracy figure hides the thing worth knowing: **whether failures clust
 
 **Step 6 commits before step 9 reveals.** Ordering must be verifiable, not asserted.
 
+### 6.1a The hand diagnosis, and hedging
+
+The comparison diagnosis is written by a human, before the agent runs, and committed before the agent runs (OBS-076). Two rules govern its content, the second learned from round 2.
+
+**It is recorded verbatim and not evaluated before the run.** No commentary, no assessment, no "this looks right". The point of committing it is that the ordering becomes a fact in git history rather than a claim in a document.
+
+**An alternative reading may be included only if it states what would refute it.**
+
+Round 2's diagnosis carried a caveat — that the subject address might belong to a different device than the resolver would pick — and it was **wrong**. The next-hop it reasoned from was real and correctly read; it was the transit neighbour, not the destination owner (OBS-089, silent-failure shape 6, occurring in a hand diagnosis).
+
+**It cost nothing, and the reason it cost nothing is the protocol property worth keeping.** It was hedged with an explicit *"if so"*, and it named its own falsification condition: *"if the agent finds every rung healthy and reports `all_layers_healthy`, that mismatch is the finding."* The agent found two broken rungs. The condition fired, the caveat was discharged in one step, and the trial was unaffected.
+
+**An unhedged version of the same inference would have contaminated the round.** It would have stood as a competing diagnosis with no stated way to settle it, and settling it *after* seeing the agent's output is exactly the judgement the blind protocol exists to protect.
+
+> **A hand diagnosis may include an alternative reading only if it states what would refute it. An uncertainty with a falsification condition is evidence; the same uncertainty without one is a second opinion that arrives too late to be independent.**
+
+This applies to the agent's side too, and already does: OBS-082 records the round-4 prediction with an explicit list of what would falsify it, written before the round.
+
 ### 6.2 Propagation is protocol-timed
 
 Wait bounds come from protocol timers, never from intuitions about "at the same time":

@@ -337,13 +337,26 @@ A different taxonomy, and worth keeping beside the family: these are the *sympto
 | 3 | A guardrail passing over an empty set | §0.12 |
 | 4 | A rule generalised from one instance | OBS-021, OBS-062, OBS-063, OBS-069 |
 | 5 | A test agreeing with the code by construction | OBS-064 |
-| 6 | **Wrong evidence read as right evidence** | **OBS-071** |
+| 6 | **Wrong evidence read as right evidence** | OBS-071, OBS-072, OBS-089, and the buffer/trap trap |
 
-**Shape 6 is new and is not a variant of the others.** Shapes 1–5 are all *absence* presented as presence: something was not measured and the gap is invisible. Shape 6 is *presence of the wrong thing*: the evidence is real, correctly timestamped, internally consistent — and about a different event.
+**Shape 6 is not a variant of the others.** Shapes 1–5 are all *absence* presented as presence: something was not measured and the gap is invisible. Shape 6 is *presence of the wrong thing* — the evidence is real, correctly read, internally consistent, and **answers a different question than the one being asked of it.**
 
-The measured instance: querying the log platform for PE2's isolation window returns two genuine severity-3 `PKT_INFRA-LINK-3-UPDOWN` records **from the previous day's restore**, and nothing from the isolation. Not an empty result. A plausible, non-empty, confidently wrong one.
+> **Shape 6 is a property of inference from partial evidence, not a property of filtered sources. Tools have nothing to do with it.**
 
-An empty result is honest and visibly incomplete. A partial result is neither, and **nothing downstream can detect it** — every consistency check it could face, it passes. Only coverage metadata (§7 of `evidence-reduction.md`, T-029a) makes it visible, by stating what the source could not have carried.
+That correction is worth the space, because the shape was first filed from a log-platform instance and reads as a data-pipeline concern. It is not. Four instances, only one of which involves a filter:
+
+| Instance | The evidence | The question it actually answered | The question being asked |
+|---|---|---|---|
+| **OBS-071** — Loki severity filter | two genuine severity-3 link events | *what happened that the platform carries* | what happened |
+| **OBS-089** — the loopback caveat | `10.0.1.17`, a correct next-hop | *which neighbour is the transit hop* | which device owns the destination |
+| **OBS-072** — the `.env` contamination | a dozen successful manual runs | *does this work in my environment* | does this work with nothing |
+| buffer vs trap level | `Trap logging: informational` | *what is shipped to the collector* | what does the buffer hold |
+
+Two of those four are human inferences with no tool involved, and one — OBS-089 — occurred in a hand diagnosis written specifically to be an independent check on a tool.
+
+**Why nothing downstream detects it.** Every consistency check it could face, it passes: the data is real, the timestamps are ordered, the address is correctly formatted, the runs genuinely succeeded. An empty result announces its own incompleteness; a *wrong-question* result does not. The only defences are stating what the source could not have carried (coverage metadata, T-029a) and, for the human case, the hedging protocol in `chaos-harness.md` §6.
+
+Note the relationship to §0.13's **setup** face without collapsing them: they are orthogonal axes. The faces classify *what the evidence could not show you*; the shapes classify *what the failure looks like*. OBS-072 appears under both, and that is correct rather than duplication.
 
 ---
 
