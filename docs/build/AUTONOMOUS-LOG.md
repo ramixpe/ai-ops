@@ -32,6 +32,7 @@ Purpose: a running record of **what was done, what was asked, and what was answe
 | Item | Outcome | Tests | Notes |
 |---|---|---|---|
 | — | session opened | 1391 | 64 backlog items; 13 defect-class targeted |
+| **B-434** | ✅ closed | 1446 | 74 ignore rules classified; **15 deferred** and now visible. `NOT_NEEDED_YET` vs `NO_EXTRACTABLE_FIELD` |
 | **B-432** | ✅ closed | 1442 | Option A, with **no new command**: the TCP signal was already in `show bgp neighbor`, filed as two `IgnoreRule`s. `cause_not_localised` reachable. Surfaced **B-434** |
 | **B-425** | ✅ closed | 1436 | Live: 1 call, **2,286 tokens**. T-033's character proxy (~5k) was ~2× the real figure |
 | **B-423** | ✅ closed | 1432 | `unshare` unavailable in this sandbox, so isolation is **announced not assumed**. All 7 assertions dry-run locally in an empty env |

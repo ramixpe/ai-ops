@@ -185,3 +185,96 @@ def test_every_diagnostic_template_is_covered_by_the_audit():
     assert used <= set(SOURCES), (
         f"templates used by a flow but absent from the audit: {sorted(used - set(SOURCES))}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# B-434 -- the other reservoir: lines never parsed at all
+# --------------------------------------------------------------------------- #
+
+
+#: Ignore rules whose line carries something real that no check has needed yet.
+#: Pinned by count and by reason so the set is a reviewed decision, not a drift.
+#:
+#: B-432's TCP signal spent the whole build in a rule labelled "socket
+#: bookkeeping" -- correctly declared, and filed as though the decision were
+#: permanent when it was only unexamined (OBS-100).
+EXPECTED_DEFERRED = 15
+
+
+def _ignore_rules():
+    from agent_nettools import template_parsers
+
+    return [
+        (name.replace("_IGNORES", "").lower(), rule)
+        for name in dir(template_parsers)
+        if name.endswith("_IGNORES")
+        for rule in getattr(template_parsers, name)
+    ]
+
+
+def test_every_ignore_rule_declares_which_kind_of_decision_it_is():
+    """§0.10 required them declared. B-434 requires them *classified*.
+
+    "This line has nothing in it" and "nobody has needed this line yet" are
+    different decisions, and only the first should be permanent.
+    """
+
+    from agent_nettools.template_parsers import IgnoreKind
+
+    rules = _ignore_rules()
+    assert len(rules) >= 70, "the corpus of ignore rules should not have shrunk"
+    for _, rule in rules:
+        assert isinstance(rule.kind, IgnoreKind)
+        assert rule.reason, "and every one still states why"
+
+
+def test_the_deferred_set_is_the_reviewed_one():
+    """The audit's second half, held as a number like the first.
+
+    Failing here means a rule changed kind. That is either someone promoting a
+    deferred line into a parsed field -- good, decrement it -- or someone
+    marking a new line deferred, which should be a deliberate note rather than
+    a default.
+    """
+
+    from agent_nettools.template_parsers import IgnoreKind
+
+    deferred = [(t, r) for t, r in _ignore_rules() if r.kind is IgnoreKind.NOT_NEEDED_YET]
+
+    assert len(deferred) == EXPECTED_DEFERRED, (
+        f"{len(deferred)} deferred ignore rules, expected {EXPECTED_DEFERRED}:\n  "
+        + "\n  ".join(f"{t}: {r.reason[:70]}" for t, r in deferred)
+    )
+
+
+def test_the_deferred_ones_are_the_diagnostic_ones():
+    """Spot-checks, so the classification is not just a label.
+
+    Each of these carries a signal a check could plausibly want, and each is
+    currently unread: a duplex mismatch, a slow peer, a policy denying every
+    prefix, a session flapping, an interface up but carrying nothing.
+    """
+
+    from agent_nettools.template_parsers import IgnoreKind
+
+    deferred = " ".join(
+        r.pattern for _, r in _ignore_rules() if r.kind is IgnoreKind.NOT_NEEDED_YET
+    )
+
+    for signal in ("Full-duplex", "Slow Peer State", "prefixes denied",
+                   "Connections established", "reliability", "minute input rate"):
+        assert signal in deferred, f"{signal!r} should be classified as deferred"
+
+
+def test_the_permanent_ones_really_are_structural():
+    """The other direction, so `NO_EXTRACTABLE_FIELD` is not a dumping ground."""
+
+    from agent_nettools.template_parsers import IgnoreKind
+
+    permanent = " ".join(
+        r.pattern for _, r in _ignore_rules() if r.kind is IgnoreKind.NO_EXTRACTABLE_FIELD
+    )
+
+    for header in ("Neighbor capabilities:", "Routing Descriptor Blocks",
+                   "Notification data sent:", "Redist Advertisers:"):
+        assert header in permanent, f"{header!r} is a section header, not deferred content"

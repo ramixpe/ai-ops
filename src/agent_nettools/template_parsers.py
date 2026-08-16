@@ -64,6 +64,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
 from ttp import ttp
@@ -111,6 +112,31 @@ __all__ = [
 # --------------------------------------------------------------------------- #
 
 
+class IgnoreKind(Enum):
+    """Why a line is skipped -- and whether that decision is permanent.
+
+    B-434. §0.10 requires every ignored line to be *declared*, which it always
+    was. What was never recorded is **which kind of decision each one is**:
+
+    * `NO_EXTRACTABLE_FIELD` -- the line carries nothing a check could use: a
+      section header, a capability flag, a counter with no diagnostic meaning.
+      Permanent.
+    * `NOT_NEEDED_YET` -- the line carries something real that **no check has
+      needed so far**. Deferred, not settled, and a candidate the next time a
+      check needs a signal.
+
+    The distinction is not academic. B-432's TCP signal spent the whole build in
+    an `IgnoreRule` labelled *"socket bookkeeping"* -- correctly declared, and
+    filed as though the decision were permanent when it was only unexamined
+    (OBS-100). **§0.10's ignore rules are shape 7's other reservoir**: B-433's
+    audit compares parsed fields against read fields, and cannot see a line that
+    was never parsed at all.
+    """
+
+    NO_EXTRACTABLE_FIELD = "no-extractable-field"
+    NOT_NEEDED_YET = "not-needed-yet"
+
+
 @dataclass(frozen=True)
 class IgnoreRule:
     """A declared reason for a line to be absent from the parsed result.
@@ -123,6 +149,9 @@ class IgnoreRule:
 
     pattern: str
     reason: str
+    #: Defaults to permanent. Mark `NOT_NEEDED_YET` when the line has real
+    #: content and simply has no consumer yet.
+    kind: IgnoreKind = IgnoreKind.NO_EXTRACTABLE_FIELD
 
     def matches(self, line: str) -> bool:
         return re.match(self.pattern, line) is not None
@@ -280,12 +309,11 @@ BGP_NEIGHBOR_IGNORES: tuple[IgnoreRule, ...] = (
     IgnoreRule(r"^Cluster ID \S+$", "route-reflector cluster ID, present only on the RR's own view of a client"),
     IgnoreRule(r"^Last Received Message: \S+$", "last BGP message type received, not required by the schema"),
     IgnoreRule(r"^NSR State: .+$", "non-stop routing state detail, not required by the schema"),
-    IgnoreRule(r"^BFD enabled \(.+\)$", "BFD session detail, not required by the schema"),
-    IgnoreRule(r"^Last read \S+, Last read before reset \S+$", "read-activity timestamps, volatile bookkeeping"),
+    IgnoreRule(r"^BFD enabled \(.+\)$", "BFD session detail, not required by the schema", kind=IgnoreKind.NOT_NEEDED_YET),
+    IgnoreRule(r"^Last read \S+, Last read before reset \S+$", "read-activity timestamps, volatile bookkeeping", kind=IgnoreKind.NOT_NEEDED_YET),
     IgnoreRule(
         r"^Configured hold time: \d+, keepalive: \d+, min acceptable hold time: \d+$",
-        "configured (not negotiated) timers restated; the negotiated 'Hold time is' line is captured instead",
-    ),
+        "configured (not negotiated) timers restated; the negotiated 'Hold time is' line is captured instead", kind=IgnoreKind.NOT_NEEDED_YET),
     # Write-pulse bookkeeping: several generations of internal "last write"
     # diagnostics IOS-XR logs for the TCP session, none needed by the schema.
     IgnoreRule(r"^Last write \S+, attempted \d+, written \d+$", "write-pulse bookkeeping"),
@@ -322,9 +350,9 @@ BGP_NEIGHBOR_IGNORES: tuple[IgnoreRule, ...] = (
     IgnoreRule(r"^NEXT_HOP is always this router$", "next-hop-self policy detail, not required by the schema"),
     IgnoreRule(r"^Extended Nexthop Encoding: .+$", "negotiated capability, not required by the schema"),
     IgnoreRule(r"^Route refresh request: received \d+, sent \d+$", "route-refresh counters, not in the schema"),
-    IgnoreRule(r"^Exact no\. of prefixes denied\s*:\s*\d+\.$", "prefix-denial counter, not required by the schema"),
-    IgnoreRule(r"^Cumulative no\. of prefixes denied:\s*\d+\.$", "prefix-denial counter, not required by the schema"),
-    IgnoreRule(r"^Prefix advertised \d+, suppressed \d+, withdrawn \d+$", "advertised-prefix counters, not in the schema"),
+    IgnoreRule(r"^Exact no\. of prefixes denied\s*:\s*\d+\.$", "prefix-denial counter, not required by the schema", kind=IgnoreKind.NOT_NEEDED_YET),
+    IgnoreRule(r"^Cumulative no\. of prefixes denied:\s*\d+\.$", "prefix-denial counter, not required by the schema", kind=IgnoreKind.NOT_NEEDED_YET),
+    IgnoreRule(r"^Prefix advertised \d+, suppressed \d+, withdrawn \d+$", "advertised-prefix counters, not in the schema", kind=IgnoreKind.NOT_NEEDED_YET),
     IgnoreRule(r"^AIGP is enabled$", "AIGP attribute flag, not required by the schema"),
     IgnoreRule(r"^An EoR was( not)? received during read-only mode$", "end-of-RIB marker, not required by the schema"),
     IgnoreRule(r"^Last ack version \d+, Last synced ack version \d+$", "version bookkeeping, not required by the schema"),
@@ -335,11 +363,11 @@ BGP_NEIGHBOR_IGNORES: tuple[IgnoreRule, ...] = (
         r"^Advertise routes with local-label via Unicast SAFI$",
         "label-advertisement flag (IPv4 Unicast only), not required by the schema",
     ),
-    IgnoreRule(r"^Slow Peer State: \S+$", "slow-peer detection header, not required by the schema"),
-    IgnoreRule(r"^Detected state: \S+, Detection threshold: \d+$", "slow-peer detection detail"),
-    IgnoreRule(r"^Detection Count: \d+, Recovery Count: \d+$", "slow-peer detection detail"),
+    IgnoreRule(r"^Slow Peer State: \S+$", "slow-peer detection header, not required by the schema", kind=IgnoreKind.NOT_NEEDED_YET),
+    IgnoreRule(r"^Detected state: \S+, Detection threshold: \d+$", "slow-peer detection detail", kind=IgnoreKind.NOT_NEEDED_YET),
+    IgnoreRule(r"^Detection Count: \d+, Recovery Count: \d+$", "slow-peer detection detail", kind=IgnoreKind.NOT_NEEDED_YET),
     # Tail bookkeeping after the last address-family section.
-    IgnoreRule(r"^Connections established \d+; dropped \d+$", "connection-attempt counters, not in the schema"),
+    IgnoreRule(r"^Connections established \d+; dropped \d+$", "connection-attempt counters, not in the schema", kind=IgnoreKind.NOT_NEEDED_YET),
     IgnoreRule(r"^Local host: \S+, Local port: \d+, IF Handle: \S+$", "local TCP endpoint detail, not in the schema"),
     IgnoreRule(r"^Foreign host: \S+, Foreign port: \d+$", "remote TCP endpoint detail, not in the schema"),
     IgnoreRule(
@@ -841,8 +869,7 @@ _COUNTER_LINES: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = (
 INTERFACE_IGNORES: tuple[IgnoreRule, ...] = (
     IgnoreRule(
         r"^reliability (?:\d+/\d+|Unknown), txload (?:\d+/\d+|Unknown), rxload (?:\d+/\d+|Unknown)$",
-        "link-quality/load snapshot, not required by the schema",
-    ),
+        "link-quality/load snapshot, not required by the schema", kind=IgnoreKind.NOT_NEEDED_YET),
     IgnoreRule(
         r"^loopback not set,$",
         "loopback-test state flag on a physical interface; folded onto the Encapsulation "
@@ -850,8 +877,7 @@ INTERFACE_IGNORES: tuple[IgnoreRule, ...] = (
     ),
     IgnoreRule(
         r"^Full-duplex, \S+, \S+, link type is \S+$",
-        "duplex/speed/link-type summary, not required by the schema",
-    ),
+        "duplex/speed/link-type summary, not required by the schema", kind=IgnoreKind.NOT_NEEDED_YET),
     IgnoreRule(
         r"^output flow control is \S+, input flow control is \S+$",
         "flow-control negotiation state, not required by the schema",
@@ -866,20 +892,17 @@ INTERFACE_IGNORES: tuple[IgnoreRule, ...] = (
     ),
     IgnoreRule(
         r"^Last input (?:never|Unknown|\d{2}:\d{2}:\d{2}), output (?:never|Unknown|\d{2}:\d{2}:\d{2})$",
-        "last-input/output activity timestamps; last_link_flapped is the field captured instead",
-    ),
+        "last-input/output activity timestamps; last_link_flapped is the field captured instead", kind=IgnoreKind.NOT_NEEDED_YET),
     IgnoreRule(
         r'^Last clearing of "show interface" counters (?:never|Unknown)$',
         "counter-clear timestamp, not required by the schema",
     ),
     IgnoreRule(
         r"^\d+ minute input rate \d+ bits/sec, \d+ packets/sec$",
-        "5-minute smoothed input rate; the raw packet/byte counters are captured instead",
-    ),
+        "5-minute smoothed input rate; the raw packet/byte counters are captured instead", kind=IgnoreKind.NOT_NEEDED_YET),
     IgnoreRule(
         r"^\d+ minute output rate \d+ bits/sec, \d+ packets/sec$",
-        "5-minute smoothed output rate; the raw packet/byte counters are captured instead",
-    ),
+        "5-minute smoothed output rate; the raw packet/byte counters are captured instead", kind=IgnoreKind.NOT_NEEDED_YET),
     IgnoreRule(
         r"^Input/output data rate is disabled\.$",
         "loopback rate-disabled notice -- a Loopback has no counter block at all -- "
