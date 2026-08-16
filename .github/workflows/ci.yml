@@ -20,3 +20,91 @@ jobs:
         run: ruff check .
       - name: Test
         run: pytest -q
+
+  # B-423. The offline demo's entire value is that it needs nothing, so nothing
+  # is the only environment that tests it.
+  #
+  # `tests/test_cli_investigate.py` already strips the environment with
+  # monkeypatch, which catches the code path. It cannot catch a future
+  # dependency on a file, a socket, or a package that happens to be installed
+  # on a developer's machine -- and that is exactly how the demo broke once
+  # already (OBS-072): every manual check passed because `main()` loads this
+  # repo's `.env`, which holds real credentials. The verification environment
+  # was contaminated by the thing being verified.
+  #
+  # This is §0.13's setup face given a permanent guard. The failure it prevents
+  # is invisible from inside the repository, so the fix has to be an
+  # environment rather than an inspection.
+  offline-demo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install without the LLM extra
+        # Deliberately not ".[dev,llm]". No provider SDK is installed, so an
+        # import of one would fail here rather than succeeding by accident on a
+        # machine that happens to have it.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Prove there is no .env and no credentials
+        run: |
+          test ! -f .env || { echo "a .env exists in a clean checkout"; exit 1; }
+          for v in DEVICE_USERNAME DEVICE_PASSWORD DEVICE_SSH_KEYFILE \
+                   ANTHROPIC_API_KEY OPENAI_API_KEY MINIMAX_API_KEY LLM_PROVIDER; do
+            if [ -n "${!v-}" ]; then echo "$v is set"; exit 1; fi
+          done
+          echo "clean: no .env, no credentials, no API keys"
+
+      - name: Detect whether this runner can isolate the network
+        id: iso
+        # `unshare -rn` gives an empty network namespace. It needs unprivileged
+        # user namespaces, which ubuntu-latest has and some runners do not.
+        # Detected and ANNOUNCED rather than assumed -- a job that silently
+        # stops isolating is the silent-degradation shape this build exists to
+        # remove. The hard no-network guarantee is
+        # `tests/test_end_to_end_offline.py`, which replaces netmiko with a
+        # module that raises; this job's own value is the *environment*.
+        run: |
+          if unshare -rn true 2>/dev/null; then
+            echo "run=unshare -rn" >> "$GITHUB_OUTPUT"
+            echo "network isolation: ON (unshare -rn)"
+          else
+            echo "run=" >> "$GITHUB_OUTPUT"
+            echo "network isolation: OFF -- this runner cannot unshare."
+            echo "Clean-environment checks still apply; no-network is covered"
+            echo "by tests/test_end_to_end_offline.py."
+          fi
+
+      - name: Run the offline demo
+        run: |
+          set -o pipefail
+          ${{ steps.iso.outputs.run }} nettools investigate RR1 10.255.0.12 \
+            --from-fixtures --format table > out.txt 2> err.txt && code=0 || code=$?
+          cat out.txt; echo "--- stderr ---"; cat err.txt
+          test "$code" = "1" || { echo "expected exit 1, got $code"; exit 1; }
+          grep -q "interface_line_down" out.txt
+          grep -q "bgp_session" out.txt
+          grep -q -- "<-- CAUSE" out.txt
+          echo "a named rung and a causal chain, from nothing"
+
+      - name: All three exit codes are reachable
+        run: |
+          ${{ steps.iso.outputs.run }} nettools investigate RR1 10.255.0.12 \
+            --from-fixtures --label healthy --quiet && h=0 || h=$?
+          ${{ steps.iso.outputs.run }} nettools investigate RR1 10.255.0.12 \
+            --from-fixtures --label t0 --quiet && t=0 || t=$?
+          test "$h" = "0" || { echo "healthy: expected 0, got $h"; exit 1; }
+          test "$t" = "2" || { echo "t0: expected 2, got $t"; exit 1; }
+          echo "0 / 1 / 2 all reachable with no lab, no key, no network"
+
+      - name: --format json is consumable on its own
+        run: |
+          ${{ steps.iso.outputs.run }} nettools investigate RR1 10.255.0.12 \
+            --from-fixtures --format json 2>/dev/null \
+            | python -c "import json,sys; assert json.load(sys.stdin)['finding']"
+          echo "json output parses without stripping anything"
