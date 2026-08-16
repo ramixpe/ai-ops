@@ -68,7 +68,7 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 
 | Task | Title | Status | Model | Commit | Findings | Notes |
 |------|-------|--------|-------|--------|----------|-------|
-| T-019 | `checks.py` and `CheckResult` | DONE | opus-5 | _next commit_ | OBS-051 | Contract + "absence is unevaluated" rule. 17 tests, 1047 passed |
+| T-019 | `checks.py` and `CheckResult` | DONE | opus-5 | `1437059` | OBS-051 | Contract + "absence is unevaluated" rule. 17 tests, 1047 passed |
 | T-020 | The five checks | TODO | sonnet-5 | | | Q-005 threshold |
 | T-021 | Agreement test with `health.py` | TODO | sonnet-5 | | | HALT on disagreement |
 | T-022 | `flows.py` registry and dataclasses | TODO | opus-5 | | | contract task |
