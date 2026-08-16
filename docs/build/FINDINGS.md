@@ -2318,6 +2318,53 @@ finding, not a diagnostic error.
 
 ---
 
+## OBS-091 · round 3 · The independent hand diagnosis, recorded before the agent run
+
+- **Kind:** decision-made
+- **Escalation:** NOTE
+- **Model:** — (human operator)
+- **What happened:** Round 3 of the manual injection sequence (track A). Subject `RR1 10.255.0.12`. Fault live, ground truth sealed. Recorded verbatim and committed **before** the agent runs, per the OBS-076 protocol.
+
+  Recorded without comment or evaluation.
+
+```
+---- BEGIN INDEPENDENT DIAGNOSIS (round 3, recorded 16:16 UTC, before agent run) ----
+Rung: bgp_session.  Finding: cause_not_localised.  Device: RR1.
+
+Evidence:
+  - rung 1 broken: 10.255.0.12 is Active on RR1, up/down 00:00:55
+  - rung 3 HEALTHY: /32 via isis CORE, distance 115, metric 20, labeled SR, protected
+    primary via Gi0/0/0/0 plus LFA backup, installed 08:23:01 — unchanged today
+  - rung 4 HEALTHY: RR1 IS-IS to P1/P4 Up 2d22h; PE2 IS-IS to P1/P3 Up 08:23
+  - rung 5 HEALTHY: PE2 physical interfaces all up/up. BV200 is down/down but is a
+    bridge-group virtual interface, not a physical member — EACH_PHYSICAL_INTERFACE
+    should exclude it. Flagging in case it does not.
+  - PE2's own view: 10.255.0.31 is "Idle (Admin)". The neighbour is administratively
+    shut on PE2's side.
+
+Reasoning: the fault is in PE2's configuration, which is a layer the ladder has no rung
+for. Everything the ladder can inspect below rung 1 is genuinely healthy — the path
+exists, the IGP is up, the interfaces are up. Hence cause_not_localised.
+
+Refutation condition: if rung 2 reports broken, the finding is transport_blocked. That
+is a legitimate and arguably more literal outcome, since PE2 is not listening on 179
+while administratively shut. If it lands that way, the finding is that this fault class
+is indistinguishable from round 2's at the rung level — which is itself worth knowing
+and should be scored as a corpus result, not as a diagnostic error.
+---- END INDEPENDENT DIAGNOSIS ----
+```
+
+- **Evidence:** This entry, committed before the agent run. The agent's result is OBS-092.
+- **What I did:** Recorded and committed, before running anything.
+
+  **This diagnosis is the strongest use of the §6.1a hedging rule so far.** It does not merely name a refutation condition — it names the *alternative finding*, argues that the alternative is legitimate rather than an error, and specifies how to score it if it occurs. Both branches are settled in advance, so neither outcome requires a judgement made after seeing the agent's output.
+
+  Two things it commits me to checking regardless of which way the round lands, both recorded here before the run so they cannot be selected after it: **whether `BV200` was excluded from `EACH_PHYSICAL_INTERFACE` and by what rule**, and **what `bgp_transport` actually tested** — since that predicate alone decides between the two candidate findings, and neither is wrong.
+- **Needs human review:** no
+- **Blocks:** none — OBS-092 is the agent run.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**
