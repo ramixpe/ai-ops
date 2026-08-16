@@ -88,6 +88,17 @@ NOT_ATTEMPTED = "not_attempted"
 #: A model call: takes a rendered prompt, returns the model's raw text.
 Analyst = Callable[[str], str]
 
+#: Findings that name no cause, for two different reasons.
+#:
+#: `undetermined` -- the walk stopped, so its lowest broken rung is only "the
+#: lowest rung reached before we stopped", and rendering that as a cause would
+#: present a stopping point as a conclusion.
+#:
+#: `no_fault_on_path` -- rung 1 is healthy, so there is no symptom and nothing
+#: below can be its cause. The broken rungs are real and are **observations**
+#: about the device, not an explanation of anything (B-428).
+_FINDINGS_WITHOUT_A_CAUSE = frozenset({flows.UNDETERMINED, flows.NO_FAULT_ON_PATH})
+
 _FENCE = re.compile(r"^\s*```(?:json)?\s*\n(?P<body>.*?)\n?\s*```\s*$", re.DOTALL)
 
 
@@ -147,7 +158,10 @@ class InvestigationResult:
         """One line. Always available -- the descent needs no model."""
 
         cause = self.descent.cause
-        localised = cause is not None and self.descent.finding != flows.UNDETERMINED
+        localised = (
+            cause is not None
+            and self.descent.finding not in _FINDINGS_WITHOUT_A_CAUSE
+        )
         where = f" on {cause.device}" if localised else ""
         return (
             f"{self.flow} {self.device} -> {self.subject}: "
@@ -173,15 +187,15 @@ class InvestigationResult:
             "flow": self.flow,
             "finding": descent.finding,
             "reason": descent.reason,
-            # Suppressed when the walk did not localise one. `DescentResult.cause`
-            # is "the lowest broken rung", which for an `undetermined` walk is
-            # only "the lowest broken rung reached before we stopped" -- naming
-            # that as a cause would present a stopping point as a conclusion.
+            # Suppressed for the findings that name no cause -- see
+            # `_FINDINGS_WITHOUT_A_CAUSE`. The rungs are still all present under
+            # "rungs", so a broken-but-off-path rung is reported, just not as an
+            # explanation.
             "cause": (
                 {"rung": descent.cause.rung, "device": descent.cause.device,
                  "reason": descent.cause.result.reason}
                 if descent.cause is not None
-                and descent.finding != flows.UNDETERMINED
+                and descent.finding not in _FINDINGS_WITHOUT_A_CAUSE
                 else None
             ),
             "causal_chain": [
@@ -205,10 +219,28 @@ class InvestigationResult:
                 "grounding": self.correlation_grounding.summary(),
                 "caveat": self.caveat,
             },
+            "off_path": list(self.off_path),
             "coverage": self.coverage.as_dict() if self.coverage is not None else None,
             "repairs": list(self.repairs),
             "trustworthy": self.trustworthy,
         }
+
+    @property
+    def off_path(self) -> tuple[dict, ...]:
+        """Broken rungs that are real but explain nothing.
+
+        Only populated for `no_fault_on_path`. They are reported so the run does
+        not read as "nothing was found" -- an interface really is down; it is
+        simply not on the path between this device and this subject.
+        """
+
+        if self.descent.finding != flows.NO_FAULT_ON_PATH:
+            return ()
+        return tuple(
+            {"rung": o.rung, "device": o.device, "reason": o.result.reason}
+            for o in self.descent.outcomes
+            if o.status == "broken"
+        )
 
     @property
     def caveat(self) -> str | None:

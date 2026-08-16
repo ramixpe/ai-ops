@@ -1,60 +1,43 @@
 # Session Handover
 
-**2026-08-16.** Branch `feat/investigation-layer`. Tree green: **1377 pass, 22 skipped**, lint clean, four frozen files byte-identical against `6629a2c`.
+**2026-08-16.** Branch `feat/investigation-layer`. Tree green: **1391 pass, 22 skipped**, lint clean, four frozen files byte-identical against `6629a2c`.
 
-> ## ⛔ Read this first: the session ended on a HALT
+> ## ✅ The HALT is resolved and B-428 has landed
 >
-> **B-428 was specified and not implemented.** Clause 2 of the specification conflicts with the code, and the instruction accompanying it was *"HALT and record it. Do not improvise a different rule."*
+> Q-020 answered: **clause 2 dropped** — it was an error, and an empty causal chain with rung 1 as the cause is necessary by construction, not contradictory. B-428 shipped as **clause 1 alone**.
 >
-> **Nothing was written to `src/` or `tests/` this session.** `git diff` against the last code commit is empty for both.
+> **The most important line in `MVP0-REVIEW.md` has been corrected.** *"It cannot tell you nothing is wrong"* no longer holds.
 >
-> The decision needed is **Q-020**, and it is small. Details in §1.
+> Nothing else was started. **B-430, B-431, B-432, tracks B and C, and MVP-1 are all untouched.**
 
 ---
 
-## 1. The HALT — Q-020, and what it needs
+## 1. What landed: B-428
 
-### The specification, as given
+> After a descent completes and before a finding is emitted: **if rung 1 is healthy, no cause below it explains anything, because there is no symptom to explain.** Emit `no_fault_on_path` with the broken rungs recorded as observations rather than as a cause. Exit 0, not 1. Every other case unchanged.
 
-| Clause | Rule | Status |
+Nine lines of predicate in `_finding_for`. No model call; `ALL_HEALTHY` aggregation untouched; four frozen files still byte-identical.
+
+| Vector | Before | After |
 |---|---|---|
-| 1 | rung 1 `HEALTHY` → emit `no_fault_on_path`, broken rungs as observations not a cause, **exit 0** | ✅ correct, unimplemented |
-| 2 | rung 1 `BROKEN` **and** causal chain empty → contradictory, emit `undetermined` | ❌ **conflicts** |
-| 3 | every other case unchanged | ✅ trivially satisfied |
+| round 1 `B B B B H` | `igp_isolated` | unchanged |
+| round 2 `B B H H H` | `transport_blocked` | unchanged |
+| round 3 `B B H H H` | `transport_blocked` | unchanged |
+| **round 4 `H H H H B`** | `interface_line_down`, **exit 1** | **`no_fault_on_path`, exit 0** |
+| captured `broken` `B B B B B` | `interface_line_down` | unchanged |
+| `cause_not_localised` `B H H H H` | `cause_not_localised` | unchanged |
 
-### Why clause 2 conflicts
+All six pinned in `tests/test_rounds_regression.py` (13 tests) — the four rounds as executable vectors, which is the form a B-427 corpus row should take.
 
-`DescentResult.causal_chain` is defined as *the broken rungs **above** the cause*. Rung 1 is the top of the ladder. **When rung 1 is the cause, there is nothing above it, so the chain is empty by construction — necessarily, not contradictorily.**
+**Exit 0 now covers two findings.** `all_layers_healthy`, and `no_fault_on_path` — the session is fine *and* something else on the device is genuinely down. The broken rungs are reported as observations in all three output formats, never as a cause. **`no_fault_on_path` must never read as "nothing found"**; a test asserts every renderer shows the broken rung.
 
-Verified offline against the real `bgp_session` ladder:
+**Read exit 0 as "not on this path", not as "all clear".** The tool still cannot say *"this device is healthy"* — that was never the question it answers.
 
-```
-rung 1 BROKEN, rungs 2-5 HEALTHY
-  -> cause = bgp_session   chain = []   finding = cause_not_localised
-```
+### Two things from the implementation worth carrying
 
-That matches clause 2's antecedent exactly, and it is the **only** reachable state that does. The state clause 2 appears to reach for — rung 1 broken, cause *below* rung 1, chain empty — cannot occur, because a broken rung 1 with a lower cause **is** the chain:
+**A failing test that was the change working.** `test_a_healthy_rung_does_not_stop_the_walk_either` asserted the old finding. Its stated property — the walk visits every rung — is asserted by `rung_path` and was untouched. OBS-083's rule: *a change that tightens a rule fails exactly the tests that encoded the old rule as correct, and those failures are findings.*
 
-```
-[B,H,H,H,B] -> cause = interface   chain = ['bgp_session']
-[B,B,H,H,H] -> cause = transport   chain = ['bgp_session']
-```
-
-So applying clause 2 would replace `cause_not_localised` — a correct, well-defined, golden-tested finding — with `undetermined`, which asserts something different and false: *"a rung could not be read"* instead of *"the symptom is confirmed and nothing beneath explains it"*.
-
-### The two resolutions, neither chosen
-
-**(i) Drop clause 2.** Its only reachable case is already handled correctly. Clause 1 plus "everything else unchanged" is then the entire rule.
-
-**(ii) Re-scope it** to the genuinely impossible state (cause below rung 1 with an empty chain) as a defensive assertion that should never fire. This is a *different rule* from the one specified, which is why it was not written.
-
-### One interaction to decide alongside it
-
-**B-432** records that `cause_not_localised` may be unreachable in practice for `bgp_session`, because rung 2 restates rung 1's state machine. If clause 2 was a step toward **retiring** that finding, it is coherent — but it resolves B-432, which the same instruction deferred. If it was not, clause 2 and B-432 pull in opposite directions on the same finding.
-
-### Why clause 1 was not implemented on its own
-
-Tempting, and judged wrong. The clauses are mutually exclusive conditions so they look separable, but they are one change to one function and one closed finding set — `no_fault_on_path`'s place in that set is settled alongside whatever clause 2 becomes. **Applying a HALT selectively on my own judgement that the remainder is safe is the erosion `chaos-harness.md` §3.1 names**: every argument for proceeding is locally reasonable, and the rule's value is that it does not bend to locally reasonable arguments.
+**And a hazard that is not one of the seven shapes.** Converting that test left *"descend past a healthy rung to a broken one below and name it"* — the property round 1 depends on — with **no coverage at all**. **Fixing a defect can silently delete coverage of behaviour that was always correct, and the deletion looks like a routine test update.** The tell is a test whose *inputs* had to change rather than its expectations. Companion added.
 
 ---
 
@@ -66,7 +49,8 @@ Tempting, and judged wrong. The clauses are mutually exclusive conditions so the
 |---|---|
 | **MVP-0** | Complete. T-001–T-034 plus T-029a/b/c. **M4 reached** |
 | **Review** | `MVP0-REVIEW.md`, written at M4 before any MVP-1 work |
-| **Injection rounds** | **All four complete.** Scored in OBS-095 |
+| **Injection rounds** | **All four complete.** Scored in OBS-095, pinned in `tests/test_rounds_regression.py` |
+| **B-428** | **Landed** (OBS-097). Round 4's false positive is closed |
 
 ### The four rounds
 
@@ -75,30 +59,35 @@ Tempting, and judged wrong. The clauses are mutually exclusive conditions so the
 | 1 | IS-IS shut, PE3 uplinks | `igp_adjacency` | `igp_adjacency` | primary | ✅ | ✅ |
 | 2 | transport block, RR1↔PE1 | `transport` | `transport` | primary | ✅ | ✅ |
 | 3 | BGP admin-shut, PE2 | `cause_not_localised` / *`transport_blocked`* | `transport_blocked` | **refutation branch** | ❌ | ⚠️ impoverished |
-| 4 | one uplink shut, IGP absorbs | `interface`, empty chain, exit 1 | **identical** | primary *(predicted failure)* | n/a | ❌ **wrong** |
+| 4 | one uplink shut, IGP absorbs | `interface`, empty chain, exit 1 | **identical** | primary *(predicted failure)* | n/a | ❌ **wrong — fixed by B-428** |
 
 **Prediction accuracy 4/4. Diagnostic accuracy 3/4 — do not report 75%.** The classes differ:
 
 - fault **on the dependency path**: **3 / 3**
-- no fault on the path: **0 / 1**, structurally 0 / *n* until B-428
+- no fault on the path: **0 / 1 at the time; the class is now closed** (B-428)
+
+Row 4 keeps its ❌ deliberately. **A corpus records what the system did at the time, not what it does now** — one that silently rewrites its own history cannot show that a fix worked, which is most of what a corpus is for.
 
 **Is agreement a pattern?** Provisionally yes for fault localisation — three rungs, and rounds 1 and 2 put *opposite* pressure on the walk rule (descend past a healthy rung; do not descend into healthy rungs). Three caveats keep it provisional: selection effect (rounds designed by someone who knows the ladder), every fault single (Q-019 untouched), and round 3 matched via its declared branch. **No for concluding health, and more rounds will not change that.**
 
 ### Fabric state
 
-**PE2 has one uplink administratively shut** — round 4's fault, still applied. Rounds 1–3's faults were restored by the operator. Verify before any further trial; the round-4 predicate is `2 of 3 members healthy` on PE2.
+**PE2 has one uplink administratively shut** — round 4's fault, still applied and **not restored**. Rounds 1–3's faults were restored by the operator. Verify before any further trial; the round-4 predicate is `2 of 3 members healthy` on PE2. Note that `nettools investigate RR1 10.255.0.12` now correctly exits **0** against that state.
 
 ---
 
 ## 3. Next actions, in order
 
-1. **Answer Q-020.** Unblocks B-428 and track A. Small.
-2. **Implement B-428** once clause 2 is settled. Round 4's payload is the regression (`no_fault_on_path`, exit 0); rounds 1–3's payloads must be unchanged and all three pinned. `no_fault_on_path` joins the closed finding set, and the exit-code documentation in the README and `--help` needs to say what exit 0 now covers.
-3. **Re-run the four round payloads**, update the B-427 rows, and **update `MVP0-REVIEW.md` §5** — the *"it cannot tell you nothing is wrong"* warning may no longer be true, and if so it is the single most important line in the review to correct.
+**Nothing is blocked.** The next item is a decision about sequencing, not a HALT.
 
-**Not started, deliberately:** B-430, B-431, B-432, track B (`feat/log-evidence`), track C (`feat/chaos-harness`), any MVP-1 work.
+1. **Restore PE2's uplink** before any further trial.
+2. **B-430** — `bgp_transport` ignores `last_reset_reason`, which stated round 3's cause verbatim in the same parsed record. Small, and it is silent-failure shape 7's only known instance.
+3. **B-431** — `EACH_PHYSICAL_INTERFACE` is a naming filter duplicated in three places with one differing definition, and an empty member set raises `IndexError` in the emit path.
+4. **B-432** — `cause_not_localised` is unreachable for `bgp_session`. Two options recorded, neither chosen; do not resolve without the round-2 and round-3 envelopes side by side.
+5. **B-433** — audit what every check reads against what its inputs contain. `bgp_neighbor` parses 23 fields and 5 are read. Should precede any new flow, since B-107's checks will be written against the same parsers.
+6. Then **tracks B and C**, and the five flows only after `isis_adjacency` runs serially.
 
----
+**Untouched, deliberately:** everything in 2–6 above, plus MVP-1.
 
 ## 4. What a new session most needs to know
 
@@ -112,7 +101,7 @@ Tempting, and judged wrong. The clauses are mutually exclusive conditions so the
 
 **Exit 2 means the *answer* is untrustworthy; exit 1 means the *network* is broken.** This matches `nettools diff` and deliberately not `nettools health`, where 2 is the worst network outcome. A grounding failure is exit 2 even over a real fault — otherwise a systematic grounding regression hides in the noise of routine faults.
 
-**Do not wire this to anything that pages on exit 1 until B-428 lands.** Measured at round 4: `cause: interface on PE2`, `trustworthy: true`, exit 1, on a BGP session that was Established and carrying traffic.
+**Exit 1 is now safe to page on — but read exit 0 correctly.** Round 4's false positive (`cause: interface on PE2`, `trustworthy: true`, exit 1, on a session that was Established and carrying traffic) is closed by B-428. Exit 0 now means *no fault on the path between these two endpoints*, which is **not** *this device is healthy*: `no_fault_on_path` reports broken rungs it found off the path, and a caller that ignores them will miss a real interface fault.
 
 ### The one thing worth carrying to another project
 

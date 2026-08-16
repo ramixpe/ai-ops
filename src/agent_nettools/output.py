@@ -326,6 +326,20 @@ def _render_investigation_table(payload: dict[str, Any]) -> str:
         table,
     ]
 
+    off_path = payload.get("off_path") or []
+    if off_path:
+        lines.append("")
+        lines.append(
+            "NO FAULT ON THE PATH between "
+            f"{payload.get('device', '?')} and {payload.get('subject', '?')}. "
+            f"{len(off_path)} broken rung(s) recorded as observations, not as a cause:"
+        )
+        for entry in off_path:
+            lines.append(
+                f"  - {entry.get('rung', '?')} on {entry.get('device', '?')}: "
+                f"{_compact(str(entry.get('reason') or ''))}"
+            )
+
     report = payload.get("report") or {}
     correlation = payload.get("correlation") or {}
     lines.append("")
@@ -360,6 +374,17 @@ def _render_investigation_summary(payload: dict[str, Any]) -> str:
     elif chain:
         # No localised cause: the chain is what broke, not an explanation of it.
         head += " [broken: " + ", ".join(str(link.get("rung", "?")) for link in chain) + "]"
+
+    off_path = payload.get("off_path") or []
+    if off_path:
+        # Never render this as "nothing found". Something IS broken; it is not
+        # between these two endpoints, and saying only the first half would be
+        # the opposite of the false positive B-428 removed.
+        head += (
+            f" [{len(off_path)} broken rung(s) off the path: "
+            + ", ".join(f"{e.get('rung', '?')} on {e.get('device', '?')}" for e in off_path)
+            + "]"
+        )
 
     correlation = payload.get("correlation") or {}
     if correlation.get("status") == "coverage_limited":

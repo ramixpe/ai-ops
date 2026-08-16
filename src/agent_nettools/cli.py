@@ -325,8 +325,10 @@ def _cmd_investigate(args: argparse.Namespace) -> int:
     ==== =========================================================
     Code Meaning
     ==== =========================================================
-    0    the descent completed and found no fault
-    1    the descent completed and found a fault
+    0    no fault on the dependency path -- `all_layers_healthy`,
+         or `no_fault_on_path` (something on the device is broken
+         and it does not lie between this device and this subject)
+    1    the descent completed and found a fault on the path
     2    no trustworthy answer was produced
     ==== =========================================================
 
@@ -384,7 +386,11 @@ def _cmd_investigate(args: argparse.Namespace) -> int:
 
     if not result.trustworthy:
         return EXIT_CRITICAL
-    if result.descent.finding == flows.ALL_LAYERS_HEALTHY:
+    # `no_fault_on_path` is exit 0 alongside `all_layers_healthy`: both mean no
+    # fault on the dependency path between this device and this subject. The
+    # difference is that the second found broken rungs elsewhere on the device
+    # and reports them as observations -- see `--help` and B-428.
+    if result.descent.finding in (flows.ALL_LAYERS_HEALTHY, flows.NO_FAULT_ON_PATH):
         return EXIT_OK
     return EXIT_WARNING
 
@@ -811,8 +817,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Deterministically descend a flow's dependency stack and report the cause.",
         description=(
             "Exit codes answer a different question here than in `nettools health`. "
-            "0 = the descent completed and found no fault; 1 = it completed and found "
-            "one (a problem with the NETWORK); 2 = no trustworthy answer was produced "
+            "0 = no fault on the dependency path -- either everything is healthy, or "
+            "something on the device is broken but does not lie between this device and "
+            "this subject (`no_fault_on_path`); 1 = a fault was found on the path "
+            "(a problem with the NETWORK); 2 = no trustworthy answer was produced "
             "-- undetermined, a withheld report, or a run that could not complete (a "
             "problem with the ANSWER). This matches `nettools diff`. It does NOT match "
             "`nettools health`, where 2 is the worst network outcome; a script calling "

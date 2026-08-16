@@ -50,9 +50,16 @@ walk rather than being filled in with a plausible one.
 
 | Code | Meaning |
 |---|---|
-| `0` | the descent completed and found no fault |
-| `1` | the descent completed and found a fault — a problem with the **network** |
+| `0` | **no fault on the dependency path** — either everything is healthy, or something on the device is broken and does not lie between this device and this subject |
+| `1` | a fault was found **on the path** — a problem with the **network** |
 | `2` | no trustworthy answer was produced — a problem with the **answer** |
+
+Exit 0 covers two findings. `all_layers_healthy` is the simple one. **`no_fault_on_path`**
+is the one worth knowing about: the session under investigation is fine, *and*
+something else on the device is genuinely down — a shut interface on a router
+with redundancy, say, where the IGP reconverged and nothing on this path
+noticed. The broken rungs are reported as **observations**, never as a cause,
+and the exit code says what it means: nothing here is breaking this session.
 
 Exit 2 covers `undetermined`, a report that failed its grounding check, and a
 run that could not complete. A grounding failure is exit 2 even when the
@@ -236,6 +243,13 @@ to already-parsed records. Three verdicts, and the walk rule matters:
 | `broken` | record it and **keep descending** |
 | `healthy` | **keep descending** |
 | `unevaluated` | **stop** — nothing below a rung that could not be read is trustworthy |
+
+Then one check before anything is emitted: **if the first rung is healthy, there
+is no symptom, so nothing below it can be a cause.** A shut interface on a
+redundant router is real and is not why a working session is working. That case
+reports `no_fault_on_path` and exits 0, with the broken rungs listed as
+observations. Without it the walk names its lowest broken rung as the cause of a
+session that is up — measured on live hardware before it was fixed.
 
 **The result is the *lowest* broken rung**, and the broken rungs above it become
 the causal chain. Stopping at the first broken rung would report "BGP is not

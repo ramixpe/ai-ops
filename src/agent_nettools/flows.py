@@ -234,7 +234,21 @@ UNDETERMINED = "undetermined"
 #: them. An honest answer, not a failure (Q-017).
 CAUSE_NOT_LOCALISED = "cause_not_localised"
 
-UNIVERSAL_FINDINGS = frozenset({ALL_LAYERS_HEALTHY, UNDETERMINED, CAUSE_NOT_LOCALISED})
+#: Rung 1 is healthy, and something *below* it is broken. There is no symptom
+#: to explain, so nothing beneath can be its cause -- the broken rungs are real
+#: observations about the device and are simply not on the dependency path
+#: between this device and this subject (B-428, OBS-094).
+#:
+#: The walk finds the lowest broken thing, which is the right rule when there is
+#: something to explain and the wrong one when there is not. Measured live: one
+#: uplink shut on a device with two, the IGP reconverging over the survivor, and
+#: the session Established and carrying traffic throughout -- reported as
+#: `interface_line_down` with exit code 1 until this finding existed.
+NO_FAULT_ON_PATH = "no_fault_on_path"
+
+UNIVERSAL_FINDINGS = frozenset(
+    {ALL_LAYERS_HEALTHY, UNDETERMINED, CAUSE_NOT_LOCALISED, NO_FAULT_ON_PATH}
+)
 
 
 # --------------------------------------------------------------------------- #

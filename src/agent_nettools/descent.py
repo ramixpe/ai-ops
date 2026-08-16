@@ -55,6 +55,7 @@ from .checks import BROKEN, HEALTHY, UNEVALUATED, CheckResult
 from .flows import (
     ALL_LAYERS_HEALTHY,
     CAUSE_NOT_LOCALISED,
+    NO_FAULT_ON_PATH,
     UNDETERMINED,
     Aggregation,
     DeviceScope,
@@ -304,6 +305,21 @@ def _finding_for(flow: Flow, outcomes: list[RungOutcome], stopped_reason: str | 
     broken = [o for o in outcomes if o.status == BROKEN]
     if not broken:
         return ALL_LAYERS_HEALTHY
+
+    # B-428. Rung 1 is the symptom the investigation was called about. If it is
+    # healthy there is no symptom, so nothing below it can be a cause -- the
+    # broken rungs beneath are real, and simply not on the dependency path
+    # between this device and this subject.
+    #
+    # Without this the walk reports its lowest broken rung as a cause on a
+    # session that is up. Measured live at round 4 (OBS-094): one uplink shut on
+    # a redundant device, IGP reconverged, BGP Established and carrying traffic,
+    # reported as `interface_line_down` with `trustworthy: true` and exit 1.
+    #
+    # Only reached when something *is* broken -- the all-healthy case returns
+    # above -- so this fires exactly on "broken, but not on the path".
+    if outcomes[0].status == HEALTHY:
+        return NO_FAULT_ON_PATH
 
     lowest = broken[-1]
     lowest_index = outcomes.index(lowest)

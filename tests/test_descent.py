@@ -216,13 +216,44 @@ def test_a_broken_rung_does_not_stop_the_walk():
 
 
 def test_a_healthy_rung_does_not_stop_the_walk_either():
-    """RR1's healthy IS-IS did not prove PE2's was."""
+    """RR1's healthy IS-IS did not prove PE2's was.
+
+    The property under test is that the walk **visits every rung**, which
+    `rung_path` asserts. The finding changed at B-428: with rung 1 healthy there
+    is no symptom, so the broken rung below it is an observation and not a
+    cause, and the descent says `no_fault_on_path` rather than naming it.
+
+    That is the whole of B-428 in one test, and the walk behaviour it was
+    written for is untouched.
+    """
 
     flow = _stub_flow(checks.HEALTHY, checks.HEALTHY, checks.BROKEN)
     result = run_descent(flow, "RR1", "s", collector=_null_collector)
 
+    assert result.rung_path == ("r0", "r1", "r2"), "the walk still visits every rung"
+    assert result.finding == flows.NO_FAULT_ON_PATH
+    assert result.cause is None or result.finding == flows.NO_FAULT_ON_PATH
+    assert [o.rung for o in result.outcomes if o.status == checks.BROKEN] == ["r2"], (
+        "the broken rung is still recorded -- as an observation, not a cause"
+    )
+
+
+def test_a_healthy_rung_does_not_stop_the_walk_when_there_IS_a_symptom():
+    """The companion B-428 would otherwise have silently removed.
+
+    The test above used a rung-1-healthy ladder, which now routes to
+    `no_fault_on_path` -- so it no longer exercises *descending past a healthy
+    rung to a broken one below and naming it*. That is the property round 1
+    depends on, and without this it would have no coverage at all.
+    """
+
+    flow = _stub_flow(checks.BROKEN, checks.HEALTHY, checks.BROKEN)
+    result = run_descent(flow, "RR1", "s", collector=_null_collector)
+
     assert result.rung_path == ("r0", "r1", "r2")
-    assert result.finding == "finding_2"
+    assert result.finding == "finding_2", "the LOWEST broken rung, past a healthy one"
+    assert result.cause is not None and result.cause.rung == "r2"
+    assert [o.rung for o in result.causal_chain] == ["r0"]
 
 
 def test_an_unevaluated_rung_stops_the_walk():

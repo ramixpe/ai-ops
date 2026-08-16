@@ -2638,6 +2638,46 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-097 · B-428 · `no_fault_on_path` — the review's sharpest warning no longer holds
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** B-428 implemented, as clause 1 alone. Clause 2 was dropped after the HALT at OBS-096 — the operator confirmed the reading and took resolution (i), explicitly declining the never-firing-assertion variant: *"a never-firing assertion encodes a belief about the state space, and my belief about this state space was wrong an hour ago."*
+
+  > After a descent completes and before a finding is emitted: **if rung 1 is healthy, no cause below it explains anything, because there is no symptom to explain.** Emit `no_fault_on_path` with the broken rungs recorded as observations rather than as a cause. Exit 0, not 1. Every other case unchanged.
+
+  Nine lines of predicate in `_finding_for`, reached only when something is broken — the all-healthy case returns above it — so it fires exactly on *"broken, but not on the path"*.
+
+  | Vector | Before | After |
+  |---|---|---|
+  | round 1 `B B B B H` | `igp_isolated` | unchanged |
+  | round 2 `B B H H H` | `transport_blocked` | unchanged |
+  | round 3 `B B H H H` | `transport_blocked` | unchanged |
+  | **round 4 `H H H H B`** | `interface_line_down`, **exit 1** | **`no_fault_on_path`, exit 0** |
+  | captured `broken` `B B B B B` | `interface_line_down` | unchanged |
+  | `cause_not_localised` `B H H H H` | `cause_not_localised` | unchanged |
+
+  **1391 pass**, lint clean. No model call anywhere in it; `ALL_HEALTHY` aggregation untouched; four frozen files still byte-identical.
+- **Evidence:** `tests/test_rounds_regression.py` — 13 tests pinning all four rounds plus three corpus shapes as executable vectors.
+- **What I did:** Four things worth recording.
+
+  **1. A failing test that was the change working.** `test_a_healthy_rung_does_not_stop_the_walk_either` used a rung-1-healthy ladder and asserted `finding == "finding_2"`. Its *stated* property — the walk visits every rung — is asserted by `rung_path` and is untouched; the finding assertion encoded the old behaviour. OBS-083's rule, applied directly: **a change that tightens a rule fails exactly the tests that encoded the old rule as correct, and those failures are findings, not breakage.**
+
+  **2. And the companion that failure would otherwise have deleted silently.** Converting that test to expect `no_fault_on_path` leaves *"descend past a healthy rung to a broken one below and name it"* — the property round 1 depends on — with **no coverage at all**, because its only test had just been repurposed. Added `test_a_healthy_rung_does_not_stop_the_walk_when_there_IS_a_symptom` (`B H B`).
+
+  Worth flagging as a general hazard, because it is not one of the seven shapes: **fixing a defect can silently delete coverage of the behaviour that was always correct, and the deletion looks like a routine test update.** The tell is a test whose *inputs* had to change rather than its expectations.
+
+  **3. "Observations rather than as a cause" is two requirements, and having only the first is worse than the bug.** Suppressing the cause without reporting the broken rung produces a run that silently drops a real interface fault — the opposite mistake, and quieter. `off_path` carries them, all three renderers show them, and a test asserts every renderer does. **`no_fault_on_path` must never read as "nothing found".**
+
+  **4. The review's most important line is corrected, and narrowed rather than deleted.** MVP0-REVIEW §5 said *"it cannot tell you nothing is wrong"*. It can now say **"no fault on the path between these two endpoints, and here is what else is broken"**. It still cannot say *"this device is healthy"* — that was never the question — so §5 now reads **"read exit 0 as *not on this path*, not as *all clear*"**. Deleting the warning outright would have replaced a true limitation with an implied capability that does not exist.
+
+  **What this validates about the process rather than the code.** B-428 was constructed offline, predicted with falsifiers before the fault existed, reproduced exactly on live hardware, and fixed in nine lines. OBS-095 called the backlog *"a more accurate model of this system than the code is"* — this is the first item to close that gap, and closing it was cheap **precisely because the diagnosis had been done properly first.**
+- **Needs human review:** no
+- **Blocks:** none. Stopping here — B-430, B-431, B-432, tracks B and C, and MVP-1 all untouched.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**
@@ -2676,7 +2716,7 @@ Anything logged with `Needs human review: yes` is mirrored here so the review ha
 | Q-012 | T-005 | **The lab was rebuilt ~2 days ago and is now healthy** — all 16 BGP sessions Established, PE2/PE4 back to 2 IS-IS adjacencies. T-011 says to capture "against the current broken state", which no longer exists. Re-break the lab, capture a new consistent healthy label, or build the broken case synthetically in-test? | **Yes for T-011** (T-025/M3 unaffected — fixtures still hold the broken state) | **Closed (OBS-049)** — `broken` captured 2026-08-16 with both uplinks. Originally (OBS-019) — options 1+2: keep `t0`/`t1` frozen, add complete `healthy` and `broken` labels; operator runs the break, capture coordinated at T-011 |
 | **Q-018** | **T-033** | **PE3 has 0 IS-IS adjacencies as of 2026-08-16** (every other device is at its expected 2, and PE3 had 2 in the pre-proposal baseline). Intended — the T-033 fault applied and in place — or an unrestored fault from the OBS-075 harness incident? I did not read further to distinguish them, because if it is the former those reads are the diagnosis the Q-006 protocol keeps closed. | **Yes — blocks T-033** | **Resolved** — intended; the T-033 fault, confirmed live by the operator. |
 | **Q-019** | **D6** | **Is "lowest broken rung is the root cause" still right under two simultaneous faults?** Interface down *and* BGP neighbour admin-shut gives the interface as the lowest broken rung — correctly — but fixing it will not bring the session up, and the rung table is identical to the single-fault case. Two candidate signals (a second unexplained commit in the timeline; forward consistency of the upper rungs against what the cause alone predicts), neither validated. | No for MVP-0 — every corpus label is a single fault | Open (OBS-078) — **only injection answers it (B-426)** |
-| **Q-020** | **B-428** | **HALT.** Clause 2 of the B-428 specification (*rung 1 broken + empty causal chain → `undetermined`*) matches exactly one reachable state, and that state is `cause_not_localised` — where an empty chain is **necessary**, because the chain is the broken rungs *above* the cause and rung 1 has none. Applying it would replace a correct golden-tested finding with a false one. The state it appears to reach for (cause below rung 1, chain empty) is unreachable. **Drop clause 2, or re-scope it to the impossible state as a never-firing assertion?** Note the interaction: if clause 2 was a step toward retiring `cause_not_localised`, that resolves B-432, which the same instruction deferred. | **Yes — blocks B-428 and track A** | Open (OBS-096) |
+| **Q-020** | **B-428** | **HALT.** Clause 2 of the B-428 specification (*rung 1 broken + empty causal chain → `undetermined`*) matches exactly one reachable state, and that state is `cause_not_localised` — where an empty chain is **necessary**, because the chain is the broken rungs *above* the cause and rung 1 has none. Applying it would replace a correct golden-tested finding with a false one. The state it appears to reach for (cause below rung 1, chain empty) is unreachable. **Drop clause 2, or re-scope it to the impossible state as a never-firing assertion?** Note the interaction: if clause 2 was a step toward retiring `cause_not_localised`, that resolves B-432, which the same instruction deferred. | **Yes — blocks B-428 and track A** | **Resolved** — operator dropped clause 2 and confirmed the reading; resolution (i), explicitly not (ii). B-428 shipped as clause 1 alone (OBS-097). B-432 stays deferred and untouched. |
 | Q-009 | T-002 | Should `MINIMAX_API_KEY` **and the lab device credentials** be rotated after this build? Both were pasted into the transcript (OBS-008, OBS-037). It was pasted into the session transcript, which no control in this repository can revoke. | No — nothing is blocked on it | Open — recommended (OBS-008) |
 
 ---
