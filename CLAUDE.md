@@ -903,6 +903,7 @@ Read these before changing anything in the investigation layer. Placed by `insta
 | [docs/build/BUILD-PLAN.md](docs/build/BUILD-PLAN.md) | The 34-task build plan. **Part 0 is binding** — model roles, escalation ladder, frozen files |
 | [docs/build/TRACKER.md](docs/build/TRACKER.md) | Progress. Authoritative on task status |
 | [docs/build/FINDINGS.md](docs/build/FINDINGS.md) | Append-only findings log |
+| [docs/build/SESSION-HANDOVER.md](docs/build/SESSION-HANDOVER.md) | **Read first if resuming.** Current state, the open HALT (Q-020), and what to do next |
 | [docs/build/MVP0-REVIEW.md](docs/build/MVP0-REVIEW.md) | **The M4 review.** What the build changed about the design, what is still unknown, and what MVP-0 can and cannot do |
 | [docs/README.md](docs/README.md) | Map of the docs tree and reading order |
 

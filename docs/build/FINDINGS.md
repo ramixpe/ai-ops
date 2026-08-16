@@ -2592,6 +2592,52 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-096 · B-428 · **HALT** — clause 2 of the specification is unreachable except where it would clobber `cause_not_localised`
+
+- **Kind:** assumption-wrong
+- **Escalation:** **HALT**
+- **Model:** opus-5
+- **What happened:** B-428 was specified by the operator as three clauses, with an explicit instruction: *"If anything about this specification turns out to be wrong when it meets the code, HALT and record it. Do not improvise a different rule."* **Clause 2 is wrong, and I stopped rather than implementing around it.**
+
+  **Clause 1** — *if rung 1 is HEALTHY, emit `no_fault_on_path`, exit 0* — is correct and is exactly round 4's defect. Verified:
+
+  ```
+  rung 1 healthy, rung 5 broken -> cause=interface  chain=[]  finding=interface_line_down
+  ```
+
+  **Clause 2** — *if rung 1 is BROKEN and the causal chain is empty, that is contradictory; emit `undetermined`* — matches exactly one reachable state, and that state is not contradictory:
+
+  ```
+  rung 1 broken, rungs 2-5 healthy -> cause=bgp_session  chain=[]  finding=cause_not_localised
+  ```
+
+  **An empty causal chain when the cause *is* rung 1 is necessary, not contradictory.** `causal_chain` is defined as the broken rungs **above** the cause. Rung 1 is the top of the ladder, so when it is the cause there is nothing above it by construction. The chain is empty because it must be.
+
+  And the state clause 2 appears to be reaching for — rung 1 broken, cause *below* rung 1, chain empty — **is unreachable**. If the cause is below rung 1 and rung 1 is broken, rung 1 is itself in the chain:
+
+  ```
+  [B,H,H,H,B] -> cause=interface  chain=['bgp_session']
+  [B,B,H,H,H] -> cause=transport  chain=['bgp_session']
+  ```
+
+  So clause 2's only reachable instantiation is `cause_not_localised`, and applying it would **replace a correct, well-defined, golden-tested finding with `undetermined`** — turning "the descent confirmed the symptom and found nothing beneath it to explain it" into "the descent could not read something", which is a different and false claim.
+- **Evidence:** Constructed against the real `bgp_session` ladder via `_finding_for` and `DescentResult.causal_chain`, offline, no devices. `descent.py:318` is the branch clause 2 would override.
+- **What I did:** **Nothing to the code.** No clause implemented, including clause 1.
+
+  That is deliberate and I want the reasoning on record, because implementing clause 1 alone was tempting and I judged it wrong. The two clauses are mutually exclusive conditions, so they *look* separable — but they are one change to one function and one finding set, and `no_fault_on_path`'s place in the closed finding set is decided alongside whatever clause 2 becomes. **Applying a HALT selectively, on my own judgement that the remainder is safe, is the exact erosion `chaos-harness.md` §3.1 describes**: every argument for proceeding would be locally reasonable, and the value of the rule is that it does not bend to locally reasonable arguments. The operator's instruction anticipated this case by name.
+
+  **Two resolutions, neither chosen.**
+
+  **(i) Drop clause 2.** Its only reachable case is already handled correctly. Clause 1 plus "every other case unchanged" is then the whole rule, and it is small.
+
+  **(ii) Keep a clause-2-shaped guard, scoped to the genuinely impossible state** — cause below rung 1 with an empty chain — as a defensive assertion that should never fire. That is a *different rule* from the one specified, which is why I am not writing it.
+
+  **One interaction worth flagging before the decision is made.** B-432 records that `cause_not_localised` may be unreachable in practice for `bgp_session`, because rung 2 restates rung 1's state machine. If clause 2 was intended as a step toward **retiring** `cause_not_localised`, that is a coherent position — but it resolves B-432, which the same instruction said not to do. If it was not intended that way, clause 2 and B-432 are pulling in opposite directions on the same finding and should be decided together.
+- **Needs human review:** **yes — this is a HALT**
+- **Blocks:** **B-428, and therefore track A.** Nothing else was started.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**
@@ -2630,6 +2676,7 @@ Anything logged with `Needs human review: yes` is mirrored here so the review ha
 | Q-012 | T-005 | **The lab was rebuilt ~2 days ago and is now healthy** — all 16 BGP sessions Established, PE2/PE4 back to 2 IS-IS adjacencies. T-011 says to capture "against the current broken state", which no longer exists. Re-break the lab, capture a new consistent healthy label, or build the broken case synthetically in-test? | **Yes for T-011** (T-025/M3 unaffected — fixtures still hold the broken state) | **Closed (OBS-049)** — `broken` captured 2026-08-16 with both uplinks. Originally (OBS-019) — options 1+2: keep `t0`/`t1` frozen, add complete `healthy` and `broken` labels; operator runs the break, capture coordinated at T-011 |
 | **Q-018** | **T-033** | **PE3 has 0 IS-IS adjacencies as of 2026-08-16** (every other device is at its expected 2, and PE3 had 2 in the pre-proposal baseline). Intended — the T-033 fault applied and in place — or an unrestored fault from the OBS-075 harness incident? I did not read further to distinguish them, because if it is the former those reads are the diagnosis the Q-006 protocol keeps closed. | **Yes — blocks T-033** | **Resolved** — intended; the T-033 fault, confirmed live by the operator. |
 | **Q-019** | **D6** | **Is "lowest broken rung is the root cause" still right under two simultaneous faults?** Interface down *and* BGP neighbour admin-shut gives the interface as the lowest broken rung — correctly — but fixing it will not bring the session up, and the rung table is identical to the single-fault case. Two candidate signals (a second unexplained commit in the timeline; forward consistency of the upper rungs against what the cause alone predicts), neither validated. | No for MVP-0 — every corpus label is a single fault | Open (OBS-078) — **only injection answers it (B-426)** |
+| **Q-020** | **B-428** | **HALT.** Clause 2 of the B-428 specification (*rung 1 broken + empty causal chain → `undetermined`*) matches exactly one reachable state, and that state is `cause_not_localised` — where an empty chain is **necessary**, because the chain is the broken rungs *above* the cause and rung 1 has none. Applying it would replace a correct golden-tested finding with a false one. The state it appears to reach for (cause below rung 1, chain empty) is unreachable. **Drop clause 2, or re-scope it to the impossible state as a never-firing assertion?** Note the interaction: if clause 2 was a step toward retiring `cause_not_localised`, that resolves B-432, which the same instruction deferred. | **Yes — blocks B-428 and track A** | Open (OBS-096) |
 | Q-009 | T-002 | Should `MINIMAX_API_KEY` **and the lab device credentials** be rotated after this build? Both were pasted into the transcript (OBS-008, OBS-037). It was pasted into the session transcript, which no control in this repository can revoke. | No — nothing is blocked on it | Open — recommended (OBS-008) |
 
 ---
