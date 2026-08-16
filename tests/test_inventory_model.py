@@ -227,7 +227,12 @@ def test_the_lab_carries_the_facts_this_build_had_to_rediscover():
     assert "suspicious_baseline" in pe2
 
     p1 = " ".join(n.note for n in devices["P1"].notes)
-    assert "contradicts itself" in p1, "the LLDP disagreement, recorded once"
+    # Corrected at OBS-103: LLDP does NOT contradict itself here. The apparent
+    # disagreement was between LLDP's device-reported names and the inventory's
+    # labels -- P1 was configured as LEAF05_DHCP_SERVER in the t0/t1 captures.
+    assert "does NOT contradict itself" in p1
+    assert "LEAF05_DHCP_SERVER" in p1
+    assert "configured hostname" in p1, "the actual rule a reader needs"
 
     assert all(
         any("0 prefixes" in n.note for n in d.notes) for d in devices.values()

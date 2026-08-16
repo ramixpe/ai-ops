@@ -236,3 +236,77 @@ def test_ignore_rule_reasons_are_not_reused_verbatim_across_unrelated_lines():
             f"{name}: every rule shares the exact reason {most_common_reason!r} -- "
             "not distinguishable per line"
         )
+
+
+# --------------------------------------------------------------------------- #
+# The cycle B-404 created, pinned rather than trusted
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "first", ["agent_nettools.parsers", "agent_nettools.template_parsers"]
+)
+def test_the_two_parser_modules_import_in_either_order(first):
+    """`parsers` and `template_parsers` now import each other (B-404).
+
+    `parsers` needs the accounting primitives; `template_parsers` needs the
+    status vocabulary. Python tolerates that only because the accounting
+    primitives are fully defined *before* `template_parsers` reaches back into
+    `parsers` — an ordering constraint that lives in a comment and is invisible
+    at the point where someone would break it, by tidying a mid-file import back
+    to the top.
+
+    `ruff` does not currently move it, which is not the same as safe. **Where a
+    condition is checkable, check it** (T-029c): a subprocess importing each
+    module first, so the failure is a red test rather than an `ImportError` in
+    whichever caller happens to import first.
+    """
+
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [sys.executable, "-c", f"import {first}; import agent_nettools.parsers, "
+         f"agent_nettools.template_parsers; print('ok')"],
+        capture_output=True, text=True, timeout=60,
+    )
+
+    assert result.returncode == 0, (
+        f"importing {first} first breaks the cycle:\n{result.stderr[-1500:]}"
+    )
+    assert "ok" in result.stdout
+
+
+def test_the_accounting_primitives_carry_no_dependency_on_parsers():
+    """Why the cycle is resolvable at all, asserted.
+
+    If `IgnoreRule`/`account_lines`/`finalize` ever grow a dependency on
+    `parsers`, the ordering that makes this work stops existing and the fix is
+    a third module rather than a comment. This fails at that moment instead of
+    at some importer's.
+    """
+
+    import ast
+    import pathlib
+
+    source = (
+        pathlib.Path(__file__).resolve().parent.parent
+        / "src" / "agent_nettools" / "template_parsers.py"
+    ).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    parsers_import_line = min(
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == "parsers"
+    )
+    finalize_line = max(
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name in {"account_lines", "finalize"}
+    )
+
+    assert finalize_line < parsers_import_line, (
+        "the accounting primitives must be defined before template_parsers "
+        "reaches into parsers, or the cycle breaks"
+    )

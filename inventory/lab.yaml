@@ -50,14 +50,17 @@ devices:
     notes:
       - applies_to: lldp
         note: >-
-          This fabric's LLDP data contradicts itself: P1 reports Gi0/0/0/0 facing P2's
-          Gi0/0/0/0 while P2 reports that same port facing LEAF05_DHCP_SERVER. Do not assert a
-          link from LLDP alone; `nettools learn-topology` reports the disagreement rather than
-          picking a side.
+          LLDP here does NOT contradict itself, though it looks like it in the t0/t1
+          captures. P1's own configured hostname there is LEAF05_DHCP_SERVER, so P2 reporting
+          that neighbour on Gi0/0/0/0 agrees with P1 exactly. P3 was Lab-leaf01 and PE4 was
+          SDWAN-Edge01 in the same captures; all three were aligned to their inventory labels
+          by the healthy/broken captures. Compare LLDP device IDs against each device's
+          configured hostname, not against its inventory label.
         author: operator
         recorded: "2026-08-16"
         revisit_when: >-
-          the lab's LLDP neighbours agree, or a topology source of truth exists
+          the inventory carries a configured-hostname mapping, making this comparison
+          automatic rather than a note
       - applies_to: bgp
         note: >-
           Every BGP session on this lab carries 0 prefixes -- nothing is advertised into it.

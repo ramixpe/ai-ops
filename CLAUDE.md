@@ -297,9 +297,16 @@ parsed IS-IS/BGP neighbor records per device and writes them back via
 `topology.update_expected_in_yaml`. `bgp_peers` is omitted (not `0`) for a
 device with no active BGP process, matching the `router_id`/`local_as` rule
 above. Only per-device *counts* are ever written — never link-level ("A
-connects to B") topology, because this fabric's own LLDP data is
-self-contradictory: P1 reports its Gi0/0/0/0 facing P2's Gi0/0/0/0, while P2
-reports that same port facing `LEAF05_DHCP_SERVER` instead. Asserting a
+connects to B") topology, because ~~this fabric's own LLDP data is self-contradictory~~ **-- corrected
+2026-08-16, see OBS-103.** It is not. At the `t0`/`t1` captures three devices
+were configured with hostnames that differ from their inventory labels: P1 is
+`LEAF05_DHCP_SERVER`, P3 is `Lab-leaf01`, PE4 is `SDWAN-Edge01`. So P1 reporting
+its Gi0/0/0/0 facing P2, and P2 reporting that same port facing
+`LEAF05_DHCP_SERVER`, are **the same statement** -- LLDP was correct at both
+ends, and the disagreement was between LLDP's device-reported names and the
+inventory's labels. The hostnames were aligned by the `healthy`/`broken`
+captures. The count-only rule below is still right, for the reasons given, but
+not for this reason. Asserting a
 specific link would silently pick a side of a real disagreement; a count
 survives it. `learn-topology` always exits `0` but prints an anomaly report
 covering exactly this fabric's three verified anomaly classes — LLDP links

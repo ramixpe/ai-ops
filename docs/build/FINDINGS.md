@@ -2891,6 +2891,47 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-103 · B-404 · The fabric's LLDP never contradicted itself — three devices were wearing different names
+
+- **Kind:** assumption-wrong
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5 · surfaced by sonnet-5 during B-404
+- **What happened:** The Sonnet agent doing B-404's line accounting flagged something it called *"striking"* rather than a defect: three `t0` fixtures capture `show running-config hostname` answering with a name that is not the device's inventory name.
+
+  ```
+  P1  -> hostname LEAF05_DHCP_SERVER
+  P3  -> hostname Lab-leaf01
+  PE4 -> hostname SDWAN-Edge01
+  ```
+
+  **That resolves a fabric anomaly this build has treated as unresolvable since Phase 3.** `CLAUDE.md` states, and `topology.py`'s anomaly report is built on, the claim that *"this fabric's own LLDP data is self-contradictory: P1 reports its Gi0/0/0/0 facing P2's Gi0/0/0/0, while P2 reports that same port facing `LEAF05_DHCP_SERVER` instead."*
+
+  Read directly:
+
+  ```
+  P1 Gi0/0/0/0 neighbour -> P2
+  P2 Gi0/0/0/0 neighbour -> LEAF05_DHCP_SERVER
+  P1's own configured hostname at t0 -> LEAF05_DHCP_SERVER
+  ```
+
+  **P1 and P2 agree exactly.** Both describe one link: `P1(=LEAF05_DHCP_SERVER) Gi0/0/0/0 ↔ P2 Gi0/0/0/0`. LLDP was correct at both ends throughout. The disagreement was never within LLDP — it was **between LLDP's device-reported names and the inventory's labels**, and nothing in the tool held the mapping between them.
+
+  The same explains the second anomaly class. `Lab-leaf01`, `LEAF05_DHCP_SERVER` and `SDWAN-Edge01` were reported as *"LLDP neighbours that are not in this inventory at all"*. They are P3, P1 and PE4, under the names those boxes were configured with. All three were aligned to their inventory labels by the `healthy`/`broken` captures, so the anomaly is historical and specific to `t0`/`t1`.
+- **Evidence:** `show running-config hostname` and `show lldp neighbors` across the committed fixtures, read directly.
+- **What I did:** Corrected `CLAUDE.md`, the B-402 note I had seeded **one hour earlier** stating the contradiction as fact, and the test asserting it. Filed the code change as **B-435** rather than making it minutes before a push — `topology.py` should compare LLDP device IDs against each device's *configured hostname* and stop reporting three known devices as unknown.
+
+  **Three things worth keeping.**
+
+  **1. This is silent-failure shape 6, and it survived a year of documentation.** The evidence — `LEAF05_DHCP_SERVER` in P2's LLDP table — was real, correctly parsed, and correctly reported. It answered *"what name does the neighbour advertise"*. It was read as answering *"which inventory device is on this port"*. Real evidence, right value, **wrong question**, and every consistency check it faced it passed, because there was nothing inconsistent to find.
+
+  **2. I propagated it into a fresh artefact while it was still wrong.** The B-402 note went in an hour before this, presented as one of *"the facts this build proved"*. It was one of the facts this build **assumed**, restated with more confidence each time it was repeated — CLAUDE.md, `topology.py`'s design, MVP0-REVIEW, then an operator note. **A fact's provenance does not improve by being cited**, and the `revisit_when` field I added to that very schema is the mechanism that would have caught it, had the note carried an honest one.
+
+  **3. It came from line-by-line accounting, not from anyone looking for it.** §0.10 exists to make parsers complete. Its by-product is that somebody has to *read every line* of real output, and a human — or an agent — reading every line notices a hostname that does not match the folder it came from. That is the second time the accounting discipline has produced a finding outside parsing (the first being B-432's socket line). **A rule that forces exhaustive reading pays out in things nobody was looking for.**
+- **Needs human review:** **yes** — this contradicts a claim in `CLAUDE.md` and in the MVP-0 review
+- **Blocks:** none. B-435 filed.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**
