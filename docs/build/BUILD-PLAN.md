@@ -572,7 +572,7 @@ class CheckResult:
 
 ---
 
-## T-020 · The five checks `[STATUS: TODO]`
+## T-020 · The five checks `[STATUS: DONE]`
 
 | Function | Reads | `broken` when |
 |---|---|---|

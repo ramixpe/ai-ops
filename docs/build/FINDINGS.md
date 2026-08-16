@@ -1074,6 +1074,35 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-053 · T-020 · The five checks; and a reasoned divergence from `health.py` that T-021 must expect
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5 (judgement) · sonnet-5 (implementation)
+- **What happened:** All five checks implemented against the `healthy` and `broken` labels. **1069 passed**, the 17 T-019 contract tests including the AST purity test still pass unchanged, and no fixture contradicted the spec.
+
+  The Q-005 composition landed exactly as intended. On a single observation of a healthy interface:
+
+  > `healthy` — *"line protocol up; error-counter rate not evaluated (single observation)"*
+
+  The check answers about the field it read and says plainly what it did not evaluate, which is the whole point of the rule.
+
+  **Sonnet generalised rule 1, correctly, and flagged it.** My spec said "`admin_state` up and `line_state` down → broken". PE2's shut uplinks are `admin-down`/`admin-down` — neither field is `up`, so the literal rule would not have fired on the one interface the `broken` label exists to capture. The implemented rule is "not both fields exactly `up` → broken", which subsumes mine. My wording came from the LLD's table and would have missed the case the fixture was captured for.
+- **Evidence:** `interface_state(PE2 broken, "Gi0/0/0/0")` → `broken`, reason `"interface Gi0/0/0/0 is not up (admin_state='admin-down', line_state='admin-down')"`, citing `PE2:interface:Gi0/0/0/0`. Same interface on `healthy` → `healthy` with the counter half named.
+- **What I did:** Accepted. The reason text does the load-bearing work here: **"admin-down" and "line protocol down" are different findings** — one says a human did this deliberately, the other says something failed — and a report that conflated them would send an operator to the wrong place. Naming both fields in the reason keeps that distinction available downstream.
+
+  **Recording the divergence from `health.py` before T-021 meets it**, because T-021 failing is a §0.11 HALT and I would rather it arrive as a known allowance than as a surprise:
+
+  `health.py`'s `_interface_admin_up_line_down` deliberately does **not** fire on admin-down — its docstring says "an admin-down interface is intentional and must never fire this rule". `checks.interface_state` calls the same interface `broken`. **Both are right for the question they answer**, which is exactly the per-device/per-object split the LLD draws: "is this device unhealthy?" is not the same question as "why is this specific path broken?" An intentionally shut interface is not evidence of ill health, and *is* the complete answer to why a path is down.
+
+  Measured on the fixtures, they do not currently collide: on the `broken` label `health.py` reports PE2 **critical** (`isis_isolated`, `bgp_session_down`) while the check reports the interface `broken` — same direction, different attribution. **The collision is reachable though**, and T-021 needs to handle it: an interface shut on an otherwise-healthy device would give `health.py` severity `ok` and `checks` `broken`. That must be encoded as an explicit, justified allowance in the agreement test — **not** as a loosened assertion, and not by weakening either module.
+
+  One structural consequence Sonnet flagged honestly: a line-down interface short-circuits to `broken` before the counter half runs, so the absent-counter path cannot be reached through the public API on that fixture. It is tested directly against the private helpers using `Gi0/0/0/2.300` — the one real line-down interface — never against the healthy 44, as OBS-044 requires.
+- **Needs human review:** yes — the `health.py` divergence is a design position, and T-021 encodes it.
+- **Blocks:** none. Binds T-021.
+
+---
+
 <!--
 Copy this block for each new entry.
 

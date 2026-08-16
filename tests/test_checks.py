@@ -8,13 +8,16 @@ enforce: **a check may only answer `healthy` about a field it actually read.**
 from __future__ import annotations
 
 import ast
+import copy
 import dataclasses
 import inspect
 from pathlib import Path
 
 import pytest
+from helpers import set_device_environment
 
-from agent_nettools import checks, parsers
+from agent_nettools import checks, network_tools, parsers
+from agent_nettools.fixtures import fixture_sender, load_fixture_evidence
 
 # --------------------------------------------------------------------------- #
 # Purity -- no I/O, no device, no inventory
@@ -200,3 +203,286 @@ def test_unevaluated_always_carries_a_reason():
 
     with pytest.raises(TypeError):
         checks.unevaluated()  # type: ignore[call-arg]
+
+
+# --------------------------------------------------------------------------- #
+# The five checks (T-020) -- exercised against the committed fixtures.
+#
+# ``healthy`` is the clean fabric; ``broken`` is PE2 isolated at the IGP layer
+# (0 IS-IS adjacencies, both uplinks admin-down), RR1's session to PE2's
+# loopback (10.255.0.12) Idle, and PE2 with no route to RR1's loopback
+# (10.255.0.31). See tests/fixtures/cisco_xr/*/{healthy,broken}/.
+# --------------------------------------------------------------------------- #
+
+
+def _fixture_evidence(monkeypatch, device: str, *, label: str = "healthy") -> dict:
+    """One device's intent evidence, replayed from a committed fixture.
+
+    ``run_template``/``collect_evidence`` call ``get_device`` even when a
+    ``sender`` bypasses the network, so credentials must still resolve --
+    ``set_device_environment`` supplies safe test-only values for that.
+    """
+
+    set_device_environment(monkeypatch)
+    return load_fixture_evidence(device, label=label)
+
+
+def _with_template(evidence: dict, device: str, template: str, *, label: str, **params: str) -> dict:
+    """Add one ``run_template`` result to a copy of ``evidence``.
+
+    Keyed ``"<template>:<parameter-value>"``, exactly the convention
+    ``checks.py``'s module docstring documents and T-022's collect step will
+    build against.
+    """
+
+    value = next(iter(params.values()))
+    key = f"{template}:{value}"
+    evidence = dict(evidence)
+    evidence[key] = network_tools.run_template(
+        device, template, sender=fixture_sender(label=label), **params
+    )
+    return evidence
+
+
+# --- bgp_session_state: the BGP summary's own St/PfxRcd column --- #
+
+
+def test_bgp_session_state_established_peer_is_healthy(monkeypatch):
+    evidence = _fixture_evidence(monkeypatch, "RR1", label="healthy")
+    result = checks.bgp_session_state(evidence, "10.255.0.11")
+    assert result.status == checks.HEALTHY
+    assert result.evidence_keys == ("RR1:bgp:10.255.0.11",)
+
+
+def test_bgp_session_state_idle_peer_is_broken(monkeypatch):
+    """RR1's session to PE2's loopback (10.255.0.12) sits Idle on ``broken``."""
+
+    evidence = _fixture_evidence(monkeypatch, "RR1", label="broken")
+    result = checks.bgp_session_state(evidence, "10.255.0.12")
+    assert result.status == checks.BROKEN
+    assert "Idle" in result.reason
+    assert result.evidence_keys == ("RR1:bgp:10.255.0.12",)
+
+
+def test_bgp_session_state_failed_parse_is_unevaluated(monkeypatch):
+    evidence = _fixture_evidence(monkeypatch, "RR1", label="healthy")
+    evidence = dict(evidence)
+    evidence["bgp"] = _section(parsers.PARSE_FAILED)
+    result = checks.bgp_session_state(evidence, "10.255.0.11")
+    assert result.status == checks.UNEVALUATED
+
+
+def test_bgp_session_state_unknown_peer_is_unevaluated_not_broken(monkeypatch):
+    """A peer absent from an otherwise-parsed 'bgp' section is unevaluated --
+    it may simply not be configured on this device, which is not the same
+    fact as "configured and down"."""
+
+    evidence = _fixture_evidence(monkeypatch, "RR1", label="healthy")
+    result = checks.bgp_session_state(evidence, "10.255.0.99")
+    assert result.status == checks.UNEVALUATED
+    assert result.status != checks.BROKEN
+
+
+# --- bgp_transport: one peer's own show bgp neighbor <peer> --- #
+
+
+def test_bgp_transport_established_is_healthy(monkeypatch):
+    evidence = _fixture_evidence(monkeypatch, "RR1", label="healthy")
+    evidence = _with_template(evidence, "RR1", "bgp_neighbor", label="healthy", address="10.255.0.11")
+    result = checks.bgp_transport(evidence, "10.255.0.11")
+    assert result.status == checks.HEALTHY
+    assert result.evidence_keys == ("RR1:bgp_neighbor:10.255.0.11",)
+
+
+def test_bgp_transport_idle_peer_is_broken(monkeypatch):
+    """PE2's own view of its session to RR1's loopback: Idle on ``broken``."""
+
+    evidence = _fixture_evidence(monkeypatch, "PE2", label="broken")
+    evidence = _with_template(evidence, "PE2", "bgp_neighbor", label="broken", address="10.255.0.31")
+    result = checks.bgp_transport(evidence, "10.255.0.31")
+    assert result.status == checks.BROKEN
+    assert "Idle" in result.reason
+    assert result.evidence_keys == ("PE2:bgp_neighbor:10.255.0.31",)
+
+
+def test_bgp_transport_missing_template_section_is_unevaluated(monkeypatch):
+    evidence = _fixture_evidence(monkeypatch, "PE2", label="broken")
+    result = checks.bgp_transport(evidence, "10.255.0.31")
+    assert result.status == checks.UNEVALUATED
+
+
+# --- route_present: show route <prefix> --- #
+
+
+def test_route_present_installed_route_is_healthy(monkeypatch):
+    evidence = _fixture_evidence(monkeypatch, "RR1", label="healthy")
+    evidence = _with_template(evidence, "RR1", "route", label="healthy", prefix="10.255.0.11/32")
+    result = checks.route_present(evidence, "10.255.0.11/32")
+    assert result.status == checks.HEALTHY
+    assert result.evidence_keys == ("RR1:route:10.255.0.11/32",)
+
+
+def test_route_present_network_not_in_table_is_broken(monkeypatch):
+    """PE2 has no route to RR1's loopback (10.255.0.31) on ``broken`` -- the
+    device answers '% Network not in table', a real fact, not an absence of
+    evidence."""
+
+    evidence = _fixture_evidence(monkeypatch, "PE2", label="broken")
+    evidence = _with_template(evidence, "PE2", "route", label="broken", prefix="10.255.0.31/32")
+    result = checks.route_present(evidence, "10.255.0.31/32")
+    assert result.status == checks.BROKEN
+    assert "Network not in table" in result.reason
+    assert result.evidence_keys == ("PE2:route:10.255.0.31/32",)
+
+
+def test_route_present_missing_template_section_is_unevaluated(monkeypatch):
+    evidence = _fixture_evidence(monkeypatch, "PE2", label="broken")
+    result = checks.route_present(evidence, "10.255.0.31/32")
+    assert result.status == checks.UNEVALUATED
+
+
+# --- isis_adjacency: show isis neighbors --- #
+
+
+def test_isis_adjacency_two_up_is_healthy(monkeypatch):
+    evidence = _fixture_evidence(monkeypatch, "PE2", label="healthy")
+    result = checks.isis_adjacency(evidence)
+    assert result.status == checks.HEALTHY
+    assert result.evidence_keys == ("PE2:isis",)
+
+
+def test_isis_adjacency_zero_is_broken(monkeypatch):
+    """PE2 on ``broken`` is isolated at the IGP layer: 0 adjacencies."""
+
+    evidence = _fixture_evidence(monkeypatch, "PE2", label="broken")
+    result = checks.isis_adjacency(evidence)
+    assert result.status == checks.BROKEN
+    assert "isolated" in result.reason
+    assert result.evidence_keys == ("PE2:isis",)
+
+
+def test_isis_adjacency_failed_parse_is_unevaluated(monkeypatch):
+    evidence = _fixture_evidence(monkeypatch, "PE2", label="healthy")
+    evidence = dict(evidence)
+    evidence["isis"] = _section(parsers.PARSE_FAILED)
+    result = checks.isis_adjacency(evidence)
+    assert result.status == checks.UNEVALUATED
+
+
+def test_isis_adjacency_named_interface_up_is_healthy(monkeypatch):
+    evidence = _fixture_evidence(monkeypatch, "PE2", label="healthy")
+    result = checks.isis_adjacency(evidence, interface="Gi0/0/0/0")
+    assert result.status == checks.HEALTHY
+    assert result.subject == "Gi0/0/0/0"
+
+
+def test_isis_adjacency_unknown_interface_is_unevaluated_not_broken(monkeypatch):
+    evidence = _fixture_evidence(monkeypatch, "PE2", label="healthy")
+    result = checks.isis_adjacency(evidence, interface="Gi9/9/9/9")
+    assert result.status == checks.UNEVALUATED
+
+
+# --- interface_state: show interfaces <name>, plus the error-counter rate --- #
+
+
+def test_interface_state_admin_down_line_down_is_broken(monkeypatch):
+    """PE2's uplinks are admin-down on ``broken`` -- the fact that isolates it.
+
+    Conclusive on a single observation regardless of the (zero, benign) error
+    counters also present in this same capture: not-fully-up outranks the
+    counter half entirely."""
+
+    evidence = _fixture_evidence(monkeypatch, "PE2", label="broken")
+    evidence = _with_template(evidence, "PE2", "interface", label="broken", interface="Gi0/0/0/0")
+    result = checks.interface_state(evidence, "Gi0/0/0/0")
+    assert result.status == checks.BROKEN
+    assert "admin-down" in result.reason
+    assert result.evidence_keys == ("PE2:interface:Gi0/0/0/0",)
+
+
+def test_interface_state_absent_error_counters_are_never_read_as_zero(monkeypatch):
+    """OBS-044: PE1's Gi0/0/0/2.300 is the *only* line-down interface anywhere
+    in the healthy fixture set (a VLAN sub-interface with no far end attached);
+    IOS-XR omits its error-counter line entirely rather than reporting zero.
+    Extraction must come back ``None``, not an empty-but-present dict of
+    zeros, or a check would silently read "never measured" as "clean".
+
+    Tested against exactly this interface, never one of the 44 healthy
+    Gi/Lo0 captures -- every one of those happens to carry a full (zero)
+    counter block and would never exercise this path, which is exactly how
+    a check written only against the healthy fixtures would carry OBS-044's
+    defect forward undetected.
+    """
+
+    evidence = _fixture_evidence(monkeypatch, "PE1", label="healthy")
+    evidence = _with_template(
+        evidence, "PE1", "interface", label="healthy", interface="Gi0/0/0/2.300"
+    )
+    section = evidence["interface:Gi0/0/0/2.300"]
+    assert checks._extract_error_counters(section) is None
+
+
+def test_interface_state_counter_half_unevaluated_when_absent_from_one_observation(monkeypatch):
+    """Two real interfaces, not an invented shape: Gi0/0/0/0's counters
+    (present) as one observation, Gi0/0/0/2.300's (absent) as the other."""
+
+    evidence = _fixture_evidence(monkeypatch, "PE1", label="healthy")
+    with_counters = _with_template(evidence, "PE1", "interface", label="healthy", interface="Gi0/0/0/0")
+    without_counters = _with_template(
+        evidence, "PE1", "interface", label="healthy", interface="Gi0/0/0/2.300"
+    )
+    current = checks._extract_error_counters(with_counters["interface:Gi0/0/0/0"])
+    previous = checks._extract_error_counters(without_counters["interface:Gi0/0/0/2.300"])
+    assert current is not None
+    assert previous is None
+
+    status, _detail = checks._counter_delta_status(current, previous, has_previous=True)
+    assert status == checks.UNEVALUATED
+
+
+def test_interface_state_single_observation_line_up_is_healthy(monkeypatch):
+    """Case 3, the deliberate one: no `previous` must not make the whole
+    check unevaluated -- it answers healthy about line state, which it
+    actually read, and names the unevaluated counter half in the reason."""
+
+    evidence = _fixture_evidence(monkeypatch, "PE1", label="healthy")
+    evidence = _with_template(evidence, "PE1", "interface", label="healthy", interface="Gi0/0/0/0")
+    result = checks.interface_state(evidence, "Gi0/0/0/0")
+    assert result.status == checks.HEALTHY
+    assert result.reason == "line protocol up; error-counter rate not evaluated (single observation)"
+
+
+def test_interface_state_two_observations_flat_counters_is_healthy(monkeypatch):
+    evidence = _fixture_evidence(monkeypatch, "PE1", label="healthy")
+    evidence = _with_template(evidence, "PE1", "interface", label="healthy", interface="Gi0/0/0/0")
+    previous = copy.deepcopy(evidence)
+
+    result = checks.interface_state(evidence, "Gi0/0/0/0", previous=previous)
+    assert result.status == checks.HEALTHY
+    assert "flat" in result.reason
+
+
+def test_interface_state_two_observations_rising_input_errors_is_broken(monkeypatch):
+    """Derived from real captured output, not an invented format: a deep copy
+    of PE1's Gi0/0/0/0 capture with input_errors incremented."""
+
+    evidence = _fixture_evidence(monkeypatch, "PE1", label="healthy")
+    evidence = _with_template(evidence, "PE1", "interface", label="healthy", interface="Gi0/0/0/0")
+    previous = copy.deepcopy(evidence)
+
+    records = evidence["interface:Gi0/0/0/0"]["data"]["parsed"]["records"]
+    for record in records:
+        if record["counter"] == "input_errors":
+            record["value"] = str(int(record["value"]) + 5)
+
+    result = checks.interface_state(evidence, "Gi0/0/0/0", previous=previous)
+    assert result.status == checks.BROKEN
+    assert "input_errors" in result.reason
+
+
+def test_interface_state_evidence_keys_are_non_empty_for_a_conclusive_verdict(monkeypatch):
+    evidence = _fixture_evidence(monkeypatch, "PE2", label="broken")
+    evidence = _with_template(evidence, "PE2", "interface", label="broken", interface="Gi0/0/0/0")
+    result = checks.interface_state(evidence, "Gi0/0/0/0")
+    assert result.status == checks.BROKEN
+    assert result.evidence_keys
