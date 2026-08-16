@@ -939,6 +939,35 @@ Read the **buffer** level, not the trap level. `show logging` returns the buffer
 
 ---
 
+## T-029b · timeline citations — presence checking for correlations `[STATUS: DONE]`
+
+Pulled forward from **B-424** at the operator's direction, after T-033 emitted a fabricated timestamp to a user.
+
+```python
+def check_timeline_citations(claim: dict, window: ShapedWindow | None) -> GroundingResult
+def ground_correlation(claim, coverage, window=None) -> GroundingResult   # both halves
+```
+
+**The gap.** Grounding checked *presence* for reports and *absence* for correlations (T-029a). It checked **nothing** for presence in a correlation: `ground_correlation` returned a **vacuous pass** whenever `found` was not `False`, and printed `correlation grounding: vacuous pass — 0 observations, 0 citations` in every payload.
+
+|  | presence | absence |
+|---|---|---|
+| **report** | checked | n/a |
+| **correlation** | **was unchecked** → T-029b | checked (T-029a) |
+
+**Found live, not by review.** MiniMax emitted `Aug 14 04:28.238 UTC` for a record whose real timestamp is `Aug 16 14:04:28.238 UTC` — characters dropped, producing a malformed date two days earlier, in the one field `correlate.v3` constraint 2 says to quote exactly. One of nine entries did not exist in the evidence.
+
+Two rules, the report's evidence-key rule applied to the other output:
+
+1. **`at` must be a device timestamp present in the window** — verbatim, not approximately. A timeline is an ordering claim, and an ordering built on one wrong instant is wrong in a way no reader can see.
+2. **`mnemonic` must match a record at that timestamp.** A real instant attached to an event that did not happen at it is the same fabrication wearing a valid citation, and a timestamp check alone waves it through.
+
+A timeline with **no window** is refused rather than passed: grading against nothing must not look like grading successfully. An **empty** timeline is not a citation problem — that is `check_absence_coverage`'s business.
+
+**Tests:** 15. The live fabrication is pinned verbatim as a regression. `test_the_gate_now_runs_both_halves` is the §0.12 companion — it asserts `check_absence_coverage` alone *passes* the fabricated timeline and is `vacuous`, and that the composed gate does not.
+
+---
+
 ## T-030 · `investigation.py` — the MVP-0 runner `[STATUS: DONE]`
 
 ```python

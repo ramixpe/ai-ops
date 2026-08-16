@@ -403,7 +403,7 @@ def investigate(
 
         decoded, fixes = _decode(analyst(build_correlate_prompt(descent, shaped)))
         repairs.extend(fixes)
-        correlation_grounding = ground_correlation(decoded, coverage)
+        correlation_grounding = ground_correlation(decoded, coverage, shaped)
 
         if correlation_grounding.ok:
             correlation, correlation_status = decoded, EMITTED

@@ -495,3 +495,49 @@ def test_a_failed_log_read_is_a_window_with_no_coverage_not_an_empty_one():
     verdict = ground_correlation(refusal, shaped.coverage)
     assert not verdict.ok
     assert verdict.failures[0].kind == "unbacked_absence_claim"
+
+
+def test_a_fabricated_timestamp_withholds_the_correlation_through_the_runner():
+    """T-029b arriving through the runner -- the T-033 failure, end to end.
+
+    The descent and the report are unaffected: the diagnosis is deterministic
+    and the report grounds against it. Only the timeline is refused, which is
+    exactly the scoping the two gates are meant to give.
+    """
+
+    import json as _json
+
+    fabricated = _json.dumps({
+        "timeline": [{"at": "Aug 14 04:28.238 UTC", "event": "adjacency down",
+                      "mnemonic": "ROUTING-ISIS-5-ADJCHANGE"}],
+        "correlation": {"found": True, "summary": "s",
+                        "followed_a_commit": True, "recurrence": "once"},
+    })
+    result = _run("broken", Scripted(report=_good_report, correlate=fabricated))
+
+    assert result.correlation_status == WITHHELD
+    assert result.correlation is None
+    assert [f.kind for f in result.correlation_grounding.failures] == ["invented_timestamp"]
+
+    assert result.report_status == EMITTED, "the report is unaffected"
+    assert result.finding == "interface_line_down", "the diagnosis is unaffected"
+
+
+def test_a_faithful_timeline_still_passes_through_the_runner():
+    """The companion, and it needs the real window -- the entries are copied out
+    of it, so a runner reading the wrong device would fail this."""
+
+    import json as _json
+
+    window = investigation._log_window("PE2", sender=fixture_sender(label="broken"))
+    faithful = _json.dumps({
+        "timeline": [{"at": r["timestamp"], "event": r["text"][:30],
+                      "mnemonic": r["mnemonic"]} for r in window.records[:3]],
+        "correlation": {"found": True, "summary": "s",
+                        "followed_a_commit": True, "recurrence": "once"},
+    })
+    result = _run("broken", Scripted(report=_good_report, correlate=faithful))
+
+    assert result.correlation_status == EMITTED
+    assert result.correlation_grounding.ok
+    assert result.correlation_grounding.timeline_entries_checked == 3

@@ -1979,6 +1979,33 @@ transport path disappearing rather than a direct session teardown.
 
 ---
 
+## OBS-081 · T-029b · Presence checking for correlations — and the flag that was reporting the gap all along
+
+- **Kind:** defect-found
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** Closed B-424. `ground_correlation` now runs `check_timeline_citations` alongside `check_absence_coverage`, and the runner passes it the shaped window. **1365 passed.**
+
+  The rule is the report's, applied to the other output: every timeline entry's `at` must be a device timestamp present in the window, and its `mnemonic` must match a record at that timestamp. The second rule is not redundant — a verbatim-correct timestamp attached to an event that did not happen at it is the same fabrication wearing a valid citation, and a timestamp check alone passes it.
+- **Evidence:** `grounding.check_timeline_citations`; 15 tests, including the live T-033 fabrication pinned verbatim as a regression. `1365 passed`, lint clean.
+- **What I did:** Two things worth recording beyond the fix.
+
+  **1. The vacuous flag was reporting this in every payload, and I read past it.** §0.12 made `GroundingResult.vacuous` exist precisely so a pass over nothing would be distinguishable from a real pass — and the T-033 output printed
+
+  ```
+  correlation grounding: vacuous pass -- nothing to verify: 0 observations, 0 citations
+  ```
+
+  next to a nine-entry timeline. The instrument worked. **I did not read it**, and I only looked because a malformed date caught my eye in the prose.
+
+  That is a distinct failure from the ones catalogued in §0.13, and worth naming as such: not *the evidence could not have shown you*, but **the evidence did show you and nobody looked.** A guard that reports honestly into an output no one reads is, in effect, not running. The practical consequence is narrow and cheap: a `vacuous` pass on a payload that plainly contains claims is a contradiction the *code* should surface, not something a reader should have to notice. Filed as **B-429**.
+
+  **2. Scoping held.** The fabricated timeline withholds only the correlation. The descent is untouched — it is deterministic and has no model in it — and the report still grounds and emits. That is the two-gate design doing what it was built for, and the runner test asserts all three facts together so a future change that collapses them fails.
+- **Needs human review:** no
+- **Blocks:** none — T-034 next.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**

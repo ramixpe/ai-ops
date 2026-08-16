@@ -725,3 +725,142 @@ def _finding_for_correlation() -> DescentResult:
         flow="bgp_session", device="RR1", subject="10.255.0.12",
         finding="interface_line_down", outcomes=(outcome,),
         evidence_keys=("PE2:interface:Gi0/0/0/0",))
+
+
+# --------------------------------------------------------------------------- #
+# T-029b -- a timeline must cite records that exist
+# --------------------------------------------------------------------------- #
+
+
+def _found(timeline):
+    return {"timeline": timeline,
+            "correlation": {"found": True, "summary": "s",
+                            "followed_a_commit": True, "recurrence": "once"}}
+
+
+def test_the_exact_timestamp_the_model_fabricated_live_is_now_refused():
+    """The T-033 regression, verbatim.
+
+    MiniMax emitted `Aug 14 04:28.238 UTC` for a record whose real timestamp is
+    `Aug 16 14:04:28.238 UTC` -- characters dropped, producing a malformed date
+    two days earlier, in the one field `correlate.v3` constraint 2 says to quote
+    exactly. One of nine timeline entries did not exist in the evidence and the
+    correlation was emitted anyway, because nothing checked.
+    """
+
+    window = _window("broken")
+    real = window.records[0]["timestamp"]
+    assert real.startswith("Aug ")
+
+    mangled = _found([{"at": "Aug 14 04:28.238 UTC", "event": "adjacency down",
+                       "mnemonic": "ROUTING-ISIS-5-ADJCHANGE"}])
+    result = grounding.check_timeline_citations(mangled, window)
+
+    assert not result.ok
+    assert [f.kind for f in result.failures] == ["invented_timestamp"]
+    assert result.timeline_entries_checked == 1
+
+
+def test_a_timeline_citing_real_records_passes():
+    """The companion. Without it the check could refuse everything."""
+
+    window = _window("broken")
+    entries = [{"at": r["timestamp"], "event": r["text"][:30], "mnemonic": r["mnemonic"]}
+               for r in window.records[:4]]
+
+    result = grounding.check_timeline_citations(_found(entries), window)
+
+    assert result.ok, result.summary()
+    assert result.timeline_entries_checked == 4
+    assert not result.vacuous
+
+
+def test_a_real_instant_with_the_wrong_event_is_refused():
+    """The second rule, and it is not redundant with the first.
+
+    A verbatim-correct timestamp attached to an event that did not happen at it
+    is the same fabrication wearing a valid citation -- and a timestamp check
+    alone waves it through.
+    """
+
+    window = _window("broken")
+    record = next(r for r in window.records if r["mnemonic"].startswith("ROUTING-ISIS"))
+    wrong = _found([{"at": record["timestamp"], "event": "the peer reset",
+                     "mnemonic": "ROUTING-BGP-5-ADJCHANGE"}])
+
+    result = grounding.check_timeline_citations(wrong, window)
+
+    assert not result.ok
+    assert [f.kind for f in result.failures] == ["mnemonic_mismatch"]
+    assert record["mnemonic"] in str(result.failures[0])
+
+
+def test_a_timeline_with_no_window_is_refused_rather_than_passed():
+    """`window` is optional only so an existing caller keeps working. Grading a
+    timeline against nothing must not look like grading it successfully."""
+
+    result = grounding.check_timeline_citations(
+        _found([{"at": "Aug 16 07:41:54.688 UTC", "event": "x", "mnemonic": "y"}]), None)
+
+    assert not result.ok
+    assert result.failures[0].kind == "uncited_timeline"
+
+
+def test_an_empty_timeline_is_not_a_citation_problem():
+    """A `found: false` correlation has an empty timeline by contract. That is
+    `check_absence_coverage`'s business, not this one's."""
+
+    assert grounding.check_timeline_citations({"timeline": []}, _window("broken")).ok
+    assert grounding.check_timeline_citations({}, _window("broken")).ok
+
+
+def test_the_gate_now_runs_both_halves():
+    """§0.12's companion for `ground_correlation`, and the gap B-424 recorded.
+
+    Until T-029b this returned a *vacuous pass* for any correlation asserting
+    presence -- `found: true` meant nothing was checked at all. The two
+    assertions together are the point: absence checking alone passes a
+    fabricated timeline, and the composed gate does not.
+    """
+
+    window = _window("broken")
+    fabricated = _found([{"at": "Aug 14 04:28.238 UTC", "event": "x",
+                          "mnemonic": "ROUTING-ISIS-5-ADJCHANGE"}])
+
+    assert grounding.check_absence_coverage(fabricated, window.coverage).ok
+    assert grounding.check_absence_coverage(fabricated, window.coverage).vacuous
+
+    gated = grounding.ground_correlation(fabricated, window.coverage, window)
+    assert not gated.ok
+    assert [f.kind for f in gated.failures] == ["invented_timestamp"]
+
+
+def test_presence_and_absence_are_now_both_covered_for_both_outputs():
+    """The symmetry that was missing, asserted as a property.
+
+    The report checked presence; the correlation checked absence (T-029a) and
+    not presence. That asymmetry is why the live fabrication got through, and it
+    was invisible because the report's presence check made the other half feel
+    covered.
+    """
+
+    window = _window("healthy")
+
+    absence = {"timeline": [], "correlation": {"found": False, "summary": "none"}}
+    assert not grounding.ground_correlation(absence, window.coverage, window).ok
+
+    presence = _found([{"at": "Aug 14 04:28.238 UTC", "event": "x", "mnemonic": "z"}])
+    assert not grounding.ground_correlation(presence, window.coverage, window).ok
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [{"timeline": "not a list"}, {"timeline": ["a string"]},
+     {"timeline": [{"at": None}]}, {"timeline": [{"at": 12345}]},
+     "not a dict", []],
+    ids=lambda c: str(c)[:30],
+)
+def test_a_malformed_timeline_is_a_verdict_not_a_crash(claim):
+    result = grounding.check_timeline_citations(claim, _window("broken"))
+    assert isinstance(result, grounding.GroundingResult)
+    assert not result.ok

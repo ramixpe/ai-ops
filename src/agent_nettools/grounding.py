@@ -57,6 +57,7 @@ from dataclasses import dataclass, field
 
 from .coverage import Coverage
 from .descent import DescentResult
+from .log_window import ShapedWindow
 
 __all__ = [
     "MAX_LOCUS_LENGTH",
@@ -64,6 +65,7 @@ __all__ = [
     "GroundingResult",
     "check_absence_coverage",
     "check_chain_coverage",
+    "check_timeline_citations",
     "check_grounding",
     "descent_evidence_keys",
     "ground_correlation",
@@ -124,6 +126,7 @@ class GroundingResult:
     rungs_covered: int = 0
     rungs_required: int = 0
     absence_claims_checked: int = 0
+    timeline_entries_checked: int = 0
 
     @property
     def ok(self) -> bool:
@@ -143,6 +146,7 @@ class GroundingResult:
             or self.citations_checked
             or self.rungs_required
             or self.absence_claims_checked
+            or self.timeline_entries_checked
         )
 
     def merge(self, other: GroundingResult) -> GroundingResult:
@@ -155,6 +159,9 @@ class GroundingResult:
             absence_claims_checked=(
                 self.absence_claims_checked + other.absence_claims_checked
             ),
+            timeline_entries_checked=(
+                self.timeline_entries_checked + other.timeline_entries_checked
+            ),
         )
 
     def summary(self) -> str:
@@ -166,7 +173,8 @@ class GroundingResult:
                 f"{state}: {self.observations_checked} observations, "
                 f"{self.citations_checked} citations, "
                 f"{self.rungs_covered}/{self.rungs_required} rungs cited, "
-                f"{self.absence_claims_checked} absence claims backed"
+                f"{self.absence_claims_checked} absence claims backed, "
+                f"{self.timeline_entries_checked} timeline entries cited"
             )
         return f"not grounded ({len(self.failures)} failures): " + "; ".join(
             str(f) for f in self.failures
@@ -530,12 +538,125 @@ def check_absence_coverage(claim: dict, coverage: Coverage | None) -> GroundingR
     return GroundingResult(absence_claims_checked=1)
 
 
-def ground_correlation(claim: dict, coverage: Coverage | None) -> GroundingResult:
-    """The gate for a correlation result. **This is what the emit path calls.**
+def check_timeline_citations(claim: dict, window: ShapedWindow | None) -> GroundingResult:
+    """Every timeline entry must cite a record that is actually in the window.
 
-    Separate from :func:`ground_report` because the two consume different
-    outputs -- a correlation has no observations and no descent, and a report
-    has no coverage record. A future output carrying both grounds through both.
+    T-029b, closing the gap B-424 recorded. Grounding checked *presence* for
+    reports (an observation's ``evidence_key`` must be one the descent read) and
+    *absence* for correlations (T-029a). It checked **nothing** for presence in a
+    correlation, so a timeline asserting events was emitted with no verification
+    at all — ``ground_correlation`` returned a vacuous pass whenever ``found``
+    was not ``False``, and said so in every payload.
+
+    Found live at T-033, not by review. The model emitted
+
+        Aug 14 04:28.238 UTC
+
+    for a record whose real timestamp is ``Aug 16 14:04:28.238 UTC`` — a
+    malformed date two days earlier, in the one field ``correlate.v3``
+    constraint 2 says to quote exactly. One of nine timeline timestamps did not
+    exist in the evidence, and the report was emitted.
+
+    Two rules, and they are the report's evidence-key rule applied to the other
+    output:
+
+    * **``at`` must be a device timestamp present in the window.** Verbatim, not
+      approximately — the prompt says do not convert, do not normalise, do not
+      round, and a timestamp that has been altered is exactly as unusable as an
+      invented one. A timeline is an ordering claim, and an ordering built on
+      one wrong instant is wrong in a way no reader can see.
+    * **``mnemonic`` must match a record at that timestamp.** Otherwise a real
+      instant can be attached to an event that did not happen at it, which is
+      the same fabrication wearing a valid citation.
     """
 
-    return check_absence_coverage(claim, coverage)
+    if not isinstance(claim, dict):
+        return GroundingResult(
+            failures=(GroundingFailure("malformed_report", "correlation",
+                                       "the correlation result is not a JSON object"),)
+        )
+
+    timeline = claim.get("timeline")
+    if timeline is None:
+        timeline = []
+    if not isinstance(timeline, list):
+        return GroundingResult(
+            failures=(GroundingFailure("malformed_report", "timeline",
+                                       "'timeline' must be a list"),)
+        )
+    if not timeline:
+        return GroundingResult()
+
+    if window is None:
+        return GroundingResult(
+            failures=(
+                GroundingFailure(
+                    "uncited_timeline", "timeline",
+                    f"{len(timeline)} timeline entries with no window to cite against; "
+                    "a timeline is only a claim about evidence somebody holds",
+                ),
+            ),
+            timeline_entries_checked=len(timeline),
+        )
+
+    by_timestamp: dict[str, set[str]] = {}
+    for record in window.records:
+        stamp = record.get("timestamp")
+        if isinstance(stamp, str):
+            by_timestamp.setdefault(stamp, set()).add(str(record.get("mnemonic", "")))
+
+    failures: list[GroundingFailure] = []
+    for index, entry in enumerate(timeline, start=1):
+        locus = f"timeline[{index}]"
+        if not isinstance(entry, dict):
+            failures.append(
+                GroundingFailure("malformed_timeline_entry", locus, "not a JSON object")
+            )
+            continue
+
+        at = entry.get("at")
+        if not isinstance(at, str) or at not in by_timestamp:
+            failures.append(
+                GroundingFailure(
+                    "invented_timestamp", locus,
+                    f"cites {_locus(at)!r}, which is not a device timestamp in this "
+                    f"window; timestamps are quoted verbatim, never adjusted",
+                )
+            )
+            continue
+
+        mnemonic = entry.get("mnemonic")
+        if isinstance(mnemonic, str) and mnemonic and mnemonic not in by_timestamp[at]:
+            failures.append(
+                GroundingFailure(
+                    "mnemonic_mismatch", locus,
+                    f"cites {_locus(mnemonic)!r} at {_locus(at)}, where the window "
+                    f"records {', '.join(sorted(by_timestamp[at]))}",
+                )
+            )
+
+    return GroundingResult(
+        failures=tuple(failures), timeline_entries_checked=len(timeline)
+    )
+
+
+def ground_correlation(
+    claim: dict, coverage: Coverage | None, window: ShapedWindow | None = None
+) -> GroundingResult:
+    """The gate for a correlation result. **This is what the emit path calls.**
+
+    Both halves, for the same reason :func:`ground_report` runs both of its own:
+    a correlation makes claims of presence *and* of absence, and until T-029b
+    only the second was checked. `window` is optional solely so an existing
+    caller that has only the coverage record keeps working -- but omitting it
+    means a timeline is graded against nothing, and the check says so rather
+    than passing.
+
+    Separate from :func:`ground_report` because the two consume different
+    outputs: a correlation has no observations and no descent, and a report has
+    no window. A future output carrying both grounds through both.
+    """
+
+    return check_absence_coverage(claim, coverage).merge(
+        check_timeline_citations(claim, window)
+    )
