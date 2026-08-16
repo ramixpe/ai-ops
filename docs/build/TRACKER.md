@@ -59,7 +59,7 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 | T-012 | `bgp_neighbor` parser | DONE | sonnet-5 (opus-5 spec + review) | `5360adc` | OBS-040, OBS-041 | 41 fixtures round-trip, unaccounted=[]. §0.10 verified by mutation. 662 passed |
 | T-013 | `route` parser | DONE | sonnet-5 (opus-5 spec + review) | `d690246` | OBS-042 | 44 fixtures; a third output shape found that the spec missed. 719 passed |
 | T-014 | `interface` parser | DONE | sonnet-5 (opus-5 spec + review) | `04a0bf1` | OBS-043, OBS-044 | 45 fixtures, 3 shapes. Line-down omits error counters — binds T-020. 776 passed |
-| T-015 | `logging` parser | DONE | sonnet-5 (opus-5 spec + review) | _next commit_ | OBS-045 | 1,800 entries; mnemonic split verified by recomposition. Zero ignores. 804 passed |
+| T-015 | `logging` parser | DONE | sonnet-5 (opus-5 spec + review) | `b45d4d2` | OBS-045 | 1,800 entries; mnemonic split verified by recomposition. Zero ignores. 804 passed |
 | T-016 | `ping` parser | TODO | sonnet-5 | | | §0.10 completeness |
 | T-017 | `traceroute` parser | TODO | sonnet-5 | | | §0.10 completeness |
 | T-018 | Attach parsed data to `run_template` | TODO | sonnet-5 | | | closes the blocking gap |
