@@ -26,7 +26,7 @@ Maintained continuously, not at the end. Updated after every task by Opus 5.
 | Baseline test count | **550 passed, 4 skipped, 0 failed** (554 total; the 4 are `live_lab`, skipped by default) |
 | Run started | 2026-08-15 |
 | Last updated | 2026-08-16 |
-| Current task | T-029 |
+| Current task | T-030 |
 | Halted? | no — Q-013 and Q-017 resolved by the operator |
 | Operator decisions pending capture | **Lab must stay healthy until T-011** — `healthy` then `broken` captured in one coordinated window (OBS-019) |
 
@@ -84,8 +84,9 @@ T-035 is optional and does not gate the definition of done.
 |------|-------|--------|-------|--------|----------|-------|
 | T-026 | Prompt library scaffold (GRACE) | DONE | opus-5 | `e904ba9` | OBS-058 | Rules enforced by 8 tests; Part 4 requirements recorded. 1202 passed |
 | T-027 | `report` prompt | DONE | opus-5 | `436d90b` | OBS-059, OBS-060 | 3 golden cases incl. refusal path + `cause_not_localised`. 1217 passed |
-| T-028 | `correlate` prompt | DONE | opus-5 | _next commit_ | OBS-061, OBS-062 | Window shaped in code (200→20). `show logging` beats Loki here. 1235 passed |
-| T-029 | `grounding.py` | TODO | sonnet-5 | | | |
+| T-028 | `correlate` prompt | DONE | opus-5 | e9b468c | OBS-061, OBS-062 | Window shaped in code. `show logging` beats Loki here. 1235 passed |
+| — | reconcile `evidence-reduction.md` | DONE | opus-5 | 1630635 | OBS-063, OBS-064, OBS-065 | 6 divergences: 4 amended the doc, 1 corrected the filter (attribution, not facility), 1 scoped to B-414. correlate.v2. B-414/B-415 filed. 1245 passed |
+| T-029 | `grounding.py` | DONE | opus-5 | _next commit_ | OBS-066 | Two checks: citation integrity (spec) + chain coverage (operator). `ground_report` runs both. 34 tests, 1279 passed |
 | T-030 | `investigation.py` runner | TODO | sonnet-5 | | | no gate in MVP-0 |
 | T-031 | CLI wiring | TODO | sonnet-5 | | | |
 | T-032 | End-to-end offline test | TODO | sonnet-5 | | | **must assert BOTH labels**, as T-025 does |

@@ -790,7 +790,7 @@ This is the model's genuine contribution per the design: the descent says *what*
 
 ---
 
-## T-029 · `grounding.py` `[STATUS: TODO]`
+## T-029 · `grounding.py` `[STATUS: DONE]`
 
 ```python
 def check_grounding(report: dict, evidence_keys: frozenset[str]) -> GroundingResult
@@ -803,6 +803,29 @@ def check_grounding(report: dict, evidence_keys: frozenset[str]) -> GroundingRes
 **A failed grounding check means the report is not emitted.** The run returns the descent result plus the grounding failure — never the model's prose.
 
 **Tests:** an invented evidence key fails; a dangling `based_on` fails; a valid report passes.
+
+**Amended 2026-08-16 — grounding covers the causal chain.** The three bullets above are *citation integrity*: is the report internally sound? They cannot see the failure that matters most, because nothing in it is false. A report reading
+
+> "PE2's Gi0/0/0/0 is administratively down." `[obs-1, real key, cited, flagged]`
+
+passes every one of them and is the output `prompts/README.md` rules out — the cause named, the four rungs that explain it dropped, an RCA reduced to an assertion with a label attached.
+
+So there is a second check, and it needs the descent rather than a flat key set:
+
+```python
+def check_chain_coverage(report: dict, descent: DescentResult) -> GroundingResult
+def ground_report(report: dict, descent: DescentResult) -> GroundingResult   # both
+```
+
+- **Every rung the walk read is an observation**, citing one of *that rung's* evidence keys. An uncited rung is an uncited claim. A rung with no keys (`unevaluated`, nothing read) is exempt — there is nothing to cite, and that the report must *say so* is the prompt's refusal case.
+- **The causal chain is argued.** The union of all interpretations' `based_on` must cover the cause and every broken rung above it. The union rather than one interpretation: splitting a five-link chain into two sentences is better prose and no weaker an argument; dropping a link is what this forbids.
+- `check_grounding` keeps its specified signature and is exported as a component. **`ground_report` is what the emit path calls** — reaching for `check_grounding` alone there turns the chain requirement off silently.
+
+Keys are `descent_evidence_keys(descent)` — what the checks *read*, never what exists in the evidence store. Citing a real key for an interface this descent never looked at is an uncited claim wearing a citation.
+
+`GroundingFailure` carries a *locus* and never a `claim`. "The report is not emitted" is worth nothing if the rejection quotes it, and a rule enforced by remembering to redact eventually is not enforced (OBS-061).
+
+**T-030 acceptance depends on this:** the runner must call `ground_report`. A runner calling `check_grounding` would pass every internally-consistent report.
 
 ---
 

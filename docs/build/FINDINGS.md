@@ -1448,6 +1448,48 @@ Append-only record of everything learned during the build of the investigation l
 <!--
 Copy this block for each new entry.
 
+## OBS-066 · T-029 · `grounding.py` — the gate, and the half of it the spec could not see
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** T-029 as specified is three bullets of citation integrity: every observation's key is real, every `based_on` resolves, the recommendation carries `requires_human: true`. All three implemented, all three tested exactly as the plan asks. **They are not sufficient, and the report that defeats them is the likely one rather than an adversarial one.**
+
+  ```json
+  {"observations":    [{"claim": "PE2's Gi0/0/0/0 is administratively down",
+                        "evidence_key": "PE2:interface:GigabitEthernet0/0/0/0"}],
+   "interpretations": [{"claim": "The interface is the cause.", "based_on": ["obs-1"]}],
+   "recommendation":  {"next_check": "confirm with the operator", "requires_human": true}}
+  ```
+
+  Every claim cites something real. Every citation resolves. **`check_grounding` passes it**, and it is precisely the output `prompts/README.md` rules out — the cause named and the four rungs that explain it dropped. Citation integrity cannot see it, because nothing in it is false. What is wrong with the report is what it *omits*, and omission is invisible to a check that only inspects what is present.
+
+  So the operator's requirement — *grounding covers the causal chain* — is a second check with a different input, and the difference in input is the whole reason the first cannot absorb it: completeness is measured against the descent, and `check_grounding` never sees the descent.
+
+  | Function | Question | Input |
+  |---|---|---|
+  | `check_grounding` | Is this report internally sound? | the report, a key set |
+  | `check_chain_coverage` | Is this report the argument the descent made? | the report, the descent |
+  | **`ground_report`** | **both** — the function the emit path calls | the report, the descent |
+
+  The spec's signature is kept exactly, as a component. `ground_report` derives the key set from the descent rather than taking one, which closes a second gap: the authoritative set is what the checks **read**, never what exists in the evidence store. `PE2:interface:GigabitEthernet0/0/0/2` is a real key for a real interface this descent never looked at, and citing it is an uncited claim wearing a citation.
+- **Evidence:** `src/agent_nettools/grounding.py`; `tests/test_grounding.py`, 34 tests. **1279 passed, lint clean.** Built against the real five-rung `broken` descent, not a constructed one — `test_the_broken_descent_has_a_chain_worth_checking` asserts 5 rungs, a 4-rung chain and keys on every rung before anything else runs.
+- **What I did:** Four decisions worth recording.
+
+  **1. The union of `based_on` covers the chain, not a single interpretation.** The operator's phrasing was "the lowest broken rung is the interpretation citing the observations above it". Implemented as the union across all interpretations, deliberately: splitting a five-link chain into two sentences is better prose and no weaker an argument. Dropping a link is what the rule forbids, and the union catches that exactly. Pinned in both directions — the split version passes, the version citing only the cause fails with four `chain_link_not_argued` failures.
+
+  **2. Rule 1's exemption is narrower than "unevaluated rungs are exempt".** The exemption is keyed on *having no evidence keys*, not on the verdict. A rung that read something before giving up is still required to be cited; only a rung with nothing to cite is exempt. The wider version was the obvious phrasing and would have let a partially-read rung disappear from the report — the same shape as OBS-065, a rule encoded at the wrong width.
+
+  **3. `GroundingFailure` has no field a claim can occupy.** "A failed grounding check means the report is not emitted" is worth nothing if the rejection reason quotes it. Structural containment rather than redaction, for OBS-061's reason: a rule enforced by remembering is a rule that eventually is not enforced. Evidence keys *are* included — an invented key is the thing that failed and naming it is what makes the failure actionable — but they are flattened and capped at 120 characters, since a key in a rejected report is model-authored text like any other.
+
+  **4. §0.12 applied to this module's own result.** An all-`unevaluated` descent and an empty report satisfy every rule here by having nothing to check. That is a legitimate pass, and `ok` alone is indistinguishable from a real one — so `GroundingResult` carries the counts and `vacuous` names the case. Two tests, in both directions: the empty pass reports vacuous, the real pass reports not-vacuous. Without the second, `vacuous` could be hardcoded `True`.
+
+  Also pinned: `observation_labels` against the prompt's own instruction that observations are numbered `obs-1, obs-2, …`. That label scheme is a contract between two files with no third place to write it down, and if they ever disagree the gate rejects every report a correctly-behaving model produces — a total outage presenting as a model quality problem.
+- **Needs human review:** no
+- **Blocks:** none. **T-030 acceptance depends on the runner calling `ground_report`, not `check_grounding`** — the latter passes every internally-consistent report.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**
