@@ -215,6 +215,8 @@ Only these. They are absolute.
 - A fixture or capture that would commit sensitive data.
 - `T-021`'s agreement test failing — a genuine disagreement between `checks.py` and `health.py` is a design finding, not a test to loosen.
 
+A tool's report of failure is not evidence of failure. Before acting on either a success or a failure report from anything that touched a device, verify the device's actual state directly and cross-check against a second source. Never retry a non-idempotent action on the basis of a failure report alone — re-applying a change to a device that is already correct is itself the harm this section exists to prevent.
+
 On HALT: mark the task `BLOCKED`, write a finding with `Needs human review: yes`, add a row to the Open Questions table in `FINDINGS.md`, update `TRACKER.md`, and **stop**.
 
 ### DECIDE-AND-LOG — choose, record, continue
