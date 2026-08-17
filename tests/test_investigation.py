@@ -146,8 +146,24 @@ def test_the_descent_runs_alone_and_says_so():
     assert result.finding == "interface_line_down"
     assert result.descent.cause.device == "PE2"
     assert len(result.descent.causal_chain) == 4
-    assert result.report is None and result.report_status == NOT_ATTEMPTED
-    assert result.correlation is None and result.correlation_status == NOT_ATTEMPTED
+    # Changed at B-439, and the change is the point of that item. The report
+    # used to be NOT_ATTEMPTED without a model. It is now **rendered from the
+    # descent and always present**, so `--no-model` produces a complete answer
+    # rather than a reduced one -- the deterministic half was always the half
+    # that found the cause, and now it is the half that reports it too.
+    assert result.report_status == EMITTED
+    assert result.report is not None and result.report["authoritative"] is True
+    assert result.report["generated_by"] == "code"
+    assert result.report["finding"] == "interface_line_down"
+
+    # No model ran, so there is no paraphrase. Still NOT_ATTEMPTED, still not a
+    # failure -- that half of the original property is unchanged.
+    assert result.paraphrase is None and result.paraphrase_status == NOT_ATTEMPTED
+
+    # The timeline is rendered too, and needs no model either.
+    assert result.correlation is not None
+    assert result.correlation["generated_by"] == "code"
+    assert result.correlation_paraphrase is None
     assert "interface_line_down on PE2" in result.summary()
 
 
@@ -167,10 +183,10 @@ def test_a_grounded_report_is_emitted():
     analyst = Scripted(report=_good_report, correlate=_FOUND)
     result = _run("broken", analyst)
 
-    assert result.report_status == EMITTED
-    assert result.report is not None
-    assert result.report_grounding.ok
-    assert result.report_grounding.rungs_covered == 5
+    assert result.paraphrase_status == EMITTED
+    assert result.paraphrase is not None
+    assert result.paraphrase_grounding.ok
+    assert result.paraphrase_grounding.rungs_covered == 5
 
 
 def test_a_report_that_drops_the_chain_is_withheld_and_its_prose_is_gone():
@@ -193,10 +209,10 @@ def test_a_report_that_drops_the_chain_is_withheld_and_its_prose_is_gone():
     })
     result = _run("broken", Scripted(report=chain_dropped, correlate=_FOUND))
 
-    assert result.report_status == WITHHELD
-    assert result.report is None
+    assert result.paraphrase_status == WITHHELD
+    assert result.paraphrase is None
     assert invented not in json.dumps(result.withheld_because())
-    assert {f.kind for f in result.report_grounding.failures} == {"uncited_rung"}
+    assert {f.kind for f in result.paraphrase_grounding.failures} == {"uncited_rung"}
 
 
 def test_an_invented_evidence_key_withholds_the_report():
@@ -206,8 +222,8 @@ def test_an_invented_evidence_key_withholds_the_report():
     })
     result = _run("broken", Scripted(report=bad, correlate=_FOUND))
 
-    assert result.report is None
-    assert any(f.kind == "invented_evidence_key" for f in result.report_grounding.failures)
+    assert result.paraphrase is None
+    assert any(f.kind == "invented_evidence_key" for f in result.paraphrase_grounding.failures)
 
 
 @pytest.mark.parametrize(
@@ -221,8 +237,8 @@ def test_a_malformed_model_response_is_a_withheld_report_not_a_crash(response):
 
     result = _run("broken", Scripted(report=response, correlate=_FOUND))
 
-    assert result.report_status == WITHHELD
-    assert result.report is None
+    assert result.paraphrase_status == WITHHELD
+    assert result.paraphrase is None
     assert result.descent.finding == "interface_line_down", "the descent still stands"
 
 
@@ -237,7 +253,7 @@ def test_a_markdown_fence_is_stripped_and_the_repair_is_recorded():
     fenced = lambda p: "```json\n" + _good_report(p) + "\n```"  # noqa: E731
     result = _run("broken", Scripted(report=fenced, correlate=_FOUND))
 
-    assert result.report_status == EMITTED
+    assert result.paraphrase_status == EMITTED
     assert any("markdown fence" in r for r in result.repairs)
 
 
@@ -249,8 +265,8 @@ def test_nothing_beyond_a_fence_is_repaired():
     chatty = lambda p: _good_report(p) + "\n\nHope that helps!"  # noqa: E731
     result = _run("broken", Scripted(report=chatty, correlate=_FOUND))
 
-    assert result.report_status == WITHHELD
-    assert result.report is None
+    assert result.paraphrase_status == WITHHELD
+    assert result.paraphrase is None
 
 
 # --------------------------------------------------------------------------- #
@@ -272,7 +288,7 @@ def test_the_log_window_comes_from_the_cause_device_not_the_local_one():
                   window=_capture(asked))
 
     assert asked == ["PE2"], "the window must be read where the cause is"
-    assert result.correlation_status == EMITTED
+    assert result.correlation_paraphrase_status == EMITTED
 
 
 def _capture(sink):
@@ -300,8 +316,8 @@ def test_no_cause_means_no_correlation_to_run():
 
     result = _run("healthy", Scripted(report="{}", correlate=_FOUND))
 
-    assert result.correlation_status == NOT_ATTEMPTED
-    assert result.correlation is None
+    assert result.correlation_paraphrase_status == NOT_ATTEMPTED
+    assert result.correlation_paraphrase is None
     assert result.coverage is None
 
 
@@ -323,8 +339,8 @@ def test_an_absence_claim_over_a_truncated_buffer_is_downgraded_not_discarded():
     result = _run("broken", Scripted(report=_good_report, correlate=_NOT_FOUND),
                   window=_capture(asked))
 
-    assert result.correlation_status == COVERAGE_LIMITED
-    assert result.correlation is not None, "downgraded, not discarded"
+    assert result.correlation_paraphrase_status == COVERAGE_LIMITED
+    assert result.correlation_paraphrase is not None, "downgraded, not discarded"
     assert not result.correlation_grounding.ok
     assert [f.kind for f in result.correlation_grounding.failures] == [
         "absence_claim_exceeds_coverage"
@@ -343,7 +359,7 @@ def test_a_found_correlation_is_unaffected_by_the_same_coverage_gap():
     result = _run("broken", Scripted(report=_good_report, correlate=_FOUND),
                   window=_capture(asked))
 
-    assert result.correlation_status == EMITTED
+    assert result.correlation_paraphrase_status == EMITTED
     assert result.coverage is not None and not result.coverage.complete
 
 
@@ -356,8 +372,8 @@ def test_a_correlation_that_fails_for_a_real_reason_is_still_withheld():
                       "agent_nettools.log_window", fromlist=["ShapedWindow"]
                   ).ShapedWindow(total_in=0, coverage=None))
 
-    assert result.correlation_status == WITHHELD
-    assert result.correlation is None
+    assert result.correlation_paraphrase_status == WITHHELD
+    assert result.correlation_paraphrase is None
     assert result.correlation_grounding.failures[0].kind == "unbacked_absence_claim"
 
 
@@ -526,11 +542,11 @@ def test_a_fabricated_timestamp_withholds_the_correlation_through_the_runner():
     })
     result = _run("broken", Scripted(report=_good_report, correlate=fabricated))
 
-    assert result.correlation_status == WITHHELD
-    assert result.correlation is None
+    assert result.correlation_paraphrase_status == WITHHELD
+    assert result.correlation_paraphrase is None
     assert [f.kind for f in result.correlation_grounding.failures] == ["invented_timestamp"]
 
-    assert result.report_status == EMITTED, "the report is unaffected"
+    assert result.paraphrase_status == EMITTED, "the report is unaffected"
     assert result.finding == "interface_line_down", "the diagnosis is unaffected"
 
 
@@ -549,7 +565,7 @@ def test_a_faithful_timeline_still_passes_through_the_runner():
     })
     result = _run("broken", Scripted(report=_good_report, correlate=faithful))
 
-    assert result.correlation_status == EMITTED
+    assert result.correlation_paraphrase_status == EMITTED
     assert result.correlation_grounding.ok
     assert result.correlation_grounding.timeline_entries_checked == 3
 

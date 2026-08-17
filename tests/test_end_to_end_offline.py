@@ -214,14 +214,14 @@ def test_the_broken_label_runs_the_whole_pipeline_and_grounds():
     assert result.descent.cause.device == "PE2"
     assert len(result.descent.causal_chain) == 4
 
-    assert result.report_status == EMITTED
-    assert result.report_grounding.ok, result.report_grounding.summary()
-    assert result.report_grounding.rungs_covered == 5
-    assert len(result.report["observations"]) == 5
-    assert result.report["recommendation"]["requires_human"] is True
+    assert result.paraphrase_status == EMITTED
+    assert result.paraphrase_grounding.ok, result.paraphrase_grounding.summary()
+    assert result.paraphrase_grounding.rungs_covered == 5
+    assert len(result.paraphrase["observations"]) == 5
+    assert result.paraphrase["recommendation"]["requires_human"] is True
 
-    assert result.correlation_status == EMITTED
-    assert result.correlation["correlation"]["found"] is True
+    assert result.correlation_paraphrase_status == EMITTED
+    assert result.correlation_paraphrase["correlation"]["found"] is True
     assert result.coverage is not None and result.coverage.device == "PE2"
 
 
@@ -232,11 +232,11 @@ def test_the_healthy_label_runs_the_whole_pipeline_and_grounds():
     assert result.finding == "all_layers_healthy"
     assert result.descent.cause is None
 
-    assert result.report_status == EMITTED
-    assert result.report_grounding.ok, result.report_grounding.summary()
-    assert result.report_grounding.rungs_required == 5, "every rung was read and healthy"
+    assert result.paraphrase_status == EMITTED
+    assert result.paraphrase_grounding.ok, result.paraphrase_grounding.summary()
+    assert result.paraphrase_grounding.rungs_required == 5, "every rung was read and healthy"
 
-    assert result.correlation_status == NOT_ATTEMPTED, "no cause, nothing to place in time"
+    assert result.correlation_paraphrase_status == NOT_ATTEMPTED, "no cause, nothing to place in time"
 
 
 def test_the_same_peer_gives_opposite_answers_on_the_two_labels():
@@ -292,7 +292,7 @@ def test_no_unparsed_device_text_reaches_the_model():
 
     analyst = ReadsItsPrompt()
     result = _pipeline("broken", analyst)
-    assert result.report_status == EMITTED
+    assert result.paraphrase_status == EMITTED
     assert len(analyst.prompts) == 2
 
     # Strings that are definitely in the fixtures this run read, and that no

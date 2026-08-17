@@ -156,38 +156,52 @@ def _drive(result, monkeypatch, capsys, fmt="json"):
     return code, capsys.readouterr().out
 
 
-def test_a_withheld_report_exits_two_even_though_a_fault_was_found(monkeypatch, capsys):
-    """The decisive case, and the one worth arguing about.
+def test_a_withheld_paraphrase_no_longer_changes_the_exit_code(monkeypatch, capsys):
+    """**A deliberate reversal at B-439, and the argument it has to answer.**
 
-    The descent found `interface_line_down` -- the network really is broken, so
-    exit 1 is defensible. It is still wrong. If a grounding failure exited 1, a
-    *systematic* grounding regression would hide in the noise of routine faults
-    forever: faults are normal, exit 1 is normal, and a model layer that had
-    quietly stopped producing verifiable output would look exactly like a
-    fabric with intermittent problems.
+    This test asserted the opposite until 2026-08-17: a withheld report exited
+    2, on the reasoning that *"if a grounding failure exited 1, a systematic
+    grounding regression would hide in the noise of routine faults forever."*
 
-    The finding stays in the payload, so nothing about the network is
-    concealed -- only the exit code says "do not trust this run".
+    That reasoning was right while the report **was** the answer. It is not any
+    more. The authoritative report is rendered from the descent and cannot fail
+    to be produced; what can fail grounding is the model's paraphrase, which
+    nothing downstream depends on. Exiting 2 because a restatement was clumsy
+    would mean a cosmetic failure suppresses a trustworthy finding, which
+    inverts the point of B-439.
+
+    **But the original concern is not answered by that, and is not dismissed
+    here.** A systematic paraphrase-grounding regression is now invisible to
+    exit codes. It has to be visible somewhere, so the replacement requirement
+    is that it is loud in the payload and on stderr -- asserted below, and filed
+    as B-457 because a field nobody aggregates is not detection either.
     """
 
     from agent_nettools.grounding import GroundingFailure, GroundingResult
 
     withheld = _result(
         "broken",
-        report=None,
-        report_status=investigation.WITHHELD,
-        report_grounding=GroundingResult(
+        paraphrase=None,
+        paraphrase_status=investigation.WITHHELD,
+        paraphrase_grounding=GroundingResult(
             failures=(GroundingFailure("uncited_rung", "rung:transport", "not cited"),)
         ),
     )
     code, out = _drive(withheld, monkeypatch, capsys)
     payload = _payload(out)
 
-    assert code == 2
-    assert payload["finding"] == "interface_line_down", "the descent is not concealed"
-    assert payload["report"]["status"] == investigation.WITHHELD
-    assert payload["report"]["content"] is None
+    assert code == 1, "the network is broken; the answer about it is still good"
+    assert payload["trustworthy"] is True
 
+    # The authoritative answer is present and is not the model's.
+    assert payload["report"]["authoritative"] is True
+    assert payload["report"]["content"]["generated_by"] == "code"
+
+    # And the failure is not silent.
+    assert payload["report"]["paraphrase"]["status"] == investigation.WITHHELD
+    assert payload["report"]["paraphrase"]["content"] is None, (
+        "rejected prose still does not leave the module"
+    )
 
 def test_the_identical_descent_without_a_withheld_report_exits_one(monkeypatch, capsys):
     """The companion. Without it, the test above could pass because `broken`
@@ -216,8 +230,8 @@ def _coverage_limited():
 
     return _result(
         "broken",
-        correlation={"timeline": [], "correlation": {"found": False}},
-        correlation_status=investigation.COVERAGE_LIMITED,
+        correlation_paraphrase={"timeline": [], "correlation": {"found": False}},
+        correlation_paraphrase_status=investigation.COVERAGE_LIMITED,
         correlation_grounding=GroundingResult(
             failures=(GroundingFailure("absence_claim_exceeds_coverage",
                                        "correlation.found", "; ".join(coverage.gaps())),),

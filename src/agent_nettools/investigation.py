@@ -69,6 +69,7 @@ from .grounding import GroundingResult, ground_correlation, ground_report
 from .log_window import ShapedWindow, coverage_from_logging, shape_window
 from .network_tools import collect_evidence, run_template
 from .prompt_library import RenderedPrompt, build_correlate_prompt, build_report_prompt
+from .render import render_correlation, render_report, report_grounding_note
 from .template_parsers import PARSE_OK, parse_template_output
 
 __all__ = [
@@ -157,14 +158,32 @@ class InvestigationResult:
     flow: str
     descent: DescentResult
 
+    #: **The authoritative report, rendered by code from the descent (B-439).**
+    #: Never a model's output, always present, and never graded -- see
+    #: `render.report_grounding_note`.
     report: dict | None = None
     report_status: str = NOT_ATTEMPTED
     report_grounding: GroundingResult = field(default_factory=GroundingResult)
 
+    #: **The authoritative timeline, also rendered by code.** Four of the five
+    #: correlate fields are filtering, ordering and counting; only `summary` is
+    #: prose, and the rendered one states exactly what it counted.
     correlation: dict | None = None
     correlation_status: str = NOT_ATTEMPTED
     correlation_grounding: GroundingResult = field(default_factory=GroundingResult)
     coverage: Coverage | None = None
+
+    #: A model's readable restatement of the report. **Non-authoritative**, and
+    #: structurally separate so nothing downstream can prefer it to `report` by
+    #: accident. Graded exactly as the report used to be, and `None` when that
+    #: grading failed -- rejected prose still does not leave this module.
+    paraphrase: dict | None = None
+    paraphrase_status: str = NOT_ATTEMPTED
+    paraphrase_grounding: GroundingResult = field(default_factory=GroundingResult)
+
+    #: The same, for the timeline.
+    correlation_paraphrase: dict | None = None
+    correlation_paraphrase_status: str = NOT_ATTEMPTED
 
     #: Non-semantic fixes applied to a model response, e.g. a stripped fence.
     repairs: tuple[str, ...] = field(default_factory=tuple)
@@ -186,10 +205,21 @@ class InvestigationResult:
             and self.descent.finding not in _FINDINGS_WITHOUT_A_CAUSE
         )
         where = f" on {cause.device}" if localised else ""
+        # The authoritative report and timeline are always emitted, so saying so
+        # adds nothing. What a reader needs from one line is whether a *model*
+        # restatement was rejected -- which no longer changes the exit code
+        # (B-439), and therefore has to be legible somewhere that is read.
+        model = ""
+        if NOT_ATTEMPTED != (self.paraphrase_status, self.correlation_paraphrase_status):
+            model = (
+                f" [paraphrase {self.paraphrase_status}, "
+                f"timeline paraphrase {self.correlation_paraphrase_status}]"
+            )
         return (
             f"{self.flow} {self.device} -> {self.subject}: "
-            f"{self.descent.finding}{where} "
-            f"[report {self.report_status}, correlation {self.correlation_status}]"
+            f"{self.descent.finding}{where}"
+            f" [report {self.report_status}, correlation {self.correlation_status}]"
+            f"{model}"
         )
 
     def to_payload(self) -> dict:
@@ -234,13 +264,31 @@ class InvestigationResult:
             "report": {
                 "status": self.report_status,
                 "content": self.report,
-                "grounding": self.report_grounding.summary(),
+                "authoritative": True,
+                # Deliberately not a grounding verdict. Grading a report
+                # generated from the descent's own typed fields would compare
+                # code against itself and always pass -- shape 5 in the one
+                # place built to prevent shape 5 (B-439).
+                "grounding": report_grounding_note(),
+                "paraphrase": {
+                    "status": self.paraphrase_status,
+                    "content": self.paraphrase,
+                    "authoritative": False,
+                    "grounding": self.paraphrase_grounding.summary(),
+                },
             },
             "correlation": {
                 "status": self.correlation_status,
                 "content": self.correlation,
-                "grounding": self.correlation_grounding.summary(),
+                "authoritative": True,
+                "grounding": report_grounding_note(),
                 "caveat": self.caveat,
+                "paraphrase": {
+                    "status": self.correlation_paraphrase_status,
+                    "content": self.correlation_paraphrase,
+                    "authoritative": False,
+                    "grounding": self.correlation_grounding.summary(),
+                },
             },
             "off_path": list(self.off_path),
             # Present whatever the outcome, including a comfortable pass. A
@@ -283,7 +331,7 @@ class InvestigationResult:
         make a correlation shortfall read as doubt about the diagnosis.
         """
 
-        if self.correlation_status != COVERAGE_LIMITED:
+        if self.correlation_paraphrase_status != COVERAGE_LIMITED:
             return None
         gaps = "; ".join(self.coverage.gaps()) if self.coverage else "coverage unknown"
         return (
@@ -315,8 +363,13 @@ class InvestigationResult:
         # observations were real, and they do not describe one state.
         if self.descent.finding == flows.TEMPORALLY_INCOHERENT:
             return False
-        if self.report_status == WITHHELD or self.correlation_status == WITHHELD:
-            return False
+        # The authoritative report is always produced, so it can no longer be
+        # withheld. A rejected *paraphrase* does not make the answer
+        # untrustworthy -- the answer is the rendered report, and the model
+        # failing to restate it well is a prompt problem, not a doubt about the
+        # finding. That is a real change from before B-439 and is the point of
+        # it: the trustworthy answer no longer depends on a model call
+        # succeeding.
         return True
 
     def withheld_because(self) -> tuple[str, ...]:
@@ -327,9 +380,9 @@ class InvestigationResult:
         """
 
         reasons: list[str] = []
-        if self.report_status == WITHHELD:
-            reasons.extend(str(f) for f in self.report_grounding.failures)
-        if self.correlation_status in (WITHHELD, COVERAGE_LIMITED):
+        if self.paraphrase_status == WITHHELD:
+            reasons.extend(str(f) for f in self.paraphrase_grounding.failures)
+        if self.correlation_paraphrase_status in (WITHHELD, COVERAGE_LIMITED):
             reasons.extend(str(f) for f in self.correlation_grounding.failures)
         return tuple(reasons)
 
@@ -473,31 +526,63 @@ def investigate(
         collector=collect, resolver=resolve, coherence=coherence,
     )
 
-    if analyst is None:
-        return InvestigationResult(
-            device=device, subject=subject, flow=flow, descent=descent
-        )
+    # -- The authoritative report. No model, always produced (B-439). --------
+    #
+    # Rendered from the descent's typed fields, so it cannot differ from what
+    # the walk found -- not "checked and found faithful", unable to differ. It
+    # is produced whether or not an analyst is configured, which is what makes
+    # `--no-model` a complete result rather than a reduced one.
+    report = render_report(descent)
+    report_status = EMITTED
 
-    repairs: list[str] = []
-
-    # -- Correlate. Against the device the cause is on, not the local one. ---
     cause = descent.cause
     correlation: dict | None = None
     correlation_status = NOT_ATTEMPTED
-    correlation_grounding = GroundingResult()
     coverage: Coverage | None = None
+    shaped: ShapedWindow | None = None
 
     if cause is not None:
         read_window = window or (lambda d: _log_window(d, sender=sender))
         shaped = read_window(cause.device)
         coverage = shaped.coverage
+        correlation = render_correlation(descent, shaped)
+        correlation_status = EMITTED
 
+    if analyst is None:
+        return InvestigationResult(
+            device=device, subject=subject, flow=flow, descent=descent,
+            report=report, report_status=report_status,
+            correlation=correlation, correlation_status=correlation_status,
+            coverage=coverage,
+        )
+
+    # -- The paraphrase. A model, and nothing downstream may prefer it. ------
+    #
+    # Graded exactly as the report used to be, and carried in its own field. A
+    # consumer that wants the finding reads `report`; a consumer that wants a
+    # readable sentence reads `paraphrase` and knows it is not authoritative.
+    repairs: list[str] = []
+
+    decoded, fixes = _decode(analyst(build_report_prompt(descent)))
+    repairs.extend(fixes)
+    paraphrase_grounding = ground_report(decoded, descent)
+    paraphrase = decoded if paraphrase_grounding.ok else None
+    paraphrase_status = EMITTED if paraphrase_grounding.ok else WITHHELD
+    if isinstance(paraphrase, dict):
+        paraphrase["authoritative"] = False
+
+    correlation_paraphrase: dict | None = None
+    correlation_paraphrase_status = NOT_ATTEMPTED
+    correlation_grounding = GroundingResult()
+
+    if cause is not None and shaped is not None:
         decoded, fixes = _decode(analyst(build_correlate_prompt(descent, shaped)))
         repairs.extend(fixes)
         correlation_grounding = ground_correlation(decoded, coverage, shaped)
 
         if correlation_grounding.ok:
-            correlation, correlation_status = decoded, EMITTED
+            correlation_paraphrase = decoded
+            correlation_paraphrase_status = EMITTED
         elif all(
             f.kind == "absence_claim_exceeds_coverage"
             for f in correlation_grounding.failures
@@ -506,22 +591,22 @@ def investigate(
             # is strictly better than discarding it: the reader learns both
             # that nothing was found and that the source could not have shown
             # it, which is more than either half alone.
-            correlation, correlation_status = decoded, COVERAGE_LIMITED
+            correlation_paraphrase = decoded
+            correlation_paraphrase_status = COVERAGE_LIMITED
         else:
-            correlation_status = WITHHELD
-
-    # -- Report. ------------------------------------------------------------
-    decoded, fixes = _decode(analyst(build_report_prompt(descent)))
-    repairs.extend(fixes)
-    report_grounding = ground_report(decoded, descent)
-    report = decoded if report_grounding.ok else None
-    report_status = EMITTED if report_grounding.ok else WITHHELD
+            correlation_paraphrase_status = WITHHELD
+        if isinstance(correlation_paraphrase, dict):
+            correlation_paraphrase["authoritative"] = False
 
     return InvestigationResult(
         device=device, subject=subject, flow=flow, descent=descent,
-        report=report, report_status=report_status, report_grounding=report_grounding,
+        report=report, report_status=report_status,
         correlation=correlation, correlation_status=correlation_status,
         correlation_grounding=correlation_grounding, coverage=coverage,
+        paraphrase=paraphrase, paraphrase_status=paraphrase_status,
+        paraphrase_grounding=paraphrase_grounding,
+        correlation_paraphrase=correlation_paraphrase,
+        correlation_paraphrase_status=correlation_paraphrase_status,
         repairs=tuple(repairs),
         # Duck-typed: an analyst that does not record usage simply has none.
         usage=getattr(analyst, "usage", None),

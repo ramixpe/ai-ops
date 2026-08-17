@@ -112,11 +112,19 @@ def test_the_epoch_costs_fewer_commands_than_collecting_per_rung():
     )
 
     assert len(epoch_calls) < len(per_rung_calls)
-    # 24 against 40 as measured 2026-08-17: 19 to collect, 5 to re-read. The
-    # design predicted "19 + 2 re-reads" and the re-read costs 5, because the
-    # interface rung fans out over three members plus its `interfaces` intent.
-    # Pinned so the cost of the re-read stays visible rather than drifting.
-    assert (len(epoch_calls), len(per_rung_calls)) == (24, 40)
+    # 25 against 41 as measured 2026-08-17: 19 to collect, 5 to re-read, 1 to
+    # read the log buffer. The design predicted "19 + 2 re-reads"; the re-read
+    # costs 5 because the interface rung fans out over three members plus its
+    # `interfaces` intent.
+    #
+    # **The log read is new at B-439 and appears on the `--no-model` path**,
+    # which it never did before: the timeline is now rendered deterministically,
+    # so it is produced whether or not an analyst is configured. That is one
+    # extra command on every run in exchange for a timeline that no longer needs
+    # a model, and it is pinned here so the trade stays visible rather than
+    # looking like drift.
+    assert (len(epoch_calls), len(per_rung_calls)) == (25, 41)
+    assert sum("logging" in c for c in epoch_calls) == 1
 
 
 def test_for_device_returns_the_shape_checks_already_read():

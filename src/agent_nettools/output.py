@@ -354,10 +354,19 @@ def _render_investigation_table(payload: dict[str, Any]) -> str:
                 else "usage not reported by the provider"
             )
         )
-    lines.append(f"report:      {report.get('status', '?')}")
-    lines.append(f"correlation: {correlation.get('status', '?')}")
+    lines.append(f"report:      {report.get('status', '?')} (rendered from the descent)")
+    lines.append(f"correlation: {correlation.get('status', '?')} (rendered from the descent)")
+    # A model restatement no longer changes the exit code (B-439), so a rejected
+    # one has to be legible here or it is not legible anywhere a person looks.
+    for label, block in (("report", report), ("timeline", correlation)):
+        para = block.get("paraphrase") or {}
+        if para.get("status") and para["status"] != "not_attempted":
+            lines.append(f"  {label} paraphrase: {para['status']} (non-authoritative)")
     if correlation.get("caveat"):
         lines.append(f"  caveat: {_compact(correlation['caveat'])}")
+    coherence = payload.get("coherence") or {}
+    if coherence.get("caveat"):
+        lines.append(f"  caveat: {_compact(coherence['caveat'])}")
     if not payload.get("trustworthy", True):
         lines.append("  NOT TRUSTWORTHY -- no answer was produced (exit 2)")
     return "\n".join(lines)
@@ -398,8 +407,13 @@ def _render_investigation_summary(payload: dict[str, Any]) -> str:
         )
 
     correlation = payload.get("correlation") or {}
-    if correlation.get("status") == "coverage_limited":
-        head += " (timeline coverage-limited; finding unaffected)"
+    para = (correlation.get("paraphrase") or {}).get("status")
+    if para == "coverage_limited":
+        head += " (timeline coverage_limited; finding unaffected)"
+    elif para == "withheld":
+        head += " (timeline paraphrase withheld; finding unaffected)"
+    if (payload.get("coherence") or {}).get("status") == "window_limited":
+        head += " (window_limited; read as true at both ends, not throughout)"
     if not payload.get("trustworthy", True):
         head += " -- NOT TRUSTWORTHY"
     return head

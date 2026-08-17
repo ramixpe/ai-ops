@@ -348,9 +348,18 @@ def _cmd_investigate(args: argparse.Namespace) -> int:
     2    no trustworthy answer was produced
     ==== =========================================================
 
+    **No model is called unless ``--paraphrase`` is given (B-439).** The
+    finding, the causal chain, the recommendation and the timeline are all
+    rendered from the descent's typed fields, so the authoritative answer needs
+    no model and does not wait for one — measured live, ~70s of a ~110s run was
+    two model calls producing a restatement nothing depends on. A paraphrase is
+    still available, still graded, and marked non-authoritative.
+
     Exit 1 is a problem with the **network**. Exit 2 is a problem with the
-    **answer** — `undetermined`, `temporally_incoherent`, a withheld report, a
-    collection failure, a flow that could not run.
+    **answer** — `undetermined`, `temporally_incoherent`, a
+    collection failure, a flow that could not run. **A withheld paraphrase is
+    not on that list**: it cannot be, now that the answer does not come from a
+    model.
 
     `temporally_incoherent` is worth naming here because it is the one that
     reads like a network fault and is not: the rungs were all read, and each
@@ -384,7 +393,7 @@ def _cmd_investigate(args: argparse.Namespace) -> int:
 
         sender = fixture_sender(label=args.label)
         _note(f"# Fixture replay: label={args.label}, no lab and no model", args)
-    elif not args.no_model:
+    elif args.paraphrase and not args.no_model:
         try:
             analyst = _build_analyst()
         except (ValueError, LLMAnalysisError) as exc:
@@ -903,7 +912,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_investigate.add_argument(
         "--no-model", action="store_true",
-        help="Run the descent against live devices but skip the report and correlation.",
+        help=(
+            "Accepted and now the default: no model is called unless --paraphrase "
+            "is given. Kept so existing scripts and habits keep working."
+        ),
+    )
+    p_investigate.add_argument(
+        "--paraphrase", action="store_true",
+        help=(
+            "Additionally ask a model for a readable restatement of the report and "
+            "timeline. Non-authoritative, graded, and roughly 70s slower. The "
+            "finding, the causal chain and the timeline are produced without it."
+        ),
     )
     _add_output_arguments(p_investigate)
     p_investigate.set_defaults(func=_cmd_investigate)
