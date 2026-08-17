@@ -58,7 +58,7 @@ Three of those four are about what happens *after* a defect is fixed. Every rule
 | **MVP-0** | Complete. T-001–T-034 plus T-029a/b/c. **M4 reached** |
 | **Review** | `MVP0-REVIEW.md`, written at M4 before any MVP-1 work |
 | **Injection rounds** | **All four complete.** Scored in OBS-095, pinned in `tests/test_rounds_regression.py` |
-| **B-428** | **Landed** (OBS-097). Round 4's false positive is closed |
+| **B-428** | **Landed** (OBS-097). Round 4's known vector now passes its regression test (not: the class is closed — reviewer C, review §4) |
 
 ### The four rounds
 
@@ -109,7 +109,7 @@ Row 4 keeps its ❌ deliberately. **A corpus records what the system did at the 
 
 **Exit 2 means the *answer* is untrustworthy; exit 1 means the *network* is broken.** This matches `nettools diff` and deliberately not `nettools health`, where 2 is the worst network outcome. A grounding failure is exit 2 even over a real fault — otherwise a systematic grounding regression hides in the noise of routine faults.
 
-**Exit 1 is now safe to page on — but read exit 0 correctly.** Round 4's false positive (`cause: interface on PE2`, `trustworthy: true`, exit 1, on a session that was Established and carrying traffic) is closed by B-428. Exit 0 now means *no fault on the path between these two endpoints*, which is **not** *this device is healthy*: `no_fault_on_path` reports broken rungs it found off the path, and a caller that ignores them will miss a real interface fault.
+**Do not treat exit 1 as paging-safe.** ~~An earlier version of this line said it was.~~ Round 4's false positive (`cause: interface on PE2`, exit 1, on a session that was Established) is closed by B-428, and **one regression test on one known vector does not establish paging safety** — reviewer C, `peer-review-response.md` §4. The vector that produced it passes; the class it belongs to is uncharacterised, and B-436 has since identified a second way to reach a confident wrong answer that no current test covers. Exit 0 separately means *no fault on the path*, never *this device is healthy*.
 
 ### The one thing worth carrying to another project
 

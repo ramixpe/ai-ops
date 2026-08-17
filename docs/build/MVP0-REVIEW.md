@@ -140,7 +140,7 @@ Listed as questions rather than risks, because each has a specific experiment at
 
 **Is the descent's behaviour under two faults acceptable?** (Q-019) A single interface fault and an interface fault plus a BGP shut produce **byte-identical rung tables**. The masking is structural. Two candidate signals — a second unexplained commit in the timeline, and forward consistency — neither validated, and the corpus contains no two-fault capture.
 
-**Is Q-006's agreement a pattern or a data point?** ~~One match, on one rung.~~ **Answered 2026-08-16 by four rounds (OBS-095).** Provisionally a pattern **for fault localisation on the dependency path — 3 of 3, on three different rungs, with rounds 1 and 2 exercising the walk rule in opposite directions.** Three caveats keep it provisional: the rounds were designed by someone who knows the ladder (selection effect), every fault was single (Q-019 untouched), and round 3 matched via its declared refutation branch with an answer weaker than the evidence supported. **Not a pattern for concluding health — 0 of 1, and structurally 0 of *n* until B-428.** Do not report the combined 3/4; the denominator hides a class failure.
+**Is Q-006's agreement a pattern or a data point?** ~~One match, on one rung.~~ **Answered 2026-08-16 by four rounds (OBS-095), and the answer is narrower than it was first written.** ~~"Provisionally a pattern."~~ **The tool succeeded on these three discriminating cases** — three different rungs, with rounds 1 and 2 exercising the walk rule in opposite directions. That is what was observed and no inference beyond it is supported: the cases were designed by someone who knows the ladder and were not sampled from any defined population (reviewer C, `peer-review-response.md` §3.5, §4). Three caveats keep it provisional: the rounds were designed by someone who knows the ladder (selection effect), every fault was single (Q-019 untouched), and round 3 matched via its declared refutation branch with an answer weaker than the evidence supported. **Not a pattern for concluding health — 0 of 1, and structurally 0 of *n* until B-428.** Do not report the combined 3/4; the denominator hides a class failure.
 
 **Does the model layer degrade gracefully under a model that is worse, or busier, or changed?** One live run, one provider, one prompt version. The grounding gate refused a fabricated timestamp, which is evidence that the gate works — not evidence about the failure rate it is protecting against. Nothing measures how often the model produces something the gate must catch.
 
@@ -162,7 +162,7 @@ For an operations engineer deciding whether to point this at something.
 
 **No model reaches that answer.** The descent is parse-and-compare. Turn the model off entirely (`--no-model`) and you still get the diagnosis; the model only writes it up and places it on a timeline.
 
-**It refuses rather than guesses.** A layer it could not read ends the walk with `undetermined` and no cause named. A written report whose claims do not cite evidence the descent actually read is **not emitted** — you get the descent and the reason, never the prose.
+**It is designed to refuse rather than guess, and that is an intention, not a measured distribution** (reviewer C, `peer-review-response.md` §4). A layer it could not read ends the walk with `undetermined` and no cause named. **One of four blind trials nonetheless produced a confident false positive rather than a refusal**, so the design holds in the cases tested and the rate at which it holds is unknown. A written report whose claims do not cite evidence the descent actually read is **not emitted** — you get the descent and the reason, never the prose.
 
 **You can verify all of that in ten seconds with no lab**: `nettools investigate RR1 10.255.0.12 --from-fixtures --format table`.
 
@@ -188,11 +188,19 @@ Worth knowing if you read the reports rather than the exit codes: before the fix
 
 **It does not act.** Read-only by construction — there is no configuration path, no shell, and no generic command tool. It will not fix anything and cannot be made to.
 
+**Scope that claim to the right path** (reviewer A, §4). The defensible form is:
+
+> *"The model cannot alter device configuration, and **one investigation path** localises a finding using deterministic predicates."*
+
+`nettools investigate` is that path. **`nettools agent` is a separate, explicitly untrusted path** — a bounded tool-calling loop where the model chooses what to call — and it must not inherit the same trust language. Both are read-only; only one is deterministic. And the read-only guarantee itself had a hole until B-438: `pin_lab_golden_snapshot` performed a persistent write from behind a decorator named `_read_only_tool` (§3.1).
+
 **It does not know history.** No baselines, no "has this happened before", no rarity. A flap and a first-ever transition look the same.
 
 **Its timelines are bounded by what a device buffer holds.** 200 of 684 records on the measured run, and it says so — a negative over incomplete coverage is reported as `unevaluated`, never as "nothing happened".
 
-**It has produced three correct blind diagnoses out of four rounds** (OBS-095), on three different rungs. The fourth was a **false positive on a working session**, predicted in advance, reproduced exactly, and **since fixed** (B-428). Treat fault localisation as promising at n=3 with the caveats in §4; the false-positive class round 4 exposed is closed, and no round has yet tested a fault chosen without reference to the ladder.
+**It succeeded on three discriminating blind cases and failed the fourth** (OBS-095). The fourth was a **false positive on a working session**, predicted in advance, reproduced exactly, and its **known vector** now passes a regression test (B-428) — which is not the same as the class being closed (reviewer C, §4).
+
+Three strata, reported together and none of them an estimate of field accuracy, **because the cases were not sampled from a defined population** (§3.5): **3/3** on-path, **0/1** no-fault, **3/4** overall. No round has yet tested a fault chosen without reference to the ladder, and none has run while the network was still changing — which reviewer A, B and C independently identify as both the dominant production condition and the one the trial protocol excludes by construction (§2.1, and `BUILD-PLAN.md` §0.15).
 
 ### The honest summary
 

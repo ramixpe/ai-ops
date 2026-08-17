@@ -225,6 +225,13 @@ Everything above answers *"what is the state of this device?"*. This layer answe
 *"why is this thing broken, and what is the evidence?"* — and it is built so the
 second answer is not a model's opinion.
 
+**Scope, stated precisely** (external review, `docs/design/peer-review-response.md`
+§4): *the model cannot alter device configuration, and **this one investigation
+path** localises a finding using deterministic predicates.* `nettools agent` is a
+different path — a bounded tool-calling loop where the model chooses what to call.
+Both are read-only; only `investigate` is deterministic, and the trust language
+below applies to it alone.
+
 ```
 nettools investigate <device> <subject> [--flow bgp_session]
                                         [--from-fixtures [--label broken]]
