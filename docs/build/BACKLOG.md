@@ -204,7 +204,7 @@ cost of the state a reconciliation cannot express, measured (OBS-140).
 | **B-473** | `DONE` | `_active_probe_tool`: same sanitisation boundary via shared `_register_sanitized_tool`, distinct annotations (`open_world_hint` + ACTIVE PROBE title), docstring prefix. Signalling, not enforcement — stated | — | FIX-PLAN · wave 1-D |
 | **B-474** | `DONE` | `_atomic_write_text` (tmp+fsync+replace), one-transaction golden + partial unique index with MAX(id) dedup migration, guarded reads with loud warnings, `snapshots_skipped` in `detect_flaps`, device-name validation both backends. **35 tests** | — | FIX-PLAN · wave 1-C |
 | **B-475** | `OPEN` | **half done** (wave 1-D): `assess_lab_fabric_health` pooled, concurrency test proven non-vacuous by reversion. Remaining: the agent loop's `_assess_health` (wave 2-B); the full cross-surface scheduler stays future | — | FIX-PLAN |
-| **B-476** | `OPEN` | **settings validator + `nettools config show/check`** (P2-02 scoped): loud warnings on malformed env values; effective config, secrets redacted. Wave 1-E | — | FIX-PLAN |
+| **B-476** | `DONE` | `settings.py`, 37 vars, two-direction cross-check test, `nettools config show/check`, startup warnings. Found `NETTOOLS_FIXTURE_DIR` undocumented and two live typo-swallows (`fasle` enables probes; `sqlit` selects files). Rewiring call sites is named future work | — | FIX-PLAN · wave 1-E |
 
 **Totals:** `BLOCKED` 13 · `DONE` 33 · `OPEN` 7 · `unverified` 42 · **95 items**
 
