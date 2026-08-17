@@ -2676,6 +2676,18 @@ and should be scored as a corpus result, not as a diagnostic error.
 - **Needs human review:** no
 - **Blocks:** none. Stopping here — B-430, B-431, B-432, tracks B and C, and MVP-1 all untouched.
 
+  ### Amended 2026-08-17, after round 5 — clause 1 is also wrong
+
+  **Recorded at the operator's instruction, and in their words: B-428 clause 1 is my specification being wrong for the second time.** Clause 2 was withdrawn before it shipped (Q-020). Clause 1 shipped, was golden-tested, was the finding I was most confident about in the whole build, and round 5 measured it producing **exit 0 on a blackholing path for fifty seconds** (OBS-109).
+
+  The qualification, confirmed by the operator:
+
+  > **Rung-1-healthy is right when the broken rungs are off-path, and wrong when they are on-path and the symptom has not propagated.**
+
+  What makes this worth more than a correction: the *evidence* for clause 1 was sound. Round 4 really did produce a false `interface_line_down` on a healthy session, and the predicate really does fix that case. Nothing about the observation was wrong. The rule inferred from it was too broad, and it was too broad in a direction the observation could not show — round 4 was a **settled** fabric, and the failure mode is a **converging** one. §0.13's first face: the evidence never bounded the conclusion, and every test written afterwards sampled the same settled condition the original observation came from.
+
+  That is silent-failure **shape 4** — a rule generalised from one instance — with the additional twist that the instance was real, the fix was correct for it, and the over-generalisation was invisible until the protocol was changed to observe a state it had always excluded. Which is §0.15: the settled-fabric protocol was tightened for rigour, and what it excluded was the only condition that could have falsified clause 1.
+
 ---
 
 ## OBS-098 · principles · Four judgements from B-428, promoted out of the task writeup

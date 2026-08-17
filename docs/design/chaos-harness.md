@@ -289,6 +289,42 @@ This is one of the two leakage routes reviewer C named (§3.6): *local Git histo
 
 An operator reading a future round's result should be able to check the seal without asking anyone. That is the whole difference.
 
+### 6.1b The sealed prediction must state the fault it assumes
+
+Added after round 5 (OBS-109), where it cost a correct answer a passing score.
+
+> **A sealed prediction states the fault it assumes, in the terms the injector
+> applies it. Before the round runs, the harness is read and checked against
+> that statement.**
+
+Round 5's prediction said *"shut `Gi0/0/0/0` and `Gi0/0/0/1` on PE2"*. The
+harness applies `router isis CORE / interface … / shutdown`, which disables
+IS-IS **on** those ports and leaves the ports up. Two different faults, and the
+prediction was written from the operator's instruction — *"both PE2 uplinks shut
+in one commit"* — which is ambiguous between them, without reading the
+injector's `APPLY` block.
+
+So the prediction expected `interface_line_down`, and the interface rung
+correctly reported healthy in all thirteen probes, because the interfaces
+**were** healthy.
+
+**The reason this is a protocol rule and not a note to be careful.** A blind
+protocol's entire value is that the prediction cannot be adjusted after the
+fact. That property is what makes a mismatch *unrecoverable*: when the sealed
+prediction describes fault X and the harness applies fault Y, the tool's correct
+answer about Y is scored as a failure against X, and the seal is precisely what
+prevents anyone from fixing it afterwards. **The rigour that protects the round
+from bias is the same rigour that locks in a setup error** — §0.15 again, and
+the cheap remedy is to check the setup *before* sealing, which costs one reading
+of the injector.
+
+Round 5 escaped only by accident: the bound masked phase C's finding, so the
+`igp_isolated` that would have been marked wrong was never emitted.
+
+**In practice**, the prediction carries a *Fault assumed* line quoting the
+injector's own apply block, and step 2 of §6.1 does not happen until that line
+has been checked against the script.
+
 ### 6.1a The hand diagnosis, and hedging
 
 The comparison diagnosis is written by a human, before the agent runs, and **pushed** before the agent runs (OBS-076, tightened by OBS-105 — see §6.1 step 6). Two rules govern its content, the second learned from round 2.
@@ -306,6 +342,35 @@ Round 2's diagnosis carried a caveat — that the subject address might belong t
 > **A hand diagnosis may include an alternative reading only if it states what would refute it. An uncertainty with a falsification condition is evidence; the same uncertainty without one is a second opinion that arrives too late to be independent.**
 
 This applies to the agent's side too, and already does: OBS-082 records the round-4 prediction with an explicit list of what would falsify it, written before the round.
+
+### 6.1c Fabric property: an ~8-second consecutive-login penalty, resetting after ~20 s
+
+Measured on RR1, 2026-08-17, after round 5 (B-455). Back-to-back
+`connect + show clock`:
+
+```
+  0.68s   7.62s   8.52s   8.20s   8.72s   7.56s      <- consecutive
+  [20s pause]
+  0.54s   8.22s   7.77s                              <- the gap resets it
+```
+
+**The first login after a gap is nearly free; every consecutive one costs about
+eight seconds.** Whether the penalty is armed at all varies with recent history —
+twelve back-to-back epochs earlier the same day showed none of it.
+
+This is a property of the fabric, not of the tool, and it has to be written down
+here because it silently sets the cost of everything the harness does. Anything
+that opens *n* sessions to a device pays roughly *(n−1) × 8 s*, which is why an
+evidence epoch measured 4 s on a quiet device and 34–38 s on an armed one, and
+why the tool refused to answer about a healthy fabric during round 5's dry run.
+
+**It argues for session reuse well beyond the epoch.** The epoch reduced a
+descent from 10 sessions to 4 and that is the only lever the tool currently has;
+the remaining three penalties are ~24 s of a ~36 s observation window. A harness
+that probes densely is arming the penalty on itself, and a soak that leaves
+20–30 minute gaps between trials (§6.3) never sees it — so **the harness's own
+recommended shape hides the cost that dense sampling pays.** Worth knowing
+before anyone reads a soak's timings as representative of interactive use.
 
 ### 6.2 Propagation is protocol-timed
 
