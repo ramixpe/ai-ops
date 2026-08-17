@@ -205,6 +205,34 @@ class Rung:
     meaningless otherwise; that is enforced in ``__post_init__`` rather than
     left to a convention, because a `PATH` rung with no declared aggregation
     would silently pick one.
+
+    The member set and the aggregation are one decision
+    ----------------------------------------------------
+    **A rule that changes what a rung is evaluated over must state how those
+    results combine, in the same place.** They are not two settings; they are
+    two halves of one question, and the combining rule is part of what the
+    member set *means*:
+
+    ========================  ==========================================
+    path-scoped               ``ANY_HEALTHY`` — "does a path survive?", and
+                              one healthy member answers yes
+    device-wide               ``ALL_HEALTHY`` — "is any port down, explaining
+                              this?", which one healthy member does not answer
+    ========================  ==========================================
+
+    Measured cost of separating them (OBS-119): `EACH_PATH_INTERFACE` was first
+    implemented switching the member set to every physical interface when no
+    path existed, while leaving `ANY_HEALTHY` in place from the rung's
+    declaration. PE2's one healthy port then outvoted its two shut uplinks and
+    the rung reported **healthy on a completely isolated device** — a confident
+    wrong answer in the direction that matters, produced by changing one half of
+    a decision.
+
+    So a `SubjectRule` that resolves to more than one member set returns its
+    aggregation with each of them (`descent._rung_subjects`), and
+    `test_flows.py` asserts the **pairing** rather than either half — a test of
+    "the aggregation is ANY_HEALTHY" and a test of "the member set is
+    path-scoped" both pass in the state that produced the defect.
     """
 
     name: str

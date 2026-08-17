@@ -325,6 +325,37 @@ A single accuracy figure hides the thing worth knowing: **whether failures clust
 
 **Steps 3 and 7 verify by reading the device, never by the write's report.** A push that reported failure may have succeeded; a push that raised may still have applied. This rule was written after a restore reported failure three times while having succeeded on the first attempt.
 
+### 6.1d Every round archives its full payload, not its finding
+
+Added 2026-08-17, after a semantic change could not be checked against round 4.
+
+> **A round's record is the complete `investigate` payload — every rung, its
+> device, its status, its reason, its evidence keys, the coherence block — not
+> the finding it produced.**
+
+Round 4's stored record is a rung-status vector and a finding. When
+`EACH_PATH_INTERFACE` changed what the interface rung is evaluated over (B-456),
+the question *"would round 4 still produce `no_fault_on_path`?"* became
+unanswerable: the payload that would settle it was never kept, so the regression
+vector now carries a **prediction** where it should carry a replay.
+
+**The general form.** A finding is the *output* of a semantic layer, so it
+cannot validate a change *to* that layer. Only the inputs can — and the inputs
+are the payload. Any round archived as a conclusion is spent the first time the
+logic that produced it changes, which is exactly when its evidence is most
+wanted.
+
+**Rounds 1–5 have this gap.** Round 5's per-probe payloads were archived
+(`evidence-archive/round5/`) and are replayable; rounds 1–4 kept findings and
+metrics only. Their entries in `test_rounds_regression.py` therefore assert what
+the *finding logic* does with a given vector — which is still a true and useful
+assertion — and **not** that the vector is still producible. The two are
+different claims and the file now says so.
+
+Cheap to fix going forward: the payload is already JSON on stdout, and round 5's
+harness writes one file per probe. Nothing new is needed except doing it every
+time.
+
 **Step 6 pushes before step 9 reveals.** Not commits — *pushes*.
 
 A local commit is not a seal. `git commit --amend` rewrites it, `git rebase` reorders it, and both leave a history that reads as though the original ordering held. The property the protocol needs is that the record became **unalterable by the person being tested** before the answer was known, and only publishing to a remote does that.

@@ -229,3 +229,81 @@ def test_flows_module_calls_no_model_and_touches_no_device():
 
     forbidden = {"network_tools", "inventory", "llm_analysis", "anthropic", "openai", "netmiko"}
     assert not (imported & forbidden), sorted(imported & forbidden)
+
+
+# --------------------------------------------------------------------------- #
+# The member set and the aggregation are one decision (OBS-119)
+# --------------------------------------------------------------------------- #
+
+
+def test_each_member_set_carries_its_own_aggregation():
+    """**Asserts the pairing, not either half.**
+
+    This is the point of the test and the reason the rule exists. When
+    `EACH_PATH_INTERFACE` switched to every physical interface without switching
+    `ANY_HEALTHY` with it, a test of "the aggregation is ANY_HEALTHY" passed and
+    a test of "the member set is every physical port" passed, and the rung
+    reported healthy on a completely isolated device.
+
+    Only a test that reads them together fails in that state.
+    """
+
+    from agent_nettools import descent
+    from agent_nettools.epoch import collect_epoch
+    from agent_nettools.fixtures import fixture_sender
+
+    flow = flows.flow_for("bgp_session")
+    rung = next(r for r in flow.descent if r.subject_rule.is_fanout)
+
+    #: (label, has a reverse route, expected pairing)
+    EXPECTED = [
+        ("healthy", True, flows.Aggregation.ANY_HEALTHY),
+        ("broken", False, flows.Aggregation.ALL_HEALTHY),
+    ]
+
+    seen = set()
+    for label, route_expected, expected_aggregation in EXPECTED:
+        built = collect_epoch(
+            flow, "RR1", "10.255.0.12", resolver=lambda _s: "PE2",
+            sender=fixture_sender(label=label), origin_prefix="10.255.0.31/32",
+        )
+        evidence = built.for_device("PE2")
+        members, _ = descent.path_interfaces(evidence, "10.255.0.31/32")
+        assert bool(members) is route_expected, (
+            f"{label}: the fixture must exercise the case, or this is vacuous"
+        )
+
+        subjects, aggregation = descent._rung_subjects(
+            rung, "10.255.0.12", evidence, "10.255.0.31/32"
+        )
+
+        assert subjects, f"{label}: a member set is always produced"
+        assert aggregation is expected_aggregation, (
+            f"{label}: member set and aggregation must move together -- "
+            f"got {aggregation} over {subjects}"
+        )
+        seen.add(aggregation)
+
+    assert len(seen) == 2, "both pairings must actually be exercised"
+
+
+def test_the_isolated_device_is_not_reported_healthy():
+    """The defect itself, as a regression.
+
+    Two of PE2's three ports are admin-down and the third is up. Under the wrong
+    pairing the rung answers healthy; under the right one it answers broken and
+    the descent localises to `interface_line_down`.
+    """
+
+    from agent_nettools.fixtures import fixture_sender
+    from agent_nettools.investigation import investigate
+
+    result = investigate(
+        "RR1", "10.255.0.12", sender=fixture_sender(label="broken"),
+        resolver=lambda _s: "PE2",
+    )
+    rung5 = result.descent.outcomes[-1]
+
+    assert rung5.status == "broken", "an isolated device is not healthy"
+    assert "all required" in (rung5.result.reason or "")
+    assert result.finding == "interface_line_down"
