@@ -28,6 +28,7 @@ of what "measured" means here and what it does not yet cover.
 ios-xr-nettools/
 ├── README.md                           Start here. Runnable demo in the first ten lines
 ├── CLAUDE.md                           Agent instructions and the rules that must not break
+├── SECURITY.md                         Threat model, what is/isn't enforced, disclosure path
 ├── docs/
 │   ├── design/     WHY — reference. Changes rarely.
 │   │   ├── glossary.md                 Pinned terminology. Read FIRST — `intent` collides
@@ -64,12 +65,15 @@ ios-xr-nettools/
 │   │   ├── capture-manifest.md         T-007 — what to capture, per device and label
 │   │   ├── discovery-loki.md           T-004 — log pipeline, label scheme, mnemonics
 │   │   ├── discovery-alerting.md       T-005 — Alertmanager routing, Prometheus surface
-│   │   └── discovery-l3vpn.md          T-006 — VRF/RT map, CE attachment, subject naming
+│   │   ├── discovery-l3vpn.md          T-006 — VRF/RT map, CE attachment, subject naming
+│   │   └── FIX-PLAN.md                 Both reviews' findings, reconciled into one wave plan
 │   ├── devices.md                      Generated from inventory — do not hand-edit
 │   ├── REVIEW.md                       Code review
 │   ├── ARCHITECTURE-REVIEW.md          External review A
 │   ├── OPERATIONS-REVIEW.md            External review B
 │   ├── EVALUATION-METHODOLOGY-REVIEW.md  External review C
+│   ├── EXPERT-PEER-REVIEW-2026-08-17.md  External review: architecture, safety, security, roadmap (P0-P3)
+│   ├── DEEP-REVIEW-2026-08-17.md       Verifies the review above at source; B-467, the sanitisation gap
 │   └── architecture.drawio             Diagram source
 ├── prompts/README.md                   Versioned prompt artifacts (GRACE) and their rules
 ├── evidence-archive/                   Committed round payloads. See its own README

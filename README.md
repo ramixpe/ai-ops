@@ -893,7 +893,8 @@ MIT — see [LICENSE](LICENSE).
 [CONTRIBUTING.md](CONTRIBUTING.md) has the setup, the test seams, and the rules
 that are not up for negotiation: the frozen files, the allowlist ordering,
 reconstruction rather than interpolation, and why a guardrail here is a test and
-never a line in a prompt.
+never a line in a prompt. [SECURITY.md](SECURITY.md) has the threat model, what
+is and is not enforced, and where to report a problem.
 
 **On the evidence behind the claims above.** This has run on a thirteen-node
 containerlab fabric, on one vendor, with a small number of blind fault-injection
