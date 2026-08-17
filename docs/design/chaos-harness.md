@@ -356,6 +356,29 @@ Cheap to fix going forward: the payload is already JSON on stdout, and round 5's
 harness writes one file per probe. Nothing new is needed except doing it every
 time.
 
+**And it governs more than rounds.** The general form —
+
+> a finding cannot validate a change to the layer that produced it
+
+— applies to every stored artefact this project evaluates against:
+
+* **the committed fixtures.** They store *device output*, which is an input, so
+  they replay correctly through any change to parsing or descent. That is why
+  B-456 could be checked against ten device/subject/label combinations and why
+  round 4 could not. The fixtures are the model, not the exception.
+* **the B-427 evaluation corpus.** A corpus of `(case → expected finding)` pairs
+  is spent the first time the finding logic changes, in exactly the way round 4
+  was. It must store the *evidence* each case was decided from, with the
+  expected finding beside it rather than instead of it — otherwise the corpus
+  can only ever confirm the semantics it was built under, which is `§0.13`'s
+  tests face wearing a corpus for a coat.
+* **the regression set** (§3.5). A case joins it the first time it fails, and
+  what joins must be the payload that failed, not the verdict.
+
+The rule in one line: **store the input and the verdict, never the verdict
+alone.** The verdict is what you compare against; the input is what lets you
+compare again after the comparison changes.
+
 **Step 6 pushes before step 9 reveals.** Not commits — *pushes*.
 
 A local commit is not a seal. `git commit --amend` rewrites it, `git rebase` reorders it, and both leave a history that reads as though the original ordering held. The property the protocol needs is that the record became **unalterable by the person being tested** before the answer was known, and only publishing to a remote does that.

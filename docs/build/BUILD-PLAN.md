@@ -318,14 +318,16 @@ This generalises past resolvers. Whenever a test is parameterised over cases tha
 > - a test sharing the implementation's premise confirms it — *(tests, and see the two forms below)*
 > - a corpus shows width only in dimensions where it varies — *(identity)*
 > - a demo verified in the developer's environment verifies the environment — *(setup)*
+> - **agreement among re-derivations is not evidence that re-deriving was
+>   unnecessary** — *(duplication)*
 >
-> **Before trusting any of the five, ask what the evidence could not have shown you.**
+> **Before trusting any of the six, ask what the evidence could not have shown you.**
 
-One family, five faces. Each has cost this build real time, and in every case the artefact was internally consistent — which is why the question has to be asked deliberately rather than noticed.
+One family, six faces. Each has cost this build real time, and in every case the artefact was internally consistent — which is why the question has to be asked deliberately rather than noticed.
 
 **The buffer-level trap is the same family.** `show logging` returns the device *buffer* (level `debugging`, severities 0–7); the *trap* level governs what is shipped to the collector (`informational`, 0–6). Reading the trap level to describe local coverage **understates the source by exactly the class in question**, while looking entirely correct. The evidence — a header line stating a level — cannot show you that you read the wrong line.
 
-### The four faces, with their standing examples
+### The six faces, with their standing examples
 
 | Face | Standing example | Fix |
 |---|---|---|
@@ -334,6 +336,7 @@ One family, five faces. Each has cost this build real time, and in every case th
 | **Tests** — a shared premise confirms itself | T-028: **sixteen green tests** over a filter deleting eight severity-3 records unattributed. The suite and the defect shared an author and a premise | Specify independently of the code, and read the specification against the implementation |
 | **Identity** — width only where the corpus varies | T-029a: `refusal_marker` moved into data and keyed by *prompt family*, then failed again when a second **version** appeared | Key by the finest identity the thing has — a filename, not a family name |
 | **Setup** — the environment verifies itself | T-031: `--from-fixtures` was checked by hand a dozen times and "needed no credentials", because `main()` loads this repo's `.env` and it holds real ones. The verification environment was contaminated by the thing being verified | Strip the environment in a test, and in CI. A person cannot easily un-know their own `.env`; a clean container can (**B-423**) |
+| **Duplication** — consistent duplicates read as correctness | B-460: `St/PfxRcd` holds either a prefix count or a session state, and three consumers each recovered the discriminator with `_is_numeric` — identically, agreeing, for eight phases | Count the sites reconstructing a fact, not the ones disagreeing. Split at the last point the discarded information is still observable |
 
 The **setup** face is the one most likely to be dismissed as an operations detail. It is not: it is the only face where the contaminating evidence is *outside the repository*, so no amount of reading the code or the tests reveals it. The fix has to be an environment, not an inspection.
 
@@ -350,6 +353,20 @@ That instinct is exactly backwards. The prediction being tested is *"selection s
 It is the setup face because the contaminating condition is neither in the code nor in the test nor in the data — it is in the *state of the world the measurement will be taken in*, arranged by the repair. And it is invisible for the familiar reason: preserving evidence is normally correct, so the instinct that produces it feels like rigour.
 
 **The check:** after designing a fix, ask what the fix does to the conditions of the measurement that will judge it. If the fix changes the thing being measured, sequence them — measure, then fix, then measure again — or accept that the second measurement answers a different question.
+
+#### The duplication face — a detection blind spot rather than an instance of another
+
+Added 2026-08-17 from B-460, and filed as its own face because the *detector* differs from every other one here.
+
+> **Agreement among re-derivations is not evidence that re-deriving was unnecessary. Consistent duplicates read as correctness, and the more sites that re-derive the same discriminator, the more consistent and the more wrong. Look for a value being reconstructed in more than one place, not for the places disagreeing.**
+
+The case. `show bgp summary`'s `St/PfxRcd` column holds *either* a prefix count *or* a session state, and the parser stored whichever appeared in one field. Three consumers in `checks.py` each recovered the discriminator with `_is_numeric(state)` — **identically, and they agreed.** Nothing looked wrong for eight phases, and the agreement is exactly why.
+
+**Why the usual instruction fails here.** B-431's rule was *a filter defined three times is three filters*, and its detector was divergence — "these two copies will disagree the first time someone edits one." That is true and it is not what happens first. What happens first is that they *keep* agreeing, indefinitely, because they were written from the same understanding on the same afternoon. Waiting for divergence is waiting for the second defect to reveal the first.
+
+So the check is structural rather than comparative: **count the sites that reconstruct the same fact.** More than one is the finding, whatever they currently return. And the fix has a canonical location — *the last point at which the discarded information is still observable*, which for a parsed field is the parser.
+
+Note what the duplication face shares with the others and where it parts company. Like **tests**, the artefact is internally consistent; unlike tests, there is no premise to specify independently, because every copy is correct. Like **rules**, it is about a generalisation; unlike rules, no instance is wrong. It is the one face where *nothing anywhere is incorrect* and the defect is entirely in the shape.
 
 The **tests** face deserves the extra sentence, because it is the one that cannot be caught by looking harder at the artefact: *green tests are not by themselves evidence that a component is correct — only that it agrees with the assumption it was built on.* Where a component encodes a judgement about the world, specify it independently.
 
@@ -468,6 +485,22 @@ When it happens, one question: **what were the old inputs covering, and does any
 #### Why it belongs in this list rather than in a style guide
 
 It produces the same end state as every other shape here — a green suite over an unverified property — by a route none of the others take. §0.12's vacuity companions do not catch it, because nothing is empty. §0.13's independent specification does not catch it, because the specification is satisfied. Only the diff catches it, and only if someone reads it asking this question.
+
+### Absence, not a sentinel, where a downstream check keys on a value
+
+Added 2026-08-17 from B-460. A rule of its own because it is a *repair* hazard: it fires while you are fixing something else.
+
+> **Where a downstream check keys on a specific value, emitting a placeholder in place of "not applicable" manufactures a second defect while fixing the first. Absence is the structural form; a sentinel is the remembered form.**
+
+The worked example. Splitting `St/PfxRcd` into `session_state` and `prefixes_received`, the obvious shape is to always emit both — `prefixes_received: 0` when the session is not Established. It reads as tidy and it is a measurement nobody took.
+
+And it has a consequence, not merely an inaccuracy: `health.py`'s `bgp_no_prefixes` rule fires on `prefixes_received == 0`. A zero for an Idle session would make **every down session also report *"Established with 0 prefixes received"*** — a fabricated second finding stapled to a real fault, on exactly the devices an operator is already looking at.
+
+Absence makes that impossible. A sentinel makes it something the rule has to remember not to do, and this build's whole position on remembered rules is that they are eventually not remembered.
+
+The general check, cheap enough to run while writing a parser: for each field you are about to emit, ask **who keys on a specific value of it**, and whether the value you would emit for "not applicable" is one of those keys. If it is, absence is not the tidier option, it is the only correct one.
+
+This is the same rule Phase 3 already applies without naming it: `router_id` and `local_as` are *absent* for the four devices with no BGP process rather than zero, because the fixtures literally answer `% BGP instance 'default' not active` and asserting a zero would be a lie the evidence contradicts.
 
 ---
 
