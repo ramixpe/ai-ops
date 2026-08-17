@@ -3513,6 +3513,32 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-123 · Track A · Four of five items were already done, and measuring said so
+
+- **Kind:** audit
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** Track A listed five items. **A1 was the only one with work in it.** The other four were measured before building, per the operator's standing instruction, and the measurements are the result:
+
+  | Item | Filed as | Measured |
+  |---|---|---|
+  | **A2** B-411 | *"a read timeout returns partial output with `errors: []` and `status: success`"* | **Not reproducible.** netmiko 4.7's `read_timeout` raises; the raise is caught per command; the envelope reports `status: error` with the failing command named, and keeps the outputs that answered |
+  | **A3** B-425 | usage not instrumented | **Done.** `TokenUsage` + `Completion.usage` shipped at B-425 |
+  | **A4** B-403 | consolidation to judge | **Already consolidated.** `health.py` is a re-export shim; all 40 rule definitions are in `checks.py` |
+  | **A5** B-404 | six parsers predate §0.10 | **Done.** All six intents report `unaccounted_lines`, empty across the corpus |
+- **Evidence:** A2 measured with a fake netmiko raising `ReadTimeout` mid-batch: `status='error'`, one error naming `show isis neighbors`, 2 of 3 outputs retained; per-intent slicing isolates it (`isis` error/0 commands, `bgp` success with its output). Two regression tests added.
+- **What I did:** Closed A2 as measured-not-a-defect with the behaviour **pinned**, since "the filed defect does not exist today" is not the same as "it cannot arrive tomorrow" — a retry loop that swallowed the exception, or a transport that returned partial text instead of raising, would both fail the new tests.
+
+  Kept the half of A2's acceptance that survived: *audit every consumer of `status`*. A partial batch isolates cleanly — the failed intent carries `status: error` and **zero** commands, so no consumer can read its absence as data, and its siblings keep a `success` that is true of them.
+
+  **A4 needs no consolidation and the shim stays.** Nine call sites import from `health`, including `mcp_server/server.py`, `cli.py`, `agent_loop.py` and four test modules. Rewriting them buys tidiness and risks a large green suite for it — which is exactly what the item warned against. A shim whose entire content is a documented re-export is not duplication; it is one name for one thing, in the place its callers already look.
+
+  **One thing I got wrong and caught by checking.** My first A5 probe reported `version` as unaccounted, and I nearly filed it as a gap in an item claiming all six were done. There is no `version` intent — it is `facts`. **A defect assembled from a name I did not verify**, which is the same shape as everything else this session and the reason the second probe enumerated `platforms.all_intents()` instead of a list I typed.
+- **Needs human review:** no — four closures at measured size, as the plan asks
+- **Blocks:** nothing. Track A is complete.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**

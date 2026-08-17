@@ -1503,3 +1503,105 @@ def test_the_combined_runner_never_renders_a_refused_batch(monkeypatch):
 
     assert sent == [], "nothing reached the transport at all"
     assert all(e["status"] == "error" for e in envelopes)
+
+
+# --------------------------------------------------------------------------- #
+# A2 / B-411 -- a partial read is reported, not silently successful
+# --------------------------------------------------------------------------- #
+
+
+def _timeout_netmiko(monkeypatch, fail_on: set[str]):
+    """A netmiko whose `send_command` raises `ReadTimeout` for named commands."""
+
+    import sys
+    import types
+
+    from netmiko.exceptions import ReadTimeout
+
+    class Conn:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def send_command(self, command, **_kw):
+            if command in fail_on:
+                raise ReadTimeout("Pattern not detected in output")
+            return f"OUTPUT {command}"
+        def disconnect(self): pass
+        def is_alive(self): return True
+
+    fake = types.ModuleType("netmiko")
+    exc = types.ModuleType("netmiko.exceptions")
+    exc.NetmikoAuthenticationException = type("Auth", (Exception,), {})
+    fake.exceptions = exc
+    fake.ConnectHandler = lambda **_kw: Conn()
+    monkeypatch.setitem(sys.modules, "netmiko", fake)
+    monkeypatch.setitem(sys.modules, "netmiko.exceptions", exc)
+
+
+def test_a_read_timeout_mid_batch_is_an_error_not_a_silent_success(monkeypatch):
+    """**B-411, measured rather than assumed.**
+
+    The item was filed as *"a read timeout returns partial output with
+    `errors: []` and `status: success`"* -- the third instance of the
+    silent-degradation shape. Measured against netmiko 4.7, that is **not what
+    happens**: `read_timeout` raises, the raise is caught per command, and the
+    envelope reports it.
+
+    Pinned here so the filed defect cannot arrive later by a different route --
+    a retry loop that swallowed the exception, or a transport change that
+    returned partial text instead of raising, would both fail this.
+    """
+
+    from agent_nettools import network_tools
+
+    _timeout_netmiko(monkeypatch, {"show isis neighbors"})
+    monkeypatch.setattr(network_tools, "get_device", lambda n, **k: {
+        "name": n, "platform": "cisco_xr", "hostname": "1.2.3.4",
+        "username": "u", "password": "p", "device_type": "cisco_xr",
+    })
+
+    result = network_tools._run_approved_commands(
+        "PE1", ["show version", "show isis neighbors", "show bgp summary"],
+        platform="cisco_xr",
+    )
+    outputs = (result.get("data") or {}).get("commands") or {}
+
+    assert result["status"] == "error", "a command that timed out is not a success"
+    assert len(result["errors"]) == 1
+    assert "show isis neighbors" in result["errors"][0]
+
+    # And the commands that did answer are kept -- discarding them would be the
+    # opposite defect, throwing away evidence because a sibling failed.
+    assert len(outputs) == 2
+    assert "show isis neighbors" not in outputs
+
+
+def test_a_partial_batch_isolates_the_failure_to_its_own_intent(monkeypatch):
+    """The half of B-411's acceptance that survived measurement: **audit every
+    consumer of `status`.**
+
+    `collect_evidence` runs one batch and slices it per intent, so the question
+    is whether one command's timeout contaminates the sections that answered.
+    It does not -- and a consumer reading a per-intent `success` is therefore
+    reading a true statement about *that* intent.
+    """
+
+    from agent_nettools import network_tools
+
+    _timeout_netmiko(monkeypatch, {"show isis neighbors"})
+    monkeypatch.setattr(network_tools, "get_device", lambda n, **k: {
+        "name": n, "platform": "cisco_xr", "hostname": "1.2.3.4",
+        "username": "u", "password": "p", "device_type": "cisco_xr",
+    })
+
+    evidence = network_tools.collect_evidence("PE1")
+
+    isis = evidence["isis"]
+    assert isis["status"] == "error"
+    assert (isis.get("data") or {}).get("commands") == {}, (
+        "the failed intent carries no output, so nothing reads it as data"
+    )
+    assert isis["errors"], "and it says why"
+
+    bgp = evidence["bgp"]
+    assert bgp["status"] == "success", "a sibling's timeout does not contaminate this"
+    assert (bgp.get("data") or {}).get("commands"), "its own output survives"
