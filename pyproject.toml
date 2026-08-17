@@ -55,6 +55,9 @@ dev = [
 nettools = "agent_nettools.cli:main"
 nettools-mcp = "mcp_server.server:main"
 
+[tool.setuptools.package-data]
+agent_nettools = ["data/*.yaml"]
+
 [tool.setuptools.packages.find]
 where = ["src", "."]
 include = ["agent_nettools*", "mcp_server*"]

@@ -27,6 +27,8 @@ environment (`DEVICE_USERNAME`, `DEVICE_PASSWORD`).
 - `assess_lab_fabric_health`
 - `detect_lab_flaps`
 - `investigate_lab_session`
+- `search_lab_knowledge`
+- `explain_lab_mnemonic`
 
 There is no shell, configuration tool, or generic command runner.
 

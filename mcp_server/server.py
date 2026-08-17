@@ -372,6 +372,41 @@ def get_lab_interface(device_name: str, name: str) -> dict:
 
 
 @_read_only_tool()
+def search_lab_knowledge(query: str) -> dict:
+    """Answers: *what does this project's own documentation or the operator's
+    notes say about X?*
+
+    Prefer this before asking a person: the corpus includes the glossary, the
+    design decisions, the security posture, and the inventory's operator-
+    authored notes about known local conditions (which have twice held answers
+    nobody read -- OBS-139). Plain text search with `path:line` citations; no
+    device is contacted. Not a device-state tool -- for state, use the check/
+    lookup tools; for "why is X broken", use `investigate_lab_session`.
+    """
+
+    from agent_nettools.knowledge import search_knowledge
+
+    return search_knowledge(query)
+
+
+@_read_only_tool()
+def explain_lab_mnemonic(mnemonic: str) -> dict:
+    """Answers: *what does this IOS-XR syslog mnemonic mean, what typically
+    causes it, and which flow investigates it?*
+
+    Prefer this over reasoning about a mnemonic from its name alone: the
+    table is curated and reviewed (knowledge as a declared item, not a
+    model's recollection), and its `investigate_with` field names the flow
+    that turns the event into a diagnosis. An unknown mnemonic still gets its
+    facility/severity/code parts split out. No device is contacted.
+    """
+
+    from agent_nettools.knowledge import explain_mnemonic
+
+    return explain_mnemonic(mnemonic)
+
+
+@_read_only_tool()
 def get_lab_logging(device_name: str, count: int = 20) -> dict:
     """Answers: *what did this device report happening, and when?*
 

@@ -724,3 +724,17 @@ def test_an_unresolvable_origin_is_visible_in_the_payload():
         descent=_BROKEN_DESCENT,
     )
     assert resolved.to_payload()["origin_unresolved"] is None
+
+
+def test_operator_notes_surface_on_the_devices_the_walk_touched():
+    """B-210, live: the notes that twice held unread answers now arrive with
+    the investigation that needs them. Measured on the real fixtures -- the
+    broken descent touches RR1 and PE2, both of which carry lab.yaml notes."""
+
+    result = _run("broken")
+
+    devices = {n["device"] for n in result.operator_notes}
+    assert "PE2" in devices, "PE2's isis/bgp notes apply to rungs the walk read"
+    assert all(n["note"] for n in result.operator_notes)
+    payload = result.to_payload()
+    assert payload["operator_notes"] == list(result.operator_notes)

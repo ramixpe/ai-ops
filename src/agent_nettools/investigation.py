@@ -193,6 +193,15 @@ class InvestigationResult:
     correlation_paraphrase: dict | None = None
     correlation_paraphrase_status: str = NOT_ATTEMPTED
 
+    #: Operator-authored notes for the devices this descent touched (B-210).
+    #: The inventory's `notes:` blocks have twice held correct findings nobody
+    #: executed (OBS-139; the `bgp_no_prefixes` note) -- a note that surfaces
+    #: at investigation time stops being archaeology. Payload only: these do
+    #: NOT enter any prompt in this wave -- feeding operator prose to a model
+    #: needs the same egress review device text got (B-467), and until that
+    #: review happens the notes inform the human reading the payload.
+    operator_notes: tuple[dict, ...] = field(default_factory=tuple)
+
     #: Why the reverse-path member set could not be resolved, when it could
     #: not. `None` means the origin resolved (or the flow never needed it).
     #: **B-469**: when this is set, rung 5 was evaluated over ALL physical
@@ -258,6 +267,7 @@ class InvestigationResult:
             "finding": descent.finding,
             "reason": descent.reason,
             "origin_unresolved": self.origin_unresolved,
+            "operator_notes": list(self.operator_notes),
             # Suppressed for the findings that name no cause -- see
             # `_FINDINGS_WITHOUT_A_CAUSE`. The rungs are still all present under
             # "rungs", so a broken-but-off-path rung is reported, just not as an
@@ -528,6 +538,40 @@ def _log_window(device: str, *, sender=None, count: int = 200) -> ShapedWindow:
     )
 
 
+def _notes_for_devices(devices: set[str], intents_read: set[str]) -> tuple[dict, ...]:
+    """The inventory notes relevant to this investigation. B-210.
+
+    A note attaches when its device was touched by the walk AND its
+    ``applies_to`` names an intent the flow read -- or names nothing, which
+    means "about this device generally". Free-text matching is deliberately
+    exact-token, not fuzzy: a note that half-applies is worse than one that
+    is absent, because it arrives wearing relevance it has not earned.
+    """
+
+    from .inventory_model import load_inventory_file
+
+    collected: list[dict] = []
+    try:
+        inventory = load_inventory_file()
+    except Exception:  # noqa: BLE001 -- no inventory: no notes, not a crash.
+        return ()
+    for device in inventory.devices:
+        if device.name not in devices:
+            continue
+        for note in getattr(device, "notes", []) or []:
+            applies = (note.applies_to or "").strip().lower()
+            if applies and applies not in intents_read:
+                continue
+            collected.append({
+                "device": device.name,
+                "applies_to": note.applies_to,
+                "note": note.note,
+                "author": note.author,
+                "recorded": note.recorded,
+            })
+    return tuple(collected)
+
+
 def investigate(
     device: str,
     subject: str,
@@ -637,6 +681,15 @@ def investigate(
         origin_prefix=origin,
     )
 
+    # -- Operator notes for every device the walk touched (B-210). -----------
+    touched = {device} | {o.device for o in descent.outcomes}
+    # CollectStep.name is an intent OR a template name -- both are valid
+    # applies_to targets for a note (the lab.yaml notes use both spellings).
+    intents_read = {
+        step.name for rung in the_flow.descent for step in rung.collect
+    }
+    operator_notes = _notes_for_devices(touched, intents_read)
+
     # -- The authoritative report. No model, always produced (B-439). --------
     #
     # Rendered from the descent's typed fields, so it cannot differ from what
@@ -665,6 +718,7 @@ def investigate(
             report=report, report_status=report_status,
             correlation=correlation, correlation_status=correlation_status,
             coverage=coverage, origin_unresolved=origin_unresolved,
+            operator_notes=operator_notes,
         )
 
     # -- The paraphrase. A model, and nothing downstream may prefer it. ------
@@ -719,7 +773,7 @@ def investigate(
         report=report, report_status=report_status,
         correlation=correlation, correlation_status=correlation_status,
         correlation_grounding=correlation_grounding, coverage=coverage,
-        origin_unresolved=origin_unresolved,
+        origin_unresolved=origin_unresolved, operator_notes=operator_notes,
         paraphrase=paraphrase, paraphrase_status=paraphrase_status,
         paraphrase_grounding=paraphrase_grounding,
         correlation_paraphrase=correlation_paraphrase,

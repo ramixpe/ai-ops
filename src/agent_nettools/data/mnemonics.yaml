@@ -1,0 +1,103 @@
+# IOS-XR syslog mnemonics — knowledge as a declared Tier-I item (B-478).
+#
+# This table is REVIEWED LIKE CODE: additions come with the same scrutiny a
+# health rule gets, because a wrong "typical cause" here steers a person, and
+# a person under incident pressure does not re-derive. Seeded exclusively from
+# mnemonics observed in this fabric's own fixtures and the T-004 Loki corpus —
+# not imagined from documentation.
+#
+# investigate_with is null where no implemented flow applies; it names the
+# flow and how to find the subject where one does. Kept consistent with
+# event_routing.MNEMONIC_FLOW_TABLE — a test asserts every mnemonic that
+# table routes also has an entry here.
+
+- mnemonic: ROUTING-BGP-5-ADJCHANGE
+  meaning: A BGP session changed state (the message says which peer and which way).
+  typical_causes:
+    - the peer or an interface on the path went down
+    - hold timer expired (three keepalives lost)
+    - configuration change on either end (the message's reason text says which)
+  investigate_with: {flow: bgp_session, subject_hint: the peer address in the message}
+  severity_note: Severity 5 — informational framing for an event that is usually the incident.
+
+- mnemonic: ROUTING-ISIS-5-ADJCHANGE
+  meaning: An IS-IS adjacency changed state.
+  typical_causes:
+    - the link went down (look for a LINK-3-UPDOWN seconds earlier)
+    - hold time expired (~30s of lost hellos)
+    - MTU mismatch (adjacency forms, then large hellos fail)
+  investigate_with: null   # isis_adjacency flow is B-107, not yet implemented
+  severity_note: On this fabric BGP follows within its hold timer when the route is lost — measured 154s in round 1.
+
+- mnemonic: PKT_INFRA-LINK-3-UPDOWN
+  meaning: Physical interface state change (layer 1/2).
+  typical_causes:
+    - cable/optic (the rung below — no light, or dirty fibre)
+    - admin shutdown on either end
+    - far-end device restart
+  investigate_with: {flow: interface, subject_hint: the interface named in the message}
+  severity_note: Severity 3 — the lowest-layer event in most cascades; start here when several fire together.
+
+- mnemonic: PKT_INFRA-LINEPROTO-5-UPDOWN
+  meaning: Line protocol state change (layer 2 up/down, follows LINK).
+  typical_causes:
+    - always follows its LINK-3-UPDOWN; on its own, suspect keepalive/encap mismatch
+  investigate_with: {flow: interface, subject_hint: the interface named in the message}
+  severity_note: Paired with LINK-3 in the same second in every fixture occurrence.
+
+- mnemonic: PKT_INFRA-LINK-5-CHANGED
+  meaning: Interface administrative state changed (shutdown / no shutdown).
+  typical_causes:
+    - a human (or an injector) configured it — correlate with MGBL-SYS-5-CONFIG_I
+  investigate_with: {flow: interface, subject_hint: the interface named in the message}
+  severity_note: Admin change, not failure — the correlation to a commit is the finding.
+
+- mnemonic: MGBL-SYS-5-CONFIG_I
+  meaning: A configuration session committed (who and from where in the message).
+  typical_causes:
+    - deliberate operator change — this is the anchor event for "what changed?"
+  investigate_with: null
+  severity_note: In every fixture incident the config commit is the first event of the causal chain.
+
+- mnemonic: MGBL-CONFIG-6-DB_COMMIT
+  meaning: The configuration database committed (pairs with CONFIG_I).
+  typical_causes:
+    - same commit as the CONFIG_I beside it
+  investigate_with: null
+  severity_note: Redundant with CONFIG_I for correlation; keep the pair together in timelines.
+
+- mnemonic: SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL
+  meaning: SSH session activity (login accepted, session opened/closed).
+  typical_causes:
+    - management-plane access — on this fabric, overwhelmingly the collector itself
+  investigate_with: null
+  severity_note: 97% of this fabric's log volume (T-028). log_window attributes and removes it; treat a burst from an UNKNOWN source address differently from tooling noise.
+
+- mnemonic: SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL
+  meaning: SSH transport error (abrupt disconnect, kex failure).
+  typical_causes:
+    - a collector/session closing non-interactively (the dominant cause here)
+    - a real failed access attempt — check the source address
+  investigate_with: null
+  severity_note: Severity 3 but usually self-inflicted here; OBS-064's noise-filter incident was about exactly this class.
+
+- mnemonic: SYSDB-SYSDB-7-INFO
+  meaning: Internal system database chatter tied to management sessions.
+  typical_causes:
+    - management-plane activity (every fixture occurrence names client 'exec' and /vty/)
+  investigate_with: null
+  severity_note: Debug-level; pure noise for fault work on this fabric.
+
+- mnemonic: PKT_INFRA-PQMON-6-QUEUE_DROP
+  meaning: A punt/inject queue dropped packets on the RP.
+  typical_causes:
+    - control-plane bursts (protocol storms, heavy management traffic)
+  investigate_with: null
+  severity_note: Chronic-vs-burst matters more than the count — 8 spread over the corpus is background.
+
+- mnemonic: ROUTING-BGP-5-NSR_STATE_CHANGE
+  meaning: BGP non-stop-routing readiness changed.
+  typical_causes:
+    - session churn (NSR re-syncs after peer transitions)
+  investigate_with: null
+  severity_note: A follower event; correlate with the ADJCHANGE that caused it.
