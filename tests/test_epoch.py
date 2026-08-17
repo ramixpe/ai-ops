@@ -123,7 +123,11 @@ def test_the_epoch_costs_fewer_commands_than_collecting_per_rung():
     # extra command on every run in exchange for a timeline that no longer needs
     # a model, and it is pinned here so the trade stays visible rather than
     # looking like drift.
-    assert (len(epoch_calls), len(per_rung_calls)) == (25, 41)
+    # 26 at B-456: one more command, the route the subject device holds back
+    # toward the origin, which is what makes the interface rung path-scoped.
+    # It rides the subject's existing session, so it costs a command and not
+    # a login -- which is the distinction B-455 established actually matters.
+    assert (len(epoch_calls), len(per_rung_calls)) == (26, 41)
     assert sum("logging" in c for c in epoch_calls) == 1
 
 

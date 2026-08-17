@@ -113,6 +113,27 @@ class SubjectRule(Enum):
     #: The rung is about the device, not an object on it; the check gets `None`.
     DEVICE_WIDE = "device_wide"
 
+    #: Fan out over the interfaces the **path actually uses**, one check each,
+    #: taken from the route this device holds back toward the investigation's
+    #: origin (B-456).
+    #:
+    #: `EACH_PHYSICAL_INTERFACE` asks about every port on the device, which is
+    #: why a down port unrelated to the session can break the rung -- round 4,
+    #: and the only route by which `no_fault_on_path` is reachable at all. This
+    #: asks about the ports the traffic would take.
+    #:
+    #: **The route must be read on the subject device, not the local one.** The
+    #: local device's route names the *local* device's egress, and on a fabric
+    #: with uniform naming the two sets collide by name while describing
+    #: different routers (OBS-117).
+    #:
+    #: Pairs with `Aggregation.ANY_HEALTHY`: one usable path is a usable path.
+    #: A primary down with a healthy backup is a real degradation and the
+    #: three-value status vocabulary cannot say so -- it surfaces in the rung's
+    #: reason as "1 of 2 members healthy" rather than being forced into
+    #: `broken`.
+    EACH_PATH_INTERFACE = "each_path_interface"
+
     #: Fan out over the device's *physical* interfaces, one check each.
     #:
     #: Physical only, and that exclusion is measured rather than tidy:
@@ -126,7 +147,10 @@ class SubjectRule(Enum):
 
     @property
     def is_fanout(self) -> bool:
-        return self is SubjectRule.EACH_PHYSICAL_INTERFACE
+        return self in (
+            SubjectRule.EACH_PHYSICAL_INTERFACE,
+            SubjectRule.EACH_PATH_INTERFACE,
+        )
 
 
 class Aggregation(Enum):
@@ -154,6 +178,23 @@ class CollectStep:
     name: str
     parameter: str | None = None
     is_template: bool = False
+    #: **How** the parameter is filled, as distinct from *which* parameter it
+    #: is. `parameter` names a real template argument and is validated against
+    #: the template's own signature; `fill` names the strategy the collector
+    #: uses to produce a value for it.
+    #:
+    #: Conflating the two is a mistake worth naming, because it type-checks:
+    #: a first implementation of `EACH_PATH_INTERFACE` set
+    #: `parameter="origin_prefix"`, which reads naturally and is false -- the
+    #: `route` template takes `prefix`, and `origin_prefix` is a statement about
+    #: where the value comes from. `test_every_template_collect_step_names_a
+    #: _real_parameter` caught it.
+    #:
+    #: ``None``       fill from the descent subject (the default)
+    #: ``"origin"``   fill from the *origin* device's loopback prefix -- the
+    #:                route the subject device holds back toward where the
+    #:                investigation started (B-456)
+    fill: str | None = None
 
 
 @dataclass(frozen=True)
@@ -407,13 +448,18 @@ BGP_SESSION_FLOW = Flow(
             name="interface",
             collect=(
                 CollectStep("interfaces"),
+                # The route this device holds back toward the origin. It names
+                # the ports the path uses; without it the rung has no member
+                # set and is `unevaluated` rather than falling back to every
+                # port -- see `SubjectRule.EACH_PATH_INTERFACE`.
+                CollectStep("route", parameter="prefix", is_template=True, fill="origin"),
                 CollectStep("interface", parameter="interface", is_template=True),
             ),
             check=_checks.interface_state,
             finding="interface_line_down",
             device_scope=DeviceScope.SUBJECT,
-            subject_rule=SubjectRule.EACH_PHYSICAL_INTERFACE,
-            aggregation=Aggregation.ALL_HEALTHY,
+            subject_rule=SubjectRule.EACH_PATH_INTERFACE,
+            aggregation=Aggregation.ANY_HEALTHY,
         ),
     ),
     findings=frozenset(

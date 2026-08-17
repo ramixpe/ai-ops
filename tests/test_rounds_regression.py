@@ -39,6 +39,22 @@ ROUNDS = [
      ["RR1", "RR1", "RR1", "PE1", "PE1"], "transport_blocked",  1),
     ("round-3-bgp-admin-shut-PE2", [B, B, H, H, H],
      ["RR1", "RR1", "RR1", "PE2", "PE2"], "transport_blocked",  1),
+    # **B-456 note, 2026-08-17.** This vector is kept and still asserts the
+    # right thing: *given* rung 1 healthy and rung 5 broken, `no_fault_on_path`
+    # is correct, and `_finding_for` is unchanged.
+    #
+    # What is now open is whether the vector is still **producible**. Round 4
+    # was one uplink shut on a device with two, with the IGP reconverged --
+    # under `EACH_PATH_INTERFACE` the reverse route names only the survivor, so
+    # rung 5 should read healthy and the vector should become `[H,H,H,H,H]`,
+    # i.e. `all_layers_healthy` with no `no_fault_on_path` involved.
+    #
+    # **That is reasoning, not measurement.** Round 4 ran live and its payload
+    # was not archived, so it cannot be replayed and this cannot be checked from
+    # the corpus. The vector stays until round 6 measures it. Deleting it now
+    # would remove a true assertion about the finding logic on the strength of
+    # an untested prediction about the rung -- and if the prediction is right,
+    # what should follow is a *recorded change*, not a quiet disappearance.
     ("round-4-true-negative-PE2", [H, H, H, H, B],
      ["RR1", "RR1", "RR1", "PE2", "PE2"], flows.NO_FAULT_ON_PATH, 0),
 ]

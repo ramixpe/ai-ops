@@ -149,35 +149,76 @@ def test_collection_and_aggregation_agree_on_the_member_set():
     The failure B-431 exists to prevent is a descent that **collects** one
     member set and **aggregates over** another: every interface would be read,
     the rung would be evaluated over a different list, and the verdict would be
-    plausible and wrong. The two sides live in different modules now
-    (`epoch.template_calls` collects; `descent._physical_interfaces` enumerates
-    what the rung is checked over), which is precisely why this is worth
-    asserting on real evidence rather than on the presence of an identifier.
+    plausible and wrong.
+
+    B-456 made this sharper rather than obsolete. The rung now has **two**
+    member sets -- path-scoped when a reverse route resolves, every physical
+    port when it does not -- and collection has to cover both, because it cannot
+    know which the walk will pick. So this asserts the union collected is
+    exactly the union the two resolvers produce, on real evidence.
     """
 
     from agent_nettools import epoch
 
-    interfaces = fixtures.load_fixture_evidence("PE2", label="broken")
-    step = next(
-        s
-        for r in flows.flow_for("bgp_session").descent
-        if r.name == "interface"
-        for s in r.collect
-        if s.is_template
-    )
+    evidence = dict(fixtures.load_fixture_evidence("PE2", label="broken"))
+    rung = next(r for r in flows.flow_for("bgp_session").descent if r.name == "interface")
+    step = next(s for s in rung.collect if s.is_template and s.fill is None)
+    assert step.name == "interface", "the fan-out step, not the reverse-route step"
 
     collected = [
         key.split(":", 1)[1]
-        for key, _ in epoch.template_calls(step, "10.255.0.12", dict(interfaces))
+        for key, _ in epoch.template_calls(step, "10.255.0.12", evidence)
     ]
-    aggregated = descent._physical_interfaces(dict(interfaces))
+    physical = descent._physical_interfaces(evidence)
+    path, _ = descent.path_interfaces(evidence, "10.255.0.31/32")
 
     assert collected, "the fixture must actually produce members, or this is vacuous"
-    assert collected == aggregated, (
-        "the epoch collects one member set and the descent aggregates over "
-        f"another: collected={collected} aggregated={aggregated}"
+    assert set(collected) == set(physical) | set(path), (
+        "collection must cover BOTH member sets the walk can choose between: "
+        f"collected={collected} physical={physical} path={path}"
     )
 
+
+def test_both_member_sets_are_collected_because_the_walk_picks_later():
+    """The anti-vacuity companion, and it has teeth here.
+
+    On the `broken` label the reverse route is gone, so the path set is empty
+    and the union equals the physical set -- which would let a collector that
+    ignored the path set entirely pass the test above. The healthy label is
+    where the two differ, and it is where a regression would show.
+    """
+
+    from agent_nettools import epoch
+
+    # Built through the epoch, not `load_fixture_evidence`: the latter loads
+    # intents only, and the reverse route is a *template*. A test that used it
+    # would see an empty path set and pass for the wrong reason.
+    flow = flows.flow_for("bgp_session")
+    built = epoch.collect_epoch(
+        flow, "RR1", "10.255.0.12", resolver=lambda _s: "PE2",
+        sender=fixtures.fixture_sender(label="healthy"),
+        origin_prefix="10.255.0.31/32",
+    )
+    evidence = built.for_device("PE2")
+    rung = next(r for r in flow.descent if r.name == "interface")
+    step = next(s for s in rung.collect if s.is_template and s.fill is None)
+
+    physical = descent._physical_interfaces(evidence)
+    path, _ = descent.path_interfaces(evidence, "10.255.0.31/32")
+
+    assert path and physical, "both sets must be non-empty here"
+    assert set(path) < set(physical), (
+        "the point of path scoping is that it is a strict subset -- "
+        f"path={path} physical={physical}"
+    )
+
+    collected = {
+        key.split(":", 1)[1]
+        for key, _ in epoch.template_calls(step, "10.255.0.12", evidence)
+    }
+    assert collected == set(physical) | set(path), (
+        "the union is collected, so the walk can pick either"
+    )
 
 def test_the_capture_manifest_differs_deliberately_and_visibly():
     """`fixtures.py` wants the ports **and** `Lo0` -- a loopback's address is

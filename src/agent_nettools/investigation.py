@@ -420,6 +420,35 @@ def inventory_resolver(subject: str) -> str:
 #: the evidence that the evidence *shape* did not change.
 #:
 #: It is not the live path. `investigate()` builds an epoch.
+def origin_prefix_for(device: str) -> str:
+    """The host prefix of ``device``'s own loopback, for a reverse-route read.
+
+    `EACH_PATH_INTERFACE` needs the route the **subject** device holds back
+    toward where the investigation started, and that route is keyed by the
+    origin's loopback. This is the inverse of `inventory_resolver`: name to
+    router ID rather than router ID to name.
+
+    Arithmetic over the inventory, never an inference -- the same rule the
+    resolver follows, and the same refusal when it cannot be satisfied. A
+    device with no router ID raises rather than returning a guess, because a
+    guessed prefix would read a real route to somewhere nobody asked about.
+    """
+
+    from .inventory_model import load_inventory_file
+
+    for entry in load_inventory_file().devices:
+        if entry.name == device:
+            router_id = getattr(entry, "router_id", None)
+            if router_id:
+                return f"{router_id}/32"
+            raise ValueError(
+                f"{device!r} has no router_id in the inventory, so the route back "
+                f"toward it cannot be looked up; a path-scoped rung is unevaluated "
+                f"rather than guessing a prefix"
+            )
+    raise ValueError(f"{device!r} is not in the inventory")
+
+
 def _collect_for_rung(device: str, rung: flows.Rung, subject: str, *, sender=None) -> dict:
     """Everything one rung needs, keyed by the convention `checks.py` reads.
 
@@ -508,6 +537,14 @@ def investigate(
     the_flow = flows.flow_for(flow)
     resolve = resolver or inventory_resolver
 
+    # The route the *subject* device holds back toward here, for a path-scoped
+    # rung. A device with no router ID has no reverse route to look up, and the
+    # rung is `unevaluated` rather than falling back to every interface.
+    try:
+        origin = origin_prefix_for(device)
+    except (ValueError, Exception):  # noqa: BLE001 -- an inventory gap, not a crash
+        origin = None
+
     epoch: EvidenceEpoch | None = None
     coherence = None
     if collector is not None:
@@ -515,7 +552,7 @@ def investigate(
     else:
         epoch = collect_epoch(
             the_flow, device, subject, resolver=resolve, sender=sender,
-            bound_seconds=skew_bound_seconds,
+            bound_seconds=skew_bound_seconds, origin_prefix=origin,
         )
         # Every rung reads the same window. `for_device` hands back exactly the
         # dict shape `checks.py` already read, which is what keeps this a change
@@ -529,6 +566,7 @@ def investigate(
     descent = run_descent(
         the_flow, device, subject,
         collector=collect, resolver=resolve, coherence=coherence,
+        origin_prefix=origin,
     )
 
     # -- The authoritative report. No model, always produced (B-439). --------

@@ -40,6 +40,8 @@ from enum import Enum
 
 __all__ = [
     "AGGREGATE_PREFIXES",
+    "canonical",
+    "same_interface",
     "MANAGEMENT_PREFIXES",
     "PHYSICAL_PREFIXES",
     "VIRTUAL_PREFIXES",
@@ -133,3 +135,63 @@ def physical_members(names: list[str]) -> tuple[list[str], list[str]]:
     members = [n for n in names if is_physical_member(n)]
     unclassified = [n for n in names if classify(n) is InterfaceKind.UNKNOWN]
     return members, unclassified
+
+
+#: Short form -> long form, for the abbreviations IOS-XR prints in
+#: ``show interfaces brief`` but not in ``show route``. Declared rather than
+#: derived by regex, the same discipline as the prefix tables above: the set of
+#: abbreviations a platform uses is a fact about the platform, not a pattern.
+_EXPANSIONS: tuple[tuple[str, str], ...] = (
+    ("GigabitEthernet", "GigabitEthernet"),
+    ("TenGigE", "TenGigE"),
+    ("TwentyFiveGigE", "TwentyFiveGigE"),
+    ("FortyGigE", "FortyGigE"),
+    ("HundredGigE", "HundredGigE"),
+    ("FourHundredGigE", "FourHundredGigE"),
+    ("Gi", "GigabitEthernet"),
+    ("Te", "TenGigE"),
+    ("Twe", "TwentyFiveGigE"),
+    ("Fo", "FortyGigE"),
+    ("Hu", "HundredGigE"),
+    ("FH", "FourHundredGigE"),
+    ("BE", "Bundle-Ether"),
+    ("Bundle-Ether", "Bundle-Ether"),
+    ("Lo", "Loopback"),
+    ("Loopback", "Loopback"),
+    ("Mg", "MgmtEth"),
+    ("MgmtEth", "MgmtEth"),
+)
+
+
+def canonical(name: str) -> str:
+    """One spelling for one interface, so two sources can be compared.
+
+    ``show route`` prints ``GigabitEthernet0/0/0/0``; ``show interfaces brief``
+    prints ``Gi0/0/0/0``. They are the same port and no string comparison says
+    so.
+
+    **This canonicalises *within* one device and is not a key across devices.**
+    On this fabric RR1 and PE2 both have a ``Gi0/0/0/0``, so comparing
+    canonicalised names from two devices produces a confident false match --
+    which is the defect B-456's naive form would have shipped (OBS-117). Any
+    caller joining two sources must establish they describe the *same device*
+    before using this.
+    """
+
+    name = (name or "").strip()
+    if not name:
+        return ""
+    for short, long in _EXPANSIONS:
+        if name.startswith(short):
+            rest = name[len(short):]
+            # Only an abbreviation if what follows is not another letter --
+            # `Ten` must not be read as `Te` + `n`.
+            if not rest or not rest[0].isalpha():
+                return long + rest
+    return name
+
+
+def same_interface(left: str, right: str) -> bool:
+    """Whether two names, **from the same device**, denote one interface."""
+
+    return bool(left) and canonical(left) == canonical(right)

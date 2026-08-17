@@ -65,7 +65,7 @@ from .flows import (
     Rung,
     SubjectRule,
 )
-from .interface_kind import physical_members
+from .interface_kind import physical_members, same_interface
 
 if TYPE_CHECKING:  # `epoch` imports this module, so the dependency is one-way
     from .epoch import Coherence
@@ -76,6 +76,7 @@ LOGGER = logging.getLogger(__name__)
 
 __all__ = [
     "DescentResult",
+    "path_interfaces",
     "RungOutcome",
     "evaluate_rung",
     "resolve_devices",
@@ -197,21 +198,121 @@ def _physical_interfaces(evidence: dict[str, Any]) -> list[str]:
     return members
 
 
-def _rung_subjects(rung: Rung, subject: str, evidence: dict[str, Any]) -> list[str | None]:
-    """What this rung's check is called with, per its declared subject rule."""
+def path_interfaces(
+    evidence: dict[str, Any], origin_prefix: str | None
+) -> tuple[list[str], list[str]]:
+    """``(members, unresolved)`` — the interfaces this device's path actually uses.
+
+    Read from the route the device holds back toward ``origin_prefix``: every
+    installed path names its outgoing interface, so the set is *observed* rather
+    than inferred, which is D7's rule.
+
+    **Two joins, and both are places this could go wrong.**
+
+    The route prints ``GigabitEthernet0/0/0/0`` and ``show interfaces brief``
+    prints ``Gi0/0/0/0``, so names are matched through
+    `interface_kind.canonical` and the **device's own spelling** is returned —
+    the check falls back to the bulk table by exact name, and handing it the
+    route's spelling would silently miss.
+
+    An interface the route names and the device's own interface list does not
+    contain comes back in ``unresolved`` rather than being dropped. That is the
+    same refusal `physical_members` makes: silently excluding a name nobody
+    recognised is the defect `interface_kind` exists for.
+
+    **This canonicalises within one device only.** The route must have been read
+    on the same device as the interface list; comparing across devices produces
+    a confident false match on a uniformly-named fabric (OBS-117).
+    """
+
+    if not origin_prefix:
+        return [], []
+
+    section = evidence.get(f"route:{origin_prefix}")
+    if not isinstance(section, dict):
+        return [], []
+    parsed = (section.get("data") or {}).get("parsed") or {}
+    if not (parsed.get("meta") or {}).get("found"):
+        return [], []
+
+    named = [r.get("interface", "") for r in parsed.get("records") or [] if r.get("interface")]
+
+    own: list[str] = []
+    bulk = (evidence.get("interfaces") or {}).get("data", {}).get("parsed") or {}
+    if isinstance(bulk, dict):
+        own = [r.get("interface", "") for r in bulk.get("records") or [] if r.get("interface")]
+
+    members: list[str] = []
+    unresolved: list[str] = []
+    for route_name in named:
+        match = next((o for o in own if same_interface(o, route_name)), None)
+        if match is None:
+            unresolved.append(route_name)
+        elif match not in members:
+            members.append(match)
+    return members, unresolved
+
+
+def _rung_subjects(
+    rung: Rung, subject: str, evidence: dict[str, Any], origin_prefix: str | None = None
+) -> tuple[list[str | None], Aggregation | None]:
+    """``(subjects, aggregation override)`` for one rung.
+
+    The override is ``None`` for every rule whose aggregation is fully declared
+    on the :class:`Rung`. ``EACH_PATH_INTERFACE`` is the exception, and it is
+    deliberate: it resolves to **two different member sets asking two different
+    questions**, and the rule for combining them differs with the question. One
+    aggregation declared on the rung would be right for one case and wrong for
+    the other.
+    """
 
     if rung.subject_rule is SubjectRule.AS_IS:
-        return [subject]
+        return [subject], None
     if rung.subject_rule is SubjectRule.HOST_PREFIX:
-        return [f"{subject}/32"]
+        return [f"{subject}/32"], None
     if rung.subject_rule is SubjectRule.DEVICE_WIDE:
-        return [None]
+        return [None], None
     if rung.subject_rule is SubjectRule.EACH_PHYSICAL_INTERFACE:
-        return list(_physical_interfaces(evidence))
+        return list(_physical_interfaces(evidence)), None
+    if rung.subject_rule is SubjectRule.EACH_PATH_INTERFACE:
+        members, unresolved = path_interfaces(evidence, origin_prefix)
+        if unresolved:
+            LOGGER.warning(
+                "route names interfaces absent from this device's own interface "
+                "list, excluded from the path member set: %s", ", ".join(unresolved),
+            )
+        if members:
+            # A path exists. The question is *does it survive*, and one healthy
+            # member answers yes -- a primary down behind a healthy backup is a
+            # degradation, not a broken path.
+            return list(members), Aggregation.ANY_HEALTHY
+
+        # **No reverse route, so no path -- and nothing to scope to.**
+        #
+        # Not a fallback to "check everything because the route was unreadable".
+        # It is a *different question* becoming the right one. With a route back
+        # to the origin, the question is which of this device's interfaces the
+        # path uses, and a down port elsewhere is irrelevant (round 4). With no
+        # route, the device is unreachable and the question is *why* -- for
+        # which every physical interface is a candidate explanation.
+        #
+        # The aggregation flips with it, and that is the half a first
+        # implementation missed. Measured on the `broken` label: `ANY_HEALTHY`
+        # over PE2's three ports lets the one that is up outvote the two shut
+        # uplinks, and the rung reports **healthy** on a completely isolated
+        # device. "Does a path survive" and "is any port down" are not the same
+        # question and cannot share a combining rule.
+        #
+        # The switch is on **observed evidence** -- did the reverse route
+        # resolve -- never on an earlier rung's verdict, so `Flow`'s prewalk
+        # precondition holds and both member sets are collectable up front.
+        return list(_physical_interfaces(evidence)), Aggregation.ALL_HEALTHY
     raise ValueError(f"unhandled subject rule {rung.subject_rule!r}")
 
 
-def _aggregate(rung: Rung, results: list[CheckResult]) -> CheckResult:
+def _aggregate(
+    rung: Rung, results: list[CheckResult], aggregation: Aggregation | None = None
+) -> CheckResult:
     """Combine per-device verdicts for a scope that resolved to a set.
 
     ``unevaluated`` dominates in both aggregations: if one member could not be
@@ -249,7 +350,7 @@ def _aggregate(rung: Rung, results: list[CheckResult]) -> CheckResult:
     keys = tuple(k for r in results for k in r.evidence_keys)
     healthy_count = sum(1 for r in results if r.status == HEALTHY)
 
-    if rung.aggregation is Aggregation.ANY_HEALTHY:
+    if (aggregation or rung.aggregation) is Aggregation.ANY_HEALTHY:
         status = HEALTHY if healthy_count else BROKEN
         reason = f"{healthy_count} of {len(results)} members healthy (any suffices)"
     else:
@@ -264,6 +365,7 @@ def evaluate_rung(
     devices: Sequence[str],
     subject: str,
     evidence_for: Callable[[str], dict[str, Any]],
+    origin_prefix: str | None = None,
 ) -> CheckResult:
     """One rung's verdict over its device set, aggregated.
 
@@ -276,9 +378,11 @@ def evaluate_rung(
     """
 
     per_device: list[CheckResult] = []
+    aggregation: Aggregation | None = None
     for target in devices:
         evidence = evidence_for(target)
-        rung_subjects = _rung_subjects(rung, subject, evidence)
+        rung_subjects, override = _rung_subjects(rung, subject, evidence, origin_prefix)
+        aggregation = override or aggregation
         if not rung_subjects:
             # A fan-out that found no objects to check. Not healthy -- we
             # verified nothing -- and not broken either.
@@ -293,7 +397,7 @@ def evaluate_rung(
         for rung_subject in rung_subjects:
             per_device.append(rung.check(evidence, rung_subject))
 
-    return _aggregate(rung, per_device)
+    return _aggregate(rung, per_device, aggregation)
 
 
 def run_descent(
@@ -304,6 +408,7 @@ def run_descent(
     collector: Callable[[str, Rung, str], dict[str, Any]],
     resolver: Callable[[str], str | Sequence[str]] | None = None,
     coherence: Callable[[list[RungOutcome]], Coherence] | None = None,
+    origin_prefix: str | None = None,
 ) -> DescentResult:
     """Walk one flow's ladder and return the lowest broken rung as the cause.
 
@@ -341,12 +446,13 @@ def run_descent(
             break
 
         result = evaluate_rung(
-            rung, devices, subject,
+            rung, devices, subject,  # noqa: E128
             # `rung=rung` binds the loop variable. The lambda is consumed
             # inside this iteration, so late binding could not bite today --
             # but a future `evaluate_rung` that deferred the call would
             # silently evaluate every rung against the last one's evidence.
             lambda target, rung=rung: collector(target, rung, subject),
+            origin_prefix=origin_prefix,
         )
         outcomes.append(RungOutcome(rung.name, ", ".join(devices), result))
         evidence_keys.extend(result.evidence_keys)

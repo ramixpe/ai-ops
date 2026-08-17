@@ -3400,6 +3400,35 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-119 · B-456 · Path scoping needs two member sets and two aggregations, and it does not save a session
+
+- **Kind:** implementation
+- **Escalation:** DECIDE-AND-LOG (one HALT raised and resolved mid-work)
+- **Model:** opus-5
+- **What happened:** `SubjectRule.EACH_PATH_INTERFACE` landed. Three things the specification did not anticipate, all found by measurement.
+
+  **1. Decision 3 was wrong, and so was my objection to correcting it.** The operator specified *unevaluated when the reverse route is absent, never fall back to all-interfaces*. Measured on the `broken` label, that produced `undetermined` — the isolated device has no reverse route *because* it is isolated, so the rung has no member set exactly when the interfaces are the answer. The operator's correction was that an absent reverse route is a **finding, not a failure to read**.
+
+  Their predicted consequence was `igp_isolated`. Measured, marking rung 5 broken yields **`interface_line_down`** — rung 5 is the *lowest* rung, so its verdict decides the finding whenever it is broken; there is nothing below it to localise to. And `interface_line_down` is the right answer: PE2's two uplinks really are `admin-down`.
+
+  **I also overstated a collision.** I reported that choosing the member set after the walk would violate `Flow`'s prewalk precondition. It does not: the switch is on *observed evidence* — did the reverse route resolve — not on an earlier rung's **verdict**. Both member sets are collectable up front and the precondition holds untouched.
+
+  **2. The aggregation has to switch with the member set, and a first implementation missed it.** With the all-physical set under `ANY_HEALTHY`, PE2's one healthy port outvoted its two shut uplinks and the rung reported **healthy on a completely isolated device**. "Does a path survive" and "is any port down, explaining this isolation" are different questions and cannot share a combining rule. `_rung_subjects` now returns an aggregation override alongside the subjects.
+
+  **3. It costs a session rather than saving one.** B-456 and B-455's last session were planned as the same change. They are not. The fan-out manifest cannot be built until the reverse route is read, so the subject device still needs two passes — the same structure it had before. A first implementation gave the route its own session and pushed skew from **25–31 s to 38–42 s**; batching it with the intents brought it back to **29–33 s**, roughly neutral.
+
+  **B-455's floor is three sessions, not two**, and the reason is structural: on a fan-out device, what to collect second depends on what was read first.
+- **Evidence:** Live, login penalty deliberately armed. Fixture replay across ten device/subject/label combinations, all correct. 1749 passing.
+- **What I did:** Implemented all three corrections. Recorded the two claims of mine that measurement corrected, alongside the operator's.
+
+  **A design flaw a test caught, worth its own paragraph.** The first version set `CollectStep(parameter="origin_prefix")`, overloading one field to mean both *which template argument* and *how to fill it*. It reads naturally and it is false — the `route` template takes `prefix`. `test_every_template_collect_step_names_a_real_parameter` failed on it. `CollectStep` now has a separate `fill` field with a declared vocabulary, which is the honest shape: the argument name is a fact about the template, the strategy is a fact about the collector.
+
+  **Round 4 is not settled and the regression vector stays.** Under path scoping round 4's `[H,H,H,H,B]` should become `[H,H,H,H,H]` — the reverse route names only the surviving uplink. **That is reasoning, not measurement**: round 4 ran live and its payload was not archived, so it cannot be replayed. The vector is kept with the prediction written beside it, because deleting a true assertion about the finding logic on the strength of an untested prediction about the rung is the wrong trade, and because if the prediction holds what should follow is a recorded change rather than a quiet disappearance. Round 6 measures it.
+- **Needs human review:** no — one HALT raised mid-work and resolved by the operator
+- **Blocks:** B-462 (does a down port persist as an LFA backup) remains open and is the known soft spot.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**

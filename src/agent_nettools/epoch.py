@@ -83,9 +83,7 @@ from typing import Any
 from . import flows
 from .checks import CheckResult
 from .descent import RungOutcome, evaluate_rung, resolve_devices
-from .interface_kind import physical_members
 from .network_tools import (
-    collect_evidence,
     collect_evidence_and_templates,
     run_intent,
     run_templates_split,
@@ -137,6 +135,12 @@ SUBJECT_PARAMETERS = frozenset({"address"})
 PREFIX_PARAMETERS = frozenset({"prefix"})
 #: Fans out over the physical interfaces the device itself reported.
 FANOUT_PARAMETERS = frozenset({"interface"})
+#: `CollectStep.fill` strategies this builder knows how to satisfy before the
+#: walk. ``"origin"`` fills a template's parameter from the **origin** device's
+#: loopback prefix -- the route the subject device holds back toward where the
+#: investigation started (B-456). Resolvable up front because the origin is
+#: `run_descent`'s `device` argument.
+FILL_STRATEGIES = frozenset({"origin"})
 
 _RESOLVABLE = SUBJECT_PARAMETERS | PREFIX_PARAMETERS | FANOUT_PARAMETERS
 
@@ -160,7 +164,13 @@ def validate_prewalk_collection(flow: flows.Flow) -> None:
         for step in rung.collect:
             if not step.is_template:
                 continue
-            if step.parameter in _RESOLVABLE:
+            if step.fill is not None and step.fill not in FILL_STRATEGIES:
+                raise ValueError(
+                    f"flow {flow.object_type!r} rung {rung.name!r} collects "
+                    f"{step.name!r} with fill strategy {step.fill!r}, which the epoch "
+                    f"builder does not know. Known: {sorted(FILL_STRATEGIES)}."
+                )
+            if step.fill is not None or step.parameter in _RESOLVABLE:
                 continue
             raise ValueError(
                 f"flow {flow.object_type!r} rung {rung.name!r} collects template "
@@ -431,7 +441,10 @@ class Coherence:
 
 
 def template_calls(
-    step: flows.CollectStep, subject: str, evidence: dict[str, Any]
+    step: flows.CollectStep,
+    subject: str,
+    evidence: dict[str, Any],
+    origin_prefix: str | None = None,
 ) -> Iterator[tuple[str, dict[str, str]]]:
     """``(evidence_key, kwargs)`` for every call one template step needs.
 
@@ -440,20 +453,34 @@ def template_calls(
     filters that agree until someone edits one.
     """
 
+    if step.fill == "origin":
+        if not origin_prefix:
+            return
+        yield f"{step.name}:{origin_prefix}", {step.parameter: origin_prefix}
+        return
+
     if step.parameter in PREFIX_PARAMETERS:
         key = f"{subject}/32"
         yield f"{step.name}:{key}", {"prefix": key}
         return
 
     if step.parameter in FANOUT_PARAMETERS:
-        parsed = (evidence.get("interfaces") or {}).get("data", {}).get("parsed") or {}
-        # The same declared taxonomy the descent aggregates over. Collecting one
-        # member set and aggregating over another is what three copies of this
-        # rule made possible (B-431).
-        members, _ = physical_members(
-            [r.get("interface", "") for r in parsed.get("records", [])]
-        )
-        for name in members:
+        # The same member set the descent will aggregate over. Collecting one
+        # set and aggregating over another is what three copies of this rule
+        # made possible (B-431), so both sides call `descent.path_interfaces`.
+        from .descent import _physical_interfaces, path_interfaces
+
+        # **Both member sets, always.** The descent picks between them after
+        # seeing whether the reverse route resolved, so collection cannot know
+        # which it will need -- and collecting only one would mean the walk
+        # asks about an interface nobody read. The extra calls ride the same
+        # batched session, so the cost is commands rather than logins (B-455).
+        path, _ = path_interfaces(evidence, origin_prefix)
+        seen: list[str] = []
+        for name in [*path, *_physical_interfaces(evidence)]:
+            if name in seen:
+                continue
+            seen.append(name)
             yield f"{step.name}:{name}", {"interface": name}
         return
 
@@ -489,14 +516,17 @@ def _plan(
 
 
 def _manifest_for(
-    steps: list[flows.CollectStep], subject: str, evidence: dict[str, Any]
+    steps: list[flows.CollectStep],
+    subject: str,
+    evidence: dict[str, Any],
+    origin_prefix: str | None = None,
 ) -> tuple[list[str], list[tuple[str, dict[str, str]]]]:
     """``(evidence keys, manifest)`` for a device's template steps."""
 
     keys: list[str] = []
     manifest: list[tuple[str, dict[str, str]]] = []
     for step in steps:
-        for key, kwargs in template_calls(step, subject, evidence):
+        for key, kwargs in template_calls(step, subject, evidence, origin_prefix):
             keys.append(key)
             manifest.append((step.name, kwargs))
     return keys, manifest
@@ -511,6 +541,7 @@ def collect_epoch(
     sender=None,
     bound_seconds: float = DEFAULT_SKEW_BOUND_SECONDS,
     clock: Callable[[], float] = time.monotonic,
+    origin_prefix: str | None = None,
 ) -> EvidenceEpoch:
     """Collect everything this flow needs, once per device.
 
@@ -549,11 +580,36 @@ def collect_epoch(
 
         started = clock()
         if fans_out:
-            evidence = dict(collect_evidence(target, sender=sender))
-            keys, manifest = _manifest_for(steps, subject, evidence)
-            envelopes = run_templates_split(target, manifest, sender=sender)
+            # **The reverse route rides the probe pass, not a pass of its own.**
+            #
+            # The fan-out manifest cannot be built until the route back toward
+            # the origin has been read, so a first implementation read it in its
+            # own session -- and measured live, that pushed skew from 25-31s to
+            # 38-42s. B-456 was supposed to *remove* B-455's last session and
+            # instead added one, because a second round trip is exactly the cost
+            # B-455 established dominates everything.
+            #
+            # Batched with the intents it is free: `collect_evidence_and_
+            # templates` authorises both kinds under their own rules and runs
+            # them over one login. Two sessions on a fan-out device, which is
+            # where it was before this item.
+            origin_steps = [s for s in steps if s.fill == "origin"]
+            okeys, omanifest = _manifest_for(origin_steps, subject, {}, origin_prefix)
+            evidence, oenvelopes = collect_evidence_and_templates(
+                target, omanifest, sender=sender
+            )
+            evidence = dict(evidence)
+            for key, envelope in zip(okeys, oenvelopes, strict=True):
+                evidence[key] = envelope
+
+            rest = [s for s in steps if s.fill != "origin"]
+            rest_keys, manifest = _manifest_for(rest, subject, evidence, origin_prefix)
+            keys = list(okeys) + rest_keys
+            envelopes = list(oenvelopes) + run_templates_split(
+                target, manifest, sender=sender
+            )
         else:
-            keys, manifest = _manifest_for(steps, subject, {})
+            keys, manifest = _manifest_for(steps, subject, {}, origin_prefix)
             evidence, envelopes = collect_evidence_and_templates(
                 target, manifest, sender=sender
             )
