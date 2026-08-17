@@ -734,7 +734,14 @@ def test_detect_flaps_with_no_history_reports_nothing(tmp_path):
 
     result = detect_flaps("NEVER_SEEN", base_dir=str(tmp_path))
 
-    assert result == {"device": "NEVER_SEEN", "snapshots_examined": 0, "flapping": []}
+    # B-474: snapshots_skipped is now always in the payload (0 here -- no
+    # corrupt files, just no history at all).
+    assert result == {
+        "device": "NEVER_SEEN",
+        "snapshots_examined": 0,
+        "snapshots_skipped": 0,
+        "flapping": [],
+    }
 
 
 def test_fabric_default_check_is_bgp(monkeypatch):

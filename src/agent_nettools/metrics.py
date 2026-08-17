@@ -58,6 +58,13 @@ import threading
 from pathlib import Path
 from typing import Any
 
+# Shared with the evidence store's file backend rather than duplicated: both
+# modules write JSON straight to a final path and both were named in B-474 /
+# DEEP-REVIEW-2026-08-17 §2.4 for the same reason (a crash mid-write leaves
+# truncated JSON). No import cycle -- evidence_store.py does not import this
+# module, so this direction is safe.
+from .evidence_store import _atomic_write_text
+
 NETTOOLS_METRICS_FILE_ENV = "NETTOOLS_METRICS_FILE"
 
 SEVERITIES: tuple[str, ...] = ("ok", "info", "warning", "critical")
@@ -154,12 +161,17 @@ class MetricsCollector:
         if path is None:
             return
         try:
-            path.write_text(
+            # Atomic (tempfile + fsync + os.replace), not a direct write --
+            # this file is rewritten whole on every mutation (see the module
+            # docstring), so a crash mid-write used to leave truncated JSON
+            # that the next process's `_load_from_disk_once` would then fail
+            # to parse (B-474 / DEEP-REVIEW-2026-08-17 §2.4).
+            _atomic_write_text(
+                path,
                 json.dumps(
                     {"collections": self._collections, "verdicts": self._verdicts,
                      "paraphrases": self._paraphrases}, indent=2
                 ),
-                encoding="utf-8",
             )
         except OSError:
             pass  # Best-effort, same as the audit log: never break a caller over this.
