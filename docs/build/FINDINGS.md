@@ -3049,6 +3049,40 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-108 · B-436 · Everyone attributed 114 seconds to collection; nobody measured the split
+
+- **Kind:** assumption-wrong
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** Reviewer B's §3.4: *"114–122 seconds is too slow for an interactive command."* §2.1 attributed the duration to per-rung collection, §6 credited item 3 with fixing it, and my own `evidence-epoch.md` opened with *"one change, three defects."*
+
+  After item 3 landed I measured it live on `RR1 → 10.255.0.12`, and the first reading looked spectacular: **6.0 s**, against the recorded 114–122 s. A 19× speedup.
+
+  **It was not a like-for-like comparison and I nearly reported it as one.** The 114 s runs made **two model calls**; my 6 s run was `--no-model`. Measured properly, both without a model:
+
+  | | Before | After |
+  |---|---:|---:|
+  | Deterministic descent | **8.5 s** | **5.8 s** |
+  | Commands | 40 | 24 |
+
+  A full `investigate` with one model call: **40.5 s**. Round 1's 114.2 s carried two, the second over a 13,218-character correlate prompt.
+
+  **So the epoch saves 2.7 seconds of about 114.** B's observation is right and B's attribution is wrong, and the response document, the order of work and my design all inherited the attribution without checking it.
+- **Evidence:** Live, this fabric, both paths in one process with the same credentials: `epoch 5.8s / per-rung 8.5s`, both `all_layers_healthy`. `nettools investigate --format json` end to end: 40.5 s, report withheld, correlation `not_attempted`. Fixture replay: 24 commands against 40.
+- **What I did:** Corrected `peer-review-response.md` §3.4 and the header of `evidence-epoch.md`; removed the speed claim from both. Item 3 keeps the two claims it can support — temporal coherence, and 40% fewer commands against A's §4.6 device-load concern.
+
+  **Three things worth keeping.**
+
+  **The 19× reading is silent-failure shape 6 with me as the subject.** Wrong evidence read as right evidence: the number was real, the run was real, and it answered a different question from the one I was asking. What caught it was not scepticism about the number — it was that the number was *too good*, which is a much weaker instrument than it feels like and would not have fired at 3×.
+
+  **A claim that three independent reviewers, a response document and an implementation design all repeat is not thereby evidenced.** It is one unmeasured claim with four citations. The convergence in §2.1 was real and load-bearing for the *correctness* half; the speed attribution rode along on it, and consensus is what made it invisible. This is §0.13's first face — the evidence never bounded the conclusion, because nobody produced any.
+
+  **It relocates a deferred item.** B-439, deterministic authoritative report rendering, is first in §5's deferred table as a *grounding* improvement. It is now the only live answer to §3.4, because it removes the model from the interactive path. A deferral's cost changes when something else is measured, and nothing re-reads the deferral table when that happens.
+- **Needs human review:** no — the correction is made; B-439's promotion is the operator's call
+- **Blocks:** nothing. Round 5 proceeds.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**

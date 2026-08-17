@@ -143,6 +143,23 @@ PE1 and PE3 carry a permanently line-down `Gi0/0/0/2.300`. `EACH_PHYSICAL_INTERF
 
 This reframes §2.1's fix. Collecting once and reusing across rungs is not only a correctness measure — it is what makes the tool worth running. One change addresses temporal coherence, device load (A's §4.6) and B's speed objection.
 
+#### Correction, 2026-08-17 — measured after item 3 landed (OBS-108)
+
+**The paragraph above is wrong about the cause, and so was I when I wrote the item 3 design on top of it.** The 114–122 seconds was attributed to collection by B, by §2.1, by §6 and by `evidence-epoch.md`. Nobody measured the split. Measured live on this fabric, `RR1 → 10.255.0.12`:
+
+| | Before item 3 | After item 3 |
+|---|---:|---:|
+| Deterministic descent, no model | **8.5 s** | **5.8 s** |
+| Commands | 40 | 24 |
+| Full `investigate`, one model call | — | **40.5 s** |
+| Round 1's 114.2 s, two model calls | — | ~**105 s** of it model latency |
+
+So the epoch saves **2.7 seconds of about 114**. B's *observation* is correct and B's *attribution* is not: the tool is slow because it makes two large model calls in the interactive path, not because it collects evidence five times.
+
+**What this changes.** Item 3 stands on its own — it is a correctness fix, and the device-load reduction (A's §4.6) is real at 40 % fewer commands. But it must stop being credited with the speed fix. The item that addresses B's objection is **B-439, deterministic authoritative report rendering**, currently first in §5's deferred table: rendering the report from typed fields removes the model from the interactive path entirely. That promotes B-439 from a grounding improvement to the *only* live answer to §3.4, which is not how §5 files it.
+
+Recorded as a claim correction in the same family as §4's five, and found the same way — by measuring something everyone had agreed about.
+
 ### 3.5 Report the aggregate, and name the sampling frame — C
 
 **This corrects a decision made during the four rounds.** Refusing to report 3/4 was endorsed on the grounds that the denominator averages a working category with one that structurally could not work. C's reasoning is better:

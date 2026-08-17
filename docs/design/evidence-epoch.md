@@ -2,7 +2,9 @@
 
 **Item 3 of `peer-review-response.md` §6. Approved 2026-08-17 — D1, D2 and D3 as recommended, with one addition to D2.**
 
-Addresses the convergent finding (§2.1, all three reviewers), A's device-load concern (§4.6) and B's speed objection (§3.4). One change, three defects.
+Addresses the convergent finding (§2.1, all three reviewers) and A's device-load concern (§4.6).
+
+> **Correction, 2026-08-17, after implementation.** This document originally claimed the change also answers B's speed objection (§3.4) — "one change, three defects". **Measured, it does not.** The deterministic descent went from **8.5 s to 5.8 s** live; the 114–122 s an operator experiences is ~105 s of model latency from two calls in the interactive path, which this change does not touch. The claim was inherited from the review and never measured by anyone, including me. B's objection is answered by **B-439** (deterministic report rendering), not by this. See OBS-108 and `peer-review-response.md` §3.4.
 
 ---
 
