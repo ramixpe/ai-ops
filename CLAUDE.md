@@ -209,6 +209,7 @@ Read these before changing anything in the investigation layer.
 | [docs/build/MCP-EXPERIMENT.md](docs/build/MCP-EXPERIMENT.md) | The 2026-08-17 MCP experiment: the invariant-4 audit, the refuted prediction, and argument fabrication (B-459) |
 | [docs/build/MVP0-REVIEW.md](docs/build/MVP0-REVIEW.md) | **The M4 review.** What the build changed about the design, what is still unknown, and what MVP-0 can and cannot do |
 | [docs/build/VERIFICATION.md](docs/build/VERIFICATION.md) | Every claim with its evidence — frozen-file hashes, guardrails by name, rounds by payload |
+| [docs/build/BACKLOG-STATUS.md](docs/build/BACKLOG-STATUS.md) | All 98 backlog items by state, every DONE claim verified, 12 guardrails mutation-tested |
 | [docs/build/PEER-REVIEW-BRIEF.md](docs/build/PEER-REVIEW-BRIEF.md) | **Give this to a reviewer.** What to read, what is already known wrong, where to attack |
 | [docs/build/OPERATOR-RUNBOOK.md](docs/build/OPERATOR-RUNBOOK.md) | Step by step for the outstanding lab work |
 | [docs/README.md](docs/README.md) | Map of the docs tree and reading order |

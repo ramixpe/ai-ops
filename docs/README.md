@@ -46,6 +46,8 @@ ios-xr-nettools/
 │   │   ├── BACKLOG.md                  Every open item with its reconciled state
 │   │   ├── MVP0-REVIEW.md              The M4 review: what it does, and what it does not
 │   │   ├── VERIFICATION.md             Every claim with its evidence. Found six overstated
+│   │   ├── BACKLOG-STATUS.md           All 98 items by state, DONE claims verified,
+│   │   │                               12 guardrails mutation-tested
 │   │   ├── PEER-REVIEW-BRIEF.md        For a reviewer: what to read, and what to attack
 │   │   ├── REPO-INVENTORY.md           Every file, purpose, last touched, referenced by
 │   │   ├── OPERATOR-RUNBOOK.md         Step by step for the outstanding lab work
