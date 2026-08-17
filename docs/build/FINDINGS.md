@@ -3620,6 +3620,50 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-127 · P2.4 · "The local buffer is better" does not imply "so build against it"
+
+- **Kind:** assumption-wrong
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5 (recording an operator correction of their own reading)
+- **What happened:** PLAN-V2's P2.4 offered three options for the evidence-reduction chain and said option 2 — *descope B-206, build normalisation against the local `show logging` buffer* — is where the evidence points.
+
+  The first half follows and the second does not. **Severity 5 and 6 events never reach the log platform**, so for local correlation the device buffer genuinely is the better source; that is measured and it is already what the code reads. It says nothing about whether **normalisation** is needed.
+
+  **B-414's own deferral argument survives the descoping intact:** *"at 28 records the aggregate carries no information the records do not, and collapsing them costs the verbatim ordering the timeline is built from."* Re-measured this session — 28 kept records on PE2, 7 on RR1, 9 on PE3, after shaping. Building reductions 3 and 4 against that window is building *N* before validating one.
+- **Evidence:** `shape_window` output across three devices on the `broken` label; Q-011 on the trap level.
+- **What I did:** Recorded the operator's own framing of the error: *"I extended 'the local buffer is better' into 'so build against it', which does not follow."*
+
+  **Resolution taken:** descope B-206 as a dependency, and separately mark **B-414 `CLOSED-AS-MEASURED`** with the 28-record measurement attached, reopening if a window exists that makes aggregation informative.
+
+  **One correction to the option itself:** descoping B-206 unblocks **4 of 6**, not all six. B-415 needs two clocks to disagree and there is only one; B-417 needs B-107, an unimplemented flow. An option described as unblocking a chain should say how much of the chain.
+
+  The shape is worth naming because it is not the data face and not the rules face: **a measurement that is sound, and an inference from it that reaches one step further than the measurement covers.** The evidence was about *which source*; the conclusion was about *what to build*.
+- **Needs human review:** no
+- **Blocks:** nothing.
+
+---
+
+## OBS-128 · Gate Zero · A state column is mechanical; a citation rule is attentional
+
+- **Kind:** method
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** The operator's §0.2a rule was *a plan item cites the last finding that touched it*. Gate Zero's reconciliation produced something that supersedes it, and the operator has recorded it as such.
+
+  **The 43 `unverified` matter more than the 11-of-12.** Eleven of twelve scheduled items being unschedulable is the visible failure. Nearly half the backlog never having been checked since filing is the condition that produced it.
+- **Evidence:** 95 items reconciled: 43 `unverified`, 30 `DONE`, 14 `BLOCKED`, 8 `OPEN`.
+- **What I did:** Recorded the supersession.
+
+  > **The previous plan could not have avoided its error, because the vocabulary to express the difference did not exist.** `BACKLOG.md` had no way to say *"nobody has looked at this"* as distinct from *"this is open"*. Reading `unverified` as `OPEN` was not carelessness; it was the only reading the document supported.
+
+  That is why a state column beats a citation rule. **A citation rule is the attentional form** — it asks the planner to go and check, every time, for every item, and it fails the first time someone is in a hurry. **A state column is the mechanical form** — it is read whether or not anyone remembers, and a plan written from it inherits the distinction for free.
+
+  The general shape, which this build has now met in several places: when a rule asks someone to *do* something repeatedly, look for the representation change that makes the doing unnecessary. §0.16 (a turn ends with a hash) is the same move applied to reporting; `Flow.subject_present` is the same move applied to validation.
+- **Needs human review:** no
+- **Blocks:** nothing.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**

@@ -502,6 +502,46 @@ The general check, cheap enough to run while writing a parser: for each field yo
 
 This is the same rule Phase 3 already applies without naming it: `router_id` and `local_as` are *absent* for the four devices with no BGP process rather than zero, because the fixtures literally answer `% BGP instance 'default' not active` and asserting a zero would be a lie the evidence contradicts.
 
+### Truncation is a filter; classification is containment
+
+Added 2026-08-17 from B-458, and it is the **third** instance of one move.
+
+> **A filter lets the dangerous value pass through the function and removes some
+> of it. A construction assembles the output from values already trusted, so the
+> dangerous value is never in it.**
+
+| Instance | The filter that was rejected | The construction that replaced it |
+|---|---|---|
+| OBS-061 | redact device text from a prompt | `prompt_library` takes a `DescentResult` and **cannot** hold device text |
+| OBS-106 | remember not to expose a write tool | `mcp_server` does not **import** a write function |
+| **B-458** | truncate an error string at 400 characters | each error is **rebuilt** from a command we rendered plus a phrase from a declared table |
+
+The B-458 case is the clearest because the filter was measurably insufficient
+rather than merely fragile: netmiko 4.7 interpolates `output={repr(output)}`
+into one exception message, so a 400-character cap passed up to 400 characters
+of device output to a model. The cap was not a weak fix, it was **the wrong
+kind** of fix.
+
+**The test for which you have:** ask whether the function ever *holds* the
+dangerous value. If it does and then trims it, it is a filter. If it never
+receives it, or discards it and builds from elsewhere, it is containment.
+
+### A documented limit is a decision that expires, not a state
+
+The second half, and the one to carry to every remaining residual.
+
+B-458 was filed honestly as *"bounded rather than claimed clean"*. That honesty
+is why it was findable — and it is also why it sat. **A bound recorded as
+acceptable becomes a filter nobody revisits**, because the record reads as a
+decision already taken rather than a question still open.
+
+The measurement that made it urgent took four minutes: reading the library's
+raise sites for interpolation. Nobody did it for months, because the item said
+the limit was known.
+
+> **Audit every stated residual on the same question: is the bound still the
+> right *kind* of answer, or was it the honest description of a filter?**
+
 ---
 
 ## 0.14 Ask what kind of claim you are acting on

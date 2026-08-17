@@ -79,7 +79,7 @@ checked-and-still-open, and conflating them is what the last plan did.
 | **B-411** | `DONE` | OBS-123 | — | OBS-123 |
 | **B-412** | `OPEN` | injector script, outside this repo | — | OBS-075 |
 | **B-413** | `DONE` | OBS-059 | — | OBS-059 |
-| **B-414** | `BLOCKED` | OBS-124 | B-206 (BLOCKED) | OBS-124 |
+| **B-414** | `CLOSED-AS-MEASURED` | OBS-127 — 28 kept records; aggregation carries nothing | B-206 (BLOCKED) | OBS-124 |
 | **B-415** | `BLOCKED` | OBS-124 | B-206 (BLOCKED) | OBS-124 |
 | **B-416** | `BLOCKED` | OBS-124 | B-414 (BLOCKED) | OBS-124 |
 | **B-417** | `BLOCKED` | OBS-124 | B-107 (OPEN) | OBS-124 |
