@@ -320,14 +320,16 @@ This generalises past resolvers. Whenever a test is parameterised over cases tha
 > - a demo verified in the developer's environment verifies the environment — *(setup)*
 > - **agreement among re-derivations is not evidence that re-deriving was
 >   unnecessary** — *(duplication)*
+> - **a procedure can be followed exactly and produce nothing, when one word
+>   in it is underspecified** — *(procedure)*
 >
-> **Before trusting any of the six, ask what the evidence could not have shown you.**
+> **Before trusting any of the seven, ask what the evidence could not have shown you.**
 
-One family, six faces. Each has cost this build real time, and in every case the artefact was internally consistent — which is why the question has to be asked deliberately rather than noticed.
+One family, seven faces. Each has cost this build real time, and in every case the artefact was internally consistent — which is why the question has to be asked deliberately rather than noticed.
 
 **The buffer-level trap is the same family.** `show logging` returns the device *buffer* (level `debugging`, severities 0–7); the *trap* level governs what is shipped to the collector (`informational`, 0–6). Reading the trap level to describe local coverage **understates the source by exactly the class in question**, while looking entirely correct. The evidence — a header line stating a level — cannot show you that you read the wrong line.
 
-### The six faces, with their standing examples
+### The seven faces, with their standing examples
 
 | Face | Standing example | Fix |
 |---|---|---|
@@ -337,6 +339,7 @@ One family, six faces. Each has cost this build real time, and in every case the
 | **Identity** — width only where the corpus varies | T-029a: `refusal_marker` moved into data and keyed by *prompt family*, then failed again when a second **version** appeared | Key by the finest identity the thing has — a filename, not a family name |
 | **Setup** — the environment verifies itself | T-031: `--from-fixtures` was checked by hand a dozen times and "needed no credentials", because `main()` loads this repo's `.env` and it holds real ones. The verification environment was contaminated by the thing being verified | Strip the environment in a test, and in CI. A person cannot easily un-know their own `.env`; a clean container can (**B-423**) |
 | **Duplication** — consistent duplicates read as correctness | B-460: `St/PfxRcd` holds either a prefix count or a session state, and three consumers each recovered the discriminator with `_is_numeric` — identically, agreeing, for eight phases | Count the sites reconstructing a fact, not the ones disagreeing. Split at the last point the discarded information is still observable |
+| **Procedure** — every step succeeds and the outcome is void | OBS-131: §6.1d said *archive the full payload*. Files written, directory created, copy made, commit run — and `.gitignore`'s `*.jsonl` dropped every sample. The archive was empty | Check for the **end state**, not the steps. Name the state in the rule: `committed`, not `archived` |
 
 The **setup** face is the one most likely to be dismissed as an operations detail. It is not: it is the only face where the contaminating evidence is *outside the repository*, so no amount of reading the code or the tests reveals it. The fix has to be an environment, not an inspection.
 
@@ -353,6 +356,34 @@ That instinct is exactly backwards. The prediction being tested is *"selection s
 It is the setup face because the contaminating condition is neither in the code nor in the test nor in the data — it is in the *state of the world the measurement will be taken in*, arranged by the repair. And it is invisible for the familiar reason: preserving evidence is normally correct, so the instinct that produces it feels like rigour.
 
 **The check:** after designing a fix, ask what the fix does to the conditions of the measurement that will judge it. If the fix changes the thing being measured, sequence them — measure, then fix, then measure again — or accept that the second measurement answers a different question.
+
+#### The procedure face — a word that names an intent rather than a state
+
+Added 2026-08-17 from OBS-131.
+
+> **A procedure can be followed exactly and produce nothing, when one word in it is underspecified. Every step is performed, every step succeeds, and the outcome is void. The word looks unambiguous to whoever wrote it, which is why it survives review — *archive*, *save*, *record*, *publish* all name an intent rather than a state.**
+>
+> **Specify the observable end state, not the action: *committed*, not *archived*.**
+>
+> **Detector: after a procedure completes, check for the END STATE, not for the steps.**
+
+The case. §6.1d required *"archive the full payload"* and it was followed — the harness wrote its files, the directory was created, the copy into `evidence-archive/` was made, the commit ran and reported success. Every step performed, every step succeeded. The archive contained two `verdict.json` files and **zero samples**, because a blanket `*.jsonl` excluded them.
+
+Nothing detected it, and nothing could have, because the detector everyone reaches for is *"did the steps run"* — and they did.
+
+**Why the word survives review.** *Archive* felt precise when it was written, and it is precise about the *intent*. It says nothing about which of several end states counts — written to disk, copied to a directory, tracked by git, pushed to a remote — and the author had one in mind while the reader had another. The same is true of *save* (to memory? to disk? durably?), *record* (in a log nobody reads?) and *publish* (built? deployed? reachable?).
+
+**The remedy is one word.** A rule that says `committed` can be checked with `git ls-files`; a rule that says `archived` can only be checked by asking what someone meant.
+
+#### And a detector note, because this one is unlike the rest of the family
+
+> **A `.gitignore` match is not an event, it is the absence of one. Configuration that works by *refusing to act* produces no signal when it refuses wrongly. Nothing can warn, because nothing happens.**
+>
+> **The only detection is to check what is *tracked* rather than what was *written* — and that check has to be deliberate, because the failure looks identical to success at every point before it.**
+
+Every other face in this family is detected by looking harder at something that exists: a corpus, a test, a rule, a duplicate. This one has nothing to look at. `git add` reported success, the commit reported success, the files were on disk. The only difference between the working and broken cases is a set of paths that were **never mentioned**, and absence has no line number.
+
+The class is wider than `.gitignore`: an allowlist that silently drops an entry, a filter matching more than intended, a `.dockerignore`, a `MANIFEST.in`, a log level suppressing the line that mattered. **Anything whose contribution is a non-action cannot report a mistaken non-action.**
 
 #### The duplication face — a detection blind spot rather than an instance of another
 
@@ -1124,7 +1155,7 @@ Add the mirror case: `subject="10.255.0.11"` on `healthy` — an established pee
 
 **Acceptance.** All pass offline, with no lab and no API key.
 
-**Record in observations:** which rung stopped, and whether that matches what a network engineer would conclude by hand from the same fixtures. If it does not, that is the single most important finding of the whole build.
+**In observations, ending committed to `FINDINGS.md`:** which rung stopped, and whether that matches what a network engineer would conclude by hand from the same fixtures. If it does not, that is the single most important finding of the whole build.
 
 ---
 

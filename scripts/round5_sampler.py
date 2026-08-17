@@ -30,7 +30,10 @@ def main() -> int:
     ap.add_argument("--device", default="RR1")
     ap.add_argument("--subject", default="10.255.0.12")
     ap.add_argument("--seconds", type=float, default=300.0)
-    ap.add_argument("--out", default="evidence/round5/samples.jsonl")
+    # `evidence-archive/`, not `evidence/`: the latter is gitignored as a
+    # snapshot cache, so a round written there is one `git clean` from gone
+    # (OBS-131). Archiving means committed.
+    ap.add_argument("--out", default="evidence-archive/round5/samples.jsonl")
     args = ap.parse_args()
 
     out = pathlib.Path(args.out)

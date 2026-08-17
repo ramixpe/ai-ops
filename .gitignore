@@ -7,6 +7,8 @@ __pycache__/
 .clab/
 clab-*/
 *.log
+# ...except round logs, which are evidence beside their samples (OBS-131).
+!evidence-archive/**/*.log
 *.jsonl
 # ...except round payloads. A round's samples ARE the evidence (chaos-harness
 # §6.1d) and a broad `*.jsonl` swept them into "untracked scratch", which is one
@@ -17,6 +19,11 @@ clab-*/
 *.tar.gz
 *.tar.xz
 images/
+# Transient device snapshots -- the evidence STORE, which is a cache.
+# `evidence-archive/` is the opposite: a round's payload, and it is tracked.
+# The two names are one character apart and mean opposite things; see OBS-131
+# for why a blanket pattern over a directory whose contents ARE the record is
+# the failure that has no signal.
 evidence/
 *.egg-info/
 /build/

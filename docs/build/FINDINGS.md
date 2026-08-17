@@ -3748,6 +3748,31 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-132 · Follow-up · Two more blanket patterns over evidence, one of them in code written today
+
+- **Kind:** audit
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** The operator asked for two follow-ups from OBS-131: audit `.gitignore` for anything else that could silently exclude evidence, and apply the end-state rule to the other procedural instructions.
+
+  **The audit found two more, and the second is worse than the first.**
+
+  **`*.log`** covers `round5.log` and `round7.log` — a round's narration, sitting beside its samples. Tracked now only because I force-added them; the next round's log would have been ignored.
+
+  **`evidence/`** ignores an entire directory — and **both samplers wrote there by default.** `scripts/round7_sampler.py`, which I wrote today, defaulted to `evidence/round7/samples.jsonl`. Had round 7 been run with my sampler rather than the operator's, its payload would have landed somewhere git refuses to see, and the finding would have read exactly like a successful archive.
+- **Evidence:** `git check-ignore -v evidence/round7/samples.jsonl` → `.gitignore:20:evidence/`. Both sampler defaults confirmed by grep.
+- **What I did:** Added `!evidence-archive/**/*.log`, annotated the `evidence/` pattern with why it is correct and what it is *not*, and repointed both samplers at `evidence-archive/`.
+
+  **The naming is the trap and it deserves recording.** `evidence/` and `evidence-archive/` are one hyphen apart and mean opposite things: the first is a snapshot **cache**, correctly ignored; the second is a round's **payload**, which must be tracked. Nothing about the names says which is which, and the ignore pattern for one silently swallows anything written to a path that looks like the other. The annotation now says so in `.gitignore`, which is where someone adding a pattern will be looking.
+
+  **The end-state pass changed less than expected, and the reason is interesting.** Only two loose procedural verbs turned up across both documents. §6.1d itself was the main offender, and it is now *"Every round's full payload is **committed**"* with the check named: `git ls-files evidence-archive/round-N/` lists the samples. §6.1's step 6 gained one too — *the prediction's commit is on the remote*, since "pushed" was already right but the check was not stated.
+
+  **What the sparseness suggests:** this build's rules are mostly stated as properties already (*"no unparsed device text reaches a model"*, *"a turn ends with a commit hash"*), and those are end states by construction. The procedural face bites where a rule describes a **workflow** rather than an invariant — and §6.1d was the only real workflow in either document. Worth knowing that the exposure is concentrated rather than diffuse.
+- **Needs human review:** no
+- **Blocks:** nothing.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**

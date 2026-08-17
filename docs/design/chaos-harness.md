@@ -325,13 +325,18 @@ A single accuracy figure hides the thing worth knowing: **whether failures clust
 
 **Steps 3 and 7 verify by reading the device, never by the write's report.** A push that reported failure may have succeeded; a push that raised may still have applied. This rule was written after a restore reported failure three times while having succeeded on the first attempt.
 
-### 6.1d Every round archives its full payload, not its finding
+### 6.1d Every round's full payload is **committed**, not its finding
 
 Added 2026-08-17, after a semantic change could not be checked against round 4.
 
 > **A round's record is the complete `investigate` payload — every rung, its
 > device, its status, its reason, its evidence keys, the coherence block — not
 > the finding it produced.**
+>
+> **End state:** `git ls-files evidence-archive/round-N/` lists the samples. Not
+> "the harness wrote them", not "they were copied" — *listed by git*. That is the
+> check, and it is the only one that distinguishes an archive from a directory
+> (OBS-131, §0.13's procedure face).
 
 Round 4's stored record is a rung-status vector and a finding. When
 `EACH_PATH_INTERFACE` changed what the interface rung is evaluated over (B-456),
@@ -401,6 +406,8 @@ alone.** The verdict is what you compare against; the input is what lets you
 compare again after the comparison changes.
 
 **Step 6 pushes before step 9 reveals.** Not commits — *pushes*.
+
+**End state:** the prediction's commit is on the remote. `git log origin/<branch>` shows it, and its timestamp precedes the fault. A local commit is a step, not a state.
 
 A local commit is not a seal. `git commit --amend` rewrites it, `git rebase` reorders it, and both leave a history that reads as though the original ordering held. The property the protocol needs is that the record became **unalterable by the person being tested** before the answer was known, and only publishing to a remote does that.
 
@@ -581,7 +588,7 @@ This is not a failure of the descent. It is a demonstration that **the `bgp_sess
 
 The harness will surface a class of faults that no existing flow covers. **That output is as valuable as the accuracy numbers** — it tells you which flow to write next, from evidence rather than from guessing.
 
-Record these as `no_applicable_flow` rather than scoring them as misses.
+These end as `no_applicable_flow` in the scored corpus, rather than scored as misses.
 
 ---
 

@@ -41,7 +41,10 @@ def main() -> int:
     ap.add_argument("--device", default="PE2", help="the device the fault is applied to")
     ap.add_argument("--origin", default="10.255.0.31", help="loopback the route points at")
     ap.add_argument("--seconds", type=float, default=180.0)
-    ap.add_argument("--out", default="evidence/round7/samples.jsonl")
+    # `evidence-archive/`, not `evidence/`: the latter is gitignored as a
+    # snapshot cache, so a round written there is one `git clean` from gone
+    # (OBS-131). Archiving means committed.
+    ap.add_argument("--out", default="evidence-archive/round7/samples.jsonl")
     args = ap.parse_args()
 
     prefix = f"{args.origin}/32"
