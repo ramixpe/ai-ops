@@ -28,15 +28,24 @@ evidence is partial rather than silently reading a short device as
 uneventful -- the analysis prompts already instruct the model to say what is
 missing when the evidence is incomplete.
 
-Parsed over raw
------------------
+Parsed over raw -- and, since B-467/B-470, parsed only
+---------------------------------------------------------
 When an intent's ``parse_status`` is ``"ok"``, the parsed structure (compact
 JSON) is sent instead of the raw command text. Parsed data is far more
 information-dense per character than a raw text table, and raw CLI output's
 column-aligned whitespace is exactly the kind of thing a model misreads or
-wastes tokens re-deriving structure from. Raw text is only sent when parsing
-failed (or there is no parser for the platform/intent) and it is the only
-material available.
+wastes tokens re-deriving structure from.
+
+**Raw command text is never sent, including when parsing failed.** Before
+B-467 this module's answer to "parsing failed, what do we send instead" was
+the raw command output -- DEEP-REVIEW-2026-08-17 §2.1 named it, correctly, as
+one of three paths that violated invariant 4 by test-pinned design. The
+model now gets the same thing a caller of the sanitised MCP surface already
+gets for the same failure: a withheld-commands record (chars/lines per
+command, never the text) and a classified error, both produced by
+``model_egress.project_envelope`` -- see ``_section_text``. A parse failure
+is communicated as "unavailable, and why", never as raw device text the
+model was never supposed to see just because the parser did not run.
 """
 
 from __future__ import annotations
@@ -45,7 +54,7 @@ import json
 import os
 from typing import Any, Mapping
 
-from . import parsers
+from . import model_egress, parsers
 
 # Env vars documented in .env.example. Read at call time (not import time) so
 # tests can monkeypatch them without reloading this module.
@@ -118,26 +127,39 @@ def _section_text(section: Any) -> str:
     """Render one intent's evidence section as compactly as possible.
 
     Prefers the parsed structure (JSON, no indentation) when
-    ``parse_status == parsers.PARSE_OK``; falls back to the raw command
-    output when parsing failed, is unavailable, or the section carries no
-    ``data`` at all. See the module docstring for why parsed data is
-    preferred.
+    ``parse_status == parsers.PARSE_OK`` -- projected through
+    ``model_egress.project_envelope`` first, so a free-text field inside the
+    parsed structure (a log line's ``text``, a BGP peer's
+    ``last_reset_reason``, an interface ``description``) reaches this
+    section quoted and budgeted rather than as unmarked device prose. See
+    the module docstring for why parsed data is preferred over raw text at
+    all.
+
+    When parsing failed, is unavailable, or the section carries no ``data``
+    at all, **raw command output is never returned** (B-467/B-470): the
+    withheld-commands record and classified errors ``project_envelope``
+    already produced for this section are rendered instead, so the model
+    reads "unavailable, and why" in the same shape the sanitised MCP surface
+    would give it for the same failure.
     """
 
     if not isinstance(section, dict):
         return str(section)
 
-    data = section.get("data") or {}
-    if data.get("parse_status") == parsers.PARSE_OK and data.get("parsed") is not None:
-        return json.dumps(data["parsed"], separators=(",", ":"), sort_keys=True)
+    projected = model_egress.project_envelope(section)
+    original_data = section.get("data") or {}
+    projected_data = projected.get("data") or {}
 
-    commands = data.get("commands") or {}
-    if commands:
-        return "\n".join(f"$ {command}\n{output}" for command, output in sorted(commands.items()))
+    if original_data.get("parse_status") == parsers.PARSE_OK and original_data.get("parsed") is not None:
+        return json.dumps(projected_data.get("parsed"), separators=(",", ":"), sort_keys=True)
 
-    status = section.get("status", "unknown")
-    errors = section.get("errors") or []
-    return f"status={status} errors={errors}"
+    status = projected.get("status", "unknown")
+    errors = projected.get("errors") or []
+    commands_withheld = projected_data.get("commands_withheld", {})
+    return (
+        f"status={status} errors={errors} "
+        f"commands_withheld={json.dumps(commands_withheld, sort_keys=True)}"
+    )
 
 
 def budget_device_evidence(

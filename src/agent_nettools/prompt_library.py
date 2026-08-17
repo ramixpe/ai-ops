@@ -19,6 +19,21 @@ That is deliberately a structural guarantee rather than a filtering one. A
 redaction pass over text that might contain raw output is something somebody
 eventually gets wrong; a function that never holds the text cannot.
 
+:func:`build_correlate_prompt` is different, on purpose, and is not covered
+by the guarantee above: it receives a :class:`~agent_nettools.log_window.ShapedWindow`
+*because* correlation needs the log line's own text -- "when did it happen"
+and "did it coincide with anything else" cannot be answered from verdicts
+alone. DEEP-REVIEW-2026-08-17 §2.1 measured this precisely: 28 of 28 shaped
+window records had their ``text`` field embedded verbatim, unmarked, into
+this prompt -- the deterministic path's own correlate/paraphrase call, not
+only the exploratory `analyze`/`agent` paths. Since B-467/B-470, every
+record's ``text`` is wrapped with :func:`model_egress.quote_device_text`
+before it reaches ``window_payload`` below, and the template's GROUNDING
+section names the delimiters and tells the model not to follow instructions
+found inside them. That is a mitigation for prompt steering, not a
+structural guarantee like `build_report_prompt`'s -- see `model_egress.py`'s
+module docstring for why the two are different claims.
+
 B-421 -- the split that makes prompt caching possible
 --------------------------------------------------------
 Both builders used to return one fully-rendered string, with the template's
@@ -56,9 +71,11 @@ import json
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 from .descent import DescentResult
 from .log_window import ShapedWindow
+from .model_egress import quote_device_text
 
 __all__ = [
     "CURRENT_VERSION",
@@ -81,11 +98,14 @@ PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "prompts"
 #: superseding a prompt is one line in a diff someone reads, not a default that
 #: drifted.
 #:
-#: `correlate` is at 3: v1's grounding text described a noise filter that
-#: dropped whole facilities, and v2 had no coverage slot, so its refusal claimed
-#: a negative the source could not support. Superseded versions stay in the tree
-#: as the record of what was reviewed when.
-CURRENT_VERSION: dict[str, int] = {"report": 1, "correlate": 3}
+#: `correlate` is at 4: v1's grounding text described a noise filter that
+#: dropped whole facilities, v2 had no coverage slot, so its refusal claimed
+#: a negative the source could not support, and v3 added constraint 7 and the
+#: coverage slot. v4 (B-467/B-470) adds the untrusted-device-text grounding
+#: paragraph naming the quote delimiters `window_json` entries are now
+#: wrapped in -- see `prompts/README.md`'s version history. Superseded
+#: versions stay in the tree as the record of what was reviewed when.
+CURRENT_VERSION: dict[str, int] = {"report": 1, "correlate": 4}
 
 
 class PromptNotFoundError(FileNotFoundError):
@@ -249,6 +269,20 @@ def build_report_prompt(result: DescentResult, *, version: int | None = None) ->
     return _split_template(template, [("{descent_json}", "DESCENT RESULT", payload)])
 
 
+def _quoted_record_text(record: dict) -> Any:
+    """One shaped log record's ``text``, wrapped for the model (B-467/B-470).
+
+    ``text`` is the syslog line's own prose -- device-authored, and the one
+    field on this fabric an unauthenticated attacker can write from the
+    network. ``None`` (a record missing the field, which `shape_window`
+    never produces but a hand-built test window might) passes through
+    unwrapped rather than being coerced into the string `"None"`.
+    """
+
+    text = record.get("text")
+    return quote_device_text(text) if isinstance(text, str) else text
+
+
 def finding_payload(result: DescentResult) -> dict:
     """The finding alone, for correlation. No chain, no rung detail.
 
@@ -281,7 +315,14 @@ def build_correlate_prompt(
     its removal counts travel with it -- so the model can say how much of the
     window it is seeing rather than presenting a filtered set as the whole.
 
-    ``correlate.v3.txt`` substitutes three placeholders inside GROUNDING, in
+    Each record's ``text`` -- the syslog line's own prose, and the one field
+    an unauthenticated attacker can write from the network -- is wrapped with
+    :func:`model_egress.quote_device_text` before it reaches
+    ``window_payload``. See the module docstring's note on why this builder,
+    unlike :func:`build_report_prompt`, is not structurally free of device
+    text and needs this instead (B-467/B-470).
+
+    ``correlate.v4.txt`` substitutes three placeholders inside GROUNDING, in
     this order: `{coverage_json}` (COVERAGE), `{finding_json}` (FINDING), then
     `{window_json}` (LOG WINDOW). `_split_template`'s ``substitutions`` list
     below must name them in that same order -- it consumes the template left
@@ -297,7 +338,7 @@ def build_correlate_prompt(
                 "at": record.get("timestamp"),
                 "mnemonic": record.get("mnemonic"),
                 "severity": record.get("severity"),
-                "text": record.get("text"),
+                "text": _quoted_record_text(record),
             }
             for record in window.records
         ],

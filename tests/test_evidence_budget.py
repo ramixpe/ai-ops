@@ -56,7 +56,24 @@ def test_budget_device_evidence_prefers_parsed_over_raw():
     assert '"neighbor":"10.0.0.1"' in sections["bgp"]
 
 
-def test_budget_device_evidence_falls_back_to_raw_when_parsing_failed():
+def test_budget_device_evidence_withholds_raw_output_when_parsing_failed():
+    """Pins the corrected behaviour, replacing the raw-fallback assertion this
+    test used to make (B-467/B-470, DEEP-REVIEW-2026-08-17 §2.1).
+
+    Before this change, a parse failure made ``_section_text`` fall back to
+    the *raw* command output -- by prior test-pinned design, this was one of
+    three paths that violated invariant 4 ("no unparsed device text ever
+    reaches a model"). This is the one test this task's spec permits
+    rewriting rather than adding a new one beside it, because the old
+    expectation was itself the pinned bug.
+
+    The corrected contract: raw device text is never returned, even on parse
+    failure. The model gets a withheld-commands record (chars/lines, never
+    the text) via ``model_egress.project_envelope`` instead -- "unavailable,
+    and why", the same shape the sanitised MCP surface already gives for the
+    same failure.
+    """
+
     evidence = {
         "bgp": _section(
             parse_status=PARSE_FAILED,
@@ -66,7 +83,12 @@ def test_budget_device_evidence_falls_back_to_raw_when_parsing_failed():
 
     sections, _report = budget_device_evidence("PE1", evidence, per_intent_chars=4000)
 
-    assert "garbled output that failed to parse" in sections["bgp"]
+    assert "garbled output that failed to parse" not in sections["bgp"]
+    assert "commands_withheld" in sections["bgp"]
+    assert '"show bgp summary"' in sections["bgp"]
+    # The withheld record still carries an honest size, so a reader can tell
+    # a command that produced output apart from one that produced nothing.
+    assert '"chars":35' in sections["bgp"].replace(" ", "")
 
 
 def test_budget_device_evidence_reports_per_intent_truncation():

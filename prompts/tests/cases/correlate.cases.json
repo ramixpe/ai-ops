@@ -1,5 +1,5 @@
 {
-  "prompt": "correlate.v3.txt",
+  "prompt": "correlate.v4.txt",
   "note": "Golden cases for the correlate prompt. Read by tests/test_correlate_prompt.py -- load-bearing, not documentation. Both cases are captured whole from committed fixtures; neither is composed.",
   "window_shaping": {
     "decision": "Deduplication and collector-noise filtering happen in CODE, before the model sees the window -- log_window.shape_window(). Deterministic, testable, and it keeps the context budget honest.",
@@ -94,7 +94,8 @@
   "refusal_markers": {
     "correlate.v1.txt": "no correlating events in window",
     "correlate.v2.txt": "no correlating events in window",
-    "correlate.v3.txt": "no correlating events in the available coverage"
+    "correlate.v3.txt": "no correlating events in the available coverage",
+    "correlate.v4.txt": "no correlating events in the available coverage"
   },
   "absence_claims": "T-029a. A `found: false` result is a claim of absence and is only a negative finding over coverage with no gaps. `grounding.check_absence_coverage` enforces it; `coverage_from_logging` builds the record from what the device's own `show logging` header reported. Neither golden case here can support a clean negative, and that is the measured answer rather than a limitation of the cases."
 }
