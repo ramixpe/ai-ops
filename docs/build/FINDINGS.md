@@ -3597,6 +3597,29 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-126 · P1.1 · The error residual was real, and truncation was not a fix
+
+- **Kind:** defect-fixed
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** P1.1's six items reduced to two — the reconciliation showed B-402, B-413, B-421, B-423 and B-461 already `DONE`. Both remaining ones produced something.
+
+  **B-457.** A rejected paraphrase stopped changing the exit code at B-439, correctly, and that removed the only signal a *systematic* grounding regression had. The per-run status was in the payload and on stderr; **a field nobody aggregates is not detection**, and the failure this guards against is a change in the *rate*. `metrics.py` now counts paraphrase outcomes, exposed as `nettools_paraphrase_outcomes_total`, labelled in the exposition text as tool-health with *"Never page on this."*
+
+  **B-458 was filed as a bounded residual and turns out to be a live one.** The mitigation was truncating error strings at 400 characters, on the reasoning that a transport exception *can* embed device output. Measured in netmiko 4.7's `base_connection`: one `ReadException` message interpolates **`output={repr(output)}`** directly. So it does, and a 400-character cap passed up to 400 characters of it to a model.
+- **Evidence:** netmiko source inspected at the raise sites. 1776 passing.
+- **What I did:** Replaced truncation with **classification**. Each error is rebuilt from two values the boundary already trusts — the command we rendered, and a phrase from a declared `ERROR_KINDS` table. An unmatched detail is withheld entirely.
+
+  **The distinction is the finding.** Truncation is a *filter*: the dangerous value passes through the function and some of it survives. Classification is *containment*: the output is assembled from safe parts and the dangerous value is never in it. Same argument as `prompt_library` never holding device text (OBS-061) and `mcp_server` not importing a write (OBS-106) — this build keeps arriving at it, and this is the third time a filter has been replaced by a construction.
+
+  **"Bounded rather than claimed clean" was the right thing to write and the wrong thing to leave.** The item was honest about being a bound, which is why it was findable; but a bound recorded as acceptable is a filter nobody will revisit, and the measurement that made it urgent took four minutes. Worth noting for the other residuals: *a documented limit is a decision that expires, not a state.*
+
+  A third test came out of writing the second: `errors` is a list of strings and nothing guarantees `"<command>: <detail>"`. An entry without a colon must not fall through unmodified, which is how a filter written for one shape leaks on another.
+- **Needs human review:** no
+- **Blocks:** nothing. P1.1 complete.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**

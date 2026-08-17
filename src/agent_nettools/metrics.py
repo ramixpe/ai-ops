@@ -84,6 +84,14 @@ def _metrics_path(explicit: str | None) -> Path | None:
     return Path(raw) if raw else None
 
 
+#: The paraphrase grounding outcomes worth counting (B-457). Mirrors
+#: `investigation`'s status constants without importing them -- `metrics` sits
+#: below the investigation layer and must not depend upward.
+PARAPHRASE_OUTCOMES: tuple[str, ...] = (
+    "emitted", "withheld", "coverage_limited", "not_attempted",
+)
+
+
 class MetricsCollector:
     """Thread-safe counters for device collections and health verdicts.
 
@@ -99,6 +107,13 @@ class MetricsCollector:
         self._explicit_path = path
         self._collections: dict[str, dict[str, float]] = {}
         self._verdicts: dict[str, int] = dict.fromkeys(SEVERITIES, 0)
+        #: Paraphrase grounding outcomes (B-457). A **tool-health** signal, and
+        #: deliberately not a network one -- reviewer B's framing. A rising
+        #: `withheld` rate means the model layer has stopped producing
+        #: verifiable prose; it says nothing about the fabric, and wiring it to
+        #: anything that pages would be the conflation the exit-code scheme
+        #: exists to prevent.
+        self._paraphrases: dict[str, int] = dict.fromkeys(PARAPHRASE_OUTCOMES, 0)
         self._file_loaded = False
 
     def _load_from_disk_once(self) -> None:
@@ -127,6 +142,12 @@ class MetricsCollector:
         if isinstance(verdicts, dict):
             for severity in SEVERITIES:
                 self._verdicts[severity] = int(verdicts.get(severity, 0))
+        # Its own guard, not nested under the verdicts one: a file carrying
+        # paraphrase counts and no verdicts would otherwise drop them silently.
+        paraphrases = raw.get("paraphrases") if isinstance(raw, dict) else None
+        if isinstance(paraphrases, dict):
+            for outcome in PARAPHRASE_OUTCOMES:
+                self._paraphrases[outcome] = int(paraphrases.get(outcome, 0))
 
     def _persist(self) -> None:
         path = _metrics_path(self._explicit_path)
@@ -135,7 +156,8 @@ class MetricsCollector:
         try:
             path.write_text(
                 json.dumps(
-                    {"collections": self._collections, "verdicts": self._verdicts}, indent=2
+                    {"collections": self._collections, "verdicts": self._verdicts,
+                     "paraphrases": self._paraphrases}, indent=2
                 ),
                 encoding="utf-8",
             )
@@ -154,6 +176,28 @@ class MetricsCollector:
             stats["latency_total_s"] += duration_s
             stats["latency_count"] += 1
             stats["retries_total"] += retries
+            self._persist()
+
+    def record_paraphrase(self, outcome: str) -> None:
+        """Record one paraphrase grounding outcome. Unknown outcomes are ignored.
+
+        **Why this exists.** Before B-439 a report that failed grounding exited
+        2, so a systematic grounding regression was visible in exit codes. The
+        authoritative report is now rendered from typed fields and cannot fail,
+        so a rejected *paraphrase* correctly no longer changes the exit code --
+        and that removed the only signal a systematic regression had (B-457).
+
+        The status was already in the payload and on stderr. **A field nobody
+        aggregates is not detection**, which is the whole content of the item: a
+        per-run field tells you about one run, and the failure this guards
+        against is a change in the *rate*.
+        """
+
+        if outcome not in PARAPHRASE_OUTCOMES:
+            return
+        with self._lock:
+            self._load_from_disk_once()
+            self._paraphrases[outcome] += 1
             self._persist()
 
     def record_verdict(self, severity: str) -> None:
@@ -183,6 +227,7 @@ class MetricsCollector:
                     "latency_avg_s": round(stats["latency_total_s"] / count, 6) if count else None,
                 }
             verdicts = dict(self._verdicts)
+            paraphrases = dict(self._paraphrases)
 
         return {
             "collections": devices,
@@ -192,6 +237,7 @@ class MetricsCollector:
                 "retries_total": sum(d["retries_total"] for d in devices.values()),
             },
             "verdicts": verdicts,
+            "paraphrases": paraphrases,
         }
 
     def reset(self) -> None:
@@ -206,6 +252,7 @@ class MetricsCollector:
         with self._lock:
             self._collections = {}
             self._verdicts = dict.fromkeys(SEVERITIES, 0)
+            self._paraphrases = dict.fromkeys(PARAPHRASE_OUTCOMES, 0)
             self._file_loaded = True
             self._persist()
 
@@ -282,6 +329,15 @@ def render_prometheus(snapshot: dict[str, Any]) -> str:
         "counter",
         [(f'{{severity="{severity}"}}', count) for severity, count in snapshot["verdicts"].items()],
     )
+    emit(
+        "nettools_paraphrase_outcomes_total",
+        "Model paraphrase grounding outcomes. A TOOL-HEALTH signal: a rising "
+        "withheld rate means the model layer stopped producing verifiable prose, "
+        "and says nothing about the network. Never page on this.",
+        "counter",
+        [(f'{{outcome="{outcome}"}}', count)
+         for outcome, count in snapshot.get("paraphrases", {}).items()],
+    )
 
     return "\n".join(lines) + "\n"
 
@@ -295,6 +351,10 @@ default_collector = MetricsCollector()
 
 def record_collection(device: str, *, success: bool, duration_s: float, retries: int = 0) -> None:
     default_collector.record_collection(device, success=success, duration_s=duration_s, retries=retries)
+
+
+def record_paraphrase(outcome: str) -> None:
+    default_collector.record_paraphrase(outcome)
 
 
 def record_verdict(severity: str) -> None:

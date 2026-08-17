@@ -43,6 +43,7 @@ from __future__ import annotations
 from typing import Any
 
 __all__ = [
+    "ERROR_KINDS",
     "MAX_ERROR_CHARS",
     "RAW_TEXT_KEYS",
     "sanitize",
@@ -72,10 +73,45 @@ __all__ = [
 RAW_TEXT_KEYS = frozenset({"commands", "unaccounted_lines"})
 
 #: Error strings are kept — a model that cannot see failures is worse than one
-#: that sees a truncated one — but bounded, because a transport exception can
-#: embed accumulated device output in its message. This is the **known residual
-#: vector** and it is bounded rather than claimed clean (B-458).
+#: that sees none — but they are **classified and rebuilt**, never truncated
+#: (B-458).
+#:
+#: Truncation was the first mitigation and it was a bound, not a fix: it still
+#: passed up to 400 characters of whatever the exception carried. And the
+#: exception does carry device output — measured in netmiko 4.7's
+#: `base_connection`, one `ReadException` message interpolates
+#: ``output={repr(output)}`` directly. That is the residual this closes.
+#:
+#: The safe structure of one of our error strings is ``"<command>: <detail>"``:
+#: the command is **ours**, rendered by reconstruction and already validated,
+#: and the detail is the part that came from somewhere else. So the command is
+#: kept verbatim, the detail is matched against a declared table of kinds, and
+#: anything unmatched is dropped rather than trimmed.
 MAX_ERROR_CHARS = 400
+
+#: What a transport failure can be, declared rather than pattern-guessed from
+#: the text. Same discipline as `template_parsers.IgnoreRule` and
+#: `log_window.NoiseRule`: a reviewable table, and anything not in it is
+#: **withheld**, not truncated.
+#:
+#: Ordered — the first match wins, so the specific entries precede the general
+#: ones.
+ERROR_KINDS: tuple[tuple[str, str], ...] = (
+    ("authentication", "authentication failed"),
+    ("connection refused", "the device refused the connection"),
+    ("timed out", "the read timed out"),
+    ("read timeout", "the read timed out"),
+    ("pattern not detected", "the device's prompt was not recognised before the timeout"),
+    ("unable to successfully split output", "the response could not be split on the prompt"),
+    ("no route to host", "the device was unreachable"),
+    ("name or service not known", "the device's name did not resolve"),
+    ("refusing unapproved", "the command was refused by the allowlist"),
+    ("refusing unsafe rendered", "the rendered command was refused"),
+    ("active probes are disabled", "active probes are disabled by configuration"),
+    ("no such template", "no such template for this platform"),
+    ("required environment variable", "a credential is not configured"),
+    ("is not in the lab inventory", "the device is not in the inventory"),
+)
 
 
 def _withheld_commands(commands: dict) -> dict:
@@ -91,17 +127,36 @@ def _withheld_commands(commands: dict) -> dict:
     }
 
 
-def _truncate_errors(errors: list) -> list:
+def _classify_errors(errors: list) -> list:
+    """Rebuild each error from its command and a declared kind (B-458).
+
+    **Rebuilt, not filtered.** The output is assembled from two things this
+    module already trusts — a command we rendered, and a phrase from
+    :data:`ERROR_KINDS` — so there is no path by which text from the device
+    reaches the result, whatever the exception contained. That is the same
+    argument as `prompt_library` never holding device text: a function that does
+    not carry the dangerous value cannot leak it.
+
+    An unmatched detail is **withheld entirely**. A truncated unknown is still
+    an unknown, and the reason a model needs is the *kind*, not the prose.
+    """
+
     out = []
     for error in errors:
         text = str(error)
-        if len(text) > MAX_ERROR_CHARS:
-            text = (
-                text[:MAX_ERROR_CHARS]
-                + f" […{len(text) - MAX_ERROR_CHARS} more characters withheld: a "
-                f"transport error can embed device output]"
+        command, _, detail = text.partition(": ")
+        if not detail:
+            command, detail = "", text
+
+        lowered = detail.lower()
+        kind = next((phrase for token, phrase in ERROR_KINDS if token in lowered), None)
+
+        if kind is None:
+            kind = (
+                "an unclassified error; its detail is withheld because a transport "
+                "exception can embed device output"
             )
-        out.append(text)
+        out.append(f"{command}: {kind}" if command else kind)
     return out
 
 
@@ -128,7 +183,7 @@ def sanitize(payload: Any) -> Any:
                 # (something went unread); the lines themselves are the text.
                 clean[f"{key}_withheld"] = len(value) if isinstance(value, (list, tuple)) else 1
             elif key == "errors" and isinstance(value, list):
-                clean[key] = _truncate_errors(value)
+                clean[key] = _classify_errors(value)
             else:
                 clean[key] = sanitize(value)
         return clean

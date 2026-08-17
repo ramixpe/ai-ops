@@ -122,15 +122,17 @@ checked-and-still-open, and conflating them is what the last plan did.
 | **B-454** | `DONE` | 6598df8 | B-436 (DONE) | OBS-122 |
 | **B-455** | `DONE` | OBS-119 | B-436 (DONE) | OBS-119 |
 | **B-456** | `DONE` | 503b2ac | B-437 (DONE), B-431 (DONE) | OBS-121 |
-| **B-457** | `unverified` | unverified | B-439 (DONE) | — |
-| **B-458** | `OPEN` | bounded at 400 chars, not closed | — | OBS-113 |
+| **B-457** | `DONE` | OBS-126 | B-439 (DONE) | — |
+| **B-458** | `DONE` | OBS-126 | — | OBS-113 |
 | **B-459** | `DONE` | ee733a2 | B-453 (OPEN) | OBS-122 |
 | **B-460** | `DONE` | OBS-120 | — | OBS-120 |
 | **B-461** | `DONE` | numbered rungs, 61af0d0 | B-439 (DONE) | OBS-117 |
 | **B-462** | `BLOCKED` | needs the lab | B-456 (DONE) | OBS-121 |
 | **B-463** | `BLOCKED` | needs the lab | B-437 (DONE) | OBS-121 |
 
-**Totals:** `BLOCKED` 14 · `DONE` 30 · `OPEN` 8 · `unverified` 43 · **95 items**
+**Totals:** `BLOCKED` 14 · `DONE` 32 · `OPEN` 7 · `unverified` 42 · **95 items**
+
+*Updated 2026-08-17 after P1.1: B-457 and B-458 closed (OBS-126).*
 
 ---
 

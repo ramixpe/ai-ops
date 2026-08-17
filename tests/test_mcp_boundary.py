@@ -21,7 +21,7 @@ import inspect
 import pytest
 
 from mcp_server import server
-from mcp_server.boundary import MAX_ERROR_CHARS, RAW_TEXT_KEYS, sanitize
+from mcp_server.boundary import RAW_TEXT_KEYS, sanitize
 
 
 def _raw_text_keys_in(payload, path="") -> list[str]:
@@ -288,16 +288,64 @@ def test_it_reaches_into_nested_per_device_results():
     assert clean["data"]["devices"]["PE1"]["data"]["commands_withheld"]
 
 
-def test_errors_survive_but_are_bounded():
-    """Kept, because a model that cannot see failures is worse than one that
-    sees a truncated one. Bounded, because a transport exception can embed
-    accumulated device output -- the known residual vector (B-458)."""
+def test_errors_are_rebuilt_from_a_declared_kind_not_truncated():
+    """**B-458 closed.** Truncation was a bound, not a fix.
 
-    clean = sanitize({"errors": ["short one", "y" * (MAX_ERROR_CHARS + 500)]})
+    Measured in netmiko 4.7's `base_connection`: one `ReadException` message
+    interpolates ``output={repr(output)}`` directly, so a 400-character cap
+    still passed up to 400 characters of device output to a model.
 
-    assert clean["errors"][0] == "short one"
-    assert len(clean["errors"][1]) < MAX_ERROR_CHARS + 200
-    assert "withheld" in clean["errors"][1]
+    Each error is now **rebuilt** from two values this module already trusts --
+    a command we rendered, and a phrase from `ERROR_KINDS`. There is no path by
+    which text from the device reaches the result, whatever the exception
+    contained. Same argument as `prompt_library` never holding device text.
+    """
+
+    from mcp_server.boundary import ERROR_KINDS
+
+    device_text = (
+        "Pattern not detected: '#' in output. "
+        "output='RP/0/RP0/CPU0:PE1#show bgp summary\nBGP router identifier 10.255.0.11'"
+    )
+    clean = sanitize({"errors": [f"show bgp summary: {device_text}"]})
+    [only] = clean["errors"]
+
+    assert only.startswith("show bgp summary: "), "our own rendered command is kept"
+    assert "the device's prompt was not recognised" in only
+    for leaked in ("RP/0/RP0/CPU0", "10.255.0.11", "output=", "BGP router identifier"):
+        assert leaked not in only, f"{leaked!r} reached a model"
+    assert any(phrase in only for _, phrase in ERROR_KINDS)
+
+
+def test_an_unclassified_error_is_withheld_entirely_not_trimmed():
+    """A truncated unknown is still an unknown.
+
+    The reason a model needs is the *kind*; if there is no kind, prose from an
+    unknown source is not a substitute for one.
+    """
+
+    clean = sanitize({"errors": [
+        "show route 1.2.3.4: brand new failure mode quoting 10.0.0.99 verbatim"
+    ]})
+    [only] = clean["errors"]
+
+    assert only.startswith("show route 1.2.3.4: ")
+    assert "unclassified" in only and "withheld" in only
+    assert "10.0.0.99" not in only
+    assert "brand new failure mode" not in only
+
+
+def test_an_error_with_no_command_prefix_still_loses_its_detail():
+    """`errors` is a list of strings and nothing guarantees the shape.
+
+    An entry that is not `"<command>: <detail>"` must not fall through
+    unclassified-and-unmodified, which is how a filter written for one shape
+    leaks on another.
+    """
+
+    clean = sanitize({"errors": ["bare text mentioning 10.0.0.99 and no colon"]})
+
+    assert "10.0.0.99" not in clean["errors"][0]
 
 
 def test_sanitize_is_total_over_the_shapes_these_tools_return():

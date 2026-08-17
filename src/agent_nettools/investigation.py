@@ -67,6 +67,7 @@ from .epoch import (
 )
 from .grounding import GroundingResult, ground_correlation, ground_report
 from .log_window import ShapedWindow, coverage_from_logging, shape_window
+from .metrics import record_paraphrase
 from .network_tools import collect_evidence, run_template
 from .prompt_library import RenderedPrompt, build_correlate_prompt, build_report_prompt
 from .render import render_correlation, render_report, report_grounding_note
@@ -656,6 +657,10 @@ def investigate(
     paraphrase_status = EMITTED if paraphrase_grounding.ok else WITHHELD
     if isinstance(paraphrase, dict):
         paraphrase["authoritative"] = False
+    # B-457. The status is already in the payload and on stderr; a field nobody
+    # aggregates is not detection, and the failure this guards against is a
+    # change in the *rate* rather than any one run.
+    record_paraphrase(paraphrase_status)
 
     correlation_paraphrase: dict | None = None
     correlation_paraphrase_status = NOT_ATTEMPTED
@@ -683,6 +688,7 @@ def investigate(
             correlation_paraphrase_status = WITHHELD
         if isinstance(correlation_paraphrase, dict):
             correlation_paraphrase["authoritative"] = False
+        record_paraphrase(correlation_paraphrase_status)
 
     return InvestigationResult(
         device=device, subject=subject, flow=flow, descent=descent,

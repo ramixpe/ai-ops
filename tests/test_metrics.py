@@ -221,3 +221,83 @@ def test_evaluate_device_records_verdict_severity_without_changing_the_verdict()
     assert verdict["severity"] == "critical"  # Unaffected by metrics recording.
     assert metrics.snapshot()["verdicts"]["critical"] == 1
     metrics.reset()
+
+
+# --------------------------------------------------------------------------- #
+# B-457 -- paraphrase grounding as a tool-health signal
+# --------------------------------------------------------------------------- #
+
+
+def test_paraphrase_outcomes_are_counted(monkeypatch):
+    """**A field nobody aggregates is not detection.**
+
+    Before B-439 a report failing grounding exited 2, so a systematic grounding
+    regression showed up in exit codes. The authoritative report is now rendered
+    from typed fields and cannot fail, so a rejected paraphrase correctly no
+    longer changes the exit code -- which removed the only signal a *systematic*
+    regression had.
+
+    The per-run status was always in the payload. What was missing is a rate,
+    and a rate is what this failure looks like.
+    """
+
+    from agent_nettools import metrics
+
+    metrics.default_collector.reset()
+    for outcome in ("emitted", "withheld", "withheld", "coverage_limited"):
+        metrics.record_paraphrase(outcome)
+
+    counts = metrics.snapshot()["paraphrases"]
+    assert counts == {"emitted": 1, "withheld": 2, "coverage_limited": 1, "not_attempted": 0}
+
+
+def test_an_unknown_outcome_is_ignored_not_counted():
+    """Same rule as `record_verdict`: a typo must not invent a category."""
+
+    from agent_nettools import metrics
+
+    metrics.default_collector.reset()
+    metrics.record_paraphrase("definitely-not-a-status")
+
+    assert sum(metrics.snapshot()["paraphrases"].values()) == 0
+
+
+def test_a_real_run_records_its_paraphrase_outcome():
+    """Wired to the runner, not merely available.
+
+    The counter existing and nothing calling it is the shape B-457 is about.
+    """
+
+    from agent_nettools import metrics
+    from agent_nettools.fixtures import fixture_sender
+    from agent_nettools.investigation import investigate
+
+    metrics.default_collector.reset()
+
+    investigate(
+        "RR1", "10.255.0.12", sender=fixture_sender(label="broken"),
+        resolver=lambda _s: "PE2", analyst=lambda _p: "this is not JSON",
+    )
+
+    counts = metrics.snapshot()["paraphrases"]
+    assert counts["withheld"] >= 1, "an ungroundable paraphrase is counted"
+    assert counts["emitted"] == 0
+
+
+def test_the_metric_is_labelled_as_tool_health_not_network_health():
+    """Reviewer B's framing, pinned in the exposition text.
+
+    Wiring this to anything that pages would be exactly the conflation the exit
+    code scheme exists to prevent -- exit 1 is the network, exit 2 is the answer,
+    and this is neither.
+    """
+
+    from agent_nettools import metrics
+
+    metrics.default_collector.reset()
+    metrics.record_paraphrase("withheld")
+    text = metrics.render_prometheus(metrics.snapshot())
+
+    assert "nettools_paraphrase_outcomes_total" in text
+    assert "TOOL-HEALTH" in text
+    assert "Never page on this." in text
