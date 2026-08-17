@@ -119,7 +119,7 @@ cost of the state a reconciliation cannot express, measured (OBS-140).
 | **B-206** | `BLOCKED` | platform work B-206a/b | B-206 (BLOCKED), B-206 (BLOCKED) | OBS-124 |
 | **B-207** | `DEFERRED` | until Stage 2, and **before it ships, not after** — the item says so | B-201 (DEFERRED) | OBS-140 |
 | **B-208** | `DEFERRED` | until Stage 2 — this is the gate on the transition | B-201 (DEFERRED) | OBS-140 |
-| **B-209** | `BLOCKED` | **T-035 is TODO and blocked on Q-007** (Telegram vs Mattermost residency). No relay exists to harden | T-035 (TODO), Q-007 (OPEN) | OBS-140 |
+| **B-209** | `BLOCKED` | **Q-007 resolved 2026-08-17 — Telegram.** Now blocked only on T-035 itself: no relay exists to harden until one is built | T-035 (TODO) | OBS-140 · OBS-141 |
 | **B-210** | `DEFERRED` | until Stage 2 memory. B-402 is DONE, so unblocked and unscheduled | B-402 (DONE) | OBS-140 |
 | **B-301** | `DEFERRED` | until Stage 3. **Nothing else in Stage 3 starts without this** | — | OBS-140 |
 | **B-302** | `DEFERRED` | until B-301 | B-301 (DEFERRED) | OBS-140 |

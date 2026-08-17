@@ -10,9 +10,8 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 keywords = ["networking", "cisco", "ios-xr", "netmiko", "mcp", "llm", "read-only"]
-# `authors` and `[project.urls]` are deliberately absent. Parked by the
-# maintainer 2026-08-17 — not an oversight, and not blocking anything. Nothing
-# is published to an index; add them if that changes.
+# `authors` is deliberately absent -- parked by the maintainer 2026-08-17.
+# Not an oversight; add it before any publish to a package index.
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: System Administrators",
@@ -35,6 +34,10 @@ dependencies = [
     # install. See docs/build/FINDINGS.md OBS-029 for the Genie comparison.
     "ttp>=0.9,<1.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/ramixpe/ai-ops"
+Repository = "https://github.com/ramixpe/ai-ops"
 
 [project.optional-dependencies]
 # LLM SDKs are only needed to run analysis with a cloud provider. Ollama uses

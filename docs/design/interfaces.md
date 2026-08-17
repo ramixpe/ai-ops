@@ -48,6 +48,16 @@ Acceptable for `sota-xrd`, which is a lab. Likely a policy problem the moment th
 
 **Decide before implementing, and record the choice.** T-035 implements exactly one provider.
 
+> ### Decided 2026-08-17: **Telegram** (Q-007)
+>
+> Taken by the operator with the residency trade-off stated above, not around it. `sota-xrd` is a lab; device names and RCA text leaving it costs nothing today.
+>
+> **What this decision buys and what it defers.** It buys the fast-follow now. It defers the residency problem to the moment this points at production — and the mitigation is not "we will remember", it is that **the notifier is written behind one provider interface**, so Mattermost is a provider swap rather than a rewrite. That is the whole reason to decide early rather than to build both.
+>
+> **Env surface is in `.env.example`.** `NETTOOLS_TELEGRAM_BOT_TOKEN` is a credential and lives only in `.env`. `NETTOOLS_TELEGRAM_CHAT_IDS` is a delivery allowlist and **empty means send to nobody** — the same fail-closed rule the command allowlist uses, for the same reason.
+>
+> **The chat-ID allowlist is not authorization.** It controls where output goes. It grants nothing, because T-035 has no inbound path to grant it on. If an inbound path is ever added, this list must not be mistaken for the thing that guards it — that needs the identity provider Stage 3 is blocked on (B-301).
+
 ### 2. Identity
 
 Messenger user IDs are not corporate identity. A group chat grants whatever the bot has to whoever gets added to it.
@@ -86,7 +96,7 @@ Alertmanager ships a Telegram receiver. If a hosted messenger is the chosen chan
 
 | # | Question | Blocking | Where |
 |---|---|---|---|
-| 1 | Telegram or Mattermost — residency decision | T-035 | Record as a finding |
+| ~~1~~ | ~~Telegram or Mattermost — residency decision~~ | **Decided 2026-08-17: Telegram** (Q-007) | §Three decisions, above |
 | 2 | Which host runs `nettools`, and does it have egress? | T-035 | Confirm before implementing |
 | 3 | Does Alertmanager already have a webhook receiver? | Stage 2 | `BUILD-PLAN.md` T-005 |
 | 4 | Identity provider for Stage 3 approvals | Stage 3 | Not before MVP-1 review |
