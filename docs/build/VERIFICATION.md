@@ -9,7 +9,8 @@ says a file is unchanged, the blob hashes were compared.
 `feat/investigation-layer`, **0 commits ahead of the remote**.
 
 > **A verification that confirms everything has probably not verified anything.** This one
-> found **six** discrepancies, listed in §7. Three are documentation drift, one is a
+> found **six** discrepancies, listed in §7 — and §7.4 turned out to be partly wrong
+> about itself, which is recorded there rather than quietly fixed. Three are documentation drift, one is a
 > mis-citation, one is a taxonomy conflation, and one is a claim in the request that
 > commissioned this report. None invalidates a result; all six were invisible before
 > someone compared two things that were supposed to agree.
@@ -52,10 +53,9 @@ reach. The frozen-file check is a tripwire on the *most likely* place for one, n
 | `test_the_exact_timestamp_the_model_fabricated_live_is_now_refused` | `tests/test_grounding.py` | The T-033 fabrication, pinned verbatim | **PASS** |
 | `test_a_paraphrase_naming_a_device_this_fabric_does_not_have_is_withheld` | `tests/test_investigation.py` | B-453 reached through the runner, not only unit-tested | **PASS** |
 
-**Discrepancy found — see §7.4.** `test_checks_agree_with_health` is cited in four
-documents as a *test name*. It is a **file name**; there is no function by that name. The
-artefact exists and passes, so this is a precision defect in the citation, not a missing
-guardrail — but a reader grepping for the function finds nothing.
+**§7.4 was overstated and is corrected there.** The claim was that four documents cite
+`test_checks_agree_with_health` as a function. **One did.** The rest already used the file
+form.
 
 ---
 
@@ -203,14 +203,21 @@ B-422 and B-423 both carry `struck through` in the evidence column. That describ
 the reconciliation, not the work. Worth fixing, and worth noticing that a machine check
 found it in a column a human had read past several times.
 
-### 7.4 A guardrail is cited by a name that does not exist
+### 7.4 A guardrail cited by a name that does not exist — **and this row was itself wrong**
 
-`test_checks_agree_with_health` is referenced in `CLAUDE.md`, `glossary.md`,
-`lld-investigation-layer.md` and `BUILD-PLAN.md` as though it were a test function. It is a
-**file**: `tests/test_checks_agree_with_health.py`. The file exists and passes.
+`test_checks_agree_with_health` is a **file**, `tests/test_checks_agree_with_health.py`, not
+a function. It exists and passes.
 
-Minor, and worth one line each to fix, because the failure mode is a reader grepping for
-the function, finding nothing, and concluding the guardrail is missing.
+**As first written, this row claimed four documents cited it as a function. Fixing them
+found that only `CLAUDE.md` did** — `glossary.md`, `lld-investigation-layer.md` and
+`BUILD-PLAN.md` already used the file form. The row was produced by grepping for the bare
+string, which matches the file citation too, and I read the hit count as the defect count.
+
+**Corrected 2026-08-17, and left visible rather than quietly amended**, because it is the
+same class as everything else in this section and the report should not be the one document
+that hides its own errors. A verification report is not exempt from verification, and the
+thing that caught it was doing the fix rather than writing the finding — which is OBS-146's
+lesson arriving twice in one day.
 
 ### 7.5 Rounds 1–4 are cited more confidently than their archive supports
 

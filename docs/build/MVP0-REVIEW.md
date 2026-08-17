@@ -22,7 +22,7 @@
 
 | Family | Rule | Instances |
 |---|---|---|
-| **Silent failure** — a green thing that verifies nothing | §0.12, §0.13 | **7 shapes**, ~15 instances |
+| **Silent failure** — a green thing that verifies nothing | §0.12, §0.13 | **8 shapes** (7 at M4; shape 8 added after), ~15 instances |
 | **Classification** — a true statement filed as the wrong kind | §0.14 | 4 instances, all in one session |
 | **Tests face** — a test agreeing with the code by construction | §0.13 | 4 instances |
 
@@ -30,7 +30,9 @@ By declared kind: 37 `decision-made`, 10 `risk`, 9 `surprise`, 13 `defect`/`defe
 
 The `decision-made` count is the one worth pausing on. **Forty-three percent of the log book is decisions the plan did not specify.** That is not plan failure — a plan that specified them all would be the implementation — but it does say that the ratio of judgement to typing in this build was much higher than a 34-task list suggests, and that a future plan of this shape should budget for it explicitly rather than discovering it.
 
-### The seven silent-failure shapes, and their polarity
+### The silent-failure shapes, and their polarity
+
+**Eight as of 2026-08-17.** Seven are listed below, as they stood at M4. Shape 8 — *a fix silently deletes coverage of behaviour that was always correct* (OBS-097) — was added afterwards and is in `BUILD-PLAN.md:456`. **Not merged into the table below**, because this document is the M4 review and what it did not know then is part of what it records.
 
 | # | Shape | Found by |
 |---|---|---|

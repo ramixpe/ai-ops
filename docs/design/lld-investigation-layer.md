@@ -326,7 +326,7 @@ Each phase is shippable and testable on its own. Phases 9–11 need no lab acces
 | Phase | Work | Acceptance |
 |---|---|---|
 | **9** | `template_parsers.py` + `run_template` parse attachment | Every template parser round-trips real captured output; `PARSE_FAILED` on garbage, never a silent empty parse |
-| **10** | `checks.py` + the agreement test with `health.py` | `test_checks_agree_with_health` green across all 9 devices × t0/t1 |
+| **10** | `checks.py` + the agreement test with `health.py` | `tests/test_checks_agree_with_health.py` green across all 9 devices × t0/t1 |
 | **11** | `flows.py` + `descent.py`, `bgp_session` and `interface` only | The §8 acceptance test passes against fixtures |
 | **12** | `config_section.py` — templates, inheritance resolution, projection | `test_no_unqualified_running_config_template_exists`; projection of RR1's BGP config stays under the per-intent budget |
 | **13** | `investigation.py` — gate, grounding, runner | Gate refuses an unobserved target; grounding blocks an uncited claim |

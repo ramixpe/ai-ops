@@ -45,6 +45,12 @@ ios-xr-nettools/
 │   │   ├── FINDINGS.md                 Append-only log + the Open Questions table
 │   │   ├── BACKLOG.md                  Every open item with its reconciled state
 │   │   ├── MVP0-REVIEW.md              The M4 review: what it does, and what it does not
+│   │   ├── VERIFICATION.md             Every claim with its evidence. Found six overstated
+│   │   ├── PEER-REVIEW-BRIEF.md        For a reviewer: what to read, and what to attack
+│   │   ├── REPO-INVENTORY.md           Every file, purpose, last touched, referenced by
+│   │   ├── OPERATOR-RUNBOOK.md         Step by step for the outstanding lab work
+│   │   ├── MCP-RETEST-PROTOCOL.md      The six MCP questions and what to capture
+│   │   ├── ROUND-6.md                  Injection round 6 — the trust-loss scenario (sealed)
 │   │   ├── SESSION-HANDOVER.md         Read first if resuming a build session
 │   │   ├── PLAN-V2.md                  The current plan
 │   │   ├── BACKLOG-COMPLETION-PLAN.md  Superseded by PLAN-V2; kept for its reasoning
@@ -78,8 +84,9 @@ ios-xr-nettools/
 `design/architecture.md` → `CLAUDE.md`'s safety boundary → the rung rules on
 `flows.Rung`.
 
-**Reviewing:** `build/FINDINGS.md` Open Questions, then the entries it references,
-then `design/peer-review-response.md` §4 for the claims already withdrawn.
+**Reviewing the repository:** start at `build/PEER-REVIEW-BRIEF.md` — it names what to
+read, in what order, what is already known to be wrong, and where an attack is most
+likely to land. Then `build/VERIFICATION.md` for every claim with its evidence.
 
 **Touching fixtures:** `tests/fixtures/README.md` before capturing anything. `t0`
 and `t1` are frozen and the reason is not obvious from looking at them.

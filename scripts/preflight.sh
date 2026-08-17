@@ -8,18 +8,20 @@
 # READ-ONLY. Nothing here writes to a device. The only writes are the log file
 # and a fixture-replay temp dir.
 #
-# TWO FINDINGS ARE KNOWN-BENIGN ON THIS FABRIC and are printed by name so they
-# do not read as alarms:
+# THIS FABRIC'S BASELINE NOISE IS DERIVED, NOT LISTED. `known_benign.py` reports
+# every (rule, device, subject) that fires on the committed `healthy` fixtures --
+# the label whose definition is "the rebuilt fabric with nothing wrong with it".
+# Whatever fires there is the floor; anything else is new and is printed.
 #
-#   bgp_no_prefixes             Every BGP session in this lab carries 0 prefixes;
-#                               nothing is advertised into it. The operator's own
-#                               note in inventory/lab.yaml says so. B-210 is the
-#                               fix (operator knowledge in the descent).
-#   isis_adjacency_count_drift  Every `expected:` baseline was derived by
-#                               learn-topology from the BROKEN fabric and never
-#                               re-derived. Since B-465 an increase is `info` and
-#                               says the baseline is stale. B-465's other half —
-#                               re-running learn-topology — needs the lab.
+# The first version of this script carried a hand-written list of two rule names.
+# Its first live run flagged three more as "read these", and all three were
+# documented known state -- one of them (`suspicious_baseline`) was the rule
+# SUCCEEDING, telling the operator not to trust PE2's and PE4's baselines.
+#
+# A hand-maintained exception list goes stale in the direction that matters: it
+# cries wolf about the rules that are working, which trains the reader to skip
+# the section where a real finding will eventually appear. §0.13's rules face,
+# in a script whose entire job is to be read while tired.
 #
 # Usage:  scripts/preflight.sh [--log PATH] [--skip-lab]
 #
@@ -199,25 +201,56 @@ else
   esac
 
   if [ "$LABRC" -le 1 ] && [ -n "${OUT:-}" ]; then
-    BENIGN=$(printf '%s' "$OUT" | grep -c 'bgp_no_prefixes\|isis_adjacency_count_drift' || true)
-    OTHER=$(printf '%s' "$OUT" \
-      | grep -o '"rule": "[a-z_]*"' | sort -u \
-      | grep -v 'bgp_no_prefixes\|isis_adjacency_count_drift' || true)
+    # The benign set is DERIVED, not listed. `known_benign.py` reports every
+    # (rule, device, subject) that fires on the committed `healthy` fixtures --
+    # the label defined as "the rebuilt fabric with nothing wrong with it". A
+    # hand-written list of exceptions goes stale in the direction that matters:
+    # it cries wolf about rules that are working, which trains the reader to
+    # skip the section where a real finding will eventually appear. The first
+    # version of this check did exactly that on its first live run.
+    BENIGN="$(mktemp)"; LIVE="$(mktemp)"
+    .venv/bin/python scripts/known_benign.py 2>/dev/null | sort -u > "$BENIGN"
+
+    .venv/bin/python - "$OUT" <<'PYEOF' 2>/dev/null | sort -u > "$LIVE"
+import json, sys
+try:
+    payload = json.loads(sys.argv[1])
+except Exception:
+    sys.exit(0)
+devices = payload.get("devices") or payload.get("data", {}).get("devices") or {}
+if isinstance(devices, dict):
+    items = devices.items()
+else:
+    items = [(d.get("device"), d) for d in devices]
+for name, verdict in items:
+    for f in (verdict or {}).get("findings", []):
+        print(f"{f.get('rule')}|{name}|{f.get('subject') or ''}")
+PYEOF
+
+    NB="$(wc -l < "$BENIGN" | tr -d ' ')"
+    NL="$(wc -l < "$LIVE" | tr -d ' ')"
+    NEW="$(comm -13 "$BENIGN" "$LIVE")"
+
     say ""
-    say "  Known-benign on this fabric — $BENIGN finding(s), NOT alarms:"
-    note "bgp_no_prefixes            nothing is advertised into any session here."
-    note "                           inventory/lab.yaml records this. B-210 is the fix."
-    note "isis_adjacency_count_drift baselines were derived from the BROKEN fabric and"
-    note "                           never re-derived. Since B-465 an increase is 'info'."
-    note "                           Re-running learn-topology is B-465's other half."
-    if [ -n "$OTHER" ]; then
-      say ""
-      say "  Findings that are NOT on the benign list — read these:"
-      printf '%s\n' "$OTHER" | sed 's/^/        /' | tee -a "$LOG"
+    if [ "$NL" -eq 0 ]; then
+      warn "could not parse the health payload; read 'nettools health --all' by hand"
     else
+      note "$NL finding(s) live; $NB are this fabric's floor, derived from the"
+      note "committed 'healthy' fixtures rather than from a hand-written list."
+      note "Known floor: bgp_no_prefixes (nothing is advertised here, B-210),"
+      note "isis_adjacency_count_drift (baselines from the broken fabric, B-465),"
+      note "interface_admin_up_line_down (PE1/PE3 Gi0/0/0/2.300, by design),"
+      note "sr_policy_down (PE1), suspicious_baseline (PE2/PE4 -- this one is the"
+      note "rule SUCCEEDING: it is telling you not to trust those baselines)."
       say ""
-      ok "no findings outside the known-benign set"
+      if [ -n "$NEW" ]; then
+        warn "findings NOT on this fabric's floor — read these:"
+        printf '%s\n' "$NEW" | sed 's/^/        /' | tee -a "$LOG"
+      else
+        ok "nothing outside this fabric's known floor"
+      fi
     fi
+    rm -f "$BENIGN" "$LIVE"
   fi
 
   # Round 6 specifically: the spare port must be up AND off-path.

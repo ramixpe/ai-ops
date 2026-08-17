@@ -150,8 +150,8 @@ cost of the state a reconciliation cannot express, measured (OBS-140).
 | **B-419** | `BLOCKED` | OBS-124 | B-101 (OPEN), B-414 (BLOCKED) | OBS-124 |
 | **B-420** | `DONE` | T-029a; verified OBS-124 | — | OBS-124 |
 | **B-421** | `DONE` | OBS-102 | T-031 | OBS-102 |
-| **B-422** | `DONE` | struck through | — | — |
-| **B-423** | `DONE` | struck through | — | — |
+| **B-422** | `DONE` | `_note` writes to stderr, stdout carries the payload. **Independently re-verified 2026-08-17**: a `test_notifier.py` assertion against stdout failed because the note was on stderr | — | VERIFICATION §6 |
+| **B-423** | `DONE` | `.github/workflows/ci.yml` `offline-demo`: installs without the `llm` extra, asserts `.env` absent and 7 credential vars unset, checks all three exit codes | — | VERIFICATION §6 |
 | **B-424** | `DONE` | OBS-081 | — | OBS-081 |
 | **B-425** | `DONE` | OBS-123 | — | OBS-123 |
 | **B-426** | `BLOCKED` | earned by rounds, not assumed | B-201 (unverified) | OBS-124 |
