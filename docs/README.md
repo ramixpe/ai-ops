@@ -39,7 +39,8 @@ ios-xr-nettools/
 │   │   ├── evidence-reduction.md       Making large sources model-readable without a model
 │   │   ├── evidence-epoch.md           One observation window; why skew is not coherence
 │   │   ├── chaos-harness.md            Fault injection and how accuracy is measured
-│   │   └── peer-review-response.md     Three external reviews; accepted, corrected, deferred
+│   │   ├── peer-review-response.md     Three external reviews; accepted, corrected, deferred
+│   │   └── next-level.md               Proposal: the three tiers + the local model, read together
 │   ├── build/      HOW — the build's own record. Append-only in spirit.
 │   │   ├── BUILD-PLAN.md               The task plan. Part 0 is binding
 │   │   ├── TRACKER.md                  Progress. Authoritative on task status
