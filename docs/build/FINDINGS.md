@@ -1972,6 +1972,27 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-155 · OPS wave · Four agents lost to a spend limit; the wave built solo to the same specs and gates
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5 (all four items, after the sonnet-5 agents terminated)
+- **What happened:** All four OPS-wave agents hit the account's monthly spend limit mid-orientation — none had committed. The wave was rebuilt directly by the orchestrator, sequentially, to the same written specifications and through the same merge gates. Suite: **1916 → 1953**; closed **B-477, B-478, B-479, B-480, plus B-202 and B-210** from the deferred pile.
+- **Evidence:** commits 076d83a (N-4), 5f829f0 (N-1), 0322888 (N-2), and the N-3 commit; each message carries its own measurements.
+- **What I did:** Three things the build itself surfaced, worth keeping:
+
+  **1. The audit's MTU rule failed its own synthetic test on the first run** — it joined LLDP's `GigabitEthernet0/0/0/0` against the interface table's `Gi0/0/0/0` by exact name and silently never fired. That is the *precise* two-spelling join `descent._path_members` documents, recurring in new code the same day its documentation existed. Fixed through `interface_kind.canonical`; the lesson is that a documented trap still catches whoever has not read that paragraph yet, and only a synthetic positive written before trusting the rule (§0.12) caught it.
+
+  **2. Two rules are named as absent rather than faked.** BGP timer asymmetry and IS-IS metric asymmetry belong in the audit and cannot be built from the current parses — the summary carries no timers, the IS-IS records no metric. Writing a second parser inside an audit rule would have planted the duplication face; the module docstring names both gaps and what each needs.
+
+  **3. The fixture labels validated the audit better than any synthetic could.** Measured before pinning: `healthy` audits clean, `broken` catches exactly PE2's configured-but-dead BGP, `t0` catches exactly the three OBS-103 renames. The fabric's own recorded history is the audit's acceptance suite.
+
+  Also: the description-form guard (wave 1-D's registry test) refused my first knowledge-tool docstring for lacking a "prefer" clause — a guard built by one wave correcting the next author, which is what registry-driven tests are for.
+- **Needs human review:** no
+- **Blocks:** nothing. The spend limit is the operator's lever; future waves can return to delegation when it resets.
+
+---
+
 <!--
 Copy this block for each new entry.
 

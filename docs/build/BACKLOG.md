@@ -113,7 +113,7 @@ cost of the state a reconciliation cannot express, measured (OBS-140).
 | **B-114** | `OPEN` | gate model evaluation. D7 | B-101 (OPEN) | OBS-140 |
 | **B-115** | `OPEN` | health-check pipeline. Part 7 open item 4; **MVP-0 shipped** | — (was: MVP-0 complete) | OBS-140 |
 | **B-201** | `DEFERRED` | until Stage 2 — event-driven intake. B-426 is how it gets tested end to end | — | OBS-140 |
-| **B-202** | `DEFERRED` | until Stage 2. **Dependencies satisfied — T-004 and T-015 both DONE**; unblocked, not scheduled | — (was: T-004, T-015) | OBS-140 |
+| **B-202** | `DONE` | the core shipped in B-480: mnemonic→flow is a declared table, subject validated, device from metadata only. What remains of the original item is the operator's receiver wiring — examples provided | — | OPS-WAVE · N-4 |
 | **B-203** | `DEFERRED` | until Stage 2 — operational memory. D14 | — | OBS-140 |
 | **B-204** | `DEFERRED` | until B-203 | B-203 (DEFERRED) | OBS-140 |
 | **B-205** | `DEFERRED` | until B-203 | B-203 (DEFERRED) | OBS-140 |
@@ -121,7 +121,7 @@ cost of the state a reconciliation cannot express, measured (OBS-140).
 | **B-207** | `DEFERRED` | until Stage 2, and **before it ships, not after** — the item says so | B-201 (DEFERRED) | OBS-140 |
 | **B-208** | `DEFERRED` | until Stage 2 — this is the gate on the transition | B-201 (DEFERRED) | OBS-140 |
 | **B-209** | `BLOCKED` | **Q-007 resolved 2026-08-17 — Telegram.** Now blocked only on T-035 itself: no relay exists to harden until one is built | T-035 (TODO) | OBS-140 · OBS-141 |
-| **B-210** | `DEFERRED` | until Stage 2 memory. B-402 is DONE, so unblocked and unscheduled | B-402 (DONE) | OBS-140 |
+| **B-210** | `DONE` | `operator_notes` in every investigate payload — notes surface where the walk touches their device and flow. Payload only; prompts need B-467's egress review first, stated in the field docstring | B-402 (DONE) | OPS-WAVE · N-2 |
 | **B-301** | `DEFERRED` | until Stage 3. **Nothing else in Stage 3 starts without this** | — | OBS-140 |
 | **B-302** | `DEFERRED` | until B-301 | B-301 (DEFERRED) | OBS-140 |
 | **B-303** | `DEFERRED` | until B-302 | B-302 (DEFERRED) | OBS-140 |
@@ -205,10 +205,10 @@ cost of the state a reconciliation cannot express, measured (OBS-140).
 | **B-474** | `DONE` | `_atomic_write_text` (tmp+fsync+replace), one-transaction golden + partial unique index with MAX(id) dedup migration, guarded reads with loud warnings, `snapshots_skipped` in `detect_flaps`, device-name validation both backends. **35 tests** | — | FIX-PLAN · wave 1-C |
 | **B-475** | `DONE` (scoped) | both serial paths pooled (`assess_lab_fabric_health` wave 1-D, agent `_assess_health` + parallel tool blocks wave 2-B). The full cross-surface scheduler stays deliberately future — filed thinking, not deferred accident | — | FIX-PLAN |
 | **B-476** | `DONE` | `settings.py`, 37 vars, two-direction cross-check test, `nettools config show/check`, startup warnings. Found `NETTOOLS_FIXTURE_DIR` undocumented and two live typo-swallows (`fasle` enables probes; `sqlit` selects files). Rewiring call sites is named future work | — | FIX-PLAN · wave 1-E |
-| **B-477** | `OPEN` | **`nettools audit`** — deterministic fabric/device/protocol audit: duplicate router-IDs, timer/MTU/metric asymmetry, hostname drift. Operational state only (config axis stays B-104). Wave N-1 | — | OPS-WAVE-PLAN |
-| **B-478** | `OPEN` | **knowledge surface** — `search_lab_knowledge` over the repo's own docs (grep, not vectors: 1.6 MB), curated mnemonic table, `operator_notes` in investigate (closes B-210). Wave N-2 | — | OPS-WAVE-PLAN |
-| **B-479** | `OPEN` | **staged MCP surface** behind `NETTOOLS_MCP_SURFACE` (default classic) — advances B-113 while keeping the §9/§10 A/B measurable. Wave N-3 | B-113 (OPEN) | OPS-WAVE-PLAN |
-| **B-480** | `OPEN` | **event routing** — pure `RoutingDecision` from Alertmanager JSON / syslog line; `nettools route-event`; orchestrator examples. Closes B-202's core; the receiver stays the operator's infra per T-005. Wave N-4 | — | OPS-WAVE-PLAN |
+| **B-477** | `DONE` | `audit.py`: 5 rules table-driven, fixture behaviour measured-then-pinned (healthy clean, broken=PE2, t0=the three renames). Two rules named absent rather than faked. The MTU rule's first draft failed its own synthetic test on the two-spelling join — fixed via `interface_kind.canonical` | — | OPS-WAVE · N-1 |
+| **B-478** | `DONE` | `knowledge.py` grep search with path:line citations (notes outrank prose); 12-entry curated mnemonic table with a drift test against event_routing; 2 MCP tools | — | OPS-WAVE · N-2 |
+| **B-479** | `DONE` | `staged_surface.py` behind `NETTOOLS_MCP_SURFACE` (default classic). Staged manifest asserted under HALF classic's. apply() fails loudly on an unknown SDK. B-113's consolidation now exists without destroying the A/B | B-113 (OPEN) | OPS-WAVE · N-3 |
+| **B-480** | `DONE` | `event_routing.py`: pure RoutingDecision, device never from message text, unroutable-is-an-answer; `route-event` CLI with branchable exits; n8n+systemd examples; T-005's label gap documented with the closing rule snippet | — | OPS-WAVE · N-4 |
 
 **Totals:** `BLOCKED` 13 · `DONE` 33 · `OPEN` 7 · `unverified` 42 · **95 items**
 
