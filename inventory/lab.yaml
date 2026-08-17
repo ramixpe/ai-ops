@@ -20,12 +20,18 @@
 # rules must also apply role-based invariants that do not depend on these counts
 # (an edge router with no IS-IS adjacency is wrong whatever this file says).
 #
-# Deliberately absent: link-level ("A connects to B") expected topology. The
-# fabric's real LLDP data is self-contradictory -- P1 reports Gi0/0/0/0 facing
-# P2's Gi0/0/0/0 while P2 reports that same port facing LEAF05_DHCP_SERVER (see
-# `nettools learn-topology`'s anomaly report). Asserting a specific link would
-# silently paper over a real, verified inconsistency; a per-device count
-# survives that ambiguity, a specific link claim would not.
+# Deliberately absent: link-level ("A connects to B") expected topology.
+#
+# The original reason given here was that this fabric's LLDP data contradicts
+# itself. **It does not** -- see the `lldp` note on P1 below, and B-435. P1's
+# configured hostname at t0 was LEAF05_DHCP_SERVER, so P2 reporting that
+# neighbour on Gi0/0/0/0 agreed with P1 exactly; `topology.hostname_map` now
+# resolves the two spellings and the anomaly report is clean.
+#
+# **The rule stands and its reason is now the right one.** A device-reported
+# name and an inventory label can legitimately differ -- they did here for
+# months -- so a link claim has to pick a spelling and defend it, while a
+# per-device count is true under either. Counts survive a rename; links do not.
 version: 1
 
 defaults:

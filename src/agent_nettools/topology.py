@@ -5,22 +5,40 @@
 real collection, never invented -- because a hand-typed expectation drifts the
 moment the fabric changes and nobody notices.
 
-This module also builds an anomaly report over the same evidence. The fabric's
-real LLDP/IS-IS data is genuinely inconsistent (verified against the committed
-t0 fixtures, not hypothetical):
+This module also builds an anomaly report over the same evidence.
+
+**Corrected 2026-08-17 (B-435, OBS-103).** This docstring said the fabric's LLDP
+data was *"genuinely inconsistent"* and gave two examples. **One of them was not
+an inconsistency and neither was the class it belonged to.**
+
+At the ``t0``/``t1`` captures three devices ran configured hostnames that differ
+from their inventory labels -- P1 was ``LEAF05_DHCP_SERVER``, P3 ``Lab-leaf01``,
+PE4 ``SDWAN-Edge01``. So P1 reporting its Gi0/0/0/0 facing P2, and P2 reporting
+that same port facing ``LEAF05_DHCP_SERVER``, are **the same statement**. LLDP
+was correct at both ends; the disagreement was between LLDP's device-reported
+names and this inventory's labels, and the comparison was reading one against
+the other.
+
+:func:`hostname_map` resolves a device-reported name to its inventory name using
+the ``facts`` intent's parsed hostname, which was already being collected. The
+anomaly classes are unchanged and still worth reporting -- **a genuine LLDP
+disagreement and a genuinely unknown neighbour both still exist as concepts**,
+and after this they mean what they say.
+
+What remains true of this fabric:
 
 - PE2 reports 0 LLDP neighbours and 0 IS-IS adjacencies while still carrying a
-  BGP router-id and one (idle) BGP peer -- it is isolated at the link layer but
-  not absent from BGP.
-- LLDP disagrees with itself: P1 reports Gi0/0/0/0 facing P2's Gi0/0/0/0, while
-  P2 reports that very port facing ``LEAF05_DHCP_SERVER`` instead.
-- Several LLDP neighbours (``Lab-leaf01``, ``LEAF05_DHCP_SERVER``,
-  ``SDWAN-Edge01``) are not devices this inventory manages at all.
+  BGP router-id and one (idle) BGP peer -- isolated at the link layer but not
+  absent from BGP.
+- The ``healthy`` and ``broken`` captures have hostnames aligned to inventory
+  labels, so they exercise the resolved path trivially; ``t0``/``t1`` are the
+  labels that exercise it for real, and they are frozen.
 
 Only per-device *counts* are written back to the inventory (see the comment in
-``inventory/lab.yaml``) precisely because link-level topology cannot be stated
-truthfully here -- the report below is how those specifics stay visible instead
-of being silently dropped.
+``inventory/lab.yaml``). **That rule survives the correction and its reason
+changes**: not "link topology cannot be stated truthfully", which is no longer
+the case, but that a count survives a naming disagreement a link claim has to
+take a side on.
 """
 
 from __future__ import annotations
@@ -98,6 +116,64 @@ def _lldp_records(evidence: dict[str, Any]) -> list[dict[str, Any]]:
     return _parsed_records(evidence, "lldp") or []
 
 
+def configured_hostname(evidence: dict[str, Any]) -> str | None:
+    """The hostname the device reports for itself, or ``None``.
+
+    Read from the ``facts`` intent's parsed meta -- already collected, so this
+    costs no extra command. ``None`` when the section errored or did not parse,
+    which is deliberately distinct from "the hostname matches the label": a
+    device whose `facts` failed must not silently look aligned.
+    """
+
+    section = evidence.get("facts")
+    if not isinstance(section, dict):
+        return None
+    data = section.get("data")
+    if not isinstance(data, dict) or data.get("parse_status") != parsers.PARSE_OK:
+        return None
+    parsed = data.get("parsed")
+    if not isinstance(parsed, dict):
+        return None
+    meta = parsed.get("meta")
+    if not isinstance(meta, dict):
+        return None
+    hostname = meta.get("hostname")
+    return hostname if isinstance(hostname, str) and hostname.strip() else None
+
+
+def hostname_map(evidence_by_device: dict[str, dict[str, Any]]) -> dict[str, str]:
+    """``{name a device calls itself: inventory name}``, for every device.
+
+    Both spellings map to the inventory name, so a lookup works whether LLDP
+    reported the configured hostname or the label. Comparison is
+    case-insensitive on the *key* only -- IOS-XR hostnames are not
+    case-sensitive in practice and LLDP has been observed to alter case, while
+    the value returned is always the inventory's exact spelling.
+
+    **A device whose `facts` did not parse contributes only its inventory
+    name.** It cannot be resolved, so an LLDP peer naming its configured
+    hostname stays unknown and is reported as such -- which is correct. The
+    alternative, assuming the hostname equals the label, would silently
+    manufacture the agreement this function exists to stop assuming.
+    """
+
+    mapping: dict[str, str] = {}
+    for name, evidence in evidence_by_device.items():
+        mapping[name.casefold()] = name
+        hostname = configured_hostname(evidence)
+        if hostname:
+            mapping.setdefault(hostname.casefold(), name)
+    return mapping
+
+
+def resolve_device(name: str, mapping: dict[str, str]) -> str | None:
+    """An LLDP-reported device ID to its inventory name, or ``None`` if unknown."""
+
+    if not isinstance(name, str):
+        return None
+    return mapping.get(name.strip().casefold())
+
+
 def find_lldp_disagreements(evidence_by_device: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     """Return LLDP links where the two ends disagree about what they see.
 
@@ -110,15 +186,21 @@ def find_lldp_disagreements(evidence_by_device: dict[str, dict[str, Any]]) -> li
     the other.
     """
 
+    mapping = hostname_map(evidence_by_device)
     disagreements: list[dict[str, Any]] = []
     for device_name, evidence in evidence_by_device.items():
         for record in _lldp_records(evidence):
-            neighbor = record["neighbor"]
-            if neighbor not in evidence_by_device:
+            # B-435: resolve what the neighbour calls itself to what this
+            # inventory calls it, before comparing. Without this a device
+            # running a hostname that differs from its label makes every one of
+            # its links look like a disagreement, and the two ends were saying
+            # the same thing.
+            neighbor = resolve_device(record["neighbor"], mapping)
+            if neighbor is None:
                 continue  # Reported separately: not a disagreement, an unknown neighbor.
 
             mirrors_back = any(
-                other["neighbor"] == device_name
+                resolve_device(other["neighbor"], mapping) == device_name
                 and other["local_interface"] == record["neighbor_interface"]
                 for other in _lldp_records(evidence_by_device[neighbor])
             )
@@ -134,7 +216,11 @@ def find_lldp_disagreements(evidence_by_device: dict[str, dict[str, Any]]) -> li
                 {
                     "device": device_name,
                     "local_interface": record["local_interface"],
+                    # The name as reported, plus what it resolved to. A reader
+                    # comparing this against a device console needs the string
+                    # the device actually emitted.
                     "claims_neighbor": neighbor,
+                    "claims_neighbor_as_reported": record["neighbor"],
                     "claims_neighbor_interface": record["neighbor_interface"],
                     "neighbor_actually_reports": neighbor_actually_sees,
                 }
@@ -147,11 +233,15 @@ def find_neighbors_not_in_inventory(
 ) -> dict[str, list[str]]:
     """Return ``{neighbor_name: ["device:interface", ...]}`` for LLDP peers this inventory does not manage."""
 
+    mapping = hostname_map(evidence_by_device)
     unknown: dict[str, list[str]] = {}
     for device_name, evidence in evidence_by_device.items():
         for record in _lldp_records(evidence):
             neighbor = record["neighbor"]
-            if neighbor not in evidence_by_device:
+            # B-435: a peer naming a managed device by its *configured
+            # hostname* is not unknown. Before this, three of this fabric's own
+            # devices were reported as foreign for the life of the project.
+            if resolve_device(neighbor, mapping) is None:
                 unknown.setdefault(neighbor, []).append(f"{device_name}:{record['local_interface']}")
     return unknown
 

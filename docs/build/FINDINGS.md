@@ -1540,6 +1540,41 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-139 · B-435 · The anomaly report had been wrong for the life of the project, and its tests agreed with it
+
+- **Kind:** defect-found
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** `topology.py` compared LLDP device IDs against inventory labels. At `t0`/`t1` three devices ran configured hostnames that differ from their labels — P1 was `LEAF05_DHCP_SERVER`, P3 `Lab-leaf01`, PE4 `SDWAN-Edge01` — so the comparison read a naming difference as a wiring fact.
+
+  The report therefore claimed **one LLDP disagreement and three foreign neighbours**, on a fabric that had neither. OBS-103 established this in prose on 2026-08-16; the code was never changed.
+
+  **After the fix both classes are empty:**
+
+  ```
+  LLDP disagreements (0):            none
+  LLDP neighbors not in inventory (0): none
+  Devices with zero adjacencies (2):  PE2, PE4
+  ```
+
+  Four things were being reported as anomalies. Three were the tool misreading its own fabric. The one that survives — PE2 and PE4 at zero IS-IS — is the one that always mattered.
+- **Evidence:** `topology.hostname_map` over the nine `t0` fixtures resolves `leaf05_dhcp_server → P1`, `lab-leaf01 → P3`, `sdwan-edge01 → PE4`. 1790 green, lint clean.
+- **What I did:** `configured_hostname` reads `facts.parsed.meta.hostname` — **already collected, so the fix costs no command**, which is why the item was cheap all along. `hostname_map` maps both spellings to the inventory name; `resolve_device` is called before either comparison.
+
+  **Three things worth recording beyond the fix.**
+
+  **1. The four failing tests were §0.13's tests face, verbatim.** `test_lldp_disagreement_between_p1_and_p2_is_detected` asserted the defect, and its docstring defended it: *"This is a verified fact about the fixture data, not a bug to paper over."* It was written from the same premise as the code, so it agreed with the code and made the defect look confirmed. Every one of them passed for a year.
+
+  **2. The fix would have silently deleted coverage that is still correct.** With both classes empty on the real fixtures, the only positive cases for *genuine* disagreements and *genuine* unknown neighbours were gone — the finders could have returned `[]` unconditionally and passed. That is the shape `SESSION-HANDOVER.md` names as shape 8. The positives are now **synthetic**, including one that matters: a device correctly resolved by hostname whose link *still* disagrees, which proves resolution does not paper over a real inconsistency.
+
+  **3. The spec was already in the repository, written by the operator.** `inventory/lab.yaml` carries an `lldp` note dated 2026-08-16: *"Compare LLDP device IDs against each device's configured hostname, not against its inventory label."* The fix is that sentence. It sat in a `notes:` block in a data file for a day, correct and unexecuted — **a structured note beside the data is a good place to record a finding and a bad place to track work**, and the backlog item existed the whole time without being scheduled.
+
+  **The count-only rule survives with a better reason.** It was justified by "link topology cannot be stated truthfully here", which is no longer true. The reason now: a device-reported name and an inventory label can legitimately differ — they did here for months — so a link claim has to pick a spelling and defend it, while a per-device count is true under either. **Counts survive a rename; links do not.**
+- **Needs human review:** no
+- **Blocks:** nothing.
+
+---
+
 <!--
 Copy this block for each new entry.
 

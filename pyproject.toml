@@ -10,9 +10,9 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 keywords = ["networking", "cisco", "ios-xr", "netmiko", "mcp", "llm", "read-only"]
-# `authors` and `[project.urls]` are deliberately absent rather than guessed:
-# how to attribute this, and which repository URL is canonical, are the
-# maintainer's calls. Add them before any publish to an index.
+# `authors` and `[project.urls]` are deliberately absent. Parked by the
+# maintainer 2026-08-17 — not an oversight, and not blocking anything. Nothing
+# is published to an index; add them if that changes.
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: System Administrators",

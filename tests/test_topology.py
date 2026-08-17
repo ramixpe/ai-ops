@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from helpers import set_device_environment
 
+from agent_nettools import parsers, topology
 from agent_nettools.fixtures import load_fixture_evidence
 from agent_nettools.lab import all_devices
 from agent_nettools.topology import (
@@ -60,47 +61,157 @@ def test_devices_with_no_bgp_process_have_no_bgp_peers_key(monkeypatch):
         assert "bgp_peers" not in derived[name]
 
 
-def test_lldp_disagreement_between_p1_and_p2_is_detected(monkeypatch):
-    """P1 claims Gi0/0/0/0 faces P2's Gi0/0/0/0; P2 reports that port facing
-    LEAF05_DHCP_SERVER instead. This is a verified fact about the fixture data,
-    not a bug to paper over."""
+# --------------------------------------------------------------------------- #
+# B-435 -- LLDP device IDs resolve to inventory names before comparison.
+#
+# These four tests asserted the *defect*. At t0 three devices ran configured
+# hostnames differing from their labels (P1 = LEAF05_DHCP_SERVER, P3 =
+# Lab-leaf01, PE4 = SDWAN-Edge01), and the finders compared LLDP's
+# device-reported names against inventory labels -- so both ends saying the same
+# thing read as a disagreement, and three of this fabric's own devices read as
+# foreign. The tests were written from the same premise as the code and agreed
+# with it (§0.13, the tests face).
+#
+# The positive cases are now synthetic, deliberately. The real fixtures no
+# longer contain either anomaly, and a fix that removes the only coverage of
+# behaviour that is still correct is its own defect shape -- so a genuine
+# disagreement and a genuine unknown are constructed here rather than lost.
+# --------------------------------------------------------------------------- #
+
+
+def test_the_p1_p2_link_was_never_a_disagreement(monkeypatch):
+    """OBS-103, now enforced rather than described.
+
+    P1 reports Gi0/0/0/0 facing P2; P2 reports that same port facing
+    ``LEAF05_DHCP_SERVER``, which *is* P1. Two spellings, one statement.
+    """
 
     evidence = _evidence_by_device(monkeypatch)
+
+    assert find_lldp_disagreements(evidence) == []
+
+
+def test_the_three_hostnames_are_this_fabric_s_own_devices(monkeypatch):
+    """They were reported as foreign for the life of the project."""
+
+    evidence = _evidence_by_device(monkeypatch)
+
+    assert find_neighbors_not_in_inventory(evidence) == {}
+
+
+def test_the_hostname_map_carries_both_spellings(monkeypatch):
+    evidence = _evidence_by_device(monkeypatch)
+
+    mapping = topology.hostname_map(evidence)
+
+    assert topology.resolve_device("LEAF05_DHCP_SERVER", mapping) == "P1"
+    assert topology.resolve_device("Lab-leaf01", mapping) == "P3"
+    assert topology.resolve_device("SDWAN-Edge01", mapping) == "PE4"
+    assert topology.resolve_device("P1", mapping) == "P1"
+    assert topology.resolve_device("lab-LEAF01", mapping) == "P3"  # case-insensitive
+    assert topology.resolve_device("NotAThing", mapping) is None
+
+
+def _fabricated(records_by_device, hostnames=None):
+    """A minimal two-device evidence set with hand-written LLDP records."""
+
+    hostnames = hostnames or {}
+    out = {}
+    for name, records in records_by_device.items():
+        out[name] = {
+            "facts": {"data": {"parse_status": parsers.PARSE_OK,
+                               "parsed": {"meta": {"hostname": hostnames.get(name, name)},
+                                          "records": []}}},
+            "lldp": {"data": {"parse_status": parsers.PARSE_OK,
+                              "parsed": {"meta": {}, "records": records}}},
+            "isis": {"data": {"parse_status": parsers.PARSE_OK,
+                              "parsed": {"meta": {}, "records": [{"x": 1}]}}},
+        }
+    return out
+
+
+def test_a_genuine_disagreement_is_still_detected():
+    """The companion. Without it the finder could return [] always and pass.
+
+    A really is cabled to B's Gi0/0/0/1, and B reports that port facing a third
+    device. Neither name needs resolving -- this is a wiring disagreement, which
+    is what the class was always meant to mean.
+    """
+
+    evidence = _fabricated({
+        "A": [{"local_interface": "Gi0/0/0/0", "neighbor": "B",
+               "neighbor_interface": "Gi0/0/0/1"}],
+        "B": [{"local_interface": "Gi0/0/0/1", "neighbor": "C",
+               "neighbor_interface": "Gi0/0/0/9"}],
+    })
 
     disagreements = find_lldp_disagreements(evidence)
 
     assert len(disagreements) == 1
-    entry = disagreements[0]
-    assert entry["device"] == "P1"
-    assert entry["claims_neighbor"] == "P2"
-    assert entry["neighbor_actually_reports"] == [
-        {"neighbor": "LEAF05_DHCP_SERVER", "local_interface": "GigabitEthernet0/0/0/0"}
+    assert disagreements[0]["device"] == "A"
+    assert disagreements[0]["claims_neighbor"] == "B"
+    assert disagreements[0]["neighbor_actually_reports"] == [
+        {"neighbor": "C", "local_interface": "Gi0/0/0/1"}
     ]
 
 
-def test_lldp_agreeing_links_are_not_reported_as_disagreements(monkeypatch):
-    """P4<->PE3, P2<->PE1, P2<->PE3, P4<->RR1, and P2<->P4 all mirror cleanly;
-    only the P1/P2 link should ever surface."""
+def test_a_disagreement_survives_a_renamed_device():
+    """Resolution must not paper over a real disagreement.
 
-    evidence = _evidence_by_device(monkeypatch)
+    B is configured ``bee`` and A names it correctly, so the *identity*
+    resolves -- and B still reports that port facing something else. The link
+    is genuinely inconsistent and must still be reported.
+    """
+
+    evidence = _fabricated(
+        {
+            "A": [{"local_interface": "Gi0/0/0/0", "neighbor": "bee",
+                   "neighbor_interface": "Gi0/0/0/1"}],
+            "B": [{"local_interface": "Gi0/0/0/1", "neighbor": "C",
+                   "neighbor_interface": "Gi0/0/0/9"}],
+        },
+        hostnames={"B": "bee"},
+    )
 
     disagreements = find_lldp_disagreements(evidence)
 
-    devices_involved = {(entry["device"], entry["claims_neighbor"]) for entry in disagreements}
-    assert devices_involved == {("P1", "P2")}
+    assert len(disagreements) == 1
+    assert disagreements[0]["claims_neighbor"] == "B"
+    assert disagreements[0]["claims_neighbor_as_reported"] == "bee"
 
 
-def test_neighbors_not_in_inventory_are_all_found(monkeypatch):
-    evidence = _evidence_by_device(monkeypatch)
+def test_a_genuinely_unknown_neighbour_is_still_reported():
+    """The companion for the other class."""
+
+    evidence = _fabricated({
+        "A": [{"local_interface": "Gi0/0/0/0", "neighbor": "some-switch",
+               "neighbor_interface": "Gi1/0/1"}],
+    })
 
     unknown = find_neighbors_not_in_inventory(evidence)
 
-    assert set(unknown) == {"Lab-leaf01", "LEAF05_DHCP_SERVER", "SDWAN-Edge01"}
-    assert "P1:GigabitEthernet0/0/0/1" in unknown["Lab-leaf01"]
-    assert "PE4:GigabitEthernet0/0/0/0" in unknown["Lab-leaf01"]
-    assert "P2:GigabitEthernet0/0/0/0" in unknown["LEAF05_DHCP_SERVER"]
-    assert "P3:GigabitEthernet0/0/0/0" in unknown["LEAF05_DHCP_SERVER"]
-    assert "P3:GigabitEthernet0/0/0/4" in unknown["SDWAN-Edge01"]
+    assert set(unknown) == {"some-switch"}
+    assert unknown["some-switch"] == ["A:Gi0/0/0/0"]
+
+
+def test_a_device_whose_facts_did_not_parse_is_not_assumed_aligned():
+    """The absence rule, applied here.
+
+    B's ``facts`` failed, so its configured hostname is unknown. A peer naming
+    ``bee`` cannot be resolved and stays *unknown* rather than being assumed to
+    be B. Guessing would manufacture exactly the agreement this function exists
+    to stop assuming.
+    """
+
+    evidence = _fabricated({
+        "A": [{"local_interface": "Gi0/0/0/0", "neighbor": "bee",
+               "neighbor_interface": "Gi0/0/0/1"}],
+        "B": [],
+    })
+    evidence["B"]["facts"]["data"]["parse_status"] = parsers.PARSE_FAILED
+
+    assert topology.configured_hostname(evidence["B"]) is None
+    assert set(find_neighbors_not_in_inventory(evidence)) == {"bee"}
 
 
 def test_zero_adjacency_devices_are_pe2_and_pe4(monkeypatch):
@@ -135,20 +246,19 @@ def test_report_surfaces_all_four_anomaly_classes(monkeypatch):
 
     report = build_anomaly_report(evidence)
 
-    assert len(report["lldp_disagreements"]) == 1
-    assert set(report["neighbors_not_in_inventory"]) == {
-        "Lab-leaf01",
-        "LEAF05_DHCP_SERVER",
-        "SDWAN-Edge01",
-    }
+    # B-435: two of the classes are empty on this fabric now, and that is the
+    # correct answer -- both were naming artefacts. The remaining anomaly is
+    # real and is the one that always mattered.
+    assert report["lldp_disagreements"] == []
+    assert report["neighbors_not_in_inventory"] == {}
     zero_devices = {entry["device"] for entry in report["zero_adjacency_devices"]}
     assert zero_devices == {"PE2", "PE4"}
 
     text = format_anomaly_report(report)
-    assert "P1" in text and "P2" in text
-    assert "Lab-leaf01" in text
-    assert "LEAF05_DHCP_SERVER" in text
-    assert "SDWAN-Edge01" in text
+    assert "PE2" in text and "PE4" in text
+    # The report still renders when a class is empty, rather than omitting the
+    # heading -- an absent section reads as "not checked", not "nothing found".
+    assert "LLDP neighbors not in inventory (0)" in text
     assert "PE2" in text and "PE4" in text
 
 

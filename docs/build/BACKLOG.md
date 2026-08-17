@@ -129,7 +129,7 @@ correct.
 | **B-432** | `DONE` | OBS-124 | — | OBS-124 |
 | **B-433** | `DONE` | OBS-100 | — | OBS-100 |
 | **B-434** | `DONE` | OBS-100 | — | OBS-100 |
-| **B-435** | `OPEN` | filed at B-404; no fix attempted. **Unscheduled** — `facts` already parses the configured hostname, so the fix is a mapping | — | OBS-103 |
+| **B-435** | `DONE` | `topology.hostname_map` + `resolve_device`. Both false anomaly classes go to **zero** on t0; the classes survive with synthetic coverage | — | OBS-103 · OBS-139 |
 | **B-436** | `DONE` | 548e380 | — | OBS-108 |
 | **B-437** | `DONE` | OBS-121 | — | OBS-121 |
 | **B-438** | `DONE` | OBS-106 | — | OBS-106 |

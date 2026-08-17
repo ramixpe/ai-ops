@@ -21,8 +21,8 @@
 | **MCP re-test** | Prediction sealed and pushed in `MCP-EXPERIMENT.md` §9 |
 | **B-113 consolidation** | Blocked on the re-test — unfalsifiable if done first |
 | **B-464** | MD5 round. Lower priority; the analysis is already sound |
-| **`pyproject.toml`** | `authors` and `urls` deliberately absent. Add before publishing to an index |
-| **`clab` in fixtures** | Kept, with the reason recorded. Rotate that account if it is reused on anything real |
+| ~~`pyproject.toml` authors/urls~~ | **Parked 2026-08-17.** Not an oversight; nothing is published to an index |
+| ~~`clab` in fixtures~~ | **Settled 2026-08-17 — lab-only.** Kept, and it signals nothing outside this fabric |
 
 **One operational note.** `~/ai-agent-ops/faultlab/` **is not a git repository**, so anything a round writes there is unarchived by §6.1d's definition (OBS-135). Round 8's payload has been copied into `evidence-archive/round8/` and committed. Round 8b should write somewhere tracked, or be copied in the same session it runs.
 
