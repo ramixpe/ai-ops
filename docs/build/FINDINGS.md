@@ -1601,6 +1601,37 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-141 · Rounds 8b and 6 · A sealed method that arithmetic showed could not deliver its own falsifier
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** Wrote `round8b.py` and sealed round 6's prediction (`ROUND-6.md`), so both lab windows are ready to spend rather than prepare.
+
+  **And amended `ROUND-8.md` §6.3, which I sealed earlier the same day.** It asked for *"sub-200 ms sampling of the socket field"*. Round 8 measured 1.563 s for three `show` commands, so **one command costs ~520 ms of round trip** and no loop tuning beats the wire. The sealed method was unreachable.
+- **Evidence:** `mean_sample_seconds: 1.563` over three commands, `evidence-archive/round8/20260817-161045/verdict.json`.
+- **What I did:** **Sub-200 ms was a proxy, not the requirement.** §2a.2 needs a good chance of landing in the `OpenSent` window at least once, which is a function of *cycles*, not resolution:
+
+  > expected catches ≈ N_cycles × min(1, W_window ÷ T_sample)
+
+  Round 8: 10 cycles, W ≈ 150 ms, T = 1.563 s → **0.96 expected**. It observed exactly one. Round 8b: one command per sample (T ≈ 0.52 s) and a 900 s dense window (~39 cycles) → **≈ 11 expected**, so **P(zero) ≈ 2×10⁻⁵**.
+
+  **That is the whole point: it converts a zero from "the instrument did not see it" into "it is not there."** A zero at 1.5 s resolution was uninterpretable; a zero at ~11 expected catches refutes §2a.2 and closes B-463.
+
+  **The prediction is untouched — only the method changed.** A method amended *before the run*, *stated in advance*, to make the claim **more** falsifiable is exactly what §6.1b permits. Round 5 lost a correct answer to a setup error found afterwards; the cost of finding one beforehand is a paragraph.
+
+  **Four instrument changes, two of them verified against round 8's own strings.** The anchored positional socket regex parses all three shapes correctly including `armed for read, not armed for write` — the discriminating case **no fixture covers**. And `classify_reset` orders specific before generic, so `"due to BGP Notification sent: hold time expired"` classifies as `hold_expired` rather than firing the AS discriminator, which is OBS-134's second defect.
+
+  **Two structural fixes worth more than the round.** The verdict now reports the **baseline** socket count as its first field and **aborts before pushing anything** if the socket does not read armed on an Established session — round 8 had that control and did not read it. And the output path defaults into the tracked repo, with the script copying itself in beside the samples: **the instrument is archived with its own output mechanically**, rather than by anyone remembering OBS-135.
+
+  **Round 6's prediction is that the defect is already fixed**, which is a weaker thing to confirm than a discovery and is worth running anyway. B-456 narrowed rung 5's member set to the path for *aggregation* reasons; that it also closes reviewer B's trust-loss scenario is **an inference from its member-set rule, not an observation.**
+
+  **The residual is sealed separately, and it is the honest half.** `_rung_subjects` falls back to all physical interfaces with `ALL_HEALTHY` when the member set is empty — correct, and it means the scenario stays reachable for any fault that removes the route as well as the session. Round 6 tests the protected half. **If it holds, the unprotected half is the more valuable round** and should be filed before B-440 closes.
+- **Needs human review:** no
+- **Blocks:** nothing — both rounds are operator-gated on a lab window.
+
+---
+
 <!--
 Copy this block for each new entry.
 

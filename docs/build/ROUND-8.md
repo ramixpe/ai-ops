@@ -553,12 +553,50 @@ specifically. A tight loop on `show bgp neighbor <peer>` for the duration of one
 retry cycle is enough, and the retry cycles are ~23 s apart with roughly ten of
 them in a 240 s window.
 
-> **Sealed: if sub-200 ms sampling across ten retry cycles still yields zero
-> armed-while-not-Established samples, §2a.2 is refuted rather than void, and
-> B-463 closes as "not separable at any resolution this tool can reach".**
+> **Sealed: if sampling across enough retry cycles to expect ~11 catches still
+> yields zero armed-while-not-Established samples, §2a.2 is refuted rather than
+> void, and B-463 closes as "not separable at any resolution reachable over
+> CLI".**
 
 That is the outcome §2a.2 could not reach in run 1, and it is the point of 8b:
 **to convert a void trial into a result in either direction.**
+
+#### Amended before the run — sub-200 ms is not reachable, and it was never the requirement
+
+§6.3 originally asked for *"sub-200 ms sampling of the socket field"*. **That is
+not achievable over SSH and saying so now is what §6.1b is for** — a setup error
+found before the window is spent costs nothing, and round 5 lost a correct answer
+to one found afterwards.
+
+Round 8 measured **1.563 s for three `show` commands**, so a single command costs
+about **520 ms** of round trip. No loop tuning beats the wire, and dropping to one
+command is the whole of the available gain.
+
+But sub-200 ms was a *proxy*, not the requirement. What §2a.2 needs is a good
+chance of landing inside the `OpenSent` window at least once, and that is a
+function of **cycles**, not resolution:
+
+> expected catches ≈ N_cycles × min(1, W_window ÷ T_sample)
+
+| | Round 8 | Round 8b |
+|---|---|---|
+| Commands per sample | 3 | **1** |
+| T_sample | 1.563 s | ~0.52 s |
+| Dense window | 240 s | **900 s** |
+| Retry cycles (~23 s) | ~10 | **~39** |
+| **Expected catches** | **0.96** | **~11** |
+
+**Round 8 observed exactly one.** The model is calibrated against the only data
+that exists, which is a weak validation but not no validation.
+
+At ~11 expected, **P(zero) ≈ 2 × 10⁻⁵**. That is what converts a zero from *"the
+instrument did not see it"* into *"it is not there"* — and it is the only reason
+to spend the window at all.
+
+**The prediction (§2a.2) is untouched.** Only the method changed, and it changed
+because arithmetic showed the sealed method could not deliver the prediction's
+own falsifier. A method amended to make a claim *more* falsifiable, before the
+run, stated in advance, is the amendment §6.1b exists to permit.
 
 ### 6.4 What is already settled and is not re-tested
 
