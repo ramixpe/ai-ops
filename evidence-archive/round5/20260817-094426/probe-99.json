@@ -1,0 +1,117 @@
+{
+  "tool": "investigate",
+  "device": "RR1",
+  "subject": "10.255.0.12",
+  "flow": "bgp_session",
+  "finding": "temporally_incoherent",
+  "reason": null,
+  "cause": null,
+  "causal_chain": [
+    {
+      "rung": "bgp_session",
+      "device": "RR1",
+      "reason": "BGP session to 10.255.0.12 is not Established (state: Idle)"
+    },
+    {
+      "rung": "transport",
+      "device": "RR1",
+      "reason": "no TCP transport to 10.255.0.12 (the socket is not armed for read); the device reports the session state as 'No route to multi-hop neighbor'; the device last recorded a reset 00:03:39 ago with reason 'BGP Notification sent: hold time expired' (history, not current state)"
+    },
+    {
+      "rung": "route_to_peer",
+      "device": "RR1",
+      "reason": "no route to 10.255.0.12/32 (device reports '% Network not in table')"
+    }
+  ],
+  "rungs": [
+    {
+      "rung": "bgp_session",
+      "device": "RR1",
+      "status": "broken",
+      "reason": "BGP session to 10.255.0.12 is not Established (state: Idle)",
+      "evidence_keys": [
+        "RR1:bgp:10.255.0.12"
+      ]
+    },
+    {
+      "rung": "transport",
+      "device": "RR1",
+      "status": "broken",
+      "reason": "no TCP transport to 10.255.0.12 (the socket is not armed for read); the device reports the session state as 'No route to multi-hop neighbor'; the device last recorded a reset 00:03:39 ago with reason 'BGP Notification sent: hold time expired' (history, not current state)",
+      "evidence_keys": [
+        "RR1:bgp_neighbor:10.255.0.12"
+      ]
+    },
+    {
+      "rung": "route_to_peer",
+      "device": "RR1",
+      "status": "broken",
+      "reason": "no route to 10.255.0.12/32 (device reports '% Network not in table')",
+      "evidence_keys": [
+        "RR1:route:10.255.0.12/32"
+      ]
+    },
+    {
+      "rung": "igp_adjacency",
+      "device": "PE2",
+      "status": "broken",
+      "reason": "no IS-IS adjacencies; device is isolated at the IGP layer",
+      "evidence_keys": [
+        "PE2:isis"
+      ]
+    },
+    {
+      "rung": "interface",
+      "device": "PE2",
+      "status": "healthy",
+      "reason": "3 of 3 members healthy (all required)",
+      "evidence_keys": [
+        "PE2:interface:Gi0/0/0/0",
+        "PE2:interface:Gi0/0/0/1",
+        "PE2:interface:Gi0/0/0/2"
+      ]
+    }
+  ],
+  "report": {
+    "status": "not_attempted",
+    "content": null,
+    "grounding": "vacuous pass -- nothing to verify: 0 observations, 0 citations, 0/0 rungs cited, 0 absence claims backed, 0 timeline entries cited"
+  },
+  "correlation": {
+    "status": "not_attempted",
+    "content": null,
+    "grounding": "vacuous pass -- nothing to verify: 0 observations, 0 citations, 0/0 rungs cited, 0 absence claims backed, 0 timeline entries cited",
+    "caveat": null
+  },
+  "off_path": [],
+  "coherence": {
+    "ok": false,
+    "skew_seconds": 34.917,
+    "bound_seconds": 30.0,
+    "within_bound": false,
+    "stable": true,
+    "detail": "skew 34.9s of 30s allowed \u2014 EXCEEDED; bgp_session, igp_adjacency agreed on re-read, but two samples across a window this wide do not establish what happened between them",
+    "rereads": [
+      {
+        "rung": "bgp_session",
+        "device": "RR1",
+        "before": "broken",
+        "after": "broken",
+        "agrees": true,
+        "detail": "BGP session to 10.255.0.12 is not Established (state: Idle)"
+      },
+      {
+        "rung": "igp_adjacency",
+        "device": "PE2",
+        "before": "broken",
+        "after": "broken",
+        "agrees": true,
+        "detail": "no IS-IS adjacencies; device is isolated at the IGP layer"
+      }
+    ]
+  },
+  "usage": null,
+  "coverage": null,
+  "repairs": [],
+  "trustworthy": false
+}

@@ -1,0 +1,107 @@
+{
+  "tool": "investigate",
+  "device": "RR1",
+  "subject": "10.255.0.12",
+  "flow": "bgp_session",
+  "finding": "no_fault_on_path",
+  "reason": null,
+  "cause": null,
+  "causal_chain": [],
+  "rungs": [
+    {
+      "rung": "bgp_session",
+      "device": "RR1",
+      "status": "healthy",
+      "reason": "BGP session to 10.255.0.12 is Established (0 prefixes received)",
+      "evidence_keys": [
+        "RR1:bgp:10.255.0.12"
+      ]
+    },
+    {
+      "rung": "transport",
+      "device": "RR1",
+      "status": "healthy",
+      "reason": "TCP transport to 10.255.0.12 is up (the socket is armed for read)",
+      "evidence_keys": [
+        "RR1:bgp_neighbor:10.255.0.12"
+      ]
+    },
+    {
+      "rung": "route_to_peer",
+      "device": "RR1",
+      "status": "healthy",
+      "reason": "route to 10.255.0.12/32 is present (2 path(s))",
+      "evidence_keys": [
+        "RR1:route:10.255.0.12/32"
+      ]
+    },
+    {
+      "rung": "igp_adjacency",
+      "device": "PE2",
+      "status": "broken",
+      "reason": "no IS-IS adjacencies; device is isolated at the IGP layer",
+      "evidence_keys": [
+        "PE2:isis"
+      ]
+    },
+    {
+      "rung": "interface",
+      "device": "PE2",
+      "status": "healthy",
+      "reason": "3 of 3 members healthy (all required)",
+      "evidence_keys": [
+        "PE2:interface:Gi0/0/0/0",
+        "PE2:interface:Gi0/0/0/1",
+        "PE2:interface:Gi0/0/0/2"
+      ]
+    }
+  ],
+  "report": {
+    "status": "not_attempted",
+    "content": null,
+    "grounding": "vacuous pass -- nothing to verify: 0 observations, 0 citations, 0/0 rungs cited, 0 absence claims backed, 0 timeline entries cited"
+  },
+  "correlation": {
+    "status": "not_attempted",
+    "content": null,
+    "grounding": "vacuous pass -- nothing to verify: 0 observations, 0 citations, 0/0 rungs cited, 0 absence claims backed, 0 timeline entries cited",
+    "caveat": null
+  },
+  "off_path": [
+    {
+      "rung": "igp_adjacency",
+      "device": "PE2",
+      "reason": "no IS-IS adjacencies; device is isolated at the IGP layer"
+    }
+  ],
+  "coherence": {
+    "ok": true,
+    "skew_seconds": 4.095,
+    "bound_seconds": 30.0,
+    "within_bound": true,
+    "stable": true,
+    "detail": "skew 4.1s of 30s allowed; bgp_session, igp_adjacency unchanged on re-read",
+    "rereads": [
+      {
+        "rung": "bgp_session",
+        "device": "RR1",
+        "before": "healthy",
+        "after": "healthy",
+        "agrees": true,
+        "detail": "BGP session to 10.255.0.12 is Established (0 prefixes received)"
+      },
+      {
+        "rung": "igp_adjacency",
+        "device": "PE2",
+        "before": "broken",
+        "after": "broken",
+        "agrees": true,
+        "detail": "no IS-IS adjacencies; device is isolated at the IGP layer"
+      }
+    ]
+  },
+  "usage": null,
+  "coverage": null,
+  "repairs": [],
+  "trustworthy": true
+}

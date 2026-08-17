@@ -207,6 +207,122 @@ the two is what the dry run nearly caused me to do.
 
 ---
 
-## 7. Results
+## 7. Results — 2026-08-17 09:44:26 → 09:51:41 UTC
 
-*Empty until the run.*
+Fault applied 09:44:42, `sent+committed+exited`. Restored and **verified by
+reading the device** on attempt 2; PE2 back to 2 IS-IS adjacencies. 13 probes.
+
+Rung columns are `bgp_session · transport · route_to_peer · igp_adjacency ·
+interface`; `.` healthy, `X` broken.
+
+| Probe | T+ | Rungs | Finding | Exit | Skew | Re-read |
+|---|---:|:---:|---|:---:|---:|---|
+| 00 | −1 s | `.....` | `all_layers_healthy` | 0 | 4.0 s | stable |
+| 01 | 6 s | `...X.` | `no_fault_on_path` | 0 | 3.9 s | stable |
+| 02 | 16 s | `...X.` | `no_fault_on_path` | 0 | 4.1 s | stable |
+| 03 | 24 s | `..XX.` | `no_fault_on_path` | 0 | 4.0 s | stable |
+| 04–07 | 32–56 s | `..XX.` | `no_fault_on_path` | **0** | ~4.0 s | stable |
+| 08 | 64 s | `..XX.` | `temporally_incoherent` | 2 | **34.0 s** | stable |
+| **09** | **117 s** | `.XXX.` | `temporally_incoherent` | 2 | 38.5 s | **`bgp_session` healthy → broken** |
+| 10 | 179 s | `XXXX.` | `temporally_incoherent` | 2 | 38.2 s | stable |
+| 11 | 235 s | `XXXX.` | `temporally_incoherent` | 2 | 36.3 s | stable |
+| 99 | 340 s | `XXXX.` | `temporally_incoherent` | 2 | 34.9 s | stable |
+
+### 7.1 Scoring against the sealed predictions
+
+**4.2 — CONFIRMED. The mechanism fired on a real transition.**
+
+> Probe 09: rung 1 read **healthy** when the epoch opened and **broken** when it
+> was re-read 38 s later. `stable: false`, `agrees: false`.
+
+This is item 3 doing exactly what it was built to do, on a live fabric, on the
+first attempt. Before B-436 that probe would have reported a confident causal
+chain assembled from a symptom that was absent when it was read and present when
+the walk finished. It is the first observation in this build of the coherence
+check catching a real state change rather than a simulated one.
+
+**4.3 — CONFIRMED, and it is the most serious defect this build has found.**
+
+> Probes 01–07, **seven consecutive samples over 50 seconds**:
+> `no_fault_on_path`, **exit 0**, `trustworthy: true`, and the coherence check
+> **passing** — within bound, stable, `ok: true`.
+
+From probe 03 onward the rungs read `..XX.`: **RR1 has no route to
+`10.255.0.12`** and PE2's IS-IS is down. Traffic to that loopback is
+blackholing. The tool reports *no fault on the dependency path* and exits 0.
+
+The mechanism is exactly as predicted. B-428 says *rung 1 healthy → nothing
+below it can be a cause*, which is right when the broken rungs are **off the
+path** (round 4: a redundant uplink, IGP reconverged, session carrying traffic)
+and wrong when they are **on the path and the symptom has not propagated yet**.
+The BGP hold timer is 180 s; for most of that window the top of the ladder still
+reads Established while everything under it is gone.
+
+**Item 3 does not catch it, and could not.** The coherence check asks whether the
+observations describe one state. They do: rung 1 really was healthy at both
+reads. The epoch is coherent and the answer is wrong. Temporal coherence and
+causal correctness are independent properties, and this round separates them
+experimentally rather than by argument.
+
+**4.1 — partly refuted, and the refutation is my error, not the tool's.**
+
+Phase order held: A (01–07) → B (09) → C (10, 11, 99). But I predicted phase C
+would report `interface_line_down`, and its own falsifier fired: *"`igp_isolated`
+would mean the interface rung did not read the shut ports."*
+
+The interface rung reads **healthy in every single probe**, because **the ports
+were never shut.** §1 of this document says "shut `Gi0/0/0/0` and `Gi0/0/0/1`",
+and the harness actually applies `router isis CORE / interface … / shutdown` —
+which disables IS-IS *on* the interfaces and leaves the interfaces up. I wrote
+the prediction from my own §1 without reading the harness's `APPLY` block
+closely enough. The tool was right and my description of the fault was wrong.
+
+Worth keeping because of what it nearly cost: had the phase-C finding not been
+masked by the bound, I would have scored a correct `igp_isolated` as a
+prediction failure. **A falsifier written against a misdescribed setup fires on
+the truth.** §0.13's fifth face — the setup — with the harness as the part I did
+not read.
+
+**4.4 (re-sealed) — refuted, and this time not by a device slowdown I can wave
+at.** Skew was 3.9–4.1 s for probes 00–07 and jumped to 34–38 s from probe 08
+onward, holding there for the rest of the run. The jump is *inside* the fault
+window and coincides with the BGP session beginning to fail. I have a
+correlation and not a mechanism: nothing recorded per-observation timings in
+these payloads, so which command slowed is not recoverable from this run.
+
+### 7.2 The finding this round produced that nobody predicted
+
+**`temporally_incoherent` conflates two different failures, and in phases B and C
+it destroyed a correct answer.**
+
+Probe 09 was incoherent because **the fabric moved** — the real signal, the thing
+the finding exists for. Probes 08, 10, 11 and 99 were incoherent because
+**collection was slow**, with the re-read agreeing every time. Same finding
+string, same exit 2, and an operator cannot tell them apart.
+
+The cost is concrete. Probes 10, 11 and 99 had rungs `XXXX.` — a settled, fully
+converged broken fabric whose lowest broken rung is `igp_adjacency`. **The
+correct answer was `igp_isolated`, and the bound replaced it with a refusal.**
+The tool knew the answer and threw it away because it had taken 36 seconds to
+collect it, on a fabric that had been in that state for four minutes.
+
+This build already has the right pattern for this and did not apply it here.
+`COVERAGE_LIMITED` keeps the correlation and labels it, on the reasoning that
+*"a real answer at the wrong strength"* is worth more than no answer. A
+width-only breach is the same shape: the finding stands, qualified. Instability
+is different — there the finding genuinely is unsupportable.
+
+So the current design is wrong in one specific way: **skew-breach and
+re-read-disagreement should not produce the same finding.** Filed as **B-454**.
+
+### 7.3 What round 5 establishes
+
+| Claim | Status |
+|---|---|
+| The coherence check catches a real transition on a live fabric | **demonstrated once**, probe 09 |
+| `no_fault_on_path` is wrong during upward propagation | **demonstrated, 7 consecutive samples** |
+| Temporal coherence and causal correctness are independent | **demonstrated** — 01–07 are coherent and wrong |
+| The bound destroys correct answers on a slow collection | **demonstrated**, probes 10/11/99 |
+| Skew degrades during a fault, cause unknown | correlation only |
+
+One trial, one fault, one fabric. None of this is a rate.

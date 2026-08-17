@@ -3083,6 +3083,35 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-109 · B-451 · Round 5: the coherence check fired on a real transition, and exit 0 was wrong for 50 seconds
+
+- **Kind:** validation
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** The first round invoked *during* convergence rather than after it. Fault applied 09:44:42 (`router isis CORE` shut on both PE2 uplinks, one commit), 13 probes over 340 s, restored and verified by reading the device. Full table in `ROUND-5.md` §7.
+
+  **Two results, and the second is the important one.**
+
+  **The mechanism works.** Probe 09 at T+117 s read rung 1 **healthy** when the epoch opened and **broken** when it was re-read 38 s later — `stable: false`, `agrees: false`, refused. That is item 3 catching a real state change on a live fabric on its first attempt, and it is the first time in this build the coherence check has fired on anything but a fixture.
+
+  **And it does not help with the thing that matters more.** Probes 01–07 — **seven consecutive samples across 50 s** — reported `no_fault_on_path`, **exit 0**, `trustworthy: true`, with the coherence check **passing**. From probe 03 the rungs read `..XX.`: RR1 had no route to `10.255.0.12` and PE2's IS-IS was down. Traffic was blackholing and the tool said there was no fault on the path.
+- **Evidence:** `docs/build/ROUND-5.md` §7; payloads archived under `evidence-archive/round5/20260817-094426/`. Prediction §4 pushed at `3f588cb`, re-sealed at `9cfad7d`, both before the fault.
+- **What I did:** Filed **B-454** and **B-455**. Scored every prediction, including the two that failed.
+
+  **The defect, stated precisely.** B-428 says *rung 1 healthy → nothing below it can be a cause*. That is right when the broken rungs are **off the path** — round 4's redundant uplink with the IGP reconverged. It is wrong when they are **on the path and the symptom has not propagated yet**. BGP's hold timer is 180 s, so for most of that window the top of the ladder reads Established while everything under it is already gone. `no_fault_on_path` conflates the two and nothing in the descent distinguishes them. That is item 7's business, and it qualifies the finding I have been most confident about all build.
+
+  **Temporal coherence and causal correctness are independent, and this round separates them experimentally rather than by argument.** Probes 01–07 are *coherent and wrong*: rung 1 genuinely was healthy at both reads, so the observations really do describe one state — a state the tool then misinterprets. Item 3 could not have caught this and was never going to. Worth stating because "we fixed temporal coherence" reads like a general soundness improvement, and it is a narrow one.
+
+  **A prediction failure that was mine, not the tool's.** I predicted phase C would report `interface_line_down`. It could not: the harness applies `router isis CORE / interface … / shutdown`, which disables IS-IS *on* the ports and leaves them up, while my own §1 wrote the fault as "shut `Gi0/0/0/0` and `Gi0/0/0/1`". The interface rung read healthy in all 13 probes, correctly. Had the bound not masked phase C's finding, **I would have scored a correct `igp_isolated` as a prediction failure** — a falsifier written against a misdescribed setup fires on the truth. §0.13's fifth face, with the injector script as the part I did not read closely enough.
+
+  **The unpredicted finding (B-454).** `temporally_incoherent` conflates *the fabric moved* with *collection was slow*, and in this round the second destroyed a correct answer: probes 10/11/99 saw a settled broken fabric whose right finding was `igp_isolated`, and the bound replaced it with a refusal four minutes after the fabric stopped changing. The build already has the right pattern — `COVERAGE_LIMITED` keeps a real answer and labels it — and I did not apply it to the epoch. A width breach should qualify a finding; only instability should refuse one.
+
+  **What this round does not establish.** One trial, one fault, one fabric. Nothing here is a rate. And the skew jump from 4 s to 38 s at T+64 s is a **correlation with no mechanism** — the per-observation timings that would diagnose it exist on `Observation` and are discarded by `to_payload()`, which is shape 7 inside code written three hours ago to fix a different problem.
+- **Needs human review:** no — but B-454 and the B-428 qualification are design calls for the operator
+- **Blocks:** item 7 (B-437) should now be scoped against this result rather than in the abstract.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**
