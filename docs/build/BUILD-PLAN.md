@@ -460,6 +460,36 @@ So §5 now reads *"read exit 0 as **not on this path**, not as **all clear**"* �
 
 ---
 
+## 0.15 A protocol tightened for rigour excludes something
+
+> **A test protocol designed for clean measurement can systematically exclude the messiest and most common real case, and its cleanliness is what makes the exclusion invisible. Our trial protocol polls until propagation settles — written as an improvement over a fixed sleep — and in doing so removed the dominant production failure mode from the test surface. When a protocol is tightened for rigour, ask what condition the tightening now excludes.**
+
+Three external reviewers found this independently (`docs/design/peer-review-response.md` §2.1, §7). It is the sharpest self-criticism this project has produced, and it is worth being precise about why it landed.
+
+**The protocol was improved, correctly, and the improvement caused the gap.** "Poll until propagation completes, never sleep" is better methodology than a fixed wait: it removes a timing guess, makes trials reproducible, and stops a slow fabric producing a spurious failure. Every one of those is true. And the condition it removes — *the network is still changing while the tool runs* — is, per reviewer B, **one of the most common overnight incidents**.
+
+So the defect was not introduced by carelessness. It was introduced by rigour, which is why no amount of looking harder at the tests would have surfaced it: the tests were doing exactly what they were designed to do.
+
+### Why this is not §0.13
+
+§0.13 asks *what could the evidence not have shown you* — it is about the reach of an observation. This is narrower and more specific: **the act of making a measurement clean is itself a filter on what can be measured.** A noisy protocol admits the messy case by accident. A clean one excludes it by construction, and reports success more confidently for having done so.
+
+The two compose badly. A protocol that excludes a condition produces a corpus with no instance of it, and §0.13's data face then reads that corpus as evidence. Clean measurement plus a corpus that inherits its cleanliness is how a whole failure mode stays invisible through 1,689 passing tests.
+
+### The check
+
+When tightening a protocol — a test harness, a fixture capture, a trial procedure, a benchmark:
+
+1. **Name the condition being removed.** Not the noise; the *condition*. "Waiting for convergence" removes *mid-convergence*.
+2. **Ask whether production has that condition.** If it does, the tightening has moved a real case out of scope, and scope is now a claim requiring its own evidence.
+3. **Keep one deliberately untightened variant.** The messy trial is not a worse version of the clean one — it is the only one covering the excluded condition.
+
+The corollary, which is the operational form:
+
+> **Every "we control for X" is also "we do not measure X". Write down which X, next to the protocol, at the time you tighten it.**
+
+---
+
 ### The three tracking documents
 
 All three live in `docs/build/` and are maintained continuously, not at the end.

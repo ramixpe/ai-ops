@@ -2966,6 +2966,35 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-105 · peer review · **HALT** — §5 defers the mechanism that makes §3.6's third dataset real
+
+- **Kind:** assumption-wrong
+- **Escalation:** **HALT** (scoped to item 8 / B-442; other items proceed)
+- **Model:** opus-5
+- **What happened:** The operator asked me to check whether any of §5's ten deferrals is load-bearing for items 1–8 in a way the response missed. **One is.**
+
+  §3.6 accepts C's three-dataset split and defines the third as the **one-shot audit** set: *"inaccessible to developers, evaluated once on a frozen release, then spent."* Item 8 (B-442) is to write that into `chaos-harness.md`.
+
+  §5 defers **"Frozen-release audit governance — until the harness matures."**
+
+  Governance is not an accessory to that dataset; **it is the entire content of the property that distinguishes it.** A development set and a one-shot audit set contain the same kind of faults and are run by the same harness. The only difference between them is a set of rules about who may see the contents, who may run it, and what happens after it is spent. Defer the rules and the third dataset is a development set with a label.
+
+  **§3.6 makes this concrete against its own deferral.** It records that of C's eight leakage routes, **two apply today**: the same tool-aware person defining both catalogues, and *"local Git history being treated as an immutable seal when it can be amended or rebased."* So the document identifies live leakage, then defers the work that addresses it until a future maturity, while item 8 specifies the artefact that leakage would compromise.
+
+  That is §0.14 exactly — the shape the operator predicted when asking. Governance was classified as *maturity work* when for this dataset it is *definitional work*.
+- **Evidence:** `peer-review-response.md` §3.6 and §5, read against each other.
+- **What I did:** Halted item 8's scope and recorded it, per the standing instruction; items 1–7 are unaffected and proceed. **Nothing about item 8 is blocked except writing the one-shot set as though it were sealed.**
+
+  **The narrow fix, for the operator to accept or reject rather than for me to take:** item 8 writes the development and regression sets in full, and writes the one-shot audit set as **specified but not yet established**, with its two known-live leakage routes named in the document. That is honest and costs nothing. Promoting B-452 out of §5 is the alternative, and it is more work than item 8 itself.
+
+  **One thing I have to record against myself, because C's second leakage route is aimed at me.** *"Local Git history treated as an immutable seal when it can be amended or rebased."* The blind-trial protocol I have relied on all session (OBS-076, OBS-087, OBS-091) rests on exactly that: *"the ordering becomes a fact in git history rather than a claim in a document."* Local git history is amendable, and **I used `git commit --amend` during this session**, on a documentation commit. The ordering claim for rounds 1–4 was weaker than I stated it to be for as long as the branch existed only locally.
+
+  It is stronger now, and for a reason that had nothing to do with the protocol: the branch was pushed to a remote, after which a rewrite is detectable by anyone who fetched. **The seal became real when it stopped being local** — which was an accident of the operator asking me to push, not a property of the method. The protocol should say *push before the run*, not *commit before the run*.
+- **Needs human review:** **yes — this is a HALT on item 8's scope, and a correction to a protocol I have used four times**
+- **Blocks:** B-442 as specified. Items 1–7 unaffected.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**
