@@ -37,8 +37,6 @@ from agent_nettools.network_tools import (
     load_golden_snapshot,
     load_latest_snapshot,
     ping_device,
-    save_golden_snapshot,
-    save_snapshot,
     traceroute_device,
 )
 
@@ -241,19 +239,28 @@ def get_lab_traceroute(device_name: str, address: str) -> dict:
 def _diff_against(tool_name: str, device_name: str, previous: dict | None) -> dict:
     """Shared shape for both diff tools: collect fresh evidence, save it, diff if possible.
 
-    Mirrors ``nettools diff DEVICE [--against golden|latest]``: the fresh
-    collection is always saved as the new "latest" timestamped snapshot,
-    regardless of which baseline it was compared against -- pinning golden is
-    a separate, explicit action (``pin_lab_golden_snapshot``).
+    Mirrors ``nettools diff DEVICE [--against golden|latest]`` **except that it
+    does not persist the fresh collection** (B-438).
+
+    The CLI saves it, deliberately, so a human's diff advances the baseline. On
+    this surface the caller is a model, and appending to snapshot history is a
+    persistent write: the history is what ``detect_lab_flaps`` reads, so a model
+    calling diff in a loop reshapes the evidence a later flap analysis sees.
+    Reviewer A, ``peer-review-response.md`` §3.1 --
+    *"the architecture protects the managed network more carefully than it
+    protects its own source of truth."*
+
+    The consequence is a **stable** baseline here rather than a moving one:
+    repeated calls compare against the same saved snapshot. For a read-only
+    surface that is the better semantics anyway.
     """
 
     current = collect_evidence(device_name)
-    path = save_snapshot(current)
     result: dict[str, Any] = {
         "tool": tool_name,
         "device": device_name,
         "status": "success",
-        "data": {"snapshot_path": path, "has_previous": previous is not None, "diff": None},
+        "data": {"snapshot_path": None, "has_previous": previous is not None, "diff": None},
         "errors": [],
     }
     if previous is not None:
@@ -288,63 +295,6 @@ def diff_lab_device_against_golden(device_name: str) -> dict:
     return _diff_against(
         "diff_lab_device_against_golden", device_name, load_golden_snapshot(device_name)
     )
-
-
-@_read_only_tool()
-def save_lab_snapshot(device_name: str) -> dict:
-    """Collect fresh evidence and save it as a new timestamped snapshot.
-
-    Does not affect the device's pinned golden baseline -- see
-    ``pin_lab_golden_snapshot`` to update that.
-    """
-
-    evidence = collect_evidence(device_name)
-    path = save_snapshot(evidence)
-    return {
-        "tool": "save_lab_snapshot",
-        "device": device_name,
-        "status": "success",
-        "data": {"snapshot_path": path},
-        "errors": [],
-    }
-
-
-@_read_only_tool()
-def pin_lab_golden_snapshot(device_name: str, from_latest: bool = False) -> dict:
-    """Pin a golden (known-good) baseline snapshot for a device.
-
-    By default collects fresh evidence and pins that. ``from_latest=true``
-    instead pins the most recently *saved* snapshot (``save_lab_snapshot`` /
-    ``diff_lab_device_against_latest`` / ``diff_lab_device_against_golden``,
-    whichever ran most recently) without a new collection -- and reports a
-    structured error if there is no saved snapshot to pin yet.
-    """
-
-    if from_latest:
-        evidence = load_latest_snapshot(device_name)
-        if evidence is None:
-            return {
-                "tool": "pin_lab_golden_snapshot",
-                "device": device_name,
-                "status": "error",
-                "data": {},
-                "errors": [
-                    f"No saved snapshot for {device_name} to pin; call save_lab_snapshot "
-                    "first, or omit from_latest to collect fresh evidence now."
-                ],
-            }
-    else:
-        evidence = collect_evidence(device_name)
-        save_snapshot(evidence)
-
-    path = save_golden_snapshot(evidence)
-    return {
-        "tool": "pin_lab_golden_snapshot",
-        "device": device_name,
-        "status": "success",
-        "data": {"golden_path": path},
-        "errors": [],
-    }
 
 
 @_read_only_tool()

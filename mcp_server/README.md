@@ -23,8 +23,6 @@ environment (`DEVICE_USERNAME`, `DEVICE_PASSWORD`).
 - `get_lab_traceroute`
 - `diff_lab_device_against_latest`
 - `diff_lab_device_against_golden`
-- `save_lab_snapshot`
-- `pin_lab_golden_snapshot`
 - `assess_lab_device_health`
 - `assess_lab_fabric_health`
 - `detect_lab_flaps`
@@ -55,11 +53,6 @@ path.
   against the device's most recent snapshot or its pinned golden baseline.
   `data.has_previous` is `false` (and `data.diff` is `null`) the first time
   there is nothing to compare against yet -- not an error.
-- `save_lab_snapshot` -- collect fresh evidence and save it as a new
-  timestamped snapshot, without touching the golden pin.
-- `pin_lab_golden_snapshot` -- pin a golden (known-good) baseline, by default
-  from a fresh collection; `from_latest=true` pins the most recently saved
-  snapshot instead.
 - `assess_lab_device_health` / `assess_lab_fabric_health` -- deterministic
   health verdicts (Phase 4 role invariants + baseline drift), for one device
   or the whole fabric, rule-based rather than an LLM call.
@@ -145,3 +138,27 @@ password into this JSON.
 [ ] lab://inventory and lab://topology/expected resources are listed and readable.
 [ ] The troubleshooting_prompt prompt is listed and returns text.
 ```
+
+## Why there is no snapshot-writing tool here
+
+`save_lab_snapshot` and `pin_lab_golden_snapshot` were exposed until B-438 and
+have been removed. Both performed a **persistent write** from behind a decorator
+named `_read_only_tool`, and `pin_lab_golden_snapshot` wrote to the thing the
+system uses as its own epistemic ground truth: a model could pin an outage state
+as golden, after which drift comparison suppresses that fault indefinitely.
+
+That contradicted **D12** (execution is never behind MCP) and **D14** (memory is
+derived, never authored). External review, `docs/design/peer-review-response.md`
+§3.1 — *"the architecture protects the managed network more carefully than it
+protects its own source of truth."*
+
+The diff tools also stopped persisting their fresh collection, which the CLI
+still does. Snapshot history is what `detect_lab_flaps` reads, so a model
+calling diff in a loop was reshaping the evidence a later flap analysis would
+see. Repeated diffs here now compare against a **stable** baseline.
+
+**Pinning a golden snapshot is a human action.** `nettools baseline pin DEVICE`.
+
+The guarantee is structural rather than a decorator's name: this module does not
+import `save_snapshot` or `save_golden_snapshot` at all, so no tool it exposes
+can reach one. `tests/test_mcp_server.py` asserts that.

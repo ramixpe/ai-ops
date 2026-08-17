@@ -2995,6 +2995,29 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-106 · B-438 · The model-visible surface had three writes, not one
+
+- **Kind:** defect-found
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** Item 1 of the review's order of work. Reviewer A named `pin_lab_golden_snapshot`: a persistent write behind a decorator called `_read_only_tool`, letting a model pin an outage state as golden so drift comparison suppresses that fault indefinitely. Contradicts D12 and D14.
+
+  **There were three.** `save_lab_snapshot` writes, and `_diff_against` — shared by `diff_lab_device_against_latest` and `diff_lab_device_against_golden` — saved the fresh collection on every call. That last one is the one nobody named, and it is the one a model would hit most: **snapshot history is what `detect_lab_flaps` reads**, so a model diffing in a loop reshapes the evidence a later flap analysis sees. Not ground truth, but the same category.
+- **Evidence:** `mcp_server/server.py` imports no write function; three tests, `1692 passed`.
+- **What I did:** Removed both writing tools, made the diff tools non-persisting, and **deleted the write imports from the module entirely**.
+
+  That last part is the fix. Removing two functions leaves the next person free to add a third, and `_read_only_tool` would decorate it just as willingly. **A module that cannot import a write function cannot expose one** — the same containment argument as `prompt_library` never holding device text (OBS-061) and `GroundingFailure` having no field for a claim. A test asserts the import graph, not the decorator.
+
+  Two things worth recording beyond the fix.
+
+  **The decorator was the defect, not the symptom.** `_read_only_tool` was introduced to attach `read_only_hint=True` for MCP clients — an accurate *hint* about intent. Read as a *guarantee* it was false for three of twenty tools, and nothing checked. **A name that states a property is a claim, and every other claim in this build is required to carry a check.** This one was exempt because it looked like plumbing.
+
+  **The diff tools' behaviour genuinely changed, and it is better here.** The CLI still saves on diff, deliberately — a human's diff advances the baseline. The MCP surface now compares against a **stable** baseline instead of a moving one, which for a read-only surface is the more defensible semantics rather than a compromise. Worth stating because a reviewer of this change would otherwise read a lost feature; the feature moved to where the writer is a person.
+- **Needs human review:** no
+- **Blocks:** none. Items 3 and 4 next, and the design goes to the operator first.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**

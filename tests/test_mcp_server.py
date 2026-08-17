@@ -161,3 +161,75 @@ def test_get_troubleshooting_prompt_through_a_real_session():
         getattr(message.content, "text", "") for message in messages
     )
     assert "troubleshooting" in joined.lower()
+
+
+# --------------------------------------------------------------------------- #
+# B-438 -- the MCP surface cannot write
+# --------------------------------------------------------------------------- #
+
+
+def test_the_mcp_module_cannot_reach_a_write_function():
+    """Structural, not a decorator's promise (B-438, review §3.1).
+
+    `pin_lab_golden_snapshot` was exposed behind `_read_only_tool` and wrote to
+    the system's own epistemic ground truth: a model could pin an outage state
+    as golden, after which drift comparison suppresses that fault indefinitely.
+    `save_lab_snapshot` and both diff tools appended to the snapshot history
+    that `detect_lab_flaps` reads.
+
+    A decorator named `_read_only_tool` asserted the property and enforced
+    nothing. **This asserts it where it cannot be worked around**: if the module
+    does not import a write function, no tool it exposes can call one -- the
+    same containment argument as `prompt_library` never holding device text.
+    """
+
+    import ast
+    import pathlib
+
+    source = (
+        pathlib.Path(__file__).resolve().parent.parent / "mcp_server" / "server.py"
+    ).read_text(encoding="utf-8")
+
+    imported: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.ImportFrom):
+            imported.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.Import):
+            imported.update(alias.name.split(".")[0] for alias in node.names)
+
+    forbidden = {
+        "save_snapshot",
+        "save_golden_snapshot",
+        "prune_snapshots",
+        "update_expected_in_yaml",
+    }
+    assert not (imported & forbidden), (
+        f"mcp_server/server.py imports {sorted(imported & forbidden)}; a model-visible "
+        f"surface must not be able to reach a persistent write"
+    )
+
+
+def test_the_two_writing_tools_are_gone_from_the_surface():
+    """Named explicitly, so re-adding one is a deliberate act that fails a test
+    rather than a plausible-looking addition."""
+
+    from mcp_server import server
+
+    for gone in ("save_lab_snapshot", "pin_lab_golden_snapshot"):
+        assert not hasattr(server, gone), (
+            f"{gone} is a persistent write and must not be on the model-visible "
+            f"surface (B-438). Pinning a golden snapshot is a human action: "
+            f"`nettools baseline pin DEVICE`."
+        )
+
+
+def test_pinning_a_golden_snapshot_is_still_possible_for_a_human():
+    """The companion. Removing the capability from the model must not remove it
+    from the operator, or the fix has broken the feature instead of scoping it.
+    """
+
+    from agent_nettools import cli
+
+    parser = cli.build_parser()
+    action = next(a for a in parser._subparsers._group_actions)  # noqa: SLF001
+    assert "baseline" in action.choices, "the human path must survive"
