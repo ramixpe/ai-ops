@@ -385,6 +385,22 @@ Every other face in this family is detected by looking harder at something that 
 
 The class is wider than `.gitignore`: an allowlist that silently drops an entry, a filter matching more than intended, a `.dockerignore`, a `MANIFEST.in`, a log level suppressing the line that mattered. **Anything whose contribution is a non-action cannot report a mistaken non-action.**
 
+#### A second instance, from round 8 — the underspecified word can be a *noun*
+
+Added 2026-08-17. OBS-131 was fixed and the fix held: round 8's payload was committed, `git ls-files` lists it, the end state was checked rather than the steps. **And the round still could not be rescored.**
+
+The remedy above replaced *archive* with *committed* — it specified the **verb**. §6.1d's other underspecified word is the **noun**: *"archive the full payload"*. Round 8 archived the `investigate` payload, which is a structure of already-parsed fields. When the disputed field turned out to be a parser defect, the archive held 355 copies of the broken parse's output and not one copy of the line it was computed from.
+
+> **Specifying the end state fixes *whether* the artefact exists. It says nothing about *what the artefact is*, and a procedure has two ways to be void.**
+
+Both are the same face: a word that looked unambiguous to its author, every step performed, every step successful, the outcome void. What makes this instance worth recording separately is that **the first remedy was in place and working**. `git ls-files` answered its question correctly; the question was the wrong one.
+
+**The generalisation, and the detector it needs.** *Payload*, *evidence*, *result*, *record*, *sample* all name a boundary that the author fixes implicitly and the reader re-fixes on their own terms. And the boundary that matters is not where any module draws it — it is **wherever the next dispute lands**, which by definition is not known when the rule is written.
+
+> **Detector: for a stored artefact, ask what a future dispute would need — not what the current consumer reads. If the answer is "the thing this was derived from", the artefact is one layer too high.**
+
+The cheap general form: **when in doubt store one layer lower than seems necessary.** A raw line beside a boolean costs bytes; the round it would have saved costs a lab window and an operator's evening.
+
 #### The duplication face — a detection blind spot rather than an instance of another
 
 Added 2026-08-17 from B-460, and filed as its own face because the *detector* differs from every other one here.

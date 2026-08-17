@@ -405,6 +405,40 @@ The rule in one line: **store the input and the verdict, never the verdict
 alone.** The verdict is what you compare against; the input is what lets you
 compare again after the comparison changes.
 
+#### A parsed field is a conclusion. The input is the text it was parsed from.
+
+Added 2026-08-17 after round 8, which **followed this rule and still could not be
+rescored.**
+
+Round 8 archived a per-sample payload, as required. What each sample carried for
+the disputed observable was `neighbor.socket_armed: false` — a boolean. When the
+sampler's socket regex turned out to be wrong, the correction was not replayable:
+every archived sample held the broken parse's *output*, and the `Socket …` line
+it was computed from was nowhere in the archive. A field that was wrong in 355
+samples was wrong identically in all 355, and the payload could not say so.
+
+> **A payload of derived fields is replayable against a change in *semantics* and
+> not against a change in *parsing* — and on an instrument written for one round,
+> a parser defect is the more likely of the two.**
+>
+> Archive the raw command output alongside the derived record, or archive nothing
+> and call it a finding.
+>
+> **End state:** the archived sample contains the substring the parser matched
+> on. If a field is disputed, its source text is in the same file.
+
+Note where this sits relative to the paragraph above. The fixtures are held up
+there as the model *because* they store device output; this is the same rule
+applied one level down, to a round's own instrument. `payload` was read as "the
+`investigate` result", which is a structure of already-parsed fields — true to
+the letter and one layer short of the intent. **The boundary between "input" and
+"conclusion" is not where a module happens to draw it; it is wherever the next
+dispute lands, and a rule that names an artefact without naming its boundary
+will be satisfied by the wrong half of it.**
+
+The cost is small and should be paid unconditionally: one raw line per sample,
+beside the field derived from it.
+
 **Step 6 pushes before step 9 reveals.** Not commits — *pushes*.
 
 **End state:** the prediction's commit is on the remote. `git log origin/<branch>` shows it, and its timestamp precedes the fault. A local commit is a step, not a state.
