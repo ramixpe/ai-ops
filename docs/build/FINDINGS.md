@@ -1912,6 +1912,26 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-152 · Cleanup · The two doc backups were byte-identical to blobs git already holds
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** The expert review's cleanup phase (§7 Phase 0, item 4) said to compare the two `.docs-backup-*` directories with tracked docs and *"archive outside the repo or delete only after differences are understood."* Understood, by hashing rather than reading:
+
+  - `.docs-backup-20260815-162657/CLAUDE.md` → blob `44a4b9f1548c` — **already in history** at `6629a2c` (2026-08-15) and `85191f8` (2026-07-29).
+  - `.docs-backup-20260815-174903/docs/build/BUILD-PLAN.md` → blob matching `5360adc` / `6a56734` (both 2026-08-15).
+
+  Both directories were hand-made safety copies of files git was already versioning, taken the day of the peer-review edits. **Deleting them loses zero bytes of information**, and the blob IDs above are the receipt.
+- **Evidence:** `git log --all --find-object=<blob>` output quoted above; re-runnable.
+- **What I did:** Deleted both. Also removed the main tree's `build/`, `agent_nettools.egg-info/`, `.pytest_cache/`, `.ruff_cache/` and `__pycache__` directories (all gitignored, all regenerable). **Left alone:** `preflight-*.log` (the operator's run record), `evidence/PE1/` (a runtime snapshot cache, gitignored by design), `.venv` (rebuilt last, after all Wave-1 merges, because every merge gate runs the suite through it), and the agents' worktrees under `.claude/`.
+
+  Worth one line: the safe way to "understand differences" between a backup and a repo is `git hash-object` + `--find-object`, not reading diffs — content-addressing answers "does git already have this exact file" in one command, with no judgement involved.
+- **Needs human review:** no
+- **Blocks:** nothing.
+
+---
+
 <!--
 Copy this block for each new entry.
 
