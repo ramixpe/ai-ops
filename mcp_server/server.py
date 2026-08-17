@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import functools
 import inspect
 import json
+import logging
+import sys
 from typing import Any, Callable
 
 from dotenv import find_dotenv, load_dotenv
+
+from .boundary import sanitize
 
 try:
     # MCP SDK >= 2.0 renamed the high-level server to MCPServer.
@@ -17,6 +22,7 @@ except ModuleNotFoundError:
 
 from agent_nettools.health import evaluate_fabric
 from agent_nettools.inventory_model import load_inventory_file
+from agent_nettools.investigation import investigate
 from agent_nettools.llm_analysis import TROUBLESHOOTING_PROMPT
 from agent_nettools.network_tools import (
     check_bgp_neighbors,
@@ -75,17 +81,39 @@ READ_ONLY_ANNOTATIONS_SUPPORTED = READ_ONLY_HINT is not None
 
 
 def _read_only_tool(*args: Any, **kwargs: Any) -> Callable[[Callable], Callable]:
-    """``@mcp.tool()``, with a ``readOnlyHint`` annotation when the installed SDK supports it.
+    """``@mcp.tool()``, plus ``readOnlyHint``, plus **the raw-text boundary**.
 
     Every tool below uses this instead of the bare ``@mcp.tool()`` decorator.
     Degrades silently (no annotation, no error) on an SDK old enough to lack
     ``ToolAnnotations``/the ``annotations=`` keyword -- see
     ``READ_ONLY_ANNOTATIONS_SUPPORTED`` for which path this process took.
+
+    **Every return value passes through `boundary.sanitize`.** That is here, in
+    the registration decorator, rather than in each tool or behind an argument,
+    because both of those make invariant 4 depend on someone remembering -- and
+    on this surface the caller is a model. Registering a tool *is* sanitising
+    it, so a tool added later inherits the guarantee with no diff to this file.
+
+    Audited 2026-08-17: 14 of 20 tools returned raw device output under
+    `data.commands`, up to 37,962 characters. See `boundary.py`.
     """
 
     if READ_ONLY_HINT is not None:
         kwargs.setdefault("annotations", READ_ONLY_HINT)
-    return mcp.tool(*args, **kwargs)
+    register = mcp.tool(*args, **kwargs)
+
+    def decorate(function: Callable) -> Callable:
+        @functools.wraps(function)
+        def sanitized(*call_args: Any, **call_kwargs: Any) -> Any:
+            return sanitize(function(*call_args, **call_kwargs))
+
+        # Registered under the *wrapped* function, so there is no route to the
+        # unsanitised one through the MCP protocol. `functools.wraps` keeps the
+        # name, docstring and signature the SDK builds the tool schema from.
+        register(sanitized)
+        return sanitized
+
+    return decorate
 
 
 @_read_only_tool()
@@ -413,9 +441,103 @@ def troubleshooting_prompt() -> str:
     return TROUBLESHOOTING_PROMPT
 
 
+@_read_only_tool()
+def investigate_lab_session(
+    device: str, subject: str, flow: str = "bgp_session"
+) -> dict:
+    """Localise the cause of a fault by walking a dependency ladder, deterministically.
+
+    **Prefer this over calling the individual check tools yourself** when the
+    question is "why is this broken?". It walks the layers beneath a symptom in
+    order -- session, transport, route, IGP adjacency, physical interface -- and
+    reports the *lowest* broken one as the cause, with the broken layers above
+    it as the causal chain that explains the symptom. Every verdict comes from
+    code comparing parsed fields, with no model involved.
+
+    ``device``  the device to investigate *from*, e.g. "RR1".
+    ``subject`` what to investigate, in the flow's own vocabulary. For
+                ``bgp_session`` that is the peer's IPv4 address as
+                ``show bgp summary`` lists it, e.g. "10.255.0.12".
+    ``flow``    the object type. ``bgp_session`` (default) or ``interface``.
+
+    Read ``finding`` first. Values you will see:
+
+    ``all_layers_healthy``     no fault on the path between these two endpoints.
+    ``no_fault_on_path``       the session is fine; broken layers were found that
+                               are **not** on the path -- read ``off_path``, and
+                               do not report them as the cause of anything.
+    ``cause_not_localised``    the symptom is real and every layer beneath it is
+                               healthy. Look at configuration and policy.
+    ``undetermined``           a layer could not be read, so nothing below it was
+                               evaluated. ``reason`` says which.
+    ``temporally_incoherent``  the fabric changed while it was being read. These
+                               observations do not describe one state; run again.
+    otherwise                  the terminal finding for the lowest broken layer,
+                               e.g. ``interface_line_down``, ``igp_isolated``.
+
+    ``trustworthy`` is false when the run did not produce an answer you may act
+    on -- which is **not** the same as the network being broken. Check it before
+    reporting a finding.
+
+    ``coherence.caveat``, when present, must be repeated to the user: the answer
+    was read over a window wider than the bound, so it is true at both ends of
+    that window rather than throughout it.
+
+    No model is called and no paraphrase is produced. The report is rendered
+    from the descent's own typed fields.
+    """
+
+    result = investigate(device, subject, flow=flow)
+    return result.to_payload()
+
+
+def protect_stdio() -> list[str]:
+    """Make sure nothing in this process logs to **stdout**.
+
+    Over stdio transport, stdout carries JSON-RPC and nothing else. A single
+    stray line breaks the framing and the client sees a protocol error rather
+    than a log message, which is a genuinely confusing failure to debug from the
+    other end.
+
+    Nothing in this package writes to stdout -- no ``print``, no
+    ``basicConfig``, and `descent.py`'s logger installs no handler. **But the
+    process is not only this package.** A host launcher we do not control (an
+    IDE wrapper, a desktop client, a shell profile that sets ``PYTHONSTARTUP``)
+    can call ``logging.basicConfig()`` before this module is imported, and
+    ``basicConfig``'s default stream is ``sys.stderr`` only when it creates the
+    handler -- a wrapper that passes ``stream=sys.stdout``, or a library that
+    attaches its own, lands on stdout.
+
+    So this redirects any root handler already pointed at stdout to stderr,
+    rather than asserting the process is clean. Cheap, and it makes the
+    transport robust against a host nobody here configured.
+
+    Returns what it changed, so a caller can log it -- to stderr.
+    """
+
+    changed: list[str] = []
+    for handler in logging.getLogger().handlers:
+        stream = getattr(handler, "stream", None)
+        if stream is sys.stdout:
+            handler.setStream(sys.stderr)
+            changed.append(type(handler).__name__)
+
+    # Anything configured *after* this point still lands correctly: the root
+    # logger gets an explicit stderr handler, so `basicConfig` becomes a no-op
+    # rather than installing a stdout one of its own.
+    root = logging.getLogger()
+    if not root.handlers:
+        root.addHandler(logging.StreamHandler(sys.stderr))
+        changed.append("installed a stderr handler on an unconfigured root logger")
+
+    return changed
+
+
 def main() -> None:
     """Console-script entry point: start the MCP server over stdio."""
 
+    for change in protect_stdio():
+        print(f"nettools-mcp: redirected {change} away from stdout", file=sys.stderr)
     mcp.run()
 
 

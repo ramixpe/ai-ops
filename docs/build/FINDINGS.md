@@ -3152,6 +3152,46 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-111 · B-458 · Invariant 4 was true of the code and false of the surface
+
+- **Kind:** defect-found
+- **Escalation:** **HALT** (accepted; fixed on instruction)
+- **Model:** opus-5
+- **What happened:** Before connecting LM Studio, the operator asked for invariant 4 — *no unparsed device text ever reaches a model* — to be audited at the MCP boundary, checking **actual return shapes, not intent**, and to treat any finding as a HALT.
+
+  **14 of 20 tools returned raw device text** under `data.commands`. Measured:
+
+  | Tool | Chars |
+  |---|---:|
+  | `get_lab_logging` (count=200) | **37,962** |
+  | `get_lab_bgp_neighbor` | 6,139 |
+  | `check_lab_fabric` (9 devices, live) | 4,239 |
+  | `collect_lab_evidence` | 2,629 |
+  | `get_lab_interface` | 1,403 |
+  | eight others | 29–985 each |
+
+  `get_lab_logging` is the one that matters: 38 kB of unshaped device log buffer — precisely the input `log_window.py` exists to filter by attribution and `coverage.py` exists to bound. The `investigate` path shapes it to a few hundred records with a coverage record attached; the MCP path handed a model the whole thing.
+- **Evidence:** Measured per tool against committed fixtures, and live for `check_lab_fabric` which needs credentials. 21 tools now smoke-tested against the live lab through a real `ClientSession` (`tests/test_mcp_live_lab.py`, 24 tests, 6m51s).
+- **What I did:** Reported and halted before changing anything, per instruction. Then, on the operator's direction: `mcp_server/boundary.py`, applied by the **registration decorator** so a tool is sanitised by the act of being registered.
+
+  **The finding worth keeping is not the leak.** Nothing was broken in the library. Every one of those envelopes also carried `data.parsed`, and every internal consumer read the parsed half and ignored the text. The code was correct and had been correct for eight phases.
+
+  > **An invariant that holds for every internal caller is not an invariant. It is a convention that has not yet met a new consumer.**
+
+  This is OBS-106's shape at larger scale — there, `_read_only_tool` was an accurate *hint* read as a *guarantee*, false for 3 of 20 tools. Here the guarantee was real, enforced structurally in `prompt_library` (OBS-061), and simply did not extend to a second path to a model that was built at a time when no model was on the other end of it. **A structural guarantee protects the path it is built into and no other**, and nothing enumerated the paths.
+
+  **Two corrections against myself during the fix**, both from measuring rather than reasoning:
+
+  *My audit understated the leak.* I probed `parsed["unaccounted_lines"]` and measured zero. The key lives at `parsed["meta"]["unaccounted_lines"]`, one level deeper — the test caught it, not me. §0.10's remainder is raw device lines by the parser contract, empty across this corpus and non-empty the first time another platform is parsed.
+
+  *And it overstated it.* `unparsed_rows` reads like `unaccounted_lines`'s sibling, is named like one, and is documented beside it — and is an **`int`**. Stripping it would have destroyed a diagnostic for no safety gain. **A rule written from a name walks into that; a rule written from a measured type does not.**
+
+  **One vacuous check found on the way.** `test_mcp_readme_lists_exactly_the_exposed_tools` filtered by a hand-maintained prefix allowlist, so `investigate_lab_session` was added and the doc-sync test **passed** — silently not covering the newest tool, which is the one most likely to be undocumented. Now derived from the registry, like the boundary sweep. Same lesson twice in one hour, which is the argument for the lesson.
+- **Needs human review:** no — reported and directed before implementation
+- **Blocks:** nothing. The known residual is bounded rather than claimed clean: a transport exception can embed device output in its message, so error strings are truncated at 400 characters (B-458's note).
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**

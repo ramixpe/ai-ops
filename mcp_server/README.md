@@ -26,6 +26,7 @@ environment (`DEVICE_USERNAME`, `DEVICE_PASSWORD`).
 - `assess_lab_device_health`
 - `assess_lab_fabric_health`
 - `detect_lab_flaps`
+- `investigate_lab_session`
 
 There is no shell, configuration tool, or generic command runner.
 
@@ -59,6 +60,28 @@ path.
 - `detect_lab_flaps` -- report fields that oscillated across a device's
   entire saved snapshot history (min 3 transitions by default), which a
   single pairwise diff cannot see.
+
+### `investigate_lab_session` -- the one to reach for first
+
+`investigate_lab_session(device, subject, flow="bgp_session")` walks a
+dependency ladder beneath a symptom -- session, transport, route, IGP
+adjacency, physical interface -- and reports the **lowest** broken layer as the
+cause, with the broken layers above it as the causal chain explaining the
+symptom. Every verdict is code comparing parsed fields; **no model is involved
+and none is called**, and the report is rendered from the descent's own typed
+fields rather than written by one.
+
+It exists because the other twenty tools answer *what is the state of X*, and
+the question an operator actually has is *why is this broken*. Answering that by
+calling six tools and reasoning over the results is exactly where a model
+invents a plausible chain; this returns one that was derived.
+
+Read `finding` first: `all_layers_healthy`, `no_fault_on_path` (the session is
+fine and the broken layers listed under `off_path` are **not** on the path --
+do not report them as a cause), `cause_not_localised`, `undetermined`,
+`temporally_incoherent` (the fabric moved while being read), or the terminal
+finding for the lowest broken layer. Check `trustworthy` before reporting
+anything, and repeat `coherence.caveat` to the user when it is present.
 
 ### Read-only annotations, resources, and a prompt (Phase 8)
 

@@ -127,6 +127,16 @@ built by interpolation; and **no unparsed device text ever reaches a model** —
 enforced structurally in `prompt_library`, which never holds the text, rather
 than by filtering.
 
+**Invariant 4 has two paths to a model, not one.** `prompt_library` is the
+first. `mcp_server/server.py` is the second, and it went eight phases without
+the guarantee because when those tools were written the only consumer was our
+own code, which reads `data.parsed` and ignores `data.commands` — 14 of 20 tools
+returned raw device output, up to 38 kB (OBS-111). `mcp_server/boundary.py`
+closes it, applied by the *registration decorator* so a tool is sanitised by the
+act of being registered. **An invariant that holds for every internal caller is
+not an invariant; it is a convention that has not yet met a new consumer** — so
+a new path to a model needs the guarantee built into it, not inherited.
+
 **Two things that look like ordinary code and are not.** `descent.py` has no
 model call, deliberately and permanently — if it ever needs one, something above
 it has been designed wrong. And `grounding.py`'s failure objects have no field a

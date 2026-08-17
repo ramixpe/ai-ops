@@ -233,3 +233,93 @@ def test_pinning_a_golden_snapshot_is_still_possible_for_a_human():
     parser = cli.build_parser()
     action = next(a for a in parser._subparsers._group_actions)  # noqa: SLF001
     assert "baseline" in action.choices, "the human path must survive"
+
+
+# --------------------------------------------------------------------------- #
+# stdio transport hygiene
+# --------------------------------------------------------------------------- #
+
+
+def test_protect_stdio_redirects_a_hostile_launchers_stdout_handler():
+    """Over stdio, stdout carries JSON-RPC and nothing else.
+
+    Nothing in this package writes to stdout. **But the process is not only this
+    package** -- a host launcher we do not control can call
+    `logging.basicConfig(stream=sys.stdout)` before this module is imported, and
+    one stray line breaks the framing so the client sees a protocol error rather
+    than a log message.
+
+    So the server redirects rather than assuming, and this asserts the
+    redirection on a deliberately hostile configuration.
+    """
+
+    import io
+    import logging
+    import sys
+
+    from mcp_server.server import protect_stdio
+
+    original = logging.getLogger().handlers[:]
+    try:
+        logging.basicConfig(stream=sys.stdout, level=logging.INFO, force=True)
+        assert any(
+            getattr(h, "stream", None) is sys.stdout for h in logging.getLogger().handlers
+        ), "the hostile setup must actually point at stdout, or this is vacuous"
+
+        changed = protect_stdio()
+
+        assert changed, "it reports what it moved"
+        assert not any(
+            getattr(h, "stream", None) is sys.stdout for h in logging.getLogger().handlers
+        )
+
+        captured = io.StringIO()
+        real, sys.stdout = sys.stdout, captured
+        try:
+            logging.getLogger("anything").warning("must not reach stdout")
+        finally:
+            sys.stdout = real
+        assert captured.getvalue() == ""
+    finally:
+        logging.getLogger().handlers[:] = original
+
+
+def test_protect_stdio_leaves_an_unconfigured_root_logger_safe():
+    """A later `basicConfig()` must not be able to install a stdout handler.
+
+    With an explicit stderr handler present, `basicConfig` is a no-op -- so the
+    defence survives a library that configures logging after startup, not only
+    one that did it before.
+    """
+
+    import logging
+    import sys
+
+    from mcp_server.server import protect_stdio
+
+    original = logging.getLogger().handlers[:]
+    try:
+        logging.getLogger().handlers[:] = []
+        protect_stdio()
+
+        logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+
+        assert not any(
+            getattr(h, "stream", None) is sys.stdout for h in logging.getLogger().handlers
+        )
+    finally:
+        logging.getLogger().handlers[:] = original
+
+
+def test_importing_the_server_writes_nothing_to_stdout():
+    """The import-time half: `load_dotenv` and 21 tool registrations, silent."""
+
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [sys.executable, "-c", "import mcp_server.server"],
+        capture_output=True, text=True, check=True,
+    )
+
+    assert result.stdout == "", f"stdout polluted at import: {result.stdout!r}"
