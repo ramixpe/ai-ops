@@ -10,31 +10,43 @@
 
 ---
 
-## 0. Abort condition — settle this before applying anything
+## 0. The stanza, read — and it ruled out the fault as first written
 
-**The corpus cannot tell me whether IOS-XR accepts a `remote-as` change on an
-existing neighbour in place.** `fault_lab.py`'s snapshot does run
-`show running-config router bgp 65000`, but no stored capture retains the
-neighbour stanza — the run records hold the *apply* lines of past faults, not the
-config they were applied to. I checked; it is not there.
+**Settled by `show running-config router bgp 65000` on PE2, before any window
+was spent.** §6.1b's second catch in two rounds.
 
-**And the syntactic question hides a semantic one that matters more.** PE2's
-neighbour toward RR1 is **iBGP** (both in 65000, RR1 a route reflector).
-Changing `remote-as` to 65001 converts it to **eBGP**, and IOS-XR rejects that
-at commit if the stanza carries iBGP-only configuration — `next-hop-self`,
-`update-source` combinations, or anything inherited from a neighbour-group that
-fixes the AS.
+| Finding | Consequence |
+|---|---|
+| `remote-as` is **direct on the neighbour**, no `use neighbor-group` | Blast radius is one session. The change cannot propagate to other peers |
+| **No `next-hop-self`** | One less iBGP-only sub-command to be rejected at commit |
+| **`update-source Loopback0`** | **This is the problem.** The AS change makes it a loopback-sourced *eBGP* session, and eBGP defaults to **TTL 1** while PE2 reaches RR1 via P1 — **two hops** |
+| **`bfd fast-detect` at 100 ms × 3** | A new risk, sealed in §2a.6 |
 
-> **One read-only command settles both:** `show running-config router bgp 65000`
-> on PE2. If the neighbour stanza is bare — `remote-as`, `update-source`,
-> `address-family` — the change will take. If it carries iBGP-specific
-> sub-commands, the fault needs a different shape and it is better known now.
+**Why `update-source` mattered more than the syntax question.** Either XR rejects
+the commit, or it accepts and **TCP never establishes** — giving
+`socket_armed_read: false` and `B B H H H`.
 
-**Abort condition:** if the commit is rejected, the round does not run, the
-rejection is recorded as the result, and B-463 stays open pending a fault that
-can produce the vector. **A rejected commit is a finding, not a failed round.**
+That vector is *what this round predicts* (§2a.1). It would have arrived **for
+the wrong reason and been indistinguishable from a confirmation.** A round that
+cannot tell its predicted outcome from an unrelated failure of its own setup is
+not a test; it is a coin that lands the same way up either side.
 
----
+**Fixed by two lines rather than one.** `fault_lab.py` option 7 now applies
+`remote-as 65001` **and** `ebgp-multihop 5`, reverting with `remote-as 65000`
+and `no ebgp-multihop`.
+
+### 0.1 The revert's end state, named rather than assumed
+
+Per §0.13's procedure face: *"revert was pushed"* is a step, not a state.
+
+> **End state: `diff_keys(baseline, snapshot)` returns empty.** Specifically the
+> `ebgp-multihop` line must be **absent** from the neighbour stanza afterwards,
+> not merely un-pushed. `no ebgp-multihop` should remove it; the snapshot
+> comparison is what proves it did.
+
+A lingering `ebgp-multihop 5` on a restored iBGP session is inert — multihop is
+meaningless for an internal peer — which is exactly why it could sit there
+unnoticed. **Harmless and undetectable is the combination worth checking for.**
 
 ## 1. §6.1b — the fault, read against what this prediction assumes
 
@@ -44,8 +56,9 @@ can produce the vector. **A rejected commit is a finding, not a failed round.**
 router bgp 65000
  neighbor 10.255.0.31
   remote-as 65001
+  ebgp-multihop 5
 ```
-revert: `remote-as 65000`.
+revert: `remote-as 65000` + `no ebgp-multihop`.
 
 **The APPLY block matches the fault this prediction assumes**: PE2 believes its
 peer is in AS 65001; RR1 announces 65000. TCP establishes normally — nothing in
@@ -185,6 +198,13 @@ Unchanged from the MD5 seal, and still the more valuable of the two claims:
 This is the one clear improvement over MD5, whose timing was unknown and
 possibly 180 s.
 
+**Superseded in part by §2a.6.** This claim was written against the corpus's
+180 s hold timer. With `bfd fast-detect` at 300 ms the teardown is sub-second
+and the 30 s falsifier is far looser than it needs to be — it will not fire, and
+its not firing is therefore weak evidence. **Kept as sealed rather than
+rewritten**, with the weakness stated: a falsifier loosened by a fact discovered
+after sealing is a falsifier that has stopped discriminating.
+
 ### 2a.5 The expected `last_reset_reason`
 
 > Something naming the AS — IOS-XR typically reports a notification of
@@ -193,6 +213,67 @@ possibly 180 s.
 > **Not a scored claim**, because I do not know this platform's exact wording
 > and inventing one to score against would be a falsifier written from a guess.
 > Recorded as an observation to capture.
+
+---
+
+### 2a.6 BFD under eBGP multihop — the fifth claim, and it is a real unknown
+
+`bfd fast-detect` is configured on this neighbour at **100 ms × 3 = 300 ms
+detection**. Under eBGP multihop, a single-hop BFD session will not come up —
+IOS-XR needs `bfd multihop` configured for that, and it is not.
+
+**I cannot tell from configuration whether XR lets BGP establish while BFD
+fails, or holds the session down.** Both are defensible implementations and I am
+not guessing which this release does.
+
+> **Sealed claim: BGP's failure to establish is attributable to the AS check,
+> not to BFD.**
+>
+> **Refuted if** `last_reset_reason` or the log names BFD, or if `show bfd
+> session` shows the session down while BGP never leaves Idle — i.e. BGP is
+> being held down by BFD rather than rejected on the OPEN.
+
+**And it confounds the timing claim.** §2a.4 predicted an immediate
+renegotiation against a 180 s hold timer. **A neighbour with 300 ms BFD
+detection does not have the corpus's hold-timer semantics at all** — teardown
+and retry are sub-second, so the retry cycle is far faster than §2a.4 assumed.
+That makes the transient window *more* frequent (good for §2a.2) and the
+individual window *shorter* (bad for it). Net effect unknown; recorded rather
+than predicted.
+
+### 2a.7 Three mechanisms, one vector — and the discriminator
+
+This is the round's central methodological risk and it must be stated before it
+is run.
+
+**Three independent failures now produce `B B H H H`:**
+
+1. **the intended one** — TCP establishes, OPEN rejected on the AS check;
+2. **TTL/multihop** — TCP never establishes (mitigated by `ebgp-multihop 5`,
+   not eliminated);
+3. **BFD** — the session is held down by a BFD session that cannot come up.
+
+**The rung vector cannot distinguish them.** All three give the same five
+letters, and a round scored on the vector alone would confirm its prediction in
+all three cases — including the two where the prediction's *mechanism* never
+occurred.
+
+> **So the vector is not the result. The discriminators are:**
+>
+> - **the transient socket sample** (§2a.2) — armed means TCP established, which
+>   rules out (2) outright;
+> - **`last_reset_reason`** — an AS-related notification rules in (1); a BFD
+>   mention rules in (3);
+> - **`show bfd session`** on PE2, if (3) is suspected.
+
+That makes §2a.2 **load-bearing rather than a bonus**: it is simultaneously the
+claim the round exists to test *and* the only cheap evidence that the round
+tested what it meant to. Dense sampling from the commit is therefore not an
+optimisation.
+
+**Favourably, the operator's point stands:** the OpenSent window recurs on
+**every connect retry**, so the round gets repeated chances rather than one — and
+with BFD-speed retries, many of them.
 
 ---
 
