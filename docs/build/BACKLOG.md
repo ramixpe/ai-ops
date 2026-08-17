@@ -205,6 +205,10 @@ cost of the state a reconciliation cannot express, measured (OBS-140).
 | **B-474** | `DONE` | `_atomic_write_text` (tmp+fsync+replace), one-transaction golden + partial unique index with MAX(id) dedup migration, guarded reads with loud warnings, `snapshots_skipped` in `detect_flaps`, device-name validation both backends. **35 tests** | — | FIX-PLAN · wave 1-C |
 | **B-475** | `DONE` (scoped) | both serial paths pooled (`assess_lab_fabric_health` wave 1-D, agent `_assess_health` + parallel tool blocks wave 2-B). The full cross-surface scheduler stays deliberately future — filed thinking, not deferred accident | — | FIX-PLAN |
 | **B-476** | `DONE` | `settings.py`, 37 vars, two-direction cross-check test, `nettools config show/check`, startup warnings. Found `NETTOOLS_FIXTURE_DIR` undocumented and two live typo-swallows (`fasle` enables probes; `sqlit` selects files). Rewiring call sites is named future work | — | FIX-PLAN · wave 1-E |
+| **B-477** | `OPEN` | **`nettools audit`** — deterministic fabric/device/protocol audit: duplicate router-IDs, timer/MTU/metric asymmetry, hostname drift. Operational state only (config axis stays B-104). Wave N-1 | — | OPS-WAVE-PLAN |
+| **B-478** | `OPEN` | **knowledge surface** — `search_lab_knowledge` over the repo's own docs (grep, not vectors: 1.6 MB), curated mnemonic table, `operator_notes` in investigate (closes B-210). Wave N-2 | — | OPS-WAVE-PLAN |
+| **B-479** | `OPEN` | **staged MCP surface** behind `NETTOOLS_MCP_SURFACE` (default classic) — advances B-113 while keeping the §9/§10 A/B measurable. Wave N-3 | B-113 (OPEN) | OPS-WAVE-PLAN |
+| **B-480** | `OPEN` | **event routing** — pure `RoutingDecision` from Alertmanager JSON / syslog line; `nettools route-event`; orchestrator examples. Closes B-202's core; the receiver stays the operator's infra per T-005. Wave N-4 | — | OPS-WAVE-PLAN |
 
 **Totals:** `BLOCKED` 13 · `DONE` 33 · `OPEN` 7 · `unverified` 42 · **95 items**
 
