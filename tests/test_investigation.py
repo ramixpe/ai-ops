@@ -215,6 +215,67 @@ def test_a_report_that_drops_the_chain_is_withheld_and_its_prose_is_gone():
     assert {f.kind for f in result.paraphrase_grounding.failures} == {"uncited_rung"}
 
 
+def test_a_paraphrase_naming_a_device_this_fabric_does_not_have_is_withheld():
+    """B-453 through the runner, which is the only place it has ever mattered.
+
+    The MCP re-test (`MCP-EXPERIMENT.md` §10.3) was expected to exercise this
+    and did not: no paraphrase was generated, so the gate had nothing to grade
+    and reported `0 identifiers contained`. The unit tests in
+    `test_grounding.py` prove the check works; this proves it is **reached**,
+    which is the different claim and the one that was outstanding.
+
+    The report is otherwise perfect — every rung cited, every key real, the
+    chain complete. The single defect is a device that does not exist, which
+    is precisely the class citation integrity cannot see.
+    """
+
+    real_keys = [o.result.evidence_keys[0] for o in _BROKEN_DESCENT.outcomes]
+    observations = [
+        {"claim": f"{i + 1}/5 {o.rung} on {o.device} is {o.status}",
+         "evidence_key": key}
+        for i, (o, key) in enumerate(zip(_BROKEN_DESCENT.outcomes, real_keys, strict=True))
+    ]
+    # The one lie, and it is in the interpretation rather than an observation:
+    # PE7 is not in this fabric.
+    invented = json.dumps({
+        "observations": observations,
+        "interpretations": [
+            {"claim": "interface_line_down on PE7",
+             "based_on": [f"obs-{i + 1}" for i in range(len(observations))]}
+        ],
+        "recommendation": {"next_check": "Check PE7's uplinks", "requires_human": True},
+    })
+
+    result = _run("broken", Scripted(report=invented, correlate=_FOUND))
+
+    assert result.paraphrase_status == WITHHELD
+    assert result.paraphrase is None
+    assert "uncontained_identifier" in {
+        f.kind for f in result.paraphrase_grounding.failures
+    }
+    # The identifier is named, because that is what makes the failure
+    # actionable. The sentence around it is not.
+    withheld = json.dumps(result.withheld_because())
+    assert "PE7" in withheld
+    assert "uplinks" not in withheld
+
+
+def test_the_companion_a_paraphrase_naming_only_real_devices_still_emits():
+    """Without this, the check above passes on a gate that refuses everything.
+
+    Same shape as the report above, every identifier real. §0.12: a guardrail
+    needs the case that must not fire, and this one is load-bearing because
+    B-453 was measured on the promise of zero false positives.
+    """
+
+    result = _run("broken", Scripted(report=_good_report, correlate=_FOUND))
+
+    assert result.paraphrase_status == EMITTED
+    assert result.paraphrase_grounding.ok
+    # And it actually looked: a vacuous pass here would be indistinguishable.
+    assert result.paraphrase_grounding.identifiers_checked > 0
+
+
 def test_an_invented_evidence_key_withholds_the_report():
     bad = json.dumps({
         "observations": [{"claim": "x", "evidence_key": "PE2:interface:Nonsense0/0/0/9"}],

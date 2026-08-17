@@ -181,7 +181,7 @@ cost of the state a reconciliation cannot express, measured (OBS-140).
 | **B-450** | `DEFERRED` | until a characterised failure envelope exists | — | review §5 · C |
 | **B-451** | `DONE` | f6ea6ec | B-436 (DONE) | OBS-109 |
 | **B-452** | `BLOCKED` | deferred by decision, OBS-105 | — | OBS-116 |
-| **B-453** | `DONE` | `check_identifier_containment`, wired into `ground_report`. 10 tests; 1786 green; the offline demo still emits | — | OBS-122 · OBS-138 |
+| **B-453** | `DONE` | `check_identifier_containment`, wired into `ground_report`. 12 tests, **including two through `investigate()`** — the MCP re-test was expected to exercise this and did not (§10.3), so the wiring is now pinned rather than assumed | — | OBS-122 · OBS-138 |
 | **B-454** | `DONE` | 6598df8 | B-436 (DONE) | OBS-122 |
 | **B-455** | `DONE` | OBS-119 | B-436 (DONE) | OBS-119 |
 | **B-456** | `DONE` | 503b2ac | B-437 (DONE), B-431 (DONE) | OBS-121 |
