@@ -15,6 +15,8 @@ whose job is to prevent shape 5.
 
 from __future__ import annotations
 
+import pytest
+
 from agent_nettools import flows, investigation, render
 from agent_nettools.descent import DescentResult, RungOutcome, run_descent
 from agent_nettools.fixtures import fixture_sender
@@ -26,14 +28,24 @@ def _resolver(_subject):
     return "PE2"
 
 
+#: Router ID -> owning device, from the inventory. Used instead of a fixed
+#: resolver so a test can run an investigation in either direction.
+_OWNER = {"10.255.0.12": "PE2", "10.255.0.31": "RR1"}
+
+
 def _descent(label):
+    return _descent_between("RR1", SUBJECT, label=label)
+
+
+def _descent_between(device, subject, label="broken"):
     from agent_nettools.epoch import collect_epoch
 
     flow = flows.flow_for("bgp_session")
-    built = collect_epoch(flow, "RR1", SUBJECT, resolver=_resolver,
+    resolve = _OWNER.__getitem__
+    built = collect_epoch(flow, device, subject, resolver=resolve,
                           sender=fixture_sender(label=label))
-    return run_descent(flow, "RR1", SUBJECT,
-                       collector=lambda d, _r, _s: built.for_device(d), resolver=_resolver)
+    return run_descent(flow, device, subject,
+                       collector=lambda d, _r, _s: built.for_device(d), resolver=resolve)
 
 
 # --------------------------------------------------------------------------- #
@@ -343,25 +355,78 @@ def test_the_report_states_its_rung_count_and_numbers_every_observation():
         assert observation["claim"].startswith(f"{position}/5 ")
 
 
-def test_every_observation_names_the_device_it_was_evaluated_against():
-    """The other half of OBS-115, and the half that sends someone to the wrong
-    router.
+#: Both directions of the same session. The **same two rungs** resolve to
+#: opposite devices depending on which end the investigation runs from, which is
+#: why no test here may name a device literally.
+#:
+#: `(device, subject, subject_device, expected_finding)`
+DIRECTIONS = [
+    ("RR1", "10.255.0.12", "PE2", "interface_line_down"),
+    ("PE2", "10.255.0.31", "RR1", "peer_unreachable_no_route"),
+]
 
-    `igp_adjacency` and `interface` resolve to **PE2** for `RR1 -> 10.255.0.12`,
-    because the far end is where the fault lives (Q-013). A restatement that
-    attributes them to RR1 is confident, specific, fully sourced and wrong about
-    which device to go and look at.
+
+@pytest.mark.parametrize(
+    ("device", "subject", "subject_device", "finding"),
+    DIRECTIONS,
+    ids=[f"{d}->{s}" for d, s, _, _ in DIRECTIONS],
+)
+def test_subject_scoped_rungs_resolve_to_the_subjects_device(
+    device, subject, subject_device, finding
+):
+    """A subject-scoped rung is evaluated against **the subject's** device.
+
+    **This test replaces one that hardcoded `PE2`, and the reason is the point.**
+    `igp_adjacency` and `interface` carry `DeviceScope.SUBJECT` because the far
+    end is where the fault lives (Q-013, OBS-055). Which device that *is*
+    depends entirely on the direction of the investigation:
+
+        RR1 -> 10.255.0.12   subject device PE2
+        PE2 -> 10.255.0.31   subject device RR1
+
+    A fixed name passes for one direction and is wrong for the other, so it
+    would pin a specific investigation's mapping as though it were the rule --
+    §0.13's tests face, arriving through a *specification* rather than an
+    implementation. Parameterising over both directions makes the assertion
+    about resolution rather than about a device, and fails if resolution is ever
+    hardcoded.
     """
 
-    descent = _descent("broken")
+    descent = _descent_between(device, subject)
+    scopes = {r.name: r.device_scope for r in flows.flow_for("bgp_session").descent}
+    seen = {o.rung: o.device for o in descent.outcomes}
+
+    assert descent.finding == finding, "the two directions are genuinely different cases"
+
+    for rung, scope in scopes.items():
+        expected = subject_device if scope is flows.DeviceScope.SUBJECT else device
+        assert seen[rung] == expected, (
+            f"{rung} ({scope.value}) resolved to {seen[rung]}, expected {expected}"
+        )
+
+    # And the rendered report says so on every line, which is the half that
+    # decides which router someone walks to.
     report = render.render_report(descent)
-
-    devices = {o.rung: o.device for o in descent.outcomes}
-    assert devices["igp_adjacency"] == "PE2" and devices["interface"] == "PE2"
-
     for outcome, observation in zip(descent.outcomes, report["observations"], strict=True):
         assert f"on {outcome.device}" in observation["claim"]
 
+
+def test_the_two_directions_disagree_about_the_same_rungs():
+    """The assertion above is only meaningful if the directions differ.
+
+    Without this, a resolver bug that returned the local device for everything
+    would satisfy both parameterisations of a weaker test and look correct.
+    """
+
+    by_direction = {
+        device: {o.rung: o.device for o in _descent_between(device, subject).outcomes}
+        for device, subject, _, _ in DIRECTIONS
+    }
+
+    assert by_direction["RR1"]["igp_adjacency"] == "PE2"
+    assert by_direction["PE2"]["igp_adjacency"] == "RR1"
+    assert by_direction["RR1"]["bgp_session"] == "RR1"
+    assert by_direction["PE2"]["bgp_session"] == "PE2"
 
 def test_the_payload_carries_the_same_count_and_numbering():
     """A consumer reading the payload rather than the report gets it too --

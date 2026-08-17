@@ -3259,23 +3259,22 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
-## OBS-115 · B-439 · The live case: a model restatement dropped a rung and misattributed a device
+## OBS-115 · B-439 · The live case: a model restatement dropped a rung
 
 - **Kind:** defect-observed
 - **Escalation:** DECIDE-AND-LOG
 - **Model:** opus-5 (recording an operator result)
 - **What happened:** **B-439 was justified by argument. It now has an observation.**
 
-  `investigate_lab_session` returned a deterministic report carrying **five rungs, each with the device it was evaluated against**. The model's prose restatement of that result, in conversation:
+  **Corrected 2026-08-17 — see the amendment at the end of this entry. The device-misattribution half of this finding was false and has been withdrawn.**
 
-  * **listed four rungs, omitting `route_to_peer`** — which it had reported correctly one message earlier;
-  * **attributed IS-IS and interface health to RR1**, when both rungs resolve to **PE2**.
+  `investigate_lab_session` returned a deterministic report carrying **five rungs, each with the device it was evaluated against**. The model's **first** report listed all five, including `route_to_peer`, correctly. Its **recovery message**, restating the same result later in the conversation, **listed four — omitting `route_to_peer`**.
 
-  Three messages, no probing, no adversarial prompt. Nobody was testing for it.
+  No probing, no adversarial prompt. Nobody was testing for it.
 - **Evidence:** Operator-observed, `gemma-4-e4b` over LM Studio, same session as OBS-112/113.
 - **What I did:** Recorded against B-439.
 
-  **Both errors are exactly the failure the reviewers described, in miniature.** Dropping `route_to_peer` removes a link from the causal chain, so the remaining four still read as a coherent explanation — of a path that was never checked. Misattributing IS-IS and interface health to RR1 inverts the single most important thing the descent establishes: **those rungs resolve to PE2 because the far end is where the fault lives** (Q-013, OBS-055), and reporting them against RR1 would send an engineer to the wrong device with a confident, specific, fully-sourced answer.
+  **The surviving error is the reviewers' failure in miniature.** Dropping `route_to_peer` removes a link from the causal chain, and the remaining four still read as a coherent explanation — of a path that was never checked. It is the *degradation across a restatement* that matters, not its size: the model had the correct five-rung answer and lost one of them while saying it again.
 
   **The distinction that makes this a stronger result than expected.** This was **not** the `paraphrase` field — the MCP tool produces none, by design. This was the chat model restating a *correct* deterministic report in ordinary conversation. So the degradation happened **downstream of every gate this build has**, on a surface we do not control and cannot instrument.
 
@@ -3294,6 +3293,24 @@ and should be scored as a corpus result, not as a diagnostic error.
   **The minimal design call, taken:** the report shape states `rungs_examined` and numbers every observation `1/5 … 5/5`, each naming its device; the payload carries `position`/`of` on every rung. A restatement listing four is then visibly short to a human reading both.
 
   **It is not enforcement and must not be written as though it is.** Nothing here prevents a chat client from dropping a rung. It makes the omission *detectable* at a boundary where nothing can be enforced — which is a real but strictly weaker thing, and the distinction is exactly the one this build keeps having to make between a structural guarantee and a convention.
+
+  ### Amendment 2026-08-17 — the misattribution claim was false, and the error was the operator's
+
+  **Withdrawn in full: the model did not misattribute any device. It read the payload correctly.**
+
+  The MCP investigation was `device=PE2, subject=10.255.0.31`. `10.255.0.31` is **RR1's** router ID, so the subject device was RR1, `igp_adjacency` and `interface` resolved to **RR1**, and the payload said RR1 per rung. The descent was right and so was the model.
+
+  The claim came from carrying the device mapping from round 2 — `RR1 → 10.255.0.12`, where the same two rungs resolve to **PE2**. Same fact, reversed direction, wrong investigation.
+
+  **This is silent-failure shape 6, committed about a prior exchange, without the payload in front of the person making the claim** — which is precisely the failure OBS-114 describes, by the person who directed OBS-114 be written. The operator records it as the second time in this project they have asserted something about an earlier exchange that the record contradicts.
+
+  Two things make it worth more than a correction.
+
+  **It nearly became a test.** `test_every_observation_names_the_device_it_was_evaluated_against` asserted `igp_adjacency == "PE2"` — true for round 2's direction and false for the one being discussed. It passed, because it was written against the *wrong investigation*, and a passing test would have pinned the error as expected behaviour. That is **§0.13's tests face arriving through a specification rather than an implementation**: the code was never wrong, the test agreed with a mistaken description of it, and nothing in the suite could have told them apart. The test is now parameterised over both directions (`PE2 → RR1` and `RR1 → PE2`) and asserts *resolution*, not a device name; a falsification check confirms it fails when resolution is hardcoded.
+
+  **OBS-114 generalises further than it was written.** It was recorded as a property of *models* — recall and generation being one operation. The mechanism is narrower than the failure: **anyone reasoning about a prior exchange without the record in front of them is reconstructing it**, and a confident reconstruction is indistinguishable from a memory. The rule that follows is the same one already written into `prompts/README.md`, and it is not model-specific: *a claim about earlier content must be checked against that content, supplied from the record.*
+
+  **A smaller correction in the same direction.** The B-439 sub-item was **partly already satisfied** before it was requested — every rung already carried its own `device` field, in both the report and the payload. Only the count was missing. What landed is therefore narrower than it was specified as, and the entry above should not be read as though numbering introduced per-rung devices.
 
 ---
 

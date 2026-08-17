@@ -215,24 +215,26 @@ claim measures nothing, because one side of the comparison is regenerated.
 
 Recorded as **OBS-114**.
 
-### 6.2 A model restatement dropped a rung and misattributed a device — the live case for B-439
+### 6.2 A model restatement dropped a rung — the live case for B-439
 
-The tool returned five rungs with their devices. The model's prose restatement:
+The tool returned five rungs with their devices. The model's **first** report
+listed all five correctly. Its **recovery message**, restating the same result,
+**listed four — omitting `route_to_peer`**.
 
-* **listed four**, omitting `route_to_peer` — which it had reported correctly
-  one message earlier;
-* **attributed IS-IS and interface health to RR1**, when both rungs resolve to
-  **PE2**.
+No probing. Nobody was testing for it.
 
-Three messages. No probing. Nobody was testing for it.
+It is the reviewers' scenario in miniature. Dropping `route_to_peer` removes a
+link from the chain, and the remaining four still read as a coherent explanation
+— of a path that was never checked. What matters is not the size of the loss but
+that it happened *across a restatement*: the model had the correct answer and
+lost part of it while saying it again.
 
-Both errors are the reviewers' scenario in miniature. Dropping `route_to_peer`
-removes a link from the chain, and the remaining four still read as a coherent
-explanation — of a path that was never checked. Misattributing IS-IS and
-interface health to RR1 inverts the single most important thing the descent
-establishes: **those rungs resolve to PE2 because the far end is where the fault
-lives** (Q-013). An engineer acting on it goes to the wrong device with a
-confident, specific, fully-sourced answer.
+> **A second claim was made here and withdrawn: that the model misattributed IS-IS
+> and interface health to RR1. It did not — it read the payload correctly.** The
+> investigation was `PE2 → 10.255.0.31`, and `10.255.0.31` is RR1's router ID, so
+> those subject-scoped rungs *did* resolve to RR1. The claim came from carrying
+> round 2's mapping (`RR1 → 10.255.0.12`, where the same rungs resolve to PE2) —
+> same fact, reversed direction, wrong investigation. See §6.6.
 
 **This was not our `paraphrase` field** — the MCP tool produces none, by design.
 It was a chat model restating a *correct* deterministic report in ordinary
@@ -260,6 +262,44 @@ every observation `1/5 … 5/5`, each naming its device. A four-item restatement
 is then visibly short to a human reading both. **This is not enforcement and is
 not described as such** — it makes an omission detectable where nothing can be
 enforced.
+
+### 6.6 The correction: shape 6, committed about this experiment
+
+Recorded here rather than quietly amended, because it is the most instructive
+thing in the document and it happened *while writing it up*.
+
+The misattribution claim in §6.2 was false. The device mapping was carried from
+a different investigation running in the opposite direction. **Neither the model
+nor the code was wrong; the account of them was.**
+
+Three things follow.
+
+**It is the failure §6.1 describes, from the other side of the conversation.**
+OBS-114 was recorded as a property of models: recall and generation are one
+operation, so a model checking what it said produces a fresh claim rather than
+retrieving an old one. The mechanism is narrower than the failure. **Anyone
+reasoning about a prior exchange without the record in front of them is
+reconstructing it**, and a confident reconstruction is indistinguishable from a
+memory. The rule already written into `prompts/README.md` is not model-specific.
+
+**It nearly became a test.** A test asserting `igp_adjacency == "PE2"` was
+written from the mistaken description — true for round 2's direction, false for
+this one — and it **passed**, because the code was never wrong and the test
+agreed with a wrong account of it. A passing test would have pinned the error as
+expected behaviour, and nothing in the suite could have distinguished the two.
+That is §0.13's tests face arriving through a *specification* rather than an
+implementation, which is the harder direction to catch: reviewing the code would
+not have found it.
+
+The test now parameterises over both directions and asserts *resolution* rather
+than a device name, with a falsification check confirming it fails when
+resolution is hardcoded.
+
+**One smaller correction in the same direction.** The B-439 sub-item was partly
+already satisfied before it was requested — every rung already carried its own
+`device` field. Only the count was missing, so what landed is narrower than it
+was specified as.
+
 
 ### 6.3 Argument fabrication — the uncovered boundary (B-459)
 
@@ -423,4 +463,4 @@ a model was what made anyone check.
 
 Findings: **OBS-111** (the audit), **OBS-112** (selection), **OBS-113**
 (argument fabrication), **OBS-114** (self-report), **OBS-115** (the dropped
-rung).
+rung, with its misattribution half withdrawn — §6.6).
