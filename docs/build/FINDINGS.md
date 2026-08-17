@@ -1742,6 +1742,31 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-146 · B-465 · My own backlog scoping was wrong, and writing the fix is what showed it
+
+- **Kind:** assumption-wrong
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** I filed B-465 (OBS-143) with two pieces of work, and wrote the second as: *"give `suspicious_baseline` a way to flag any baseline that disagrees with a role invariant, not only a zero."*
+
+  **That would not have caught the case that motivated the item.** PE1's recorded baseline is `isis_adjacencies: 1`. The role invariant is `_isis_isolated`, which requires **at least one**. So `1` does not disagree with any role invariant, and a widened `suspicious_baseline` would have passed it exactly as the narrow one does.
+- **Evidence:** `checks._isis_isolated` fires only on zero records; `inventory/lab.yaml` records PE1 at `1`; the MCP re-test observed `2`.
+- **What I did:** **The defect is direction, not the invariant.** `_isis_adjacency_count_drift` fired at `warning` on *any* difference, so once the fabric was repaired it reported the repair — and a warning about a restored adjacency is indistinguishable from one about a lost adjacency, which is the only case the rule was built for.
+
+  An increase is now `info`, says the baseline is likely stale, and names `learn-topology`. A decrease is unchanged at `warning`. **It is not silenced**: a genuinely new adjacency is worth a line, and suppressing it would trade one blind spot for another.
+
+  This needed one small mechanism: a finding fragment may now carry `severity` and override its rule's. Documented as the exception rather than the pattern — *a rule reaching for it routinely is two rules* — and used here because losing and gaining an adjacency are the same rule and not the same news. Splitting into `..._up`/`..._down` would break anyone filtering on the existing name for a distinction better carried in the finding.
+
+  **What the mis-scoping came from, because that is the transferable part.** I generalised from the two devices I had looked at. PE2 and PE4 record `0`, and `0` *is* a role-invariant violation, so "the baseline violates a role invariant" fitted both instances perfectly and read as the general form. **PE1 was in the same finding, one line down, and did not fit** — I had the counterexample in hand when I wrote the rule and did not check the rule against it.
+
+  That is §0.13's **rules face** exactly: a generalisation drawn from instances that happened to share a property the general case does not have. The build's standing detector for it is *"each caught by the next instance arriving"* — and here the next instance had already arrived. **Writing the fix is what checked the rule against the data; filing it did not.**
+
+  Worth keeping as a working rule: **a backlog item that names its own fix has had the fix designed at the moment of least information.** Filing should name the *defect*; the fix belongs to whoever has the code open.
+- **Needs human review:** no
+- **Blocks:** nothing. B-465's remaining half — re-run `learn-topology` against the current fabric — needs the lab.
+
+---
+
 <!--
 Copy this block for each new entry.
 

@@ -1150,10 +1150,34 @@ def _isis_adjacency_count_drift(ctx: RuleContext) -> list[dict[str, Any]]:
     actual = len(ctx.isis_records)
     if actual == expected:
         return []
+
+    # B-465. Direction matters, and treating both directions as one `warning`
+    # was measured wrong: the MCP re-test found every baseline here stale --
+    # derived from the broken fabric and never re-derived -- so the rule fired
+    # on devices that had been *repaired*. An adjacency count reported as drift
+    # because connectivity was restored is indistinguishable from one reported
+    # because connectivity was lost, and only the second is a fault.
+    if actual > expected:
+        return [
+            {
+                "intent": "isis",
+                "severity": "info",
+                "message": (
+                    f"IS-IS adjacency count {actual} is above the recorded "
+                    f"baseline {expected}. More adjacencies than expected is not "
+                    "a fault; the baseline is likely stale. Re-run "
+                    "`nettools learn-topology` against the current fabric."
+                ),
+                "expected": expected,
+                "actual": actual,
+                "subject": None,
+            }
+        ]
+
     return [
         {
             "intent": "isis",
-            "message": f"IS-IS adjacency count {actual} differs from the recorded "
+            "message": f"IS-IS adjacency count {actual} is below the recorded "
             f"baseline {expected}.",
             "expected": expected,
             "actual": actual,
@@ -1279,7 +1303,14 @@ def evaluate_device(evidence: dict[str, Any], device: Device) -> dict[str, Any]:
             findings.append(
                 {
                     "rule": rule.name,
-                    "severity": rule.severity,
+                    # A rule's severity is normally a property of the rule. A
+                    # fragment may override it when severity genuinely depends
+                    # on the *instance* rather than the kind -- see
+                    # `_isis_adjacency_count_drift`, where losing an adjacency
+                    # and gaining one are the same rule and not the same news.
+                    # The override is deliberate and rare; a rule reaching for
+                    # it routinely is two rules.
+                    "severity": raw.get("severity", rule.severity),
                     "intent": raw.get("intent"),
                     "message": raw["message"],
                     "expected": raw.get("expected"),

@@ -356,6 +356,92 @@ def test_isis_adjacency_count_drift_fires_on_mismatch_and_skips_when_absent():
     assert "isis_adjacency_count_drift" not in {f["rule"] for f in no_baseline["findings"]}
 
 
+def test_losing_an_adjacency_warns_and_gaining_one_does_not():
+    """B-465. Direction matters, and treating both as `warning` was measured wrong.
+
+    Every `expected:` block in this lab was derived by `learn-topology` from
+    the **broken** fabric and never re-derived. The fabric was then repaired,
+    so the drift rule began firing on devices that had got *better* — and a
+    warning about a restored adjacency is indistinguishable from one about a
+    lost adjacency, which is the only case the rule was built for.
+
+    An increase is `info` and says the baseline is probably stale. It is not
+    silenced: a genuinely new adjacency is still worth a line, and suppressing
+    it would trade one blind spot for another.
+    """
+
+    two_up = {
+        "platform": "cisco_xr",
+        "isis": _parsed_section([
+            {"system_id": "P1", "state": "Up"},
+            {"system_id": "P2", "state": "Up"},
+        ]),
+    }
+
+    # Observed 2, baseline 1 -- the repaired case, as measured on PE1.
+    gained = evaluate_device(two_up, _device("PE9", isis_adjacencies=1))
+    drift = [f for f in gained["findings"] if f["rule"] == "isis_adjacency_count_drift"]
+    assert len(drift) == 1
+    assert drift[0]["severity"] == "info"
+    assert "not a fault" in drift[0]["message"]
+    assert "learn-topology" in drift[0]["message"]
+
+    # Observed 2, baseline 3 -- lost connectivity, which is the real case.
+    lost = evaluate_device(two_up, _device("PE9", isis_adjacencies=3))
+    drift = [f for f in lost["findings"] if f["rule"] == "isis_adjacency_count_drift"]
+    assert len(drift) == 1
+    assert drift[0]["severity"] == "warning"
+    assert "below" in drift[0]["message"]
+
+
+def test_a_stale_baseline_no_longer_raises_a_healthy_device_to_warning():
+    """The operational consequence, which is the reason the fix is worth making.
+
+    A device that is genuinely fine, whose only complaint is that it has more
+    adjacencies than a baseline learned from a broken fabric, must not page
+    anyone. Before B-465 this scored `warning`.
+    """
+
+    evidence = {
+        "platform": "cisco_xr",
+        "isis": _parsed_section([
+            {"system_id": "P1", "state": "Up"},
+            {"system_id": "P2", "state": "Up"},
+        ]),
+    }
+
+    verdict = evaluate_device(evidence, _device("PE9", isis_adjacencies=1))
+
+    # This fixture supplies only `isis`, so the other three intents are
+    # correctly `intent_collection_failed` -- absence is never health. What
+    # matters is that **no warning comes from the drift rule**, which is what
+    # raised a repaired device to `warning` before B-465.
+    warnings = [f for f in verdict["findings"] if f["severity"] == "warning"]
+    assert {f["rule"] for f in warnings} == {"intent_collection_failed"}
+    assert all(
+        f["severity"] == "info"
+        for f in verdict["findings"]
+        if f["rule"] == "isis_adjacency_count_drift"
+    )
+
+
+def test_a_fragment_may_override_its_rule_severity_and_normally_does_not():
+    """The override is the exception, and the default must stay the rule's.
+
+    Without this, a fragment forgetting `severity` would silently inherit
+    whatever the last edit left in place rather than the rule's declared value.
+    """
+
+    evidence = {
+        "platform": "cisco_xr",
+        "isis": _parsed_section([{"system_id": "P1", "state": "Up"}]),
+    }
+    verdict = evaluate_device(evidence, _device("PE9", isis_adjacencies=5))
+    drift = [f for f in verdict["findings"] if f["rule"] == "isis_adjacency_count_drift"]
+    # No `severity` in the fragment for the decrease path -> the rule's own.
+    assert drift[0]["severity"] == "warning"
+
+
 def test_bgp_peer_count_drift_fires_on_mismatch_and_skips_when_absent():
     evidence = {
         "platform": "cisco_xr",
