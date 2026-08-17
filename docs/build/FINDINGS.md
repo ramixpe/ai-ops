@@ -3484,6 +3484,61 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-122 · B-459 · The input side of the containment boundary
+
+- **Kind:** defect-fixed
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** Track A, A1. The largest open safety gap: every containment mechanism in this build guards what a tool **returns**, and nothing guarded what a caller **supplies**.
+
+  Measured before the fix, on the committed corpus: `investigate("RR1", "10.255.0.99")` for a peer that does not exist walked all five rungs, produced a rung table, and reported honestly at every step — because at every step it *was* honest. The device has no such neighbour, so rung 1 correctly said the session is not Established, and everything beneath followed.
+- **Evidence:** `tests/test_subject_existence.py`, 11 tests. Refusal produces 0 rungs. 1766 passing.
+- **What I did:** `Flow.subject_present`, declared per flow — `bgp_peer_exists` for `bgp_session`, `interface_exists` for `interface` — run against the epoch's evidence **before the walk**, producing the new finding `subject_not_found`.
+
+  **Four decisions worth recording.**
+
+  **It is not `undetermined`.** That means *a rung could not be read*, and reading is exactly what succeeded: the device answered, and what it said is that it has no such object. A caller told `undetermined` retries; a caller told `subject_not_found` corrects the question. Same distinction B-454 drew between a moved fabric and a slow collection, in a different place.
+
+  **The refusal names what the device does have.** *"RR1 has no BGP neighbour at 10.255.0.99. It has 4: …"* A refusal that only says "not found" invites another guess.
+
+  **It is still a rendered report.** The early return produces a full authoritative report rather than `None`, because B-439's contract has no exception for refusals — and a `None` would send a caller to a model's prose for the one result whose whole value is that it is *not* a claim about the network.
+
+  **The injected-collector path is exempt, deliberately.** A caller supplying its own evidence has already decided what exists; asking it whether the subject is real is asking the test harness to validate the test. §0.13's setup face, and the reason the exemption is `None` rather than a silent pass.
+
+  **What it does not catch, stated so it is not over-scoped later.** An invented object, not a wrong one: a real peer address that is not the one the operator meant passes cleanly — exactly as B-453 catches an invented entity and not a wrong relation. The two items are the same mechanism at opposite ends of the pipeline and they have the same blind spot.
+
+  **A §0.12 audit fired during the work**, which is the cheapest evidence this build has that the audits are load-bearing: adding a universal finding failed `test_every_universal_finding_has_a_registered_next_check` because no recommendation was registered for it. The finding would otherwise have shipped with generic advice nobody wrote.
+- **Needs human review:** no
+- **Blocks:** nothing. A2 next.
+
+---
+
+## OBS-123 · Track A · Four of five items were already done, and measuring said so
+
+- **Kind:** audit
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** Track A listed five items. **A1 was the only one with work in it.** The other four were measured before building, per the operator's standing instruction, and the measurements are the result:
+
+  | Item | Filed as | Measured |
+  |---|---|---|
+  | **A2** B-411 | *"a read timeout returns partial output with `errors: []` and `status: success`"* | **Not reproducible.** netmiko 4.7's `read_timeout` raises; the raise is caught per command; the envelope reports `status: error` with the failing command named, and keeps the outputs that answered |
+  | **A3** B-425 | usage not instrumented | **Done.** `TokenUsage` + `Completion.usage` shipped at B-425 |
+  | **A4** B-403 | consolidation to judge | **Already consolidated.** `health.py` is a re-export shim; all 40 rule definitions are in `checks.py` |
+  | **A5** B-404 | six parsers predate §0.10 | **Done.** All six intents report `unaccounted_lines`, empty across the corpus |
+- **Evidence:** A2 measured with a fake netmiko raising `ReadTimeout` mid-batch: `status='error'`, one error naming `show isis neighbors`, 2 of 3 outputs retained; per-intent slicing isolates it (`isis` error/0 commands, `bgp` success with its output). Two regression tests added.
+- **What I did:** Closed A2 as measured-not-a-defect with the behaviour **pinned**, since "the filed defect does not exist today" is not the same as "it cannot arrive tomorrow" — a retry loop that swallowed the exception, or a transport that returned partial text instead of raising, would both fail the new tests.
+
+  Kept the half of A2's acceptance that survived: *audit every consumer of `status`*. A partial batch isolates cleanly — the failed intent carries `status: error` and **zero** commands, so no consumer can read its absence as data, and its siblings keep a `success` that is true of them.
+
+  **A4 needs no consolidation and the shim stays.** Nine call sites import from `health`, including `mcp_server/server.py`, `cli.py`, `agent_loop.py` and four test modules. Rewriting them buys tidiness and risks a large green suite for it — which is exactly what the item warned against. A shim whose entire content is a documented re-export is not duplication; it is one name for one thing, in the place its callers already look.
+
+  **One thing I got wrong and caught by checking.** My first A5 probe reported `version` as unaccounted, and I nearly filed it as a gap in an item claiming all six were done. There is no `version` intent — it is `facts`. **A defect assembled from a name I did not verify**, which is the same shape as everything else this session and the reason the second probe enumerated `platforms.all_intents()` instead of a list I typed.
+- **Needs human review:** no — four closures at measured size, as the plan asks
+- **Blocks:** nothing. Track A is complete.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**

@@ -115,8 +115,15 @@ Analyst = Callable[[RenderedPrompt], str]
 #: the fabric moved between the walk and the re-read. The lowest broken rung is
 #: a real observation of some instant, and presenting it as the cause of a
 #: symptom read at a different instant is exactly the defect the epoch removes.
+#: `subject_not_found` -- nothing was walked, so there are no rungs and no
+#: cause. The refusal is the whole result.
 _FINDINGS_WITHOUT_A_CAUSE = frozenset(
-    {flows.UNDETERMINED, flows.NO_FAULT_ON_PATH, flows.TEMPORALLY_INCOHERENT}
+    {
+        flows.UNDETERMINED,
+        flows.NO_FAULT_ON_PATH,
+        flows.TEMPORALLY_INCOHERENT,
+        flows.SUBJECT_NOT_FOUND,
+    }
 )
 
 _FENCE = re.compile(r"^\s*```(?:json)?\s*\n(?P<body>.*?)\n?\s*```\s*$", re.DOTALL)
@@ -368,6 +375,12 @@ class InvestigationResult:
         # observations were real, and they do not describe one state.
         if self.descent.finding == flows.TEMPORALLY_INCOHERENT:
             return False
+        # No investigation happened, so there is no answer about the network to
+        # trust. The refusal itself is reliable -- the device was read and said
+        # it has no such object -- but that is a statement about the *question*,
+        # and exit 2 is "no trustworthy answer about the fabric" (B-459).
+        if self.descent.finding == flows.SUBJECT_NOT_FOUND:
+            return False
         # The authoritative report is always produced, so it can no longer be
         # withheld. A rejected *paraphrase* does not make the answer
         # untrustworthy -- the answer is the rendered report, and the model
@@ -562,6 +575,36 @@ def investigate(
             the_flow, outcomes, epoch, subject,
             device=device, resolver=resolve, sender=sender,
         )
+
+    # -- Does the subject exist? Asked before anything is walked (B-459). ----
+    #
+    # **The input side of the containment boundary.** Everything else in this
+    # build guards what a tool *returns*; nothing guarded what a caller
+    # *supplies*, and a fabricated peer address produces a fully grounded,
+    # correctly cited investigation of a session that does not exist -- with no
+    # component malfunctioning, which is why no gate caught it.
+    #
+    # Only on the epoch path. An injected collector has already decided what
+    # evidence exists, so asking it whether the subject is real would be asking
+    # the test harness to validate the test.
+    if epoch is not None and the_flow.subject_present is not None:
+        presence = the_flow.subject_present(epoch.for_device(device), subject)
+        if presence.status == "broken":
+            refused = DescentResult(
+                flow=the_flow.object_type, device=device, subject=subject,
+                finding=flows.SUBJECT_NOT_FOUND,
+                evidence_keys=tuple(presence.evidence_keys),
+                reason=presence.reason,
+            )
+            return InvestigationResult(
+                device=device, subject=subject, flow=flow, descent=refused,
+                # Still rendered. The refusal is the answer, and B-439's
+                # contract is that the authoritative half is always produced --
+                # a `None` here would send a caller to a model's prose for the
+                # one result whose value is that it is *not* a claim about the
+                # network.
+                report=render_report(refused), report_status=EMITTED,
+            )
 
     descent = run_descent(
         the_flow, device, subject,

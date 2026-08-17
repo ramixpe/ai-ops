@@ -329,6 +329,23 @@ class Flow:
     descent: tuple[Rung, ...]
     findings: frozenset[str]
 
+    #: Does the subject this investigation names actually exist on the device?
+    #:
+    #: **B-453 pointed the other way.** B-453 checks that every identifier in a
+    #: model's *output* appears in the evidence; this checks that the identifier
+    #: in its *input* appears on the device, before anything is walked. Same
+    #: direction of suspicion, opposite end of the pipeline.
+    #:
+    #: Declared per flow because "does this subject exist" is a different
+    #: question per object type -- a peer address is looked for in the BGP
+    #: summary, an interface name in the interface list -- and inferring it from
+    #: the object type's name is the implicit rule this registry exists to
+    #: avoid.
+    #:
+    #: ``None`` means the flow has not declared one, which is a *gap*, not a
+    #: pass: `test_flows.py` requires every implemented flow to declare it.
+    subject_present: Callable[..., CheckResult] | None = None
+
     def __post_init__(self) -> None:
         declared = {rung.finding for rung in self.descent}
         missing = declared - self.findings
@@ -353,6 +370,22 @@ UNDETERMINED = "undetermined"
 #: Rungs broken above, everything healthy below -- nothing beneath to explain
 #: them. An honest answer, not a failure (Q-017).
 CAUSE_NOT_LOCALISED = "cause_not_localised"
+
+#: The subject does not exist on this device (B-459).
+#:
+#: **Not `undetermined`.** That means *a rung could not be read*, and reading it
+#: is exactly what succeeded here: the device answered, and what it said is that
+#: it has no such object. A caller told `undetermined` retries; a caller told
+#: `subject_not_found` corrects the question.
+#:
+#: This is the finding that closes the argument-fabrication gap. Every
+#: containment mechanism in this build operates on what a tool *returns*;
+#: nothing constrained what a model *supplies*. A fabricated peer address walks
+#: the whole ladder, cites real evidence keys, passes grounding, and produces a
+#: fully sourced investigation of a session that does not exist -- with nothing
+#: malfunctioning anywhere, because every component did its job on the input it
+#: was given.
+SUBJECT_NOT_FOUND = "subject_not_found"
 
 #: Rung 1 is healthy, and something *below* it is broken. There is no symptom
 #: to explain, so nothing beneath can be its cause -- the broken rungs are real
@@ -388,6 +421,7 @@ UNIVERSAL_FINDINGS = frozenset(
         CAUSE_NOT_LOCALISED,
         NO_FAULT_ON_PATH,
         TEMPORALLY_INCOHERENT,
+        SUBJECT_NOT_FOUND,
     }
 )
 
@@ -447,6 +481,7 @@ INTERFACE_FLOW = Flow(
         ),
     ),
     findings=frozenset({"interface_line_down"}) | UNIVERSAL_FINDINGS,
+    subject_present=_checks.interface_exists,
 )
 
 
@@ -527,6 +562,7 @@ BGP_SESSION_FLOW = Flow(
         }
     )
     | UNIVERSAL_FINDINGS,
+    subject_present=_checks.bgp_peer_exists,
 )
 
 

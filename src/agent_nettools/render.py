@@ -118,6 +118,12 @@ _NEXT_CHECK: dict[str, str] = {
         "A rung could not be read, so nothing below it was evaluated. Fix the "
         "collection failure and run again."
     ),
+    flows.SUBJECT_NOT_FOUND: (
+        "This device has no such object. Check the name or address against the "
+        "device's own inventory of them -- the reason lists what it does have. "
+        "Nothing was investigated, so nothing here is a statement about the "
+        "network."
+    ),
     flows.TEMPORALLY_INCOHERENT: (
         "The fabric changed while it was being read, so these observations do "
         "not describe one state. Run again once it has settled."
@@ -225,6 +231,19 @@ def render_report(descent: DescentResult) -> dict[str, Any]:
                 f"evaluated and no cause can be named. Reason: {descent.reason}"
             ),
             "based_on": [f"obs-{n}" for n in index.values()],
+        })
+    elif descent.finding == flows.SUBJECT_NOT_FOUND:
+        # No rungs, so no observations to cite. The refusal *is* the report, and
+        # it must still be a report rather than a null -- B-439's contract is
+        # that the authoritative half is always produced, and a caller handed
+        # `None` here would fall back to a model's prose for the one result
+        # whose whole value is that it is not a claim about the network.
+        interpretations.append({
+            "claim": (
+                f"No investigation was run: {descent.reason} Nothing here is a "
+                f"statement about the network."
+            ),
+            "based_on": [],
         })
     elif descent.finding == flows.TEMPORALLY_INCOHERENT:
         interpretations.append({
