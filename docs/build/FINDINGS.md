@@ -3347,6 +3347,59 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-117 · B-456 · The path-scoping fix would have checked the wrong device's interfaces
+
+- **Kind:** defect-avoided
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** B-456's premise was *"the route output already names its outgoing interface, so the subset is knowable rather than inferred."* Measured: the first half is true and the conclusion does not follow.
+
+  The route names the **local** device's egress. The interface rung is `SUBJECT`-scoped. For `RR1 → 10.255.0.12` on the healthy label:
+
+  ```
+  route on RR1 names:    GigabitEthernet0/0/0/0, GigabitEthernet0/0/0/1   (RR1's ports)
+  interface rung checks: Gi0/0/0/0, Gi0/0/0/1, Gi0/0/0/2                  (PE2's ports)
+  ```
+
+  **And the naive implementation is actively wrong on this fabric, not merely useless.** Both devices have interfaces named `Gi0/0/0/0` and `Gi0/0/0/1`. Canonicalising through `interface_kind` — which is precisely what the item proposed, and the right thing to do within a device — makes them **match**. A path-scoping filter built that way would scope PE2's rung by RR1's interface names, produce a plausible member set, and be wrong about which router it was talking about.
+- **Evidence:** Measured across the committed corpus: 85 route fixtures parsed, `interface` and `path_role` present on every path record. The RR1/PE2 name collision confirmed directly on the healthy label.
+- **What I did:** Corrected the premise before implementing, and took the variant that works: read the route **on the subject device, back toward the local device's loopback**. `show route 10.255.0.31/32` on PE2 names PE2's own egress toward RR1. Same information, right device, and it batches into the subject's existing session so it costs no extra login.
+
+  **Why this is worth a finding and not a design note.** It is **B-461's shape — a report naming the wrong device — arriving through the fix for a different problem.** Nobody would have caught it by reviewing the fix against its own goal: scoping the interface rung to the path is correct, `interface_kind` canonicalisation is correct, and the two composed produce a wrong answer that a uniformly-named fabric renders invisible.
+
+  **It is the second time this session a fix has carried the failure it was adjacent to.** The first was the B-113 rewording nearly confounding its own experiment by leaving one description in a distinct form (§0.13's setup face, new route). This one is different in mechanism and identical in shape: *the repair inherits the defect class of the thing it repairs*, and in both cases the concealment came from something that looks like good practice — preserving evidence in the first, canonicalising names in the second.
+
+  **The general check, which is cheap:** when a fix moves data between two scopes — devices, sessions, time windows — ask what identifier is being used to join them and whether that identifier is unique across the join. A name that is unique *within* a device is not a key *across* devices, and a naming convention that makes it look like one is a hazard rather than a convenience.
+- **Needs human review:** no — premise correction accepted, three design decisions taken by the operator
+- **Blocks:** nothing.
+
+---
+
+## OBS-118 · B-456 · The corpus cannot settle the LFA timing question, and the zero was vacuous
+
+- **Kind:** measurement-refused
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** Path scoping inherits a timing dependency: **can a down interface persist in the route table as an LFA backup before reconvergence completes?** If it can, the member set includes a port that is down but still named, and the rung reports a degradation that is really a stale route entry.
+
+  The operator made this the gating item rather than a footnote, since round 5 established this ladder gets read mid-convergence.
+
+  Searched every device and label: **70 routes with a path, zero naming a down interface.**
+
+  **That zero is vacuous.** The corpus contains **no device with a down physical port and a surviving route** — the one label with down ports is `broken`, where PE2 is isolated and the route is `found=False`. Zero hits is what a corpus that cannot contain the case returns, and it is indistinguishable from zero hits in a corpus that could.
+- **Evidence:** 70 routes examined across all devices and labels; 0 devices satisfying both conditions.
+- **What I did:** Refused to conclude, per the operator's instruction not to assume either way, and applied §0.12's anti-vacuity discipline to a **measurement** rather than to a test.
+
+  **This is the part worth keeping.** The first result — *"zero routes name a down interface"* — is a perfectly good sentence, it is true, and reporting it as evidence that down interfaces do not persist would have been wrong. The check that caught it is the same one §0.12 prescribes for guardrails, pointed at an analysis: *before believing a negative, ask whether the corpus could have produced a positive.*
+
+  Anti-vacuity has been applied to tests throughout this build. This is the first time it has been applied to a **measurement**, and the failure mode is worse there: a vacuous test is a green tick nobody reads, while a vacuous measurement becomes a sentence in a document that a later decision rests on.
+
+  **Shipped with the dependency recorded as open**, not assumed away. It is the subject of the next injection round — a fault that leaves a port down while a route survives, which is exactly the round-4 topology and therefore cheap to arrange.
+- **Needs human review:** no — the operator pre-authorised this branch
+- **Blocks:** nothing. **B-462** files the round.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**
