@@ -1,0 +1,29 @@
+2026-08-17T16:10:45.673Z  round 8 start  device=PE2  peer=10.255.0.31  65000->65001 +ebgp-multihop  dry_run=False
+2026-08-17T16:10:45.673Z  opening sampler session
+2026-08-17T16:10:46.494Z  opening injector session
+2026-08-17T16:10:50.125Z  baseline captured (5 sections)
+2026-08-17T16:10:50.126Z  --- baseline: 4 samples ---
+2026-08-17T16:10:56.394Z    session: {'present': True, 'remote_as': '65000', 'state': 'Established', 'established': True}
+2026-08-17T16:10:56.394Z    neighbor: fsm=Established socket_armed=False socket_reported=True
+2026-08-17T16:10:56.394Z    bfd: {'present': True, 'state': 'No'}
+2026-08-17T16:10:56.395Z  --- applying: remote-as 65001 + ebgp-multihop 5 ---
+2026-08-17T16:10:56.860Z  applied (push said 'sent+committed+exited') — dense sampling for 240s
+2026-08-17T16:14:57.652Z  --- dense done, sparse for 60s ---
+2026-08-17T16:15:57.653Z  RESTORE starting (round-complete)
+2026-08-17T16:16:03.850Z  RESTORE verified on attempt 1 — config identical, no ebgp-multihop remaining (push said 'sent+committed+exited')
+2026-08-17T16:16:03.850Z  --- 60s of post-restore sampling ---
+2026-08-17T16:17:03.856Z  --- verdict ---
+2026-08-17T16:17:03.856Z    samples_post_fault: 178
+2026-08-17T16:17:03.856Z    mean_sample_seconds: 1.563
+2026-08-17T16:17:03.856Z    SEPARATION_OBSERVED: False
+2026-08-17T16:17:03.856Z    separation_sample_count: 0
+2026-08-17T16:17:03.857Z    samples_socket_armed: 0
+2026-08-17T16:17:03.857Z    samples_socket_not_reported: 0
+2026-08-17T16:17:03.857Z    fsm_states_seen: ['Closing', 'Connect', 'Established', 'Idle', 'OpenSent']
+2026-08-17T16:17:03.857Z    last_reset_reasons_seen: ['notification']
+2026-08-17T16:17:03.857Z    bfd_states_seen: ['No']
+2026-08-17T16:17:03.857Z    discriminator_tcp_established: False
+2026-08-17T16:17:03.857Z    discriminator_reset_names_as: True
+2026-08-17T16:17:03.857Z    discriminator_reset_names_bfd: False
+2026-08-17T16:17:03.857Z    note: Socket never armed after the fault. The vector alone cannot distinguish the AS rejection from TTL/multihop or BFD — read last_reset_reasons_seen and bfd_states_seen before scoring. A separation shorter than the sampling resolution (~1.563s) is bounded above, not measured as absent.
+2026-08-17T16:17:03.879Z  round 8 complete
