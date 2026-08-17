@@ -23,6 +23,117 @@ Which is why the backlog is deliberately shallow in places it could be deep. The
 MVP-0 proves the deterministic descent. MVP-1 adds the parts where the model gets to influence what happens next, each fenced by a typed contract.
 
 | ID | Item | Why | Depends on | Size | Decision |
+## Reconciliation — 2026-08-17 (PLAN-V2 Gate Zero)
+
+Every item carries **state**, **evidence**, **dependencies with their states**, and
+**last touched**. Produced because the previous plan was written from item titles and
+scheduled four completed items and a track with no runnable work (OBS-123, OBS-124).
+
+`unverified` is **not** `OPEN`. It means nobody has checked — a different state from
+checked-and-still-open, and conflating them is what the last plan did.
+
+| Item | State | Evidence | Depends on (state) | Last touched |
+|---|---|---|---|---|
+| **B-101** | `OPEN` | PLAN-V2 P2.1 | MVP-0 complete | OBS-124 |
+| **B-102** | `unverified` | unverified | B-101 (OPEN) | — |
+| **B-103** | `unverified` | unverified | B-101 (OPEN), B-102 (unverified) | — |
+| **B-104** | `unverified` | unverified | MVP-0 complete | — |
+| **B-105** | `unverified` | unverified | B-104 (unverified) | — |
+| **B-106** | `unverified` | unverified | B-104 (unverified) | — |
+| **B-107** | `OPEN` | PLAN-V2 P2.2 | MVP-0 complete | OBS-124 |
+| **B-108** | `unverified` | unverified | B-107 (OPEN) | — |
+| **B-109** | `unverified` | unverified | B-107 (OPEN) | — |
+| **B-110** | `unverified` | unverified | T-006 finding | — |
+| **B-111** | `OPEN` | PLAN-V2 P2.3 | T-006 | OBS-086 |
+| **B-112** | `unverified` | unverified | B-101 (OPEN) | — |
+| **B-113** | `OPEN` | rewording DONE 6637368; consolidation open, P1.4 | MVP-0 complete | OBS-117 |
+| **B-114** | `unverified` | unverified | B-101 (OPEN) | — |
+| **B-115** | `unverified` | unverified | MVP-0 complete | — |
+| **B-201** | `unverified` | unverified | T-005 finding | — |
+| **B-202** | `unverified` | unverified | T-004, T-015 | — |
+| **B-203** | `unverified` | unverified | MVP-1 complete | — |
+| **B-204** | `unverified` | unverified | B-203 (unverified) | — |
+| **B-205** | `unverified` | unverified | B-203 (unverified) | — |
+| **B-206** | `BLOCKED` | platform work B-206a/b | B-206 (BLOCKED), B-206 (BLOCKED) | OBS-124 |
+| **B-207** | `unverified` | unverified | B-201 (unverified) | — |
+| **B-208** | `unverified` | unverified | B-201 (unverified) | — |
+| **B-209** | `unverified` | unverified | T-035 | — |
+| **B-210** | `unverified` | unverified | B-402 (DONE) | — |
+| **B-301** | `unverified` | unverified | — | — |
+| **B-302** | `unverified` | unverified | B-301 (unverified) | — |
+| **B-303** | `unverified` | unverified | B-302 (unverified) | — |
+| **B-304** | `unverified` | unverified | B-301 (unverified), B-303 (unverified) | — |
+| **B-305** | `unverified` | unverified | B-304 (unverified) | — |
+| **B-306** | `unverified` | unverified | B-305 (unverified) | — |
+| **B-307** | `unverified` | unverified | B-305 (unverified) | — |
+| **B-401** | `BLOCKED` | no Junos device | **a Junos device** | OBS-086 |
+| **B-402** | `DONE` | OBS-103 | — | OBS-103 |
+| **B-403** | `DONE` | OBS-123 | B-107 (OPEN) | OBS-123 |
+| **B-404** | `DONE` | OBS-123 | MVP-0 | OBS-123 |
+| **B-405** | `unverified` | unverified | MVP-1 | — |
+| **B-406** | `unverified` | unverified | Stage 2 | — |
+| **B-407** | `unverified` | unverified | MVP-1 | — |
+| **B-408** | `unverified` | unverified | Stage 2 | — |
+| **B-409** | `unverified` | unverified | MVP-1 | — |
+| **B-410** | `unverified` | unverified | Stage 2 | — |
+| **B-411** | `DONE` | OBS-123 | — | OBS-123 |
+| **B-412** | `OPEN` | injector script, outside this repo | — | OBS-075 |
+| **B-413** | `DONE` | OBS-059 | — | OBS-059 |
+| **B-414** | `BLOCKED` | OBS-124 | B-206 (BLOCKED) | OBS-124 |
+| **B-415** | `BLOCKED` | OBS-124 | B-206 (BLOCKED) | OBS-124 |
+| **B-416** | `BLOCKED` | OBS-124 | B-414 (BLOCKED) | OBS-124 |
+| **B-417** | `BLOCKED` | OBS-124 | B-107 (OPEN) | OBS-124 |
+| **B-418** | `BLOCKED` | OBS-124 | B-414 (BLOCKED) | OBS-124 |
+| **B-419** | `BLOCKED` | OBS-124 | B-101 (OPEN), B-414 (BLOCKED) | OBS-124 |
+| **B-420** | `DONE` | T-029a; verified OBS-124 | — | OBS-124 |
+| **B-421** | `DONE` | OBS-102 | T-031 | OBS-102 |
+| **B-422** | `DONE` | struck through | — | — |
+| **B-423** | `DONE` | struck through | — | — |
+| **B-424** | `DONE` | OBS-081 | — | OBS-081 |
+| **B-425** | `DONE` | OBS-123 | — | OBS-123 |
+| **B-426** | `BLOCKED` | earned by rounds, not assumed | B-201 (unverified) | OBS-124 |
+| **B-427** | `BLOCKED` | needs B-426 | B-426 (BLOCKED) | OBS-098 |
+| **B-428** | `DONE` | OBS-124 | — | OBS-124 |
+| **B-429** | `DONE` | OBS-083 | — | OBS-083 |
+| **B-430** | `DONE` | OBS-097 | — | OBS-097 |
+| **B-431** | `DONE` | OBS-097 | — | OBS-097 |
+| **B-432** | `DONE` | OBS-124 | — | OBS-124 |
+| **B-433** | `DONE` | OBS-100 | — | OBS-100 |
+| **B-434** | `DONE` | OBS-100 | — | OBS-100 |
+| **B-435** | `OPEN` | filed at B-404; no fix attempted | — | OBS-103 |
+| **B-436** | `DONE` | 548e380 | — | OBS-108 |
+| **B-437** | `DONE` | OBS-121 | — | OBS-121 |
+| **B-438** | `DONE` | OBS-106 | — | OBS-106 |
+| **B-439** | `DONE` | 79c6777 | — | OBS-122 |
+| **B-440** | `BLOCKED` | needs the lab | B-431 (DONE) | OBS-116 |
+| **B-441** | `unverified` | unverified | — | — |
+| **B-442** | `DONE` | OBS-116 | B-452 (BLOCKED) | OBS-116 |
+| **B-443** | `unverified` | unverified | — | — |
+| **B-444** | `unverified` | unverified | — | — |
+| **B-445** | `unverified` | unverified | — | — |
+| **B-446** | `unverified` | unverified | — | — |
+| **B-447** | `unverified` | unverified | — | — |
+| **B-448** | `unverified` | unverified | B-401 (BLOCKED) | — |
+| **B-449** | `unverified` | unverified | — | — |
+| **B-450** | `unverified` | unverified | — | — |
+| **B-451** | `DONE` | f6ea6ec | B-436 (DONE) | OBS-109 |
+| **B-452** | `BLOCKED` | deferred by decision, OBS-105 | — | OBS-116 |
+| **B-453** | `OPEN` | measured, not built | — | OBS-122 |
+| **B-454** | `DONE` | 6598df8 | B-436 (DONE) | OBS-122 |
+| **B-455** | `DONE` | OBS-119 | B-436 (DONE) | OBS-119 |
+| **B-456** | `DONE` | 503b2ac | B-437 (DONE), B-431 (DONE) | OBS-121 |
+| **B-457** | `unverified` | unverified | B-439 (DONE) | — |
+| **B-458** | `OPEN` | bounded at 400 chars, not closed | — | OBS-113 |
+| **B-459** | `DONE` | ee733a2 | B-453 (OPEN) | OBS-122 |
+| **B-460** | `DONE` | OBS-120 | — | OBS-120 |
+| **B-461** | `DONE` | numbered rungs, 61af0d0 | B-439 (DONE) | OBS-117 |
+| **B-462** | `BLOCKED` | needs the lab | B-456 (DONE) | OBS-121 |
+| **B-463** | `BLOCKED` | needs the lab | B-437 (DONE) | OBS-121 |
+
+**Totals:** `BLOCKED` 14 · `DONE` 30 · `OPEN` 8 · `unverified` 43 · **95 items**
+
+---
+
 |---|---|---|---|---|---|
 | **B-101** | **The reasoning gate** — typed decision object, two shapes only | The model asks for more evidence without being able to invent a target | MVP-0 complete | M | D7 |
 | **B-102** | **Candidate enumeration** — code derives narrowing targets from observed objects | The half of the gate that stops "the model chooses" becoming "the model invents" | B-101 | S | D7 |

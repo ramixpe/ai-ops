@@ -3567,6 +3567,36 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-125 · Gate Zero · The backlog had drifted, and the number is 11 of 12
+
+- **Kind:** audit
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** PLAN-V2's Gate Zero: reconcile every backlog item against the repository before scheduling anything. 95 items, four fields each.
+
+  | State | Count |
+  |---|---:|
+  | `unverified` | **43** |
+  | `DONE` | 30 |
+  | `BLOCKED` | 14 |
+  | `OPEN` | 8 |
+
+  **The drift measurement the operator asked for.** `BACKLOG-COMPLETION-PLAN.md` scheduled 12 items across two tracks. Reconciled: **five were already `DONE`, six were `BLOCKED`, and one was `OPEN`.** That one was B-459, and it shipped. So 11 of 12 were not schedulable at the moment the plan was written.
+- **Evidence:** `BACKLOG.md`'s reconciliation table, generated from the struck-through markers, a scan of every `FINDINGS.md` entry for item mentions, and the existing dependency column. 30 items needed a judgement read; the other 65 were mechanical.
+- **What I did:** Wrote the table into `BACKLOG.md` and marked the previous plan superseded rather than deleting it — its two track results are the evidence for why this one starts here.
+
+  **The finding is not the 11.** It is the **43 `unverified`**, which is nearly half the backlog. Those are items nobody has checked since filing — not "checked and still open", which is a different state and was indistinguishable from it until now. The previous plan's failure was reading `unverified` as `OPEN`, and it could not have done otherwise: `BACKLOG.md` had no way to express the difference.
+
+  So the mechanical fix is not really the citation rule. It is that **the backlog now has a vocabulary that can say "nobody has looked"**, and a plan written from it inherits that distinction for free. A rule that depends on the planner remembering to check findings is the kind this build keeps replacing; a state column is read whether or not anyone remembers.
+
+  **On scope, since the operator asked.** Reconciling all 95 was the right call and took under an hour, because three of the four fields derive mechanically — state from the struck-through marker, last-touched from a findings scan, dependencies from the column that already existed. Only 30 items needed reading.
+
+  **And narrowing it would have produced a biased number.** Reconciling only what Part 1 and Part 2 schedule measures drift *in the items someone chose to schedule*, which is exactly the sampling error §0.13's data face describes. The 43 `unverified` are mostly items nobody scheduled, and they are the population the finding is about.
+- **Needs human review:** no
+- **Blocks:** nothing. Gate Zero is complete; P1.1 may start.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**

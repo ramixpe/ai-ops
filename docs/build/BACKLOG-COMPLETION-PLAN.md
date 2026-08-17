@@ -1,4 +1,16 @@
-# BACKLOG COMPLETION PLAN
+# BACKLOG COMPLETION PLAN — **SUPERSEDED by `PLAN-V2.md`**
+
+> **Kept, not deleted.** Its Track A and Track B results are the evidence for why
+> PLAN-V2 begins with Gate Zero: Track A found four of five items already done, and
+> Track B halted with zero runnable items. Measured afterwards, **this plan scheduled
+> 12 items and 11 of them were not schedulable when it was written** — five already
+> DONE, six BLOCKED on a prerequisite this document excluded on its own Part 1 page.
+> B-459 was the single real item, and it shipped.
+>
+> Read Part 0 §0.2a for the rule both halves of that produced. Everything below is
+> superseded as a *plan* and retained as a *record*.
+
+---
 
 **Goal:** close as much of the remaining backlog as can be closed without an operator, in parallel where the contracts allow, so that one review pass and one MCP re-test leave the repository ready to publish.
 
