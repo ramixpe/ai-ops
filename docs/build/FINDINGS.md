@@ -3192,6 +3192,54 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-112 · MCP experiment · The tool description is the control surface for selection
+
+- **Kind:** prediction-refuted
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5 (recording an operator result)
+- **What happened:** **The operator's sealed prediction about the 21-tool surface is refuted.** Asked *"why is the BGP session on PE2 down?"*, `gemma-4-e4b` selected `investigate_lab_session`, and its reasoning trace named the description as the reason: *"preferred when the question is 'why is this broken?'"*.
+
+  Twenty tools say some form of **"collect read-only X"**. One says **what it achieves and when to prefer it**. The model read the difference and acted on it.
+- **Evidence:** Operator-run, LM Studio over SSH stdio, `gemma-4-e4b`, one question, reasoning trace quoted above. Recorded as reported; the prediction itself was held outside this repo and is not quoted here rather than paraphrased into something it may not have said.
+- **What I did:** Recorded, and reframed **B-113**.
+
+  **The finding: a tool's description is not documentation, it is the selection mechanism.** It is the only part of a tool a model reads before deciding, and the only part it can reason about. Twenty descriptions written as inventory entries and one written as an affordance produced exactly the selection the affordance described.
+
+  **What this does to B-113.** Consolidation was filed as the fix for D10/D11's failure mode — a manifest that grows with the catalogue. The measurement says **the count was not the binding constraint; the wording was.** A smaller manifest is still worth having, but the work that changes selection is writing each surviving description in terms of *what question it answers and when to prefer it* — and that work pays off whether or not consolidation ever happens.
+
+  **The order matters, and getting it wrong would have been self-concealing.** Consolidate first and the descriptions get rewritten as a side effect of merging; selection improves; consolidation is credited with a fix that the rewording made. Do the wording first and the two effects are separable — and it is the cheaper half.
+
+  **What this does not establish.** One model, one question, one occasion. It shows a description *can* drive selection, not that this description reliably does, and certainly not that a larger surface is safe. It is the right kind of evidence for retiring an assumption and the wrong kind for asserting a property — which is the same distinction the four rounds kept running into.
+- **Needs human review:** no
+- **Blocks:** nothing. B-113 reordered rather than dropped.
+
+---
+
+## OBS-113 · B-459 · Every containment mechanism guards the return; nothing guards the argument
+
+- **Kind:** defect-found
+- **Escalation:** DECIDE-AND-LOG (filed, not fixed)
+- **Model:** opus-5 (recording an operator finding)
+- **What happened:** The operator's second finding from the MCP experiment, and it names a boundary this build has never covered.
+
+  **Everything protective here operates on what a tool returns.** The allowlist governs what may be *sent*; `render_command` governs how a parameter is *rendered*; `boundary.sanitize` governs what may be *returned*; grounding governs what a model may *claim*. **Nothing constrains what a model supplies as an argument.**
+
+  The question *"why is the BGP session on PE2 down?"* contains no peer address. The model needed one and **asked** rather than inventing. That is the right behaviour and it is not a guarantee — it is one model on one occasion.
+- **Evidence:** Operator-run, same session as OBS-112.
+- **What I did:** Filed as **B-459** — *not* B-458 as instructed, because B-458 was taken an hour earlier by the error-string residual in the same MCP work. Flagged rather than renumbered, since a silently reused ID is worse than a visible correction.
+
+  **Why a fabricated argument would have defeated the entire build.** Walk it through: `investigate_lab_session("PE2", "10.255.0.99")` for a peer that does not exist. `render_command` accepts it — it is a well-formed IPv4 address, and canonicalisation by reconstruction is about *syntax*, which is exactly right and exactly not this. The descent walks. Rung 1 reads `show bgp summary`, finds no such peer, and answers honestly. The report renders from real typed fields. Every citation resolves. Grounding passes. **The output is a fully grounded, correctly cited, deterministically derived investigation of a session that does not exist**, and there is no gate anywhere that asks whether the subject is real.
+
+  Note what makes it invisible: **nothing malfunctions.** Every component does its job correctly on the input it was given. That is silent-failure shape 6 — wrong evidence read as right evidence — moved upstream of the evidence entirely, to the *question*.
+
+  **The defence, and why its shape is already familiar.** Validate an argument naming a network object against that device's observed state **before executing**: a peer address in no BGP summary on that device is not a peer. This is **B-453 pointed the other way**. B-453 checks that every identifier in a model's *output* appears in the evidence; this checks that every identifier in a model's *input* appears in the device. Same mechanism, same canonicalisation table, opposite direction — which is a strong sign it is the right shape rather than an invention.
+
+  **Two limits worth stating now so the item is not over-scoped later.** It catches an invented object, not a wrong one: a real peer address that is not the one the operator meant passes cleanly, exactly as B-453 catches an invented entity and not a wrong relation. And validating requires a read *before* the read, which on this fabric costs a session and an ~8 s login — so **where** the check runs is a design question, not a detail, and the epoch is the obvious place to put it since it already collects the device's state first.
+- **Needs human review:** no — filed for the operator to schedule
+- **Blocks:** nothing today. It is a precondition for trusting any model-driven entry point, which now includes the MCP surface.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**

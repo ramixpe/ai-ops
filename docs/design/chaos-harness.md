@@ -372,6 +372,8 @@ that probes densely is arming the penalty on itself, and a soak that leaves
 recommended shape hides the cost that dense sampling pays.** Worth knowing
 before anyone reads a soak's timings as representative of interactive use.
 
+**And session reuse is only available where a *plan* exists.** Measured again at the MCP surface (2026-08-17): nine parallel `get_lab_device_facts` calls took **70 s with connection retries on two devices**. The epoch avoids that because a flow declares every device and command before collecting; a model calling tools one at a time cannot be planned for, so the penalty returns in full. Anything that measures per-call latency through a model-driven surface is measuring the login penalty rather than the tool — worth knowing before a soak's timings are compared against an interactive session's.
+
 ### 6.2 Propagation is protocol-timed
 
 Wait bounds come from protocol timers, never from intuitions about "at the same time":
