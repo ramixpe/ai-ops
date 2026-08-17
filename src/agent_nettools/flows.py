@@ -224,6 +224,31 @@ class Rung:
     4. **the upper-layer signature** this rung alone should produce, so a
        descent can check forward consistency rather than only downward.
 
+    **A rung whose observable is a *prerequisite* for the rung above it cannot be
+    separated from it by a stable fault.** Check this when designing a rung, not
+    when a round fails to separate it.
+
+    Rungs 1 and 2 are the case. Rung 1 reads whether BGP is Established; rung 2
+    reads whether a TCP socket to the peer is armed. **TCP up is necessary for
+    Established**, so any *stable* fault breaks both or neither:
+
+    ==========================  =========  ==================
+    fault                       TCP        BGP
+    ==========================  =========  ==================
+    admin shutdown (round 3)    down       Idle
+    MD5 mismatch                down       Idle
+    route-policy denying all    up         Established
+    ==========================  =========  ==================
+
+    The only states with TCP up and BGP not Established are ``OpenSent`` and
+    ``OpenConfirm``, which last seconds, plus the retry window of a peer whose
+    OPEN is rejected. So the separating case exists and is **transient**.
+
+    This explains round 3 rather than excusing it. Round 3 was meant to separate
+    the boundary and produced ``BBHHH``; the reason is not that the fault was
+    badly chosen but that an administrative shutdown tears down the transport,
+    and **no fault that breaks what rung 2 observes can leave rung 2 healthy**.
+
     **Binding on every rung added from here.** `test_rungs.py` pins (3) as an
     audit over every boundary in every flow, so a new rung without separating
     evidence fails rather than being noticed later — the audit is the enforcement
