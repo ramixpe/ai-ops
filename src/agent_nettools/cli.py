@@ -382,11 +382,25 @@ def _cmd_agent(args: argparse.Namespace) -> int:
         print(f"Agent error: {exc}")
         return EXIT_WARNING
 
+    # B-471/P0-03: this loop is a model choosing its own tools and prose, not
+    # the deterministic dependency descent `nettools investigate` runs -- the
+    # answer below must never be mistaken for that grounded report. Printed
+    # to stderr, before the answer, using `_note` exactly like every other
+    # informational line in this module (B-422's stdout-is-data/stderr-is-
+    # commentary split) -- so `nettools agent "..." | ...` still gets only
+    # the answer on stdout, but nobody reading the terminal misses the label.
+    _note("[exploratory — model-selected tools; not the deterministic investigate path]", args)
     print(result["answer"])
     print(
         f"\n[{result['iterations']} iteration(s), {len(result['tool_calls'])} tool call(s), "
         f"stopped_because={result['stopped_because']}]"
     )
+    # "end_turn" is the only recognized, complete stop reason (see
+    # run_agent_loop's `complete` field) -- every other `stopped_because`,
+    # including B-471's new `unknown_stop:<reason>` (an unrecognized
+    # stop_reason used to be silently reported as "end_turn", which made this
+    # comparison wrongly return EXIT_OK for it; run_agent_loop no longer does
+    # that), already falls through to EXIT_WARNING here unchanged.
     return EXIT_OK if result["stopped_because"] == "end_turn" else EXIT_WARNING
 
 
@@ -975,7 +989,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_analyze.set_defaults(func=_cmd_analyze)
 
     p_agent = sub.add_parser(
-        "agent", help="Answer a question with a bounded, tool-calling agent loop (Anthropic only)."
+        "agent",
+        help=(
+            "Answer a question with a bounded, tool-calling agent loop (Anthropic only). "
+            "Exploratory: model-selected tools and prose, not the deterministic "
+            "`investigate` path."
+        ),
     )
     p_agent.add_argument("question", help="The question to investigate and answer.")
     p_agent.add_argument("--device", help="Optional device to focus the investigation on.")
@@ -983,7 +1002,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-iterations", type=int, default=8, help="Maximum agent loop iterations (default: 8)."
     )
     p_agent.add_argument(
-        "--time-budget", type=float, default=120, help="Wall-clock budget in seconds (default: 120)."
+        "--time-budget",
+        type=float,
+        default=120,
+        help=(
+            "Wall-clock budget in seconds (default: 120). Enforced at every turn "
+            "boundary and before every tool dispatch; a single in-flight model call "
+            "is bounded only by a timeout ceiling, not this budget exactly -- see "
+            "the returned 'overran_budget' field."
+        ),
     )
     p_agent.set_defaults(func=_cmd_agent)
 

@@ -305,11 +305,20 @@ def test_malicious_template_argument_is_refused_inside_the_loop(monkeypatch):
     # signal it needs to try something else.
     call = result["tool_calls"][0]
     assert call["is_error"] is True
+    # The internal audit trail (`tool_calls`, never sent to the model) is
+    # built from the raw envelope, so it still carries the real reason.
     assert "whitespace is not allowed" in call["error"]
     tool_result_block = captured[1]["messages"][-1]["content"][0]
     assert tool_result_block["is_error"] is True
     content = tool_result_block["content"]
-    assert "whitespace is not allowed" in content or "forbidden character" in content
+    # B-470/P0-02: `content` (what the model actually sees) is routed through
+    # model_egress.project_envelope, which classifies every `errors` entry
+    # against a fixed table rather than passing the raw validation message
+    # through -- an already-shipped model_egress.py trade-off (ERROR_KINDS),
+    # not something new here. The model learns the call was refused, not the
+    # literal validation text.
+    assert "unclassified error" in content
+    assert "whitespace is not allowed" not in content
     # The command was never assembled, so nothing resembling it reached a device.
     assert "| reload" not in content.replace("\\u007c", "|").split("errors")[0]
 
