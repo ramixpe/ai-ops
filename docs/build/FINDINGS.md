@@ -3484,6 +3484,35 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-122 · B-459 · The input side of the containment boundary
+
+- **Kind:** defect-fixed
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** Track A, A1. The largest open safety gap: every containment mechanism in this build guards what a tool **returns**, and nothing guarded what a caller **supplies**.
+
+  Measured before the fix, on the committed corpus: `investigate("RR1", "10.255.0.99")` for a peer that does not exist walked all five rungs, produced a rung table, and reported honestly at every step — because at every step it *was* honest. The device has no such neighbour, so rung 1 correctly said the session is not Established, and everything beneath followed.
+- **Evidence:** `tests/test_subject_existence.py`, 11 tests. Refusal produces 0 rungs. 1766 passing.
+- **What I did:** `Flow.subject_present`, declared per flow — `bgp_peer_exists` for `bgp_session`, `interface_exists` for `interface` — run against the epoch's evidence **before the walk**, producing the new finding `subject_not_found`.
+
+  **Four decisions worth recording.**
+
+  **It is not `undetermined`.** That means *a rung could not be read*, and reading is exactly what succeeded: the device answered, and what it said is that it has no such object. A caller told `undetermined` retries; a caller told `subject_not_found` corrects the question. Same distinction B-454 drew between a moved fabric and a slow collection, in a different place.
+
+  **The refusal names what the device does have.** *"RR1 has no BGP neighbour at 10.255.0.99. It has 4: …"* A refusal that only says "not found" invites another guess.
+
+  **It is still a rendered report.** The early return produces a full authoritative report rather than `None`, because B-439's contract has no exception for refusals — and a `None` would send a caller to a model's prose for the one result whose whole value is that it is *not* a claim about the network.
+
+  **The injected-collector path is exempt, deliberately.** A caller supplying its own evidence has already decided what exists; asking it whether the subject is real is asking the test harness to validate the test. §0.13's setup face, and the reason the exemption is `None` rather than a silent pass.
+
+  **What it does not catch, stated so it is not over-scoped later.** An invented object, not a wrong one: a real peer address that is not the one the operator meant passes cleanly — exactly as B-453 catches an invented entity and not a wrong relation. The two items are the same mechanism at opposite ends of the pipeline and they have the same blind spot.
+
+  **A §0.12 audit fired during the work**, which is the cheapest evidence this build has that the audits are load-bearing: adding a universal finding failed `test_every_universal_finding_has_a_registered_next_check` because no recommendation was registered for it. The finding would otherwise have shipped with generic advice nobody wrote.
+- **Needs human review:** no
+- **Blocks:** nothing. A2 next.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**

@@ -1412,3 +1412,93 @@ def evaluate_fabric(
         },
         "devices": device_verdicts,
     }
+
+
+# --------------------------------------------------------------------------- #
+# Subject existence -- the input side of the containment boundary (B-459)
+# --------------------------------------------------------------------------- #
+
+
+def bgp_peer_exists(evidence: dict[str, Any], peer: str) -> CheckResult:
+    """Does this device have a BGP neighbour at ``peer`` at all?
+
+    **Runs before the descent walks**, and it is the only check in this module
+    that answers a question about the *question* rather than about the network.
+
+    Why it is needed. `render_command` validates a peer address by
+    reconstruction, which is a check on **syntax** -- `10.255.0.99` is a
+    perfectly well-formed IPv4 address and always will be. Nothing downstream
+    then asks whether the device has ever heard of it: rung 1 reads
+    `show bgp summary`, finds no matching row, and reports honestly that the
+    session is not Established. Every rung beneath answers honestly too. The
+    report cites real evidence keys and grounding confirms they resolve.
+
+    The result is a fully sourced investigation of a session that does not
+    exist, with **nothing malfunctioning anywhere** -- which is why no gate
+    caught it and why the fix has to be at the input rather than anywhere along
+    the chain.
+
+    `unevaluated` when the BGP intent could not be read, because "the device has
+    no such peer" and "we could not ask" are different answers and only one of
+    them means the caller should change the question.
+    """
+
+    device = str(evidence.get("device", "unknown"))
+    section, bail = require_parsed(evidence, "bgp", subject=peer)
+    if bail is not None:
+        return bail
+
+    key = evidence_key(device, "bgp", peer)
+    neighbours = [r.get("neighbor") for r in parsed_records(section) if r.get("neighbor")]
+    if peer in neighbours:
+        return healthy(
+            subject=peer,
+            evidence_keys=(key,),
+            reason=f"{device} has a BGP neighbour at {peer}",
+        )
+
+    # Deliberately lists what the device *does* have. A refusal that only says
+    # "not found" invites the caller to try another guess; one that shows the
+    # real neighbours ends the guessing.
+    return broken(
+        subject=peer,
+        evidence_keys=(key,),
+        reason=(
+            f"{device} has no BGP neighbour at {peer}. It has "
+            f"{len(neighbours)}: {', '.join(sorted(neighbours)) or 'none'}"
+        ),
+    )
+
+
+def interface_exists(evidence: dict[str, Any], name: str) -> CheckResult:
+    """Does this device have an interface called ``name``?
+
+    The `interface` flow's counterpart to :func:`bgp_peer_exists`. Matched
+    through `interface_kind.canonical` so `Gi0/0/0/0` and
+    `GigabitEthernet0/0/0/0` are one name -- **within this device**, which is
+    the only scope that comparison is valid in (OBS-117).
+    """
+
+    from .interface_kind import same_interface
+
+    device = str(evidence.get("device", "unknown"))
+    section, bail = require_parsed(evidence, "interfaces", subject=name)
+    if bail is not None:
+        return bail
+
+    key = evidence_key(device, "interfaces", name)
+    present = [r.get("interface") for r in parsed_records(section) if r.get("interface")]
+    if any(same_interface(candidate, name) for candidate in present):
+        return healthy(
+            subject=name,
+            evidence_keys=(key,),
+            reason=f"{device} has an interface {name}",
+        )
+    return broken(
+        subject=name,
+        evidence_keys=(key,),
+        reason=(
+            f"{device} has no interface {name}. It has "
+            f"{len(present)}: {', '.join(sorted(present)) or 'none'}"
+        ),
+    )
