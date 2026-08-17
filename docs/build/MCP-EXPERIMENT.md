@@ -563,6 +563,35 @@ experiment for later.
 
 ---
 
+## 10. The rewording, as landed
+
+All 21 descriptions now open `Answers: *<the question>*` and say when to prefer
+the tool over its neighbours. Pinned by a test that reads the registry, so the
+next tool added inherits the requirement rather than the shape being a
+convention someone copies or does not.
+
+**One decision that changed during the work, and it was a confound in my own
+experiment.** `investigate_lab_session` was going to keep its original wording —
+it is the treatment that produced the result, and changing it felt like
+disturbing the evidence. That is backwards. §9's prediction is that selection
+survives rewording **all** 21; leaving one in a structurally distinct form
+preserves exactly the contrast the prediction exists to discriminate from
+content. The experiment would have been confounded by its own setup — §0.13's
+setup face arriving through the *fix* rather than through the measurement. Its
+content is unchanged; only its opening line was brought into the shared form.
+
+**A cost worth stating.** Descriptions went from **5,961 to 11,107 characters**,
++86%. That is sent on every tool-list call, so the manifest a model reads before
+it does anything roughly doubled. If selection improves, some of that is paid
+for; if B-113's consolidation later reduces 21 tools to five, the per-tool
+budget goes further and this cost mostly disappears. Recorded so a future
+measurement of context cost is not surprised by it.
+
+**Not yet measured.** The controlled comparison has not been run. §9's
+prediction was pushed before the first description was touched.
+
+---
+
 ## Appendix A — the 21 tool descriptions, as they stood for this experiment
 
 **Captured verbatim at `44f5c98`, before B-113's rewording.** These are the

@@ -118,76 +118,142 @@ def _read_only_tool(*args: Any, **kwargs: Any) -> Callable[[Callable], Callable]
 
 @_read_only_tool()
 def list_lab_devices() -> dict:
-    """List the IOS-XR devices available in the lab inventory."""
+    """Answers: *what devices exist, and what are they called?*
+
+    Prefer this first when a question names a device you have not seen, or
+    names none at all. Every other tool takes a device name, and they are exact
+    -- "PE2", not "pe2" or "PE-2". Returns names, management addresses, roles
+    and sites; no device is contacted.
+    """
 
     return list_devices()
 
 
 @_read_only_tool()
 def get_lab_device_facts(device_name: str) -> dict:
-    """Collect basic read-only facts from a lab device."""
+    """Answers: *what is this device, and is it up?*
+
+    Prefer this to confirm a device is reachable and identify what it is running
+    before interpreting anything else about it. It is the cheapest tool that
+    touches a device. It will not tell you whether anything is wrong -- use
+    `assess_lab_device_health` for that.
+    """
 
     return get_device_facts(device_name)
 
 
 @_read_only_tool()
 def check_lab_interfaces(device_name: str) -> dict:
-    """Collect read-only interface status from a lab device."""
+    """Answers: *which of this device's interfaces are up, and which are not?*
+
+    Prefer this when the question is about physical connectivity on one device,
+    or to find which interface to ask about in detail. For one named interface,
+    `get_lab_interface` returns error counters and flap history this does not.
+
+    Note a line-down subinterface is normal on this fabric and is not a path
+    fault.
+    """
 
     return check_interfaces(device_name)
 
 
 @_read_only_tool()
 def check_lab_bgp_neighbors(device_name: str) -> dict:
-    """Collect read-only BGP neighbor state from a lab device."""
+    """Answers: *which BGP sessions does this device have, and what state are they in?*
+
+    Prefer this to find out **that** a session is down, and which peer address
+    it belongs to. It will not tell you **why**.
+
+    If the question is why a session is down, prefer `investigate_lab_session`
+    -- it walks the layers beneath the session and reports which one broke.
+    """
 
     return check_bgp_neighbors(device_name)
 
 
 @_read_only_tool()
 def check_lab_lldp_neighbors(device_name: str) -> dict:
-    """Collect read-only LLDP neighbor state from a lab device."""
+    """Answers: *what is physically cabled to this device, and to which port?*
+
+    Prefer this to establish topology -- which neighbour sits on which
+    interface -- rather than to diagnose a fault. LLDP reports what a neighbour
+    calls itself, which on this fabric is not always its inventory name, so
+    treat a mismatch as a naming difference before treating it as an anomaly.
+    """
 
     return check_lldp_neighbors(device_name)
 
 
 @_read_only_tool()
 def check_lab_isis_neighbors(device_name: str) -> dict:
-    """Collect read-only IS-IS neighbor state from a lab device."""
+    """Answers: *does this device have IGP adjacencies, and to whom?*
+
+    Prefer this when a device appears unreachable at a higher layer: no IS-IS
+    adjacencies means no route to it, which means every BGP session to its
+    loopback will fail regardless of BGP configuration. Zero adjacencies on a
+    router that should have them is isolation, not a BGP problem.
+    """
 
     return check_isis_neighbors(device_name)
 
 
 @_read_only_tool()
 def check_lab_sr_policies(device_name: str) -> dict:
-    """Collect read-only Segment Routing TE policy state from a lab device."""
+    """Answers: *what SR-TE policies exist on this device, and are they up?*
+
+    Prefer this only when the question is about traffic engineering. An SR-TE
+    policy being down does not by itself explain a BGP session failure or an
+    unreachable loopback -- check the IGP and the interfaces first.
+    """
 
     return check_sr_policies(device_name)
 
 
 @_read_only_tool()
 def check_lab_fabric(check: str = "bgp") -> dict:
-    """Run one read-only check (facts|interfaces|bgp|lldp|isis|sr) across the fabric."""
+    """Answers: *how does one thing look across every device at once?*
+
+    Prefer this when the question is fabric-wide -- "are all BGP sessions up?",
+    "is anything isolated?" -- rather than about one device. `check` selects
+    what to run: facts, interfaces, bgp, lldp, isis or sr.
+
+    It is the most expensive tool here: it contacts every device in the
+    inventory, and on this fabric consecutive logins are slow. Prefer a
+    single-device tool when you already know the device.
+    """
 
     return check_fabric(check)
 
 
 @_read_only_tool()
 def collect_lab_evidence(device_name: str) -> dict:
-    """Collect the full read-only evidence bundle from a lab device in one session."""
+    """Answers: *everything the read-only tools can say about one device.*
+
+    Prefer this when you need several kinds of state from the same device and
+    would otherwise call three or four tools -- it collects them in one login,
+    which on this fabric is much faster than the separate calls.
+
+    Prefer a specific tool when you know what you are looking for. This returns
+    a lot, and more evidence is not more diagnosis: if the question is why
+    something is broken, `investigate_lab_session` answers it directly.
+    """
 
     return collect_evidence(device_name)
 
 
 @_read_only_tool()
 def get_lab_route(device_name: str, prefix: str) -> dict:
-    """Look up a specific route on a lab device.
+    """Answers: *does this device have a route to that destination, and via where?*
 
-    ``prefix`` must be an IPv4 address or CIDR prefix, e.g. "10.255.0.31" or
-    "10.0.0.0/24" -- validated and rendered from its parsed, canonical form
-    (never passed through as text); anything else is rejected before any
-    connection is made. Narrow this after seeing a route-related anomaly in
-    other evidence (e.g. a missing or unexpected next hop).
+    Prefer this when a peer or host is unreachable and you need to know whether
+    the local device even knows how to reach it. No route to a peer's loopback
+    means every session to it will fail, whatever the session configuration
+    says.
+
+    ``prefix`` is an IPv4 address or CIDR prefix, e.g. "10.255.0.31" or
+    "10.0.0.0/24". It is parsed and the command rebuilt from its canonical form,
+    never passed through as text, so anything malformed is refused before any
+    connection is made.
     """
 
     return get_route(device_name, prefix)
@@ -195,11 +261,17 @@ def get_lab_route(device_name: str, prefix: str) -> dict:
 
 @_read_only_tool()
 def get_lab_bgp_neighbor(device_name: str, address: str) -> dict:
-    """Look up a specific BGP neighbor on a lab device.
+    """Answers: *what does this device say about one specific BGP peer?*
 
-    ``address`` must be a plain IPv4 address, e.g. "10.255.0.31". Use this to
-    narrow in on one peer after ``check_lab_bgp_neighbors`` shows it Idle or
-    otherwise not Established.
+    Prefer this over `check_lab_bgp_neighbors` when you already know which peer
+    is wrong and want the detail -- the reason the session last reset, whether a
+    TCP socket exists, the negotiated timers and address families.
+
+    If the question is *why* the session is down rather than *what the peer
+    record says*, prefer `investigate_lab_session`: it reads this same detail
+    and also checks the route, the IGP and the interfaces beneath it.
+
+    ``address`` is a plain IPv4 address, e.g. "10.255.0.31".
     """
 
     return get_bgp_neighbor(device_name, address)
@@ -207,12 +279,16 @@ def get_lab_bgp_neighbor(device_name: str, address: str) -> dict:
 
 @_read_only_tool()
 def get_lab_interface(device_name: str, name: str) -> dict:
-    """Look up a specific interface's status on a lab device.
+    """Answers: *what is the detailed state of one named interface?*
 
-    ``name`` must be a valid interface name, e.g. "GigabitEthernet0/0/0/1",
-    "Gi0/0/0/2.300", or "Loopback0" -- validated against an anchored
-    letters/digits/``._/-`` charset, so it can never carry a shell or CLI
-    metacharacter.
+    Prefer this over `check_lab_interfaces` when you already know which
+    interface matters and need error counters, drop counts, or when it last
+    flapped -- a link that is up but flapping does not show as down in a
+    summary.
+
+    ``name`` is an interface name as the device spells it, e.g.
+    "GigabitEthernet0/0/0/1", "Gi0/0/0/2.300" or "Loopback0". It is validated
+    against an anchored charset, so it cannot carry shell or CLI syntax.
     """
 
     return get_interface(device_name, name)
@@ -220,9 +296,17 @@ def get_lab_interface(device_name: str, name: str) -> dict:
 
 @_read_only_tool()
 def get_lab_logging(device_name: str, count: int = 20) -> dict:
-    """Show a lab device's most recent log lines.
+    """Answers: *what did this device report happening, and when?*
 
-    ``count`` must be a plain integer from 1 to 500 (default 20).
+    Prefer this to place a fault in time -- to find when a link went down, or
+    whether a configuration commit preceded a failure. Prefer it *after* you
+    know what you are looking for; the buffer is dominated by routine
+    management-session noise, and reading it to discover a fault is far less
+    reliable than checking the relevant state directly.
+
+    Raw log text is not returned to you (invariant 4): you get parsed records
+    with timestamps, mnemonics and severities. ``count`` is how many recent
+    lines to read, 1-500.
     """
 
     return get_logging(device_name, count)
@@ -230,12 +314,17 @@ def get_lab_logging(device_name: str, count: int = 20) -> dict:
 
 @_read_only_tool()
 def get_lab_ping(device_name: str, address: str) -> dict:
-    """Ping an IPv4 address from a lab device.
+    """Answers: *can this device actually reach that address right now?*
 
-    ``address`` must be a plain IPv4 address, e.g. "10.255.0.31". This is an
-    active probe: it generates ICMP traffic (unlike every other tool here)
-    even though it changes no device configuration, and is refused when the
-    server has ``NETTOOLS_ALLOW_ACTIVE_PROBES`` set to a falsy value.
+    Prefer this to confirm or rule out data-plane reachability once you have a
+    hypothesis -- for example after finding a route exists, to check the path
+    actually forwards. It generates traffic, unlike every other tool here, so
+    prefer a state read when one would answer the question.
+
+    A failed ping tells you the path does not work; it does not tell you which
+    layer broke. For that, prefer `investigate_lab_session`.
+
+    ``address`` is a plain IPv4 address.
     """
 
     return ping_device(device_name, address)
@@ -243,12 +332,14 @@ def get_lab_ping(device_name: str, address: str) -> dict:
 
 @_read_only_tool()
 def get_lab_traceroute(device_name: str, address: str) -> dict:
-    """Traceroute to an IPv4 address from a lab device.
+    """Answers: *which hops does traffic from this device actually take?*
 
-    ``address`` must be a plain IPv4 address, e.g. "10.255.0.31". An active
-    probe like ``get_lab_ping``: generates traffic, changes no device state,
-    and is refused when ``NETTOOLS_ALLOW_ACTIVE_PROBES`` is set to a falsy
-    value.
+    Prefer this when reachability fails and you need to know **where** it stops
+    -- the last responding hop localises the problem to a segment. Like
+    `get_lab_ping` it generates traffic, so prefer a state read when one would
+    do.
+
+    ``address`` is a plain IPv4 address.
     """
 
     return traceroute_device(device_name, address)
@@ -298,12 +389,15 @@ def _diff_against(tool_name: str, device_name: str, previous: dict | None) -> di
 
 @_read_only_tool()
 def diff_lab_device_against_latest(device_name: str) -> dict:
-    """Collect fresh evidence and diff it against the device's most recently saved snapshot.
+    """Answers: *what changed on this device since it was last looked at?*
 
-    Saves the fresh collection as the new "latest" snapshot, same as
-    ``nettools diff DEVICE``. ``data.has_previous`` is ``false`` (and
-    ``data.diff`` is ``null``) the first time this runs for a device -- there
-    is nothing to compare against yet, not an error.
+    Prefer this when a fault is new and you want to know what moved, rather than
+    what is currently wrong -- a change is a much stronger lead than a state.
+    It compares against the previous collection, so it answers "since last
+    time", which may be minutes or weeks ago.
+
+    ``data.has_previous`` is ``false`` the first time this runs for a device:
+    nothing to compare against yet, not an error.
     """
 
     return _diff_against(
@@ -313,11 +407,15 @@ def diff_lab_device_against_latest(device_name: str) -> dict:
 
 @_read_only_tool()
 def diff_lab_device_against_golden(device_name: str) -> dict:
-    """Collect fresh evidence and diff it against the device's pinned golden snapshot.
+    """Answers: *how does this device differ from its known-good state?*
 
-    ``data.has_previous`` is ``false`` (and ``data.diff`` is ``null``) when no
-    golden snapshot has ever been pinned for this device -- see
-    ``pin_lab_golden_snapshot``.
+    Prefer this over `diff_lab_device_against_latest` when you want drift from a
+    state someone deliberately declared correct, rather than from whatever was
+    collected last. Useful after a maintenance window, or when "it used to work"
+    is the only description of the problem available.
+
+    ``data.has_previous`` is ``false`` when no golden snapshot was ever pinned
+    for this device.
     """
 
     return _diff_against(
@@ -327,12 +425,16 @@ def diff_lab_device_against_golden(device_name: str) -> dict:
 
 @_read_only_tool()
 def assess_lab_device_health(device_name: str) -> dict:
-    """Evaluate deterministic health verdicts (role invariants + baseline drift) for one device.
+    """Answers: *is anything wrong with this device, by rules rather than judgement?*
 
-    Cheap, rule-based -- not an LLM call -- so a client can get a severity
-    verdict (``ok``/``info``/``warning``/``critical``) and its findings
-    without spending a reasoning call. See ``assess_lab_fabric_health`` to
-    evaluate every device at once.
+    Prefer this over reading raw state yourself when the question is "is this
+    device healthy?". It applies deterministic rules -- role invariants and
+    drift from a recorded baseline -- and returns a severity
+    (``ok``/``info``/``warning``/``critical``) with the findings behind it. No
+    model is involved, so the verdict does not vary between calls.
+
+    It tells you *that* something is wrong, and which rule fired. If you then
+    need to know *why* a session is down, prefer `investigate_lab_session`.
     """
 
     evidence = collect_evidence(device_name)
@@ -351,11 +453,17 @@ def assess_lab_device_health(device_name: str) -> dict:
 
 @_read_only_tool()
 def assess_lab_fabric_health() -> dict:
-    """Evaluate deterministic health verdicts across every device in the fabric inventory.
+    """Answers: *is anything wrong anywhere, and where should I look first?*
 
-    Same rules as ``assess_lab_device_health``, rolled up to one fabric-wide
-    severity (the max over every device's own severity) -- see
-    ``health.evaluate_fabric``.
+    Prefer this as an opening move when the question is broad -- "is the fabric
+    healthy?", "anything wrong today?" -- because it returns a per-device
+    severity you can use to choose where to go next, instead of guessing a
+    device.
+
+    Same deterministic rules as `assess_lab_device_health`, rolled up to one
+    fabric severity (the worst device's). It contacts every device, so it is
+    slow on this fabric; prefer the single-device version when you already know
+    which device matters.
     """
 
     listed = list_devices()
@@ -368,13 +476,16 @@ def assess_lab_fabric_health() -> dict:
 
 @_read_only_tool()
 def detect_lab_flaps(device_name: str, min_transitions: int = 3) -> dict:
-    """Report fields that oscillated across a device's saved snapshot history.
+    """Answers: *has anything been unstable over time, rather than wrong right now?*
 
-    A peer that bounced up/down/up between collections can look clean in
-    every single pairwise diff -- this reads the device's *entire* saved
-    snapshot history instead. Requires prior snapshots (``save_lab_snapshot``,
-    ``diff_lab_device_against_latest``, or ``nettools diff``/``capture``) --
-    with none saved yet, ``data.flapping`` is simply empty.
+    Prefer this when a problem is intermittent, or when someone reports trouble
+    that is not visible when you look. A peer that bounced up/down/up looks
+    clean in every single pairwise diff and in every current-state read -- this
+    reads the device's *entire* saved snapshot history instead, which is the
+    only view that shows the pattern.
+
+    Requires prior snapshots. With none saved, ``data.flapping`` is simply
+    empty -- that means "no history", not "nothing flapped".
     """
 
     return detect_flaps(device_name, min_transitions=min_transitions)
@@ -445,10 +556,10 @@ def troubleshooting_prompt() -> str:
 def investigate_lab_session(
     device: str, subject: str, flow: str = "bgp_session"
 ) -> dict:
-    """Localise the cause of a fault by walking a dependency ladder, deterministically.
+    """Answers: *why is this broken?* -- by walking the layers beneath the symptom.
 
-    **Prefer this over calling the individual check tools yourself** when the
-    question is "why is this broken?". It walks the layers beneath a symptom in
+    **Prefer this over calling the individual check tools yourself** whenever the
+    question is why something is failing rather than what its state is. It walks the layers beneath a symptom in
     order -- session, transport, route, IGP adjacency, physical interface -- and
     reports the *lowest* broken one as the cause, with the broken layers above
     it as the causal chain that explains the symptom. Every verdict comes from

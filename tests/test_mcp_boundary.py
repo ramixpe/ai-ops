@@ -305,3 +305,63 @@ def test_sanitize_is_total_over_the_shapes_these_tools_return():
 
     for payload in (None, 0, "", [], {}, {"a": None}, [[{"commands": {}}]]):
         sanitize(payload)
+
+
+# --------------------------------------------------------------------------- #
+# B-113 -- the description form, pinned so it cannot drift back
+# --------------------------------------------------------------------------- #
+
+
+def test_every_tool_description_states_what_it_answers_and_when_to_prefer_it():
+    """The B-113 rewording, held as a property rather than a one-off edit.
+
+    A tool's description is the **selection mechanism** -- the only part a model
+    reads before deciding, and the only part it can reason about (OBS-112).
+    Before this, twenty tools said some form of "collect read-only X" and one
+    said what it achieves and when to prefer it; the model picked the one.
+
+    Pinned here because the next tool added will be written by someone copying
+    the shape of an existing one, and the shape is now the thing that matters.
+    """
+
+    import inspect
+
+    from mcp_server import server as srv
+
+    registry = _registered_tools()
+    for name in registry:
+        function = getattr(srv, name, None)
+        if function is None:
+            continue
+        doc = inspect.getdoc(function) or ""
+        first = doc.split("\n")[0]
+
+        assert first.startswith("Answers:"), (
+            f"{name} does not open by saying what question it answers: {first!r}"
+        )
+        assert "refer" in doc, (
+            f"{name} never says when to prefer it over another tool"
+        )
+
+
+def test_the_uniform_form_includes_the_tool_the_experiment_was_about():
+    """`investigate_lab_session` is in the same form as the other twenty, and
+    that is deliberate rather than incidental.
+
+    The pre-registered prediction (MCP-EXPERIMENT §9) is that selection survives
+    rewording *all* 21. Leaving this one in a distinct form would preserve the
+    contrast the prediction exists to discriminate from content -- the
+    experiment would be confounded by its own setup, which is the setup face of
+    §0.13 arriving through the fix rather than the measurement.
+    """
+
+    import inspect
+
+    from mcp_server import server as srv
+
+    doc = inspect.getdoc(srv.investigate_lab_session) or ""
+
+    assert doc.startswith("Answers:")
+    assert "why is this broken" in doc.lower()
+    # And it still carries the guidance that makes it usable, not just the form.
+    assert "trustworthy" in doc and "off_path" in doc
