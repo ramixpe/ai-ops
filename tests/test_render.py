@@ -311,3 +311,68 @@ def _broken():
     from agent_nettools.checks import CheckResult
 
     return CheckResult("broken", reason="Gi0/0/0/1 is down", evidence_keys=("interfaces",))
+
+
+# --------------------------------------------------------------------------- #
+# OBS-115 -- making an omission detectable where nothing can be enforced
+# --------------------------------------------------------------------------- #
+
+
+def test_the_report_states_its_rung_count_and_numbers_every_observation():
+    """**Not enforcement, and it must not be read as enforcement.**
+
+    A chat client restated a correct five-rung report as four, dropping
+    `route_to_peer`, and attributed two PE2 rungs to RR1 (OBS-115). That
+    happened outside our `paraphrase` field and outside every gate this build
+    has, on a surface we do not own and cannot instrument.
+
+    Nothing here prevents that. What it does is make the omission *detectable*:
+    a stated total and `1/5 … 5/5` means a four-item restatement is visibly
+    short to a human reading both, without anyone having to re-derive the
+    expected count.
+    """
+
+    descent = _descent("broken")
+    report = render.render_report(descent)
+
+    assert report["rungs_examined"] == len(descent.outcomes) == 5
+
+    for position, observation in enumerate(report["observations"], start=1):
+        assert observation["position"] == position
+        assert observation["of"] == 5
+        assert observation["claim"].startswith(f"{position}/5 ")
+
+
+def test_every_observation_names_the_device_it_was_evaluated_against():
+    """The other half of OBS-115, and the half that sends someone to the wrong
+    router.
+
+    `igp_adjacency` and `interface` resolve to **PE2** for `RR1 -> 10.255.0.12`,
+    because the far end is where the fault lives (Q-013). A restatement that
+    attributes them to RR1 is confident, specific, fully sourced and wrong about
+    which device to go and look at.
+    """
+
+    descent = _descent("broken")
+    report = render.render_report(descent)
+
+    devices = {o.rung: o.device for o in descent.outcomes}
+    assert devices["igp_adjacency"] == "PE2" and devices["interface"] == "PE2"
+
+    for outcome, observation in zip(descent.outcomes, report["observations"], strict=True):
+        assert f"on {outcome.device}" in observation["claim"]
+
+
+def test_the_payload_carries_the_same_count_and_numbering():
+    """A consumer reading the payload rather than the report gets it too --
+    the MCP surface reads the payload."""
+
+    result = investigation.investigate(
+        "RR1", SUBJECT, sender=fixture_sender(label="broken"), resolver=_resolver
+    )
+    payload = result.to_payload()
+
+    assert payload["rungs_examined"] == len(payload["rungs"]) == 5
+    assert [r["position"] for r in payload["rungs"]] == [1, 2, 3, 4, 5]
+    assert {r["of"] for r in payload["rungs"]} == {5}
+    assert [r["device"] for r in payload["rungs"]][-2:] == ["PE2", "PE2"]

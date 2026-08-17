@@ -255,11 +255,16 @@ class InvestigationResult:
                 {"rung": o.rung, "device": o.device, "reason": o.result.reason}
                 for o in descent.causal_chain
             ],
+            # Numbered, with a stated total, for the same reason the rendered
+            # report is (OBS-115): a restatement that drops one is then visibly
+            # short to anyone reading this beside it. Detectable, not enforced.
+            "rungs_examined": len(descent.outcomes),
             "rungs": [
-                {"rung": o.rung, "device": o.device, "status": o.status,
+                {"position": n, "of": len(descent.outcomes),
+                 "rung": o.rung, "device": o.device, "status": o.status,
                  "reason": o.result.reason,
                  "evidence_keys": list(o.result.evidence_keys)}
-                for o in descent.outcomes
+                for n, o in enumerate(descent.outcomes, start=1)
             ],
             "report": {
                 "status": self.report_status,

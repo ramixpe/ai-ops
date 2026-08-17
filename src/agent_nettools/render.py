@@ -160,14 +160,17 @@ def render_report(descent: DescentResult) -> dict[str, Any]:
     and visibly.
     """
 
+    total = len(descent.outcomes)
     observations: list[dict[str, Any]] = []
-    for outcome in descent.outcomes:
+    for position, outcome in enumerate(descent.outcomes, start=1):
         key = _first_key(outcome)
+        # `1/5`, and the device on every line. See `rungs_examined` below for
+        # why the numbering is in the prose rather than only in the structure.
         claim = (
-            f"{outcome.rung} on {outcome.device} is {outcome.status}"
+            f"{position}/{total} {outcome.rung} on {outcome.device} is {outcome.status}"
             + (f": {outcome.result.reason}" if outcome.result.reason else "")
         )
-        entry: dict[str, Any] = {"claim": claim}
+        entry: dict[str, Any] = {"claim": claim, "position": position, "of": total}
         if key is not None:
             entry["evidence_key"] = key
         observations.append(entry)
@@ -237,6 +240,18 @@ def render_report(descent: DescentResult) -> dict[str, Any]:
         "authoritative": True,
         "generated_by": "code",
         "finding": descent.finding,
+        # **A stated count, and numbered observations.** Not enforcement, and it
+        # must not be described as one: it makes an omission *detectable* at a
+        # boundary where nothing can be enforced.
+        #
+        # Observed 2026-08-17 (OBS-115): a chat client restated a correct
+        # five-rung report as four, dropping `route_to_peer`, and attributed two
+        # PE2 rungs to RR1. That happened outside our `paraphrase` field and
+        # outside every gate this build has -- on a surface we do not own. The
+        # only defence available there is a report shape in which "5 rungs
+        # examined", "1/5 ... on RR1" through "5/5 ... on PE2" makes a
+        # four-item restatement visibly incomplete to a human reading both.
+        "rungs_examined": total,
         "observations": observations,
         "interpretations": interpretations,
         "recommendation": {

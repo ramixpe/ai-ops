@@ -8,7 +8,11 @@ boundary the build had never crossed: until this session, every consumer of a
 tool envelope was our own code. An MCP client hands the **whole** return to a
 model.
 
-> **A note on this document's own reliability.** The tool-call sequence in §5 is
+> **A note on this document's own reliability — keep this paragraph if the
+> document is ever tidied.** A write-up about confident accounts of prior
+> exchanges should say how its own account was assembled.
+>
+> The tool-call sequence in §5 is
 > reconstructed from the operator's reports, not transcribed from a session log
 > I hold. Where a quote appears it was supplied verbatim; where a sequence
 > appears it is an ordering I was told, not one I observed. Finding §6.1 is
@@ -246,6 +250,17 @@ we do not own.
 **B-439 was justified by argument before this. It now has an observation.**
 Recorded as **OBS-115**.
 
+**Filed as a distinct boundary — B-461, not an instance of B-439.** B-439
+governs *our* paraphrase field: produced here, graded here, marked here. This is
+a surface with no field to mark, no grounding hook and no instrumentation, and
+collapsing the two would hide which half is fixable.
+
+**The minimal defence, taken:** the report states `rungs_examined` and numbers
+every observation `1/5 … 5/5`, each naming its device. A four-item restatement
+is then visibly short to a human reading both. **This is not enforcement and is
+not described as such** — it makes an omission detectable where nothing can be
+enforced.
+
 ### 6.3 Argument fabrication — the uncovered boundary (B-459)
 
 **Every containment mechanism in this build operates on what a tool returns.
@@ -402,7 +417,8 @@ a model was what made anyone check.
 | **B-459** | Argument fabrication — validate arguments against observed reality before executing |
 | **B-460** | `state_pfx_rcd` holds *either* a prefix count *or* a state string. Split into `session_state` and `prefixes_received` |
 | **B-113** | Reframed: wording before consolidation |
-| **B-439** | Validated by observation; scope widened to restatements we do not control |
+| **B-439** | Validated by observation. Numbered rungs + stated count landed as its sub-item |
+| **B-461** | The unowned surface, filed as a boundary in its own right rather than folded into B-439 |
 | **B-455** | Third measurement added: the MCP surface cannot batch |
 
 Findings: **OBS-111** (the audit), **OBS-112** (selection), **OBS-113**

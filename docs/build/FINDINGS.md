@@ -3284,8 +3284,16 @@ and should be scored as a corpus result, not as a diagnostic error.
   **B-439 is validated and its scope was too narrow.** Rendering the authoritative report deterministically was right, and marking a model paraphrase non-authoritative was right — but the marking only governs *our* paraphrase field. A chat client's own prose is a paraphrase nothing labels.
 
   **The defence available is the report's shape, not a gate.** If the authoritative report is structured so that dropping a rung or moving a device is *visibly* a deletion — an explicit per-rung device column, a stated rung count, a chain the reader can re-count — then a restatement that loses one is checkable against the tool output sitting directly above it. That is weaker than enforcement and it is what is available at a boundary we do not own. Currently `to_payload()` emits the rungs as a list with devices, which is most of the way there; what is missing is anything that makes the *count* explicit enough to notice a missing element.
-- **Needs human review:** no — but the "make omissions visible" idea is a design call, not a fix I should take unilaterally
-- **Blocks:** nothing. Strengthens B-439's justification and widens its scope.
+- **Needs human review:** no
+- **Blocks:** nothing.
+
+  **Resolved 2026-08-17 — scope separated, design call taken.**
+
+  The operator accepted the scope correction and directed that it be recorded as a **distinct boundary rather than an instance of B-439**, filed as **B-461**. The distinction is worth the extra item: B-439 governs *our* `paraphrase` field — produced here, graded here, marked here. B-461 is a surface with **no field to mark, no grounding hook and no instrumentation**. Collapsing them would hide which half is fixable.
+
+  **The minimal design call, taken:** the report shape states `rungs_examined` and numbers every observation `1/5 … 5/5`, each naming its device; the payload carries `position`/`of` on every rung. A restatement listing four is then visibly short to a human reading both.
+
+  **It is not enforcement and must not be written as though it is.** Nothing here prevents a chat client from dropping a rung. It makes the omission *detectable* at a boundary where nothing can be enforced — which is a real but strictly weaker thing, and the distinction is exactly the one this build keeps having to make between a structural guarantee and a convention.
 
 ---
 

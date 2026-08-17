@@ -41,6 +41,37 @@ property a prompt clause cannot have. Leaving the clause in would suggest the
 model's self-assessment is part of the guarantee. It is not, and stating that
 plainly is the point of recording this as a choice rather than an omission.
 
+#### The mechanism, added 2026-08-17 (OBS-114)
+
+The rule above was an argument. It now has a mechanism, and the mechanism makes
+it stronger than "self-marking is unreliable".
+
+Observed in the MCP experiment: asked about an earlier statement, a model said
+*"I did not explicitly say it was 'not established'"* — **it had, verbatim, one
+message earlier.**
+
+> **Asking a model to verify its own earlier claim measures nothing, because one
+> side of the comparison is regenerated at check time.**
+>
+> Recall and generation are one operation. When a model "checks what it said",
+> it does not retrieve the earlier claim — it produces a fresh one, conditioned
+> on the same context that produced the first. A plausible reconstruction is
+> indistinguishable, to the model, from the thing itself. So the check compares
+> a claim against a *re-derivation of that claim*, which agrees with it for
+> reasons that have nothing to do with whether either is true.
+
+Same principle as the missing E, one level deeper. The Evaluation slot fails not
+merely because a model is a lenient marker, but because **the artefact it is
+asked to mark is not available to it** — only a regeneration of that artefact
+is. A prompt clause cannot fix that, and neither can a better-worded one.
+
+The practical rule for anything in this directory: **a prompt that references
+earlier content must contain that content**, supplied from the record. Never
+*"check your previous answer"*, always *"here is what was produced; check it"*.
+`prompt_library` already works this way for the descent — `build_report_prompt`
+takes a `DescentResult` rather than asking the model to recall one — and this is
+the general form of why that shape is right.
+
 ---
 
 ## Rules
