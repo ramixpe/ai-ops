@@ -1,0 +1,98 @@
+# Security
+
+This is the canonical statement of the threat model, what is actually enforced,
+what is not, and where to report a problem. `CONTRIBUTING.md` points here rather
+than repeating it.
+
+## The threat model
+
+A single operator, a lab they already control, read-only by construction, with
+no authentication story of its own. There is no production deployment and
+nothing here is exposed to an untrusted network.
+
+**The only claim the architecture makes is that this tool cannot change device
+state.** `platforms.APPROVED_COMMANDS[platform]` is an exact-match allowlist of
+`show`/`ping`/`traceroute` commands, checked *before* credentials are loaded or
+a connection is opened; there is no `run_command(device, command)`, no config
+mode, and no shell (see CLAUDE.md, "The safety boundary"). If you find a way to
+make this tool write to a device, that is the bug worth reporting — it is the
+one thing that would falsify the project's stated safety property. Everything
+else below is honesty about the much narrower guarantee that leaves.
+
+## What is enforced
+
+- **The allowlist runs before credentials.** Platform resolution
+  (`lab.platform_for()`) reads static inventory data only, so the exact-match
+  check in `_run_approved_commands` happens before a credential is read or a
+  socket opened. `test_refuses_unapproved_commands_before_loading_credentials`
+  pins this by running with no credentials set at all.
+- **Commands are built by reconstruction, never interpolation.** A
+  caller-supplied value is parsed into a typed object and the command is
+  rendered from that object's canonical form — not validated-then-passed-through.
+  A regex broad enough to accept every legitimate value is also broad enough to
+  admit a lookalike nobody anticipated.
+- **The notifier has no inbound surface.** `notifier.py` ships delivery only —
+  no command handler, no webhook, no polling loop. It also cannot leak the
+  evidence bundle: `notify()`'s signature takes a rendered `report: dict` and
+  has no parameter a raw command envelope could arrive in, so nothing beyond
+  the report can travel through this path by construction, not by a redaction
+  filter someone has to remember. The Telegram bot token is redacted from every
+  log line, audit record, exception message and repr (`notifier._redact`).
+- **MCP tools are sanitised at registration, not by convention.**
+  `mcp_server/boundary.sanitize()` strips raw device text (`commands`,
+  `unaccounted_lines`) and replaces it with a withheld-record — count and byte
+  size, not silence — applied by the registration decorator so a tool is
+  covered by the act of being registered, not by its author remembering to call
+  something.
+
+## What is not enforced
+
+- **No authentication or RBAC.** Anything that can launch or reach the CLI or
+  the MCP server gets the full inventory and whatever the configured
+  credentials can read. `NETTOOLS_ACTOR` (`network_tools._resolve_actor`) is
+  **provenance, not authorization** — a label for "who ran this" in the audit
+  log, never consulted before a command runs, and trivially spoofable by
+  anyone who can set an environment variable. Real RBAC needs an identity
+  provider this project does not have: something a caller cannot simply
+  declare itself to be, e.g. a verified SSO/OIDC token or a signed client
+  certificate checked before any command runs.
+- **Telegram chat IDs are delivery, not authorization.**
+  `TELEGRAM_CHAT_ID`'s comma-separated allowlist controls where a report is
+  *sent*; it grants nothing, because there is no inbound path to grant
+  anything on. If this module ever grows one, that allowlist must not be
+  mistaken for the thing guarding it (`notifier.TelegramNotifier`).
+- **Prompt injection via device free text is mitigated output-side only.**
+  `mcp_server/boundary.sanitize()` withholds *unparsed* text but leaves
+  `data.parsed` intact, and parsed records still carry verbatim device-authored
+  prose in fields like a syslog line's `text` — 17,916 characters of it in one
+  measured probe, and syslog is written by an unauthenticated network peer, not
+  just the device. Nothing today validates the *content* of that text before it
+  reaches a prompt. What contains the damage is that outputs are gated —
+  `ground_correlation` requires every timeline entry to cite a real timestamp
+  and matching mnemonic, and non-authoritative prose is withheld on failure —
+  so an injected log line can steer wording but cannot fabricate a cited
+  finding. This is an open item, tracked as B-467
+  (`docs/DEEP-REVIEW-2026-08-17.md` §2.1), not a solved one.
+
+## Unsupported deployment modes
+
+None of the following have been designed for, tested against, or reviewed:
+
+- **Multi-user access.** One set of device credentials, one audit trail, no
+  per-user scoping. Two people using the same deployment are indistinguishable
+  in the audit log.
+- **An internet-exposed MCP server.** The MCP server assumes its caller is
+  already trusted — the same client that holds the device credentials. Putting
+  it behind a network boundary that admits untrusted callers hands them the
+  full read surface with no authentication in front of it.
+- **Production paging or incident closure.** The deterministic `investigate`
+  path is the only authoritative one; `analyze`, fabric analysis and the
+  free-form `agent` are exploratory and not grounded to the same standard (see
+  `docs/EXPERT-PEER-REVIEW-2026-08-17.md` §3, P0-02/P0-03). None of the outputs
+  here should drive automated remediation or unattended paging.
+
+## Reporting a security issue
+
+Open a GitHub issue describing the path. There is nothing sensitive to
+withhold: there are no production deployments and no secrets in this
+repository.

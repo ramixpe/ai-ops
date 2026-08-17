@@ -22,7 +22,7 @@ path for that.
 
 ```bash
 make setup && source .venv/bin/activate
-make test      # 1776 pass, 24 skipped — no network, no credentials, no API key
+make test      # the full suite (about 1,800 tests; the exact count moves — CI is authoritative)
 make lint
 ```
 
@@ -143,14 +143,8 @@ renders identically to a true one, and we have shipped ten of those (OBS-137).
 
 ## Reporting a security issue
 
-The threat model here is narrow: a single-operator lab, read-only by
-construction, with no authentication story of its own — the audit log's `actor`
-field is provenance, **not authorization**, and is documented as such.
-
-If you find a way to make this tool change device state, that is the bug worth
-reporting, and it is the only claim the architecture actually makes. Open an
-issue describing the path; there is nothing sensitive to withhold, because there
-are no production deployments and no secrets in the repository.
+See [SECURITY.md](SECURITY.md) for the threat model, what is and is not
+enforced, and where to report a problem.
 
 ## Licence
 
