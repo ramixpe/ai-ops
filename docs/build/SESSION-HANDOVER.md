@@ -12,6 +12,10 @@
 >
 > **B-453 shipped.** Identifier containment is wired into `ground_report`.
 
+**Shipped 2026-08-17 after the MCP re-test:** **T-035** (Telegram relay, `--notify`, 18 tests — needs `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.env` before it delivers); **B-465 half** (an adjacency count *above* baseline is `info`, not `warning` — the rule was reporting the fabric's repair as drift); **B-453 pinned through `investigate()`** rather than only at the unit level.
+
+**`docs/build/OPERATOR-RUNBOOK.md`** is the step-by-step for everything below.
+
 ## What is waiting on the operator
 
 | | |
