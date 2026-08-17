@@ -13,7 +13,7 @@ This is not a greenfield LLD. The repository already implements a substantial fr
 
 Three things follow from that:
 
-1. Where the repo and the design document disagree on **vocabulary**, the repo wins. It has 554 tests and generated documentation pinned to its terms.
+1. Where the repo and the design document disagree on **vocabulary**, the repo wins. It has a large test suite and generated documentation pinned to its terms (554 at the time this was written; 1776 today).
 2. Where the repo and the design document disagree on **mechanism**, the repo usually wins too — several existing mechanisms are stronger than what the design specified, and Section 2 records which.
 3. New code inherits the existing safety invariant unchanged. Section 3 states it as a hard constraint on every module added below.
 
@@ -48,7 +48,7 @@ Mapped against the twenty design decisions. This section exists so nobody rebuil
 | **D2** Structural enforcement, not prompt | **Done, stronger than specified** | `platforms.APPROVED_COMMANDS` exact-match frozenset, checked *before credentials load or a socket opens* |
 | **D9** Vendor never reaches the model | **Done** | `PLATFORM_INTENTS` is platform-major; `lab.platform_for()` is credential-free by design; `test_commands_do_not_leak_across_platforms` |
 | **D10** Tools parameterised by a closed enum | **Partly** | `agent_loop` exposes 6 tools with JSON-schema `enum` drawn from `all_intents()`. The MCP server does not — see §4.1 |
-| **D11** Tool only if the model decides when to call it | **Partly** | True of `agent_loop`; the MCP server exposes ~22 tools including several a model never needs to choose |
+| **D11** Tool only if the model decides when to call it | **Partly** | True of `agent_loop`; the MCP server exposed ~22 tools at the time of this review (21 today, after B-438 removed two writers and MVP-0 added `investigate_lab_session`) including several a model never needs to choose |
 | **D13** Active probes as a separate class | **Done — this was listed "open" and is in fact built** | `Template.active_probe`, `NETTOOLS_ALLOW_ACTIVE_PROBES`, refused before rendering |
 | **D14** Memory derived, keyed by object, historical only | **Substantially done** | `evidence_store` (files or SQLite), `save_snapshot`, `save_golden_snapshot`, `detect_flaps`, `diff_evidence` keyed by `parsers.record_key` excluding `volatile_fields` |
 | **D15** Template parsing, never model extraction | **Done for static intents, absent for templates** | `parsers.PARSERS[(platform, intent)]` — six entries, `cisco_xr` only. See §4.2 |
@@ -92,6 +92,8 @@ Four gaps stand between the current repo and the design. They are listed in depe
 ### 4.1 Tool surface bloat on the MCP server
 
 `mcp_server/server.py` exposes roughly 22 tools: `check_lab_interfaces`, `check_lab_bgp_neighbors`, `check_lab_lldp_neighbors`, `check_lab_isis_neighbors`, `check_lab_sr_policies`, `get_lab_route`, `get_lab_bgp_neighbor`, `get_lab_interface`, `get_lab_logging`, `get_lab_ping`, `get_lab_traceroute`, `diff_lab_device_against_latest`, `diff_lab_device_against_golden`, `save_lab_snapshot`, `pin_lab_golden_snapshot`, `assess_lab_device_health`, `assess_lab_fabric_health`, `detect_lab_flaps`, and more.
+
+> **Note added 2026-08-17.** Two tools in that list no longer exist: `save_lab_snapshot` and `pin_lab_golden_snapshot` were **removed by B-438** because both performed a persistent write from behind a decorator named `_read_only_tool`. The list is left as written — it is the baseline this delta spec was measured against — but do not read it as the current surface. `mcp_server/README.md` is authoritative and is pinned to the code by `test_mcp_readme_lists_exactly_the_exposed_tools`.
 
 This is D10 and D11's failure mode made concrete: one tool per command, so the manifest grows with the catalogue, and several tools represent decisions a model never makes (`save_lab_snapshot`, `pin_lab_golden_snapshot` are operator actions, not investigative ones).
 
@@ -219,8 +221,10 @@ def run_descent(flow: Flow, device: str, subject: str, *, collector) -> DescentR
 Walks `flow.descent` in order. For each rung: run its `collect` steps, evaluate its `check`.
 
 - `healthy` → continue to the next rung
-- `broken` → **stop.** This rung's `finding` is the result. No deeper rung runs.
+- `broken` → ~~**stop.** This rung's `finding` is the result. No deeper rung runs.~~ **Superseded by Q-017 (OBS-056): continue.** The result is the *lowest* broken rung; the broken rungs above it are the causal chain.
 - `unevaluated` → **stop** with `finding="undetermined"` and the reason recorded.
+
+> **This spec was written before Q-017 and was wrong.** Stopping at the first broken rung makes four of five findings unreachable — `RR1 → 10.255.0.12` breaks rungs 1–3, so the walk halts at rung 1 and restates the symptom. The operator confirmed the plan was defective; `cause_not_localised` was added at the same time. **Left visible rather than silently rewritten**, because this document is a pre-build delta spec and what it got wrong is part of what the build learned.
 
 Returns the rung path taken, each rung's `CheckResult`, and the accumulated evidence keys.
 
@@ -393,7 +397,7 @@ Existing tests that pin behaviour the new code must not change — treat a failu
 
 ## 10. Open items this LLD does not resolve
 
-1. **Whether `checks.py` and `health.py` eventually merge.** The agreement test makes coexistence safe; consolidation is a later decision with real risk to 554 passing tests.
+1. **Whether `checks.py` and `health.py` eventually merge.** The agreement test makes coexistence safe; consolidation is a later decision with real risk to the passing suite.
 2. **Whether `investigate()` or `agent_loop()` is the CLI default.** Recommendation is `investigate` with fallback, but that should be decided after the first descent runs against the live lab, not before.
 3. **Model choice for the gate.** The gate's typed-output requirement is the binding constraint. `agent_loop` is Anthropic-only today because a 9B local model was judged unreliable for tool calling; the gate is a strictly easier task than free tool calling (one schema, two shapes), so it may be within reach of a local model where the loop is not. Worth measuring rather than assuming — and grammar-constrained decoding remains the fallback.
 4. **Fixture capture policy for config sections.** Configuration output is more sensitive than status output. Decide what may be committed before Phase 12 captures any.

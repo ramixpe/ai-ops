@@ -235,7 +235,7 @@ Neighbourhood resolution is arithmetic over inventory and topology — determini
 
 This subsumes rather than replaces §3.5: device-and-window is the default when topology resolution is unavailable. **B-417.**
 
-*One caution from this fabric.* `learn-topology` already reports that LLDP data here is self-contradictory — P1 and P2 disagree about the link between them. A neighbourhood built from a source that contradicts itself will silently include or exclude the wrong device. Derive it from the inventory's declared topology, and treat LLDP disagreement as a reason to widen the neighbourhood rather than to pick a side.
+*One caution from this fabric.* `learn-topology` reports that P1 and P2 disagree about the link between them. ~~LLDP data here is self-contradictory.~~ **Corrected 2026-08-17 (OBS-103): it is not.** P1 was configured `LEAF05_DHCP_SERVER` at capture time, so both ends were telling the truth and the disagreement is between LLDP's device-reported names and this inventory's labels (B-435). **The caution below survives the correction**, because a neighbourhood builder cannot tell a naming disagreement from a wiring disagreement either. A neighbourhood built from a source that contradicts itself will silently include or exclude the wrong device. Derive it from the inventory's declared topology, and treat LLDP disagreement as a reason to widen the neighbourhood rather than to pick a side.
 
 ---
 

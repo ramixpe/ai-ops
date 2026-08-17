@@ -8,7 +8,9 @@ right; it is a file with a version, a golden test case, and a review history.
 prompts/
 ├── README.md          this file — GRACE, and the rules below
 ├── report.v1.txt      T-027 — descent result -> grounded report
-├── correlate.v1.txt   T-028 — finding + log window -> timeline
+├── correlate.v1.txt   T-028 — superseded, kept (see Version history)
+├── correlate.v2.txt   T-029a — superseded, kept
+├── correlate.v3.txt   T-029a — current: finding + log window -> timeline
 └── tests/cases/       golden input -> expected output shape
 ```
 

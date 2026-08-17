@@ -14,7 +14,7 @@ reasoning layer, and an MCP server — all over the same narrow allowlist of
 ```bash
 make setup                  # python -m venv .venv + pip install -e ".[dev,llm]"
 source .venv/bin/activate
-make test                   # pytest -q  (1377 pass + 22 skipped; no network, no credentials, no API key needed)
+make test                   # pytest -q  (1776 pass + 24 skipped; no network, no credentials, no API key needed)
 make lint                   # ruff check .
 make help                   # full target list
 ```

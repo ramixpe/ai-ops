@@ -22,7 +22,7 @@ That turns evaluation from a judgement into a measurement, and it makes three th
 
 ### The target is characterised, not error-free
 
-"Almost error free" is the wrong goal and aiming at it will mislead the work. The system will not be error-free — the first live trial produced a fabricated device timestamp that passed grounding.
+"Almost error free" is the wrong goal and aiming at it will mislead the work. The system will not be error-free — the first live trial produced a fabricated device timestamp that grounding did not catch.
 
 The right goal is **characterised**:
 
@@ -52,7 +52,7 @@ Three things this established, and they define what the harness must preserve.
 
 **The case was discriminating.** From RR1 the symptom was indistinguishable from the previously captured `broken` label — BGP Idle, no route to the loopback — where the cause was a *different rung*. Anything pattern-matching "peer unreachable means the far end's interfaces are down" answers wrongly here, because they were up. **A trial that cannot be failed proves nothing.**
 
-**The separation held under a real model error.** The model corrupted a device timestamp in the correlation narrative — `Aug 14 04:28.238` for a record reading `Aug 16 14:04:28.238` — and grounding passed it. The diagnosis was unaffected, because the diagnosis was never the model's to make. That is the architecture's central claim, and this is the first evidence for it rather than an argument.
+**The separation held under a real model error.** The model corrupted a device timestamp in the correlation narrative — `Aug 14 04:28.238` for a record reading `Aug 16 14:04:28.238` — and grounding did not catch it. The report path's citations were checked; the correlation path's were not checked at all (OBS-085), which is a hole rather than a gate letting something through. The diagnosis was unaffected, because the diagnosis was never the model's to make. That is the architecture's central claim, and this is the first evidence for it rather than an argument.
 
 **Prompt constraints are priors, not gates.** The prompt said *quote exactly*. The model did not. Only code enforces.
 

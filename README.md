@@ -196,14 +196,25 @@ inventory. `bgp_peers` is written only for a device with an active BGP
 process; a device with none (like this lab's P-routers) gets no `bgp_peers`
 key at all, never `0`.
 
-This lab's fabric is genuinely inconsistent -- verified against real captured
-output, not hypothetical -- so `learn-topology` also prints an anomaly report
-covering LLDP links where the two ends disagree, LLDP neighbors that are not
-devices in this inventory, and devices with zero adjacencies. It always exits
-`0`; the report is how those specifics stay visible instead of being smoothed
-into a clean-looking inventory. Only per-device *counts* are ever written back
--- never a specific link claim, because the LLDP data cannot support one
-truthfully (see the comment in `inventory/lab.yaml`).
+This lab's fabric has real anomalies -- verified against captured output, not
+hypothetical -- so `learn-topology` also prints an anomaly report covering LLDP
+links where the two ends disagree, LLDP neighbors that are not devices in this
+inventory, and devices with zero adjacencies. It always exits `0`; the report
+is how those specifics stay visible instead of being smoothed into a
+clean-looking inventory. Only per-device *counts* are ever written back --
+never a specific link claim (see the comment in `inventory/lab.yaml`).
+
+**Corrected 2026-08-17.** This paragraph said the LLDP data was *"genuinely
+inconsistent"* and that it *"cannot support a link claim truthfully"*. **It is
+not inconsistent** (OBS-103). At the `t0`/`t1` captures three devices ran
+hostnames differing from their inventory labels -- P1 was
+`LEAF05_DHCP_SERVER`, P3 `Lab-leaf01`, PE4 `SDWAN-Edge01` -- so LLDP was
+correct at both ends and the disagreement was between LLDP's device-reported
+names and this inventory's labels. **The count-only rule is still right**, for
+the reasons above and because a count survives a naming disagreement that a
+link claim has to take a side on. It is not right for the reason originally
+given, and the anomaly report still classifies those three as unknown
+neighbours until B-435 lands.
 
 ## Quick Start
 

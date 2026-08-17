@@ -30,7 +30,7 @@ So the interface follows the maturity ladder rather than leading it.
 
 **The MCP server is a chat interface with no new code.** `mcp_server/server.py` exposes read-only tools over stdio. Point any MCP client at it — Claude Desktop, Cowork, an IDE — and engineers can explore the fabric conversationally today.
 
-Two caveats: the tool manifest needs the consolidation described in the LLD (§4.1, ~22 tools down to five stage-shaped ones), and MCP clients are a developer-shaped surface rather than a NOC-shaped one. But if the near-term goal is "let someone poke at this interactively this week", it is by far the cheapest path and it is already written.
+Two caveats: the tool manifest needs the consolidation described in the LLD (§4.1, 21 tools today down to five stage-shaped ones), and MCP clients are a developer-shaped surface rather than a NOC-shaped one. But if the near-term goal is "let someone poke at this interactively this week", it is by far the cheapest path and it is already written.
 
 ---
 

@@ -2,7 +2,7 @@
 
 Terms used across the design documents, the build plan, and the code. There is one live collision (`intent`) that will cause real bugs if it is not pinned, and several near-misses.
 
-**Rule: the repository's existing vocabulary wins.** It is spelled into 554 tests, generated documentation, CLI subcommands, and evidence section keys. Design documents adapt to it, not the other way round.
+**Rule: the repository's existing vocabulary wins.** It is spelled into the test suite, generated documentation, CLI subcommands, and evidence section keys. Design documents adapt to it, not the other way round.
 
 ---
 
@@ -45,7 +45,9 @@ An investigation scoped to one **object type** — `interface`, `isis_adjacency`
 **Not:** an n8n workflow. Those are orchestration, upstream of the agent and outside its reach.
 
 ### `descent`
-The ordered walk down the protocol dependency stack inside one flow. Stops at the first broken rung, which is the root cause. Fully deterministic — no model call anywhere in it.
+The ordered walk down the protocol dependency stack inside one flow. **Continues past a broken rung and reports the *lowest* broken one as the cause**, with the broken rungs above it as the causal chain. Stops only on `unevaluated` — nothing below a rung that could not be read is trustworthy. Fully deterministic — no model call anywhere in it.
+
+**Corrected 2026-08-17.** This entry read *"stops at the first broken rung, which is the root cause"* — the pre-Q-017 specification, which Q-017 established was defective and which the code has never implemented. Under it, four of five findings are unreachable: `RR1 → 10.255.0.12` has rungs 1–3 all broken, so the walk would stop at rung 1 and report the symptom it started from. See D6 and `README.md`'s walk table.
 
 **Not:** the agent loop. `agent_loop.py` is a free-form bounded tool-calling loop and remains in place for questions that map to no flow.
 

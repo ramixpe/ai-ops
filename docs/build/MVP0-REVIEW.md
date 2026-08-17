@@ -6,8 +6,8 @@
 |---|---|
 | Tasks | T-001 … T-034, plus T-029a/b/c pulled forward from the backlog |
 | Commits | 106 on `feat/investigation-layer` |
-| Tests | **1377 pass, 22 skipped**, no network, no credentials, no API key |
-| Findings | **97** |
+| Tests | **1776 pass, 24 skipped** as of 2026-08-17 (**1377 / 22** at M4) — no network, no credentials, no API key |
+| Findings | **138** as of 2026-08-17 (**97** at M4, when this review was written) |
 | Backlog | 67 items |
 | Investigation layer | ~5,100 lines across 9 modules |
 | Frozen files | `test_safety.py`, `test_template_security.py`, `platforms.py`, `templates.py` — **byte-identical** against `6629a2c`, the commit before T-001 |
@@ -16,7 +16,7 @@
 
 ## 1. What the log book says as a whole
 
-86 findings is too many to read as a list, and the list is not where the value is. Three families account for most of them, and the interesting question is not how many but **how they were found**.
+97 findings is too many to read as a list, and the list is not where the value is. Three families account for most of them, and the interesting question is not how many but **how they were found**.
 
 ### The families
 
@@ -140,9 +140,13 @@ Listed as questions rather than risks, because each has a specific experiment at
 
 **Is the descent's behaviour under two faults acceptable?** (Q-019) A single interface fault and an interface fault plus a BGP shut produce **byte-identical rung tables**. The masking is structural. Two candidate signals — a second unexplained commit in the timeline, and forward consistency — neither validated, and the corpus contains no two-fault capture.
 
-**Is Q-006's agreement a pattern or a data point?** ~~One match, on one rung.~~ **Answered 2026-08-16 by four rounds (OBS-095), and the answer is narrower than it was first written.** ~~"Provisionally a pattern."~~ **The tool succeeded on these three discriminating cases** — three different rungs, with rounds 1 and 2 exercising the walk rule in opposite directions. That is what was observed and no inference beyond it is supported: the cases were designed by someone who knows the ladder and were not sampled from any defined population (reviewer C, `peer-review-response.md` §3.5, §4). Three caveats keep it provisional: the rounds were designed by someone who knows the ladder (selection effect), every fault was single (Q-019 untouched), and round 3 matched via its declared refutation branch with an answer weaker than the evidence supported. **Not a pattern for concluding health — 0 of 1, and structurally 0 of *n* until B-428.** Do not report the combined 3/4; the denominator hides a class failure.
+**Is Q-006's agreement a pattern or a data point?** ~~One match, on one rung.~~ **Answered 2026-08-16 by four rounds (OBS-095), and the answer is narrower than it was first written.** ~~"Provisionally a pattern."~~ **The tool succeeded on these three discriminating cases** — three different rungs, with rounds 1 and 2 exercising the walk rule in opposite directions. That is what was observed and no inference beyond it is supported: the cases were designed by someone who knows the ladder and were not sampled from any defined population (reviewer C, `peer-review-response.md` §3.5, §4). Three caveats keep it provisional: the rounds were designed by someone who knows the ladder (selection effect), every fault was single (Q-019 untouched), and round 3 matched via its declared refutation branch with an answer weaker than the evidence supported. **Not a pattern for concluding health — 0 of 1, and structurally 0 of *n* until B-428.** ~~Do not report the combined 3/4; the denominator hides a class failure.~~ **Superseded 2026-08-17 by B-441 / reviewer C §3.5, which is at §7 of this document.** Report all three strata — 3/3 on-path, 0/1 no-fault, **3/4 overall** — and state that none of them estimates field accuracy, because the cases were not sampled from a defined population. C's correction against me: *"deployment performance necessarily combines categories; the appropriate combination depends on their production prevalence, which is currently unknown."* **The problem was never the denominator. It is the sampling frame.**
 
-**Does the model layer degrade gracefully under a model that is worse, or busier, or changed?** One live run, one provider, one prompt version. The grounding gate refused a fabricated timestamp, which is evidence that the gate works — not evidence about the failure rate it is protecting against. Nothing measures how often the model produces something the gate must catch.
+**Does the model layer degrade gracefully under a model that is worse, or busier, or changed?** One live run, one provider, one prompt version. ~~The grounding gate refused a fabricated timestamp, which is evidence that the gate works.~~ **Corrected 2026-08-17 — this was backwards.** The gate did **not** refuse it. The report path's citations were checked; the correlation path had **no citation check at all**, so the fabricated timestamp was emitted unverified (OBS-085, `FINDINGS.md`). The hole was closed afterwards by `grounding.check_timeline_citations`, and the exact line is pinned as a regression.
+
+So what the trial is evidence for is **discovery** — one live run found a hole that 1,365 passing tests and two design documents did not. It is not evidence that the gate works, because on this claim there was no gate. And nothing measures how often the model produces something the gate must catch.
+
+**Why this one is worth flagging rather than quietly fixing.** It inverted a finding into its opposite and made the system look better tested than it was, in the document that serves as the M4 gate — the same failure `peer-review-response.md` §4 catalogued. Two of that section's corrections were applied to this file (§4, §5) and this sentence was not, because nobody was looking here. **A correction pass that fixes the claims it was handed does not find the ones it was not** (OBS-137).
 
 **What does this cost per investigation?** Not instrumented (B-425). ~5k tokens of prompt is a character-count proxy, response excluded. A number this project will be asked for and cannot currently give.
 

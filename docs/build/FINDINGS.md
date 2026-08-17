@@ -1473,6 +1473,48 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-137 · H2 · A correction pass fixes the claims it was handed, not the ones it was not
+
+- **Kind:** audit
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** The publication audit swept six documents for claims. `peer-review-response.md` §4 had already catalogued **five** claims exceeding their evidence and they were corrected. This pass found **ten places where two documents state the same fact differently**, and none of the ten was on §4's list.
+
+  **Two are substantive.**
+
+  **(a) Whether grounding caught the fabricated timestamp.** `MVP0-REVIEW.md:145` read *"The grounding gate refused a fabricated timestamp, which is evidence that the gate works."* It did not refuse it. The report path's citations were checked; the correlation path had **no citation check at all** (OBS-085), which is why `grounding.check_timeline_citations` was then written. `README.md:107` states this correctly and precisely. `chaos-harness.md` said *"passed grounding"* — directionally right, but it describes a gate letting something through when the fact is that no gate ran, and that looseness is what makes the inversion easy.
+
+  The sentence turned a hole into evidence of soundness, in the document that serves as the M4 gate, in the answer to *"does the model layer degrade gracefully"*.
+
+  **(b) Two documents still teach the walk rule Q-017 identified as a defect.** `glossary.md:48` — *"Stops at the first broken rung, which is the root cause"* — and `lld-investigation-layer.md:222` — *"`broken` → stop."* That is the pre-Q-017 specification, under which four of five findings are unreachable. The code has never implemented it. **The glossary is the file `CLAUDE.md` tells a reader to consult first.**
+- **Evidence:** `FINDINGS.md:1893` — *"the correlation path has no citation check at all, and it fabricated a timestamp"*. Q-017/OBS-056 for the walk rule. Full list of ten in the commit message and in this entry's table below.
+
+  | # | Conflict | Resolution |
+  |---|---|---|
+  | 1 | grounding caught / did not catch | did **not** — MVP0-REVIEW corrected, chaos-harness tightened |
+  | 2 | walk rule stop / continue | **continue** — glossary and LLD corrected, LLD's left visible as superseded |
+  | 3 | 97 vs 86 findings | 138 today, 97 at M4; both numbers dated |
+  | 4 | LLDP self-contradictory | **it is not** (OBS-103) — README and evidence-reduction corrected, and the count-only rule kept on its surviving reason |
+  | 5 | MCP tools 21 / 20 / ~22 | **21** — design docs dated, and the LLD's list flagged for naming two tools B-438 removed |
+  | 6 | `correlate` v1 in the tree, v3 in the history | tree listing completed |
+  | 7 | 1377 / 554 / 1365 / 16 tests | **1776 / 24** — present-tense claims updated, historical ones left alone |
+  | 8 | 3/4 "do not report" vs reported | §3.5 superseded the prohibition; the superseded sentence now says so |
+  | 9 | the five §4 claims | verified in their named homes |
+  | 10 | speed attribution | corrected text present; original left readable above it, which is correct |
+- **What I did:** Fixed all ten. Where a claim was superseded rather than wrong, the superseded text is struck and kept rather than deleted — the reason it changed is worth more than the tidiness.
+
+  **The finding is about the shape, not the ten.** Every one is a **superseded claim that did not announce itself**, and in three cases the superseding text is in the *same file*, sixty lines away. §4's pass corrected five claims because someone handed it a list of five. It did not look for others, and the two most serious were not on the list.
+
+  > **A correction pass bounded by a list inherits the list's coverage. Being handed the errors is the same epistemic position as being handed the tests** — §0.13's tests face, wearing a review for a coat.
+
+  **The cheap mechanical remedy, adopted:** when a claim is corrected, **grep the repository for its other statements before closing the correction.** It costs one command. It would have caught 6 of these 10, including (a).
+
+  **And the reason prose is worse than code here.** A stale constant fails a test; a stale sentence renders identically to a true one. The documents were held to a lower standard than the code, exactly as `peer-review-response.md:276` says — and this pass is evidence that saying so did not by itself fix it.
+- **Needs human review:** no
+- **Blocks:** nothing.
+
+---
+
 <!--
 Copy this block for each new entry.
 
