@@ -54,7 +54,7 @@ Acceptable for `sota-xrd`, which is a lab. Likely a policy problem the moment th
 >
 > **What this decision buys and what it defers.** It buys the fast-follow now. It defers the residency problem to the moment this points at production — and the mitigation is not "we will remember", it is that **the notifier is written behind one provider interface**, so Mattermost is a provider swap rather than a rewrite. That is the whole reason to decide early rather than to build both.
 >
-> **Env surface is in `.env.example`.** `NETTOOLS_TELEGRAM_BOT_TOKEN` is a credential and lives only in `.env`. `NETTOOLS_TELEGRAM_CHAT_IDS` is a delivery allowlist and **empty means send to nobody** — the same fail-closed rule the command allowlist uses, for the same reason.
+> **Env surface is in `.env.example`**, using T-035's own names: `NETTOOLS_NOTIFIER`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`. The token is a credential and lives only in `.env`. `TELEGRAM_CHAT_ID` takes a **comma-separated allowlist** — an addition to the spec's singular, because the operator asked for an allowlist — and **empty means send to nobody**, the same fail-closed rule the command allowlist uses.
 >
 > **The chat-ID allowlist is not authorization.** It controls where output goes. It grants nothing, because T-035 has no inbound path to grant it on. If an inbound path is ever added, this list must not be mistaken for the thing that guards it — that needs the identity provider Stage 3 is blocked on (B-301).
 

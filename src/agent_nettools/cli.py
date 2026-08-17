@@ -424,6 +424,29 @@ def _cmd_investigate(args: argparse.Namespace) -> int:
     if coherence is not None and coherence.caveat:
         _note(f"# {coherence.caveat}", args)
 
+    # T-035. Delivery is best-effort and structurally cannot carry evidence:
+    # `notify` takes the report object and has no parameter a bundle could
+    # arrive in. It never raises, so nothing below this line can change because
+    # a channel was down -- a run that found the fault and failed to post about
+    # it has still found the fault.
+    if getattr(args, "notify", False):
+        from .notifier import notify as _notify
+
+        payload = result.to_payload()
+        report = (payload.get("report") or {}).get("content") or {}
+        record = _notify(
+            report,
+            device=args.device,
+            subject=args.subject,
+            finding=result.descent.finding,
+        )
+        if record["error"]:
+            _note(f"# Notification failed ({record['provider']}): {record['error']}", args)
+        elif record["attempted"]:
+            _note(f"# Notification sent via {record['provider']}.", args)
+        else:
+            _note("# NETTOOLS_NOTIFIER is 'none'; --notify did nothing.", args)
+
     if not result.trustworthy:
         return EXIT_CRITICAL
     # `no_fault_on_path` is exit 0 alongside `all_layers_healthy`: both mean no
@@ -926,6 +949,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     _add_output_arguments(p_investigate)
+    p_investigate.add_argument(
+        "--notify",
+        action="store_true",
+        help="Send the report to the channel NETTOOLS_NOTIFIER selects. Delivery is "
+             "best-effort: a failure is reported and never changes the exit code. "
+             "With the default provider ('none') this is a no-op, not an error, so "
+             "the flag is safe in a cron entry written before a channel exists.",
+    )
     p_investigate.set_defaults(func=_cmd_investigate)
 
     p_demo = sub.add_parser("demo", help="Run the narrated agent demo.")

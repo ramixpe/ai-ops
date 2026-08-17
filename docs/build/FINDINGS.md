@@ -1709,6 +1709,39 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-145 · T-035 · Egress bounded by a function signature, and one deviation from the spec
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** Shipped `notifier.py` and `nettools investigate --notify`. Telegram, per Q-007. 18 tests, 1808 green.
+- **Evidence:** `tests/test_notifier.py`; `nettools investigate RR1 10.255.0.12 --from-fixtures --label broken --notify` exits 1 with a failing channel, unchanged from without the flag.
+- **What I did:** **T-035's three recorded decisions, in the order the task asked for them.**
+
+  **1. Residency** — Telegram, taken by the operator with the trade-off stated (Q-007). The mitigation is structural: one provider interface, so Mattermost is a swap. `mattermost` is deliberately **absent rather than stubbed** — the task says implement one real provider, and a stub is an untested path wearing a name.
+
+  **2. Identity** — not solved, and not pretended. `TELEGRAM_CHAT_ID` is a **delivery allowlist, not authorization**: it controls where output goes and grants nothing, because there is no inbound path to grant it on. Said in the module docstring, the class docstring, and `.env.example`, because this is the one that will be misread if an inbound path is ever added.
+
+  **3. Egress** — the operator still owes Q-008 (which host runs `nettools`, and does it have outbound). Recorded as outstanding rather than assumed.
+
+  **The guardrail is the shape of the call, and I wrote it first as the task required.** `notify()` takes `report, device, subject, finding` and **there is no parameter an evidence bundle could arrive in.** The test asserts the signature by introspection, so adding an `evidence=` parameter fails the suite — the addition is the defect, not the test.
+
+  A second test covers the stowaway case: a bundle stuffed *inside* the report dict still does not render, because `render_report_text` reads named fields rather than iterating. Two different failures, two different tests; the first would not have caught the second.
+
+  **One deviation from the spec, and it is an addition.** T-035 specifies `TELEGRAM_CHAT_ID`, singular. This accepts a **comma-separated allowlist** under the same name, because the operator asked to be "allowed" rather than to be the destination, and because *empty means send to nobody* only means something if the field is a list. The name is unchanged, so the spec's env surface is intact.
+
+  **Three failures found by writing the tests, all mine.**
+
+  - `main()` takes no argv; the CLI tests drive it through `sys.argv`. I wrote three tests calling `cli.main([...])`.
+  - `_note` writes to **stderr**, so stdout stays parseable JSON. I asserted against stdout. **The code was right** — a delivery failure must not corrupt the machine-readable result either, and the test now checks both streams.
+  - The token appears in Telegram's URL path, so `urllib` puts it in exception strings for free. `_redact` exists because of that, and the test asserts the token is absent from the whole returned record rather than only from the message.
+
+  **What is not built, deliberately:** no inbound anything, no threading, no per-user identity, no formatting beyond a readable summary. All MVP-1 or later. If this module ever grows a way for a message to *cause* something, that is a HALT.
+- **Needs human review:** no
+- **Blocks:** nothing. It delivers once `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are in `.env`; until then `--notify` is a no-op that says so.
+
+---
+
 <!--
 Copy this block for each new entry.
 

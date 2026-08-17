@@ -97,7 +97,7 @@ T-035 is optional and does not gate the definition of done.
 | T-032 | End-to-end offline test | DONE | opus-5 | 13b58ae | OBS-074 | Both labels, opposite answers, grounded reports. Mock model reads its own prompt. netmiko replaced with a module that raises. 10 tests, 1348 passed |
 | T-033 | Live lab run | DONE | opus-5 | eb33e18 | OBS-076, OBS-077 | **Q-006 resolved: agent and engineer reached the same rung.** 114.2s, exit 1, report grounded 5/5. Run found 2 defects the suite could not (B-424, `_log_window`) |
 | T-034 | Documentation update | DONE | opus-5 | d8c8e4b | OBS-084 | README leads with --from-fixtures and reports the T-033 failure honestly. CLAUDE.md gains the layer table. 1377 passed |
-| T-035 | Report relay — outbound only | TODO | sonnet-5 | | | **optional fast-follow**; residency decision first |
+| T-035 | Report relay — outbound only | **DONE** | opus-5 | | OBS-145 | Q-007 chose Telegram. `notifier.py` + `--notify`, 18 tests. Egress bounded structurally: `notify()` has no parameter a bundle could arrive in. Best-effort — a broken channel cannot change an exit code, pinned at the CLI boundary. **Needs `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.env` before it delivers anything** |
 
 ---
 
