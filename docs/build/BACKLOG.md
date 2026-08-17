@@ -32,6 +32,35 @@ scheduled four completed items and a track with no runnable work (OBS-123, OBS-1
 `unverified` is **not** `OPEN`. It means nobody has checked — a different state from
 checked-and-still-open, and conflating them is what the last plan did.
 
+### The vocabulary was one state short — corrected 2026-08-17
+
+The first pass had `BLOCKED` (*cannot be done*) and `unverified` (*nobody has looked*)
+and **no state for "examined, deferred, and here is the condition that would change
+that"**. So `B-443`–`B-450` — the peer review's §5 deferrals, each carrying an explicit
+trigger, and the **best-documented items in this file** — were marked `unverified`,
+which asserts the opposite of what is true about them. Three reviewers looked at them
+in detail.
+
+> **`DEFERRED` — examined, not scheduled, with the unblocking condition as its
+> evidence.** `BLOCKED` is *cannot*; `DEFERRED` is *chose not to, and this is what
+> would change it*.
+
+This is Gate Zero's own lesson recurring one level down. Gate Zero exists because a
+plan was written from item titles; the reconciliation then read those items through a
+vocabulary that could not express what they said. **A state column is only as accurate
+as the states available to it**, and a missing state does not fail loudly — it
+silently rounds to the nearest one, which is how eight examined items came to be
+labelled unexamined (OBS-136).
+
+**Counts after the correction — 95 items:** 34 `DONE` · 33 `unverified` · 14 `BLOCKED`
+· 7 `DEFERRED` · 6 `OPEN` · 1 `CLOSED-AS-MEASURED`.
+
+**33 `unverified` is the honest measure of what nobody has looked at**, and it is the
+number to watch. It should fall because items get examined, never because they get
+relabelled — a backlog reaching zero `unverified` by reclassification would have
+reproduced, in its own bookkeeping, the failure this whole reconciliation exists to
+correct.
+
 | Item | State | Evidence | Depends on (state) | Last touched |
 |---|---|---|---|---|
 | **B-101** | `OPEN` | PLAN-V2 P2.1 | MVP-0 complete | OBS-124 |
@@ -77,7 +106,7 @@ checked-and-still-open, and conflating them is what the last plan did.
 | **B-409** | `unverified` | unverified | MVP-1 | — |
 | **B-410** | `unverified` | unverified | Stage 2 | — |
 | **B-411** | `DONE` | OBS-123 | — | OBS-123 |
-| **B-412** | `OPEN` | injector script, outside this repo | — | OBS-075 |
+| **B-412** | `BLOCKED` | **outside this repository** — `~/ai-agent-ops/faultlab/`, which is not a git repo (OBS-135). Cannot be closed from here | — | OBS-075 · OBS-135 |
 | **B-413** | `DONE` | OBS-059 | — | OBS-059 |
 | **B-414** | `CLOSED-AS-MEASURED` | OBS-127 — 28 kept records; aggregation carries nothing | B-206 (BLOCKED) | OBS-124 |
 | **B-415** | `BLOCKED` | OBS-124 | B-206 (BLOCKED) | OBS-124 |
@@ -100,25 +129,25 @@ checked-and-still-open, and conflating them is what the last plan did.
 | **B-432** | `DONE` | OBS-124 | — | OBS-124 |
 | **B-433** | `DONE` | OBS-100 | — | OBS-100 |
 | **B-434** | `DONE` | OBS-100 | — | OBS-100 |
-| **B-435** | `OPEN` | filed at B-404; no fix attempted | — | OBS-103 |
+| **B-435** | `OPEN` | filed at B-404; no fix attempted. **Unscheduled** — `facts` already parses the configured hostname, so the fix is a mapping | — | OBS-103 |
 | **B-436** | `DONE` | 548e380 | — | OBS-108 |
 | **B-437** | `DONE` | OBS-121 | — | OBS-121 |
 | **B-438** | `DONE` | OBS-106 | — | OBS-106 |
 | **B-439** | `DONE` | 79c6777 | — | OBS-122 |
 | **B-440** | `BLOCKED` | needs the lab | B-431 (DONE) | OBS-116 |
-| **B-441** | `unverified` | unverified | — | — |
+| **B-441** | `DONE` | `MVP0-REVIEW.md:203` reports 3/3 on-path, 0/1 no-fault, 3/4 overall, and names the sampling frame | — | review §3.5 |
 | **B-442** | `DONE` | OBS-116 | B-452 (BLOCKED) | OBS-116 |
-| **B-443** | `unverified` | unverified | — | — |
-| **B-444** | `unverified` | unverified | — | — |
-| **B-445** | `unverified` | unverified | — | — |
-| **B-446** | `unverified` | unverified | — | — |
-| **B-447** | `unverified` | unverified | — | — |
-| **B-448** | `unverified` | unverified | B-401 (BLOCKED) | — |
-| **B-449** | `unverified` | unverified | — | — |
-| **B-450** | `unverified` | unverified | — | — |
+| **B-443** | `DEFERRED` | until a second address family or a VRF-scoped session exists | — | review §5 · A+B |
+| **B-444** | `DEFERRED` | until any multi-device concurrent deployment | — | review §5 · A+B |
+| **B-445** | `DEFERRED` | until escalation-grade output; B-430 (DONE) already surfaces the far end's stated reason | — | review §5 · B |
+| **B-446** | `DEFERRED` | until workflow adoption | — | review §5 · B |
+| **B-447** | `DEFERRED` | until either the EVPN or the SR flow is designed | — | review §5 · A |
+| **B-448** | `BLOCKED` | hardware — parked with B-401. *The payoff test is unvalidated, not passed* | B-401 (BLOCKED) | review §5 · A |
+| **B-449** | `DEFERRED` | until any L3VPN or EVPN claim is made | — | review §5 · A |
+| **B-450** | `DEFERRED` | until a characterised failure envelope exists | — | review §5 · C |
 | **B-451** | `DONE` | f6ea6ec | B-436 (DONE) | OBS-109 |
 | **B-452** | `BLOCKED` | deferred by decision, OBS-105 | — | OBS-116 |
-| **B-453** | `OPEN` | measured, not built | — | OBS-122 |
+| **B-453** | `OPEN` | measured — 0 false positives on round 3's report; **scheduled in Part 1** | — | OBS-122 |
 | **B-454** | `DONE` | 6598df8 | B-436 (DONE) | OBS-122 |
 | **B-455** | `DONE` | OBS-119 | B-436 (DONE) | OBS-119 |
 | **B-456** | `DONE` | 503b2ac | B-437 (DONE), B-431 (DONE) | OBS-121 |

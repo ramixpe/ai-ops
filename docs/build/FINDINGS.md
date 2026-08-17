@@ -1446,6 +1446,33 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-136 · Gate Zero · A missing state does not fail loudly; it rounds to the nearest one
+
+- **Kind:** defect-found
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** Gate Zero's reconciliation gave every backlog item a state from `OPEN` · `DONE` · `BLOCKED` · `SUPERSEDED` · `CLOSED-AS-MEASURED` · `unverified`. Cross-checking it against `PLAN-V2.md` found 30 open-or-unverified items named nowhere in the plan; most are covered by a Stage 2/Stage 3 block rather than by ID, which is fine. Eight are not, and all eight are wrong in the same way.
+
+  **`B-443`–`B-450` are the peer review's §5 deferrals.** Each carries an explicit trigger — *"until a second address family or a VRF-scoped session exists"*, *"until any multi-device concurrent deployment"*, *"until a characterised failure envelope exists"*. My pass marked them `unverified` because they have no `FINDINGS.md` entry.
+
+  `unverified` means **nobody has looked**. These were looked at by three independent reviewers, in detail, and deliberately not scheduled with a stated condition. They are among the **best-documented items in the file**, and they received the label meaning the opposite.
+- **Evidence:** `BACKLOG.md` reconciliation table before this change; the eight items' own rows in the main table, each of which contains the word *"Deferred until …"*.
+- **What I did:** Added `DEFERRED` — *examined, not scheduled, with the unblocking condition as its evidence* — and recategorised. Also corrected four individual rows: **B-441** is `DONE` (`MVP0-REVIEW.md:203` reports all three strata and names the sampling frame, which is exactly what the item asked for); **B-448** is `BLOCKED` on hardware with B-401, not deferred by choice; **B-412** is `BLOCKED` because it lives in `~/ai-agent-ops/faultlab/`, outside this repository, and cannot be closed from here (OBS-135); **B-453** and **B-435** are `OPEN` and were scheduled nowhere.
+
+  **The vocabulary had `BLOCKED` (*cannot*) and `unverified` (*not examined*) and no state for *examined, deferred, with a condition*.** That third thing is not a shade of either.
+
+  > **A missing state does not fail loudly. It silently rounds to the nearest available one**, and the rounding is invisible afterwards because the result is a well-formed table.
+
+  **This is Gate Zero's own lesson, one level down, and that is the part worth keeping.** Gate Zero exists because a plan was written from item *titles* rather than item *content* (OBS-123, OBS-124). The remedy was to read every item and assign a state. I then read all 95 items and assigned states through a vocabulary that could not express what eight of them said — so the second pass reproduced the first pass's failure through a different mechanism, having been designed specifically to prevent it.
+
+  The general form, which is why this is a finding and not a fix: **a classification is bounded by its categories, and a category that does not exist cannot be reported as missing.** Same family as §0.13 — the artefact was internally consistent, every row well-formed, and nothing in the table could have revealed the gap. Only comparing the table against the items' own prose did.
+
+  **Counts after correction, 95 items:** 34 `DONE` · 33 `unverified` · 14 `BLOCKED` · 7 `DEFERRED` · 6 `OPEN` · 1 `CLOSED-AS-MEASURED`. Twelve rows changed state.
+- **Needs human review:** no
+- **Blocks:** nothing.
+
+---
+
 <!--
 Copy this block for each new entry.
 
