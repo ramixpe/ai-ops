@@ -289,6 +289,24 @@ Three instances so far, each caught only because something else was watching:
 
 The companion takes one of two forms: assert the collection is currently empty (so it fails when populated), or assert the corpus exercises every outcome the test discriminates between. Either is cheap. Neither is optional on a test whose whole job is to catch a regression that has not happened yet.
 
+### A fourth shape: the parameterised test whose parameters cannot disagree
+
+Added 2026-08-17. **Parameterising a test is not the same as widening it**, and the difference is invisible in a green run.
+
+> **A parameterised test is vacuous if all of its parameters can produce the same result.**
+
+The instance. A test asserted that subject-scoped rungs resolve to *the subject's* device, parameterised over both directions of one session — `RR1 → PE2` and `PE2 → RR1`. That looks like coverage of the resolution rule, and it is not: **a resolver that returned the local device for everything satisfies both parameters.** Each case would compute its own "expected" from the same broken source and agree with itself.
+
+The parameterisation widened the *inputs* and not the *discrimination*. What made it mean something was a companion asserting the two directions **genuinely disagree** — that `igp_adjacency` is `PE2` one way and `RR1` the other — which is false under the degenerate resolver and true only when resolution actually resolves.
+
+This generalises past resolvers. Whenever a test is parameterised over cases that are *supposed* to differ, ask what a degenerate implementation would return for all of them. If a single constant satisfies every case, the parameter list is decoration:
+
+- a check parameterised over `healthy`/`broken` fixtures, where a stub returning `unevaluated` passes both;
+- a parser parameterised over platforms, where returning an empty parse satisfies each;
+- a diff parameterised over intents, where "no change" is correct for every one on a quiet corpus.
+
+**The companion is the same shape as the existing two, and it is the cheap half:** assert that the parameters produce *different* results, not merely that each produces the expected one. One extra test, and it is the one that fails when the discrimination is lost.
+
 ---
 
 ## 0.13 Evidence bounds conclusion, and the bound is invisible from inside
@@ -297,7 +315,7 @@ The companion takes one of two forms: assert the collection is currently empty (
 >
 > - a survey is a sample — *(data)*
 > - a rule generalised from one instance fits one instance — *(rules)*
-> - a test sharing the implementation's premise confirms it — *(tests)*
+> - a test sharing the implementation's premise confirms it — *(tests, and see the two forms below)*
 > - a corpus shows width only in dimensions where it varies — *(identity)*
 > - a demo verified in the developer's environment verifies the environment — *(setup)*
 >
@@ -320,6 +338,23 @@ One family, five faces. Each has cost this build real time, and in every case th
 The **setup** face is the one most likely to be dismissed as an operations detail. It is not: it is the only face where the contaminating evidence is *outside the repository*, so no amount of reading the code or the tests reveals it. The fix has to be an environment, not an inspection.
 
 The **tests** face deserves the extra sentence, because it is the one that cannot be caught by looking harder at the artefact: *green tests are not by themselves evidence that a component is correct — only that it agrees with the assumption it was built on.* Where a component encodes a judgement about the world, specify it independently.
+
+#### The tests face has two forms, and code review catches one of them
+
+Added 2026-08-17, after the second form appeared and was very nearly pinned as expected behaviour.
+
+| Form | What is wrong | What a code review sees |
+|---|---|---|
+| **Test agrees with a defective implementation** | the code | a defect, if the reviewer is careful — the artefact and the test are both in front of them, and the artefact is wrong |
+| **Test agrees with a false *description* of a correct implementation** | **nothing in the code** | **a correct implementation and a passing test.** There is no defect to find |
+
+T-028 is the first form: sixteen green tests over a filter that really was deleting records.
+
+The second form is harder and this build has now produced one. A test asserted `igp_adjacency == "PE2"`, written from a mistaken account of which investigation had run — true for `RR1 → 10.255.0.12`, false for the `PE2 → 10.255.0.31` case being discussed. **The code was never wrong.** The descent resolved correctly, the payload said so, and the test agreed with a wrong story about it and passed.
+
+> **When a test encodes a specification rather than an observation, reviewing the code cannot falsify it — there is no defect there. Only re-reading the specification against the record can.**
+
+The tell is a test whose expected value came from a *description* of a run rather than from the run's own output. The remedy is the one this section already prescribes for the other faces, pointed at the specification instead of the implementation: derive the expectation from the artefact (the payload, the fixture, the recorded result), or parameterise so that no single constant can satisfy it — see §0.12's fourth shape, which is how this instance was actually closed.
 
 Two practical consequences:
 

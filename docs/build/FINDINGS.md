@@ -3257,6 +3257,16 @@ and should be scored as a corpus result, not as a diagnostic error.
 - **Needs human review:** no
 - **Blocks:** nothing.
 
+  **Corrected 2026-08-17 by the operator, and the correction is to the framing rather than the fact.**
+
+  This was filed as a property of *models* — recall and generation are one operation, so a model checking what it said generates a fresh claim rather than retrieving an old one. **That mechanism is narrower than the failure it explains.**
+
+  > **Anyone reasoning about a prior exchange without the record in front of them is reconstructing it, and a confident reconstruction is indistinguishable from a memory.**
+
+  The operator demonstrated it twice in one session — once asserting a device misattribution that the payload contradicts (see the amendment to OBS-115), and once earlier — **after directing that this rule be written.** That is not an aside: a rule about reconstruction, written down and agreed, did not prevent its author from reconstructing an hour later. The rule is not a habit anyone acquires by knowing it, which is precisely why the remedy has to be mechanical: *supply the record*, never *recall the record*.
+
+  So the practical form in `prompts/README.md` is right and its scope statement was wrong. It is not a rule about prompting a model. It is a rule about any claim whose subject is an earlier exchange, and the prompt case is one instance of it.
+
 ---
 
 ## OBS-115 · B-439 · The live case: a model restatement dropped a rung
@@ -3311,6 +3321,29 @@ and should be scored as a corpus result, not as a diagnostic error.
   **OBS-114 generalises further than it was written.** It was recorded as a property of *models* — recall and generation being one operation. The mechanism is narrower than the failure: **anyone reasoning about a prior exchange without the record in front of them is reconstructing it**, and a confident reconstruction is indistinguishable from a memory. The rule that follows is the same one already written into `prompts/README.md`, and it is not model-specific: *a claim about earlier content must be checked against that content, supplied from the record.*
 
   **A smaller correction in the same direction.** The B-439 sub-item was **partly already satisfied** before it was requested — every rung already carried its own `device` field, in both the report and the payload. Only the count was missing. What landed is therefore narrower than it was specified as, and the entry above should not be read as though numbering introduced per-rung devices.
+
+---
+
+## OBS-116 · B-442 · The three datasets, and the one that is specified but does not exist
+
+- **Kind:** design
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** Item 8 of the peer review's order of work, the last one open. `chaos-harness.md` §3.5 specified two sets and §11 told you to re-run set B as a regression suite after every change — incompatible, as reviewer C pointed out: *"once its results influence a fix, model choice, parser or prompt, it is a regression set."*
+- **Evidence:** `chaos-harness.md` §3.5, §5, §10, §11, §12 reconciled against each other.
+- **What I did:** Wrote the three datasets under the narrow fix the operator accepted at OBS-105.
+
+  **Development** and **regression** in full. The rule that makes regression meaningful is that **a case joins it the first time it fails**, with its expected outcome recorded at that moment — so the set is a record of defects actually met rather than a wish-list of faults someone thought worth covering. `test_rounds_regression.py` already works this way for the four rounds, which is why it was worth stating as the rule rather than inventing one.
+
+  **The one-shot audit set is written as specified and explicitly not established**, with both live leakage routes named in the document rather than left to a reader who was present. Its specification was never the missing part: **governance is not an accessory to that set, it is the entire content of the property that distinguishes it.** All three sets hold the same kind of faults and run through the same harness; the only difference is who may see the contents, who may run it, and what happens after. Defer the rules and the third dataset is a development set with a label.
+
+  **The reconciliation was larger than the section.** §11's phase 7 and phase 8 named the same set for validation and for regression — that *was* the incompatibility, sitting two sections away from where it was diagnosed. Phase 9 now exists and is blocked on B-452. §13's example claim previously offered a holdout figure as though it were available; it now states that only the second sentence estimates unseen performance and that the honest form stops after the first until the audit set exists.
+
+  **On the sizing numbers.** They are recorded and placed **last**, because C's caveat is the operative sentence rather than a footnote: *sampling validity comes before sample size.* Running 59 trials against the development set produces a tight interval around a quantity nobody wants to know. Until the estimand is defined, this project has trials and no estimand — and 59 of them would not change that.
+
+  **What closing this item does not do.** It does not give the harness a third dataset. It makes the absence of one visible in the document a reader will actually reach, instead of leaving a specification that reads as a description. That is the whole content of the narrow fix, and it is worth being plain that the review's final item closes by *documenting a gap* rather than filling one.
+- **Needs human review:** no
+- **Blocks:** nothing. **Every item in the peer review's order of work is now closed**, with B-440 (round 6) operator-scheduled and B-452 deferred by decision.
 
 ---
 

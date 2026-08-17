@@ -124,22 +124,70 @@ This is harder than it sounds, and needs auditing: injection commits appear in t
 
 Two mitigations: use the same credentials and source host as routine operations, and — more robustly — measure it. Run a control arm where nothing is injected and confirm the agent's behaviour is statistically indistinguishable.
 
-### 3.5 A holdout set, never used for tuning
+### 3.5 Three datasets, because a holdout cannot be two things at once
 
 The one most often skipped, and the most expensive to skip.
 
 If failures observed during a soak are fixed, and the fixes are validated against the same fault catalogue, the result is an agent excellent at those faults and no better at anything else. That is §0.13's family in its most costly form: *your evidence bounds your conclusion, and the bound is invisible from inside.*
 
-**Split the catalogue:**
+**This section previously specified two sets, and they were incompatible.** It said set B validates fixes; §11 said re-run it as a regression suite after every change. Reviewer C:
 
-| Set | Use | Rule |
-|---|---|---|
-| **A — development** | injected during soaks; failures analysed and fixed | may be looked at freely |
-| **B — holdout** | validation only | never injected during development, never inspected when writing a fix |
+> *"Once its results influence a fix, model choice, parser or prompt, it is a regression set."*
 
-A fix that improves A and not B has fixed nothing generalisable. **Report both numbers, always. A paper that reports only the development set is reporting its own training data.**
+Both are legitimate uses. They cannot be the same artefact, because the second **spends** the first. A set re-run after every change has, by the tenth change, informed ten decisions — and a number produced by a set that has informed decisions is not an estimate of unseen performance, whatever it is called.
 
-Set B should be built by someone who is not writing the fixes, and should include fault classes absent from A entirely — not merely different parameters of the same classes.
+#### The three sets
+
+| Set | Visibility | Use | What it can support |
+|---|---|---|---|
+| **Development** | visible | injected during soaks; failures analysed and fixed | *"these failures are understood"* — never a rate |
+| **Regression** | visible **after its first failure** | re-run after every change | *"known defects have not returned"* |
+| **One-shot audit** | inaccessible to developers | evaluated **once**, on a frozen release, then spent | an estimate of unseen performance |
+
+**Development.** Freely inspectable. Its purpose is diagnosis, not measurement, and no number from it means anything beyond itself. Report it as *cases examined*, never as a score.
+
+**Regression.** A case enters this set **the first time it fails**, and its expected outcome is recorded at that moment. Before its first failure a case is a development case; afterwards it is a regression case forever. That rule matters because it makes the set's growth a record of *defects actually met*, rather than a wish-list of faults someone thought worth covering — the same discipline `test_rounds_regression.py` already follows for the four rounds.
+
+Regression results answer exactly one question: *has a known defect returned?* They do not answer *is the tool accurate*, and reporting them next to an accuracy figure invites exactly that read.
+
+#### The one-shot audit set — specified, and **not established**
+
+**This set does not exist and must not be described as though it does.**
+
+Its specification is complete: faults inaccessible to whoever writes the fixes, drawn from classes absent from the development set entirely rather than different parameters of the same classes, evaluated once against a frozen release, and spent — its results published, the set never re-run.
+
+What is missing is not the catalogue. It is the **governance**, and governance is not an accessory to this set: *it is the entire content of the property that distinguishes it.* A development set and a one-shot audit set contain the same kind of faults and are run by the same harness. The only difference between them is a set of rules about who may see the contents, who may run it, and what happens after it is spent. **Defer the rules and the third dataset is a development set with a label** (OBS-105, and it is §0.14 committed in the review's own deferral table — governance filed as *tooling for* the set when it is *the definition of* it).
+
+That work is **B-452, deferred**. Until it lands, this document claims two datasets and specifies a third.
+
+##### The two leakage routes that are live today
+
+Named here rather than left implicit, because a set whose leakage routes are undocumented cannot be assessed by anyone who was not present. Of reviewer C's eight, **two apply to this project now**:
+
+1. **The same tool-aware person defines both catalogues.** Whoever writes the development faults knows the tool's ladder, its findings and its weak rungs; a "held-out" set drawn by the same person inherits that knowledge as a shape, even with no fault repeated. This is not a matter of good faith — it is unavoidable while one person does both, and it is the reason the specification says the audit set must be built by someone who is not writing the fixes.
+
+2. **Local Git history treated as an immutable seal.** `git commit --amend` rewrites and `git rebase` reorders, both leaving a history that reads as though the original ordering held. §6.1 now requires a **push** before the run for exactly this reason, and rounds 1–4 used the weaker form (OBS-107).
+
+A number from a set with live leakage routes is not wrong — it is **unbounded in a direction nobody can quantify**, which is worse, because it looks like a number.
+
+#### Sample sizes, and why they come last
+
+Reviewer C's arithmetic, for a per-stratum claim:
+
+| Claim | Representative trials |
+|---|---:|
+| One-sided 95% upper bound on critical error below 5%, zero observed | **59** |
+| Same, below 1% | **299** |
+| Estimate a proportion to ±10 points at 95% | ~**97** |
+| Estimate to ±5 points | ~**385** |
+
+With C's caveat, which is the operative sentence and not a footnote:
+
+> *"Fifty-nine repetitions of one tool-aware true negative do not bound the false-positive rate on production incidents. **Sampling validity comes before sample size.**"*
+
+So these numbers are the *last* thing to act on, not the first. Running 59 trials against the development set produces a tight confidence interval around a quantity nobody wants to know. **The estimand has to be defined before the count matters**: what population is being sampled, by what procedure, and what claim the number is intended to support. Until the audit set is established, this project has trials and no estimand.
+
+**Report all three strata separately, always, and name the sampling frame** (§3.5's companion rule, and reviewer C's correction to a decision made during the four rounds): an aggregate that averages a working category with one that structurally could not work is not wrong because of the denominator — it is uninterpretable because the cases were never sampled from a defined population.
 
 ---
 
@@ -239,7 +287,7 @@ Scoring must never optimise `undetermined` downward. A change that converts `und
 
 ### 5.3 Reported metrics
 
-Per fault class, and overall, on **both** the development and holdout sets:
+Per fault class, and overall, reported **separately per dataset** (§3.5) and never aggregated across them:
 
 - correct rate; wrong-rung rate split by direction; false positive; false negative; undetermined; error
 - **localisation accuracy** — device correct, given the rung was correct
@@ -488,7 +536,7 @@ Note against **B-201**: Stage 2 should not ship without a soak run behind it.
 | Anti-pattern | Why |
 |---|---|
 | The agent runs the injector | Destroys blinding and grants device-write capability |
-| Tuning against the holdout set | Then there is no holdout set |
+| Tuning against the audit set | Then there is no audit set — it has become a development set with a label |
 | A single headline accuracy number | Hides clustering, which is the actionable signal |
 | Optimising `undetermined` downward | Converts honest refusals into confident guesses |
 | Faults with no true negatives | An always-report-something agent scores perfectly |
@@ -507,16 +555,19 @@ Then, in order:
 
 | Phase | Work |
 |---|---|
-| **1** | Catalogue formalised, split A/B, expected rungs sealed |
+| **1** | Catalogue formalised, split **development / regression** (§3.5), expected rungs sealed |
 | **2** | Supervisor process, independent of the injector, force-restore verified |
 | **3** | Scorer and confusion matrix over manual trials |
 | **4** | Short supervised soak — 4 hours, attended, 8–10 trials |
 | **5** | Combination faults, testing §7's non-contiguity hypothesis |
 | **6** | 24-hour unattended soak |
-| **7** | Fix cycle against set A; validate every fix against set B |
-| **8** | Re-run as a regression suite after every subsequent change |
+| **7** | Fix cycle against the development set; a case joins the regression set the first time it fails |
+| **8** | Re-run the regression set after every subsequent change |
+| **9** | *(blocked on B-452)* establish the one-shot audit set under governance, evaluate a frozen release once, publish, spend it |
 
 Phase 4 is the gate on phase 6. **An unattended run is earned by a supervised one, not assumed.**
+
+**Phases 7 and 8 used to name the same set, and that was the incompatibility §3.5 now resolves.** A set re-run after every change is a regression set; it cannot also be the source of an unseen-performance number. Phase 9 is the only phase that can produce one, and it does not exist yet — the harness can reach phase 8 and stop, and should say so rather than reporting phase 8's numbers in phase 9's language.
 
 ---
 
@@ -527,7 +578,9 @@ Phase 4 is the gate on phase 6. **An unattended run is earned by a supervised on
 | **B-426** | Fault injection harness — injector, supervisor, catalogue, safety ceilings |
 | **B-427** | Evaluation corpus and confusion matrix; regression re-runs |
 | **B-428** | Combination faults and the non-contiguity hypothesis for D6 |
-| **B-429** | Holdout set, built by someone not writing the fixes |
+| **B-429** | Audit set, built by someone not writing the fixes |
+| **B-442** | The three datasets, the estimand plan and stratum sizing — §3.5 (**this section**) |
+| **B-452** | Frozen-release audit governance. **Blocks the third dataset existing at all**, because governance is what distinguishes it (OBS-105) |
 | **B-201** | Stage 2 triggers — should not ship without a soak behind it |
 
 ---
@@ -538,6 +591,8 @@ Without a harness, the strongest honest statement is *"it worked on the cases we
 
 With one:
 
-> Across 200 trials spanning six fault classes and four devices, the agent identified the correct rung in *n*% of cases and the correct device in *m*% of those. It reported a fault where none existed *p* times. Where it could not determine a cause it said so rather than guessing, in *q*% of trials. On a holdout set never used during development, those figures were *n'*, *m'*, *p'*, *q'*.
+> Across 200 trials spanning six fault classes and four devices, the agent identified the correct rung in *n*% of cases and the correct device in *m*% of those. It reported a fault where none existed *p* times. Where it could not determine a cause it said so rather than guessing, in *q*% of trials. On a one-shot audit set, evaluated once against this release and never used during development, those figures were *n'*, *m'*, *p'*, *q'*.
+>
+> **Only the second sentence is an estimate of unseen performance, and it requires the audit set to exist under governance (B-452). Until then the honest form of this paragraph stops after the first sentence and names the dataset it came from.**
 
 That is a claim an operations team can act on — and it is the difference between an interesting prototype and something anyone will let near a production network.

@@ -72,6 +72,16 @@ earlier content must contain that content**, supplied from the record. Never
 takes a `DescentResult` rather than asking the model to recall one — and this is
 the general form of why that shape is right.
 
+**And it is not a rule about models.** The mechanism above is stated in terms of
+generation because that is where it was first observed, but the failure is
+wider: *anyone* reasoning about a prior exchange without the record in front of
+them is reconstructing it, and a confident reconstruction is indistinguishable
+from a memory. This was demonstrated twice in one session by the person who
+directed the rule be written, an hour after writing it — which is the evidence
+that knowing the rule does not protect against it. **The remedy has to be
+mechanical: supply the record, never recall it.** The prompt case is one
+instance of a general one.
+
 ---
 
 ## Rules
