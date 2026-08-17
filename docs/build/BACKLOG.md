@@ -92,7 +92,7 @@ checked-and-still-open, and conflating them is what the last plan did.
 | **B-424** | `DONE` | OBS-081 | — | OBS-081 |
 | **B-425** | `DONE` | OBS-123 | — | OBS-123 |
 | **B-426** | `BLOCKED` | earned by rounds, not assumed | B-201 (unverified) | OBS-124 |
-| **B-427** | `BLOCKED` | needs B-426 | B-426 (BLOCKED) | OBS-098 |
+| **B-427** | `BLOCKED` | needs B-426 | B-426 (BLOCKED) | OBS-098 **CORPUS UPDATE 2026-08-17: round 7 is the fifth scored round** (1 IGP shutdown, 2 transport, 3 BGP admin-shut, 5 propagation, 7 LFA persistence). Round 7 is the first whose **full per-sample payloads are archived** (`evidence-archive/round7/`, 325 samples across two runs) rather than a finding — §6.1d in force from here. It is also the first scored round that validates *shipped code* rather than measuring diagnostic accuracy, so it belongs in the corpus under a different heading: **mechanism validation**, not a blind trial. Its prediction was sealed and pushed before the fault (`e02c6ca`) and §6.1b caught a harness/prediction fault mismatch before the seal rather than after. |
 | **B-428** | `DONE` | OBS-124 | — | OBS-124 |
 | **B-429** | `DONE` | OBS-083 | — | OBS-083 |
 | **B-430** | `DONE` | OBS-097 | — | OBS-097 |
@@ -127,10 +127,10 @@ checked-and-still-open, and conflating them is what the last plan did.
 | **B-459** | `DONE` | ee733a2 | B-453 (OPEN) | OBS-122 |
 | **B-460** | `DONE` | OBS-120 | — | OBS-120 |
 | **B-461** | `DONE` | numbered rungs, 61af0d0 | B-439 (DONE) | OBS-117 |
-| **B-462** | `BLOCKED` | needs the lab | B-456 (DONE) | OBS-121 |
+| **B-462** | `DONE` | OBS-129 — round 7, 99 down-port samples, 0 persisting | B-456 (DONE) | OBS-121 |
 | **B-463** | `BLOCKED` | needs the lab | B-437 (DONE) | OBS-121 |
 
-**Totals:** `BLOCKED` 14 · `DONE` 32 · `OPEN` 7 · `unverified` 42 · **95 items**
+**Totals:** `BLOCKED` 13 · `DONE` 33 · `OPEN` 7 · `unverified` 42 · **95 items**
 
 *Updated 2026-08-17 after P1.1: B-457 and B-458 closed (OBS-126).*
 

@@ -1,0 +1,11 @@
+{
+  "samples": 163,
+  "mean_sample_seconds": 1.035,
+  "samples_with_port_down": 99,
+  "samples_route_named_down_port": 0,
+  "persisting_observed": false,
+  "persisting_sample_count": 0,
+  "persisting_span_samples": null,
+  "estimated_window_seconds": 0.0,
+  "note": "No sample caught the route naming an already-down port. The window is bounded above by the sampling resolution (~1.035s), not measured as zero."
+}

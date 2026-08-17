@@ -99,6 +99,79 @@ runs it.
 
 ---
 
-## 4. Results
+## 4. Results — scored, B-462 closed
 
-*Empty until the run.*
+Two runs are archived under `evidence-archive/round7/`. The operator reports a
+third; **I can only find two in `faultlab/round7/`, and I am not reconciling the
+count by inference** — see §4.5.
+
+| Run | Samples | Interval | Port-down samples | Route naming a down port |
+|---|---:|---:|---:|---:|
+| `151001` (dry-run; fault never applied) | 162 | 1.04 s | **0** | 0 |
+| `151420` (fault applied, restore verified) | 163 | 1.04 s | **99** | **0** |
+
+### 4.1 Primary claim — CONFIRMED
+
+> A down port does not persist as `Backup (Local-LFA)`.
+
+**99 samples with `Gi0/0/0/0` admin-down, and not one names it in PE2's route to
+`10.255.0.31`.** `EACH_PATH_INTERFACE` cannot derive a member set containing a
+dead port, so **B-456's premise is sound and the soft spot in shipped code is
+closed.**
+
+### 4.2 Secondary claim — SURVIVES, AND IS UNMEASURED
+
+The 10-second falsifier did not fire, so the claim stands. **What was
+established is "under 1.04 s", not a measured window**, and the harness said so
+itself:
+
+> *"No sample caught the route naming an already-down port. The window is
+> bounded above by the sampling resolution (~1.035s), not measured as zero."*
+
+**A method cannot measure a window shorter than its own resolution.** Reporting
+`estimated_window_seconds: 0.0` as a result would be absence read as presence —
+the same error the whole `unevaluated` discipline exists to prevent, arriving in
+a measurement rather than a check.
+
+### 4.3 The restore transition — scored separately, and it is a positive control
+
+Free, because the harness sampled through the restore. Same question, sign
+reversed: after `no shutdown`, does the route name the port before it is up?
+
+- **0 samples** name the port while it is not up. Same answer as the shutdown
+  side, in the other direction.
+- **1 sample** (n=105) has the port `up/up` with the route **not yet** naming
+  it; n=106 names it.
+
+That single sample is worth more than it looks. **It is evidence that the
+instrument can resolve a transition of this size.** A bare zero on the shutdown
+side is consistent with "nothing happened" *and* with "the sampler is too coarse
+to see it"; catching a ≤1.04 s lag on the restore side rules out the second for
+lags of that scale. The shutdown-side zero is therefore a stronger negative than
+an unaccompanied zero would be — and it is the only reason §4.2's bound means
+anything.
+
+### 4.4 The first run counts, with a caveat
+
+Run `151001` claimed `--dry-run` and its port stayed `up` across all 162
+samples, so it contributed **no down-port observations**. Its value is as an
+independent replication of the *baseline*: 162 samples in which the route names
+both ports and both are up.
+
+**Its restore was never verified** — `RESTORE verified (dry-run: nothing
+written)` is the same defective guard described in §5. The fabric was healthy at
+the next run's baseline, which is **luck rather than evidence**: nothing read the
+device to establish it.
+
+### 4.5 A count I cannot reconcile, recorded rather than resolved
+
+The operator reports **three runs and 158 + 99 down-port samples**. In
+`faultlab/round7/` there are **two** run directories, with **0** and **99**
+down-port samples. A run with 158 is not present.
+
+I am not inferring where it went. Either a third run exists outside that
+directory, or the 158 is from a source I have not been shown. **The conclusions
+are unaffected** — every sample in every run I can read has zero persisting
+observations — but the count in this document is the count I measured, and the
+discrepancy is a question for the operator rather than something to average out.
+

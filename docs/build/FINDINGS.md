@@ -3664,6 +3664,59 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-129 · B-462 · Round 7 scored: a down port does not persist, and the restore proved the instrument
+
+- **Kind:** validation
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** Round 7 answered the gating question B-456 shipped with. **99 samples with `Gi0/0/0/0` admin-down on PE2, and not one names it in the route to `10.255.0.31`.** A down port does not persist as `Backup (Local-LFA)`, so `EACH_PATH_INTERFACE` cannot derive a member set containing a dead port. **B-456's premise is sound; B-462 is closed.**
+- **Evidence:** `evidence-archive/round7/`, two runs at ~1.04 s resolution. Full per-sample payloads archived per §6.1d.
+- **What I did:** Scored it, and recorded two things the run produced that the prediction did not anticipate.
+
+  **The secondary claim survives and is unmeasured, and the distinction is not pedantry.** The 10 s falsifier did not fire, so the claim stands — but what was established is **"under 1.04 s"**, not a measured window. The harness said so in its own verdict: *"the window is bounded above by the sampling resolution, not measured as zero."* Reporting `estimated_window_seconds: 0.0` would be **absence read as presence**, which is the `unevaluated` discipline arriving in a measurement instead of a check. A method cannot measure a window shorter than its own resolution.
+
+  **The restore transition is a positive control, and it is the most useful thing in the round.** Scored separately at the operator's instruction: 0 samples name the port while it is not up — same answer, sign reversed. But **one** sample has the port `up/up` with the route not yet naming it.
+
+  That single sample is what makes the shutdown-side zero mean something. A bare zero is consistent with *"nothing happened"* **and** with *"the instrument is too coarse to see it"*. Catching a ≤1.04 s lag on the restore side rules out the second at that scale. **The negative result is only interpretable because the same run produced a positive one of comparable size** — and it was free, because the harness sampled through the restore rather than stopping at it.
+
+  Worth generalising: **a run that observes only the absence of a thing should be asked what it would have taken to observe its presence.** Where the same run answers that by accident, keep it.
+- **Needs human review:** the sample count — see below
+- **Blocks:** nothing. B-462 closed.
+
+  **One discrepancy recorded rather than resolved.** The operator reports three runs and 158 + 99 down-port samples; `faultlab/round7/` contains two runs with 0 and 99. A run with 158 is not present. The conclusions are unaffected — every sample in every run I can read has zero persisting observations — but the count in `ROUND-7.md` is the count I measured, and I am not averaging a discrepancy away.
+
+---
+
+## OBS-130 · Harness · A safety flag in the caller and a guard in the callee look identical and are unrelated
+
+- **Kind:** defect-found
+- **Escalation:** **HALT-class** — a device write occurred during a run labelled dry
+- **Model:** opus-5
+- **What happened:** `round5.py` and `round7.py` each define `_dry = False` and set it from `--dry-run`. `fault_lab.push()` guards on **`fault_lab._dry_run`**, which they never set. At the call site the two are indistinguishable:
+
+  ```python
+  _dry = args.dry_run                    # the caller's flag
+  status = push(conn, APPLY, "apply")    # reads the callee's, still False
+  ```
+
+  **So a `--dry-run` pushes configuration.** Round 5's dry run recorded `push_status: 'send:ReadTimeout+committed+exited'` at 09:30:48 — a real `send_config_set` and commit against PE2, in a run whose own log line reads *"[dry-run] fault not applied"*.
+- **Evidence:** `faultlab/round5/20260817-092916/timeline.jsonl`; `fault_lab.py` lines 199, 264; `round5.py` line 92.
+- **What I did:** Audited every cross-module flag in the harness and recorded the general form in §0.13's duplication face.
+
+  **What round 5's dry run did to the fabric cannot now be determined, and that is the worse half.** The evidence is genuinely mixed: the push reported `send:ReadTimeout`, meaning `send_config_set` raised before completing — and `probe-01`, a direct read of PE2's IS-IS **69 seconds after the commit**, reports `igp_adjacency PE2 healthy`, which two shut uplinks would not. So the config most likely never took effect.
+
+  But *most likely* is where it ends. **Nothing read the running configuration**, because the same defective flag sent `restore()` down its `if _dry:` branch — *"RESTORE verified (dry-run: nothing written)"* — skipping the verification that would have said. §6.1's rule is *verify by reading the device, never by the write's report*, and the dry-run guard is exactly what disabled it.
+
+  **The two failures compound.** A push that should not have happened is bad; a push that should not have happened *and* a verification that was skipped for the same reason means the fabric's state during that window is unrecoverable. Recorded as unknown rather than assumed benign.
+
+  **Why this is the duplication face and not carelessness.** Both modules hold what should be one value, and they agreed for as long as nobody looked — identical in shape to the three `_is_numeric` re-derivations. The difference is the direction of failure: a diverged discriminator gives a wrong answer; a diverged safety flag **writes to a production device**. The remedy is the same: one flag, owned by the module that acts on it, read by everything else through a function.
+
+  **The correction to my own record.** I attributed the dry run's 56–61 s skew to a device slowdown (OBS-107, ROUND-5 §5) and it may partly have been the fault. Probe 00 predates the commit and was already slow, so the login-penalty account survives for that sample; probes 01 and 99 span a window whose fabric state is now unknown. **The skew analysis is not invalidated, it is narrowed** — one clean sample instead of three.
+- **Needs human review:** **yes — a device write occurred outside an authorised window, and the harness is the operator's**
+- **Blocks:** nothing in this repository. The harness needs the flag fixed before the next round.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**

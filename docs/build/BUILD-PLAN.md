@@ -366,6 +366,20 @@ The case. `show bgp summary`'s `St/PfxRcd` column holds *either* a prefix count 
 
 So the check is structural rather than comparative: **count the sites that reconstruct the same fact.** More than one is the finding, whatever they currently return. And the fix has a canonical location — *the last point at which the discarded information is still observable*, which for a parsed field is the parser.
 
+**A second form, and it is the dangerous one: a *safety* flag duplicated across modules.**
+
+`round5.py` and `round7.py` each define `_dry = False` and set it from `--dry-run`. `fault_lab.push()` guards on `fault_lab._dry_run`, which they never touch. At the call site the two are indistinguishable:
+
+```python
+_dry = args.dry_run          # the caller's flag
+...
+status = push(conn, APPLY, "apply")   # reads the callee's, still False
+```
+
+**Both modules hold what should be one value, and they agreed for as long as nobody looked** — which is the duplication face exactly. What makes this instance worse than three `_is_numeric` calls is the direction of failure: a re-derived discriminator that diverges gives a wrong answer, while a safety flag that diverges **pushes configuration to a production device during a run labelled "dry".**
+
+The tell is the same and so is the remedy: **count the places holding the value.** One flag, owned by the module that acts on it, read by everything else through a function — never a module global set by a caller who does not own it.
+
 Note what the duplication face shares with the others and where it parts company. Like **tests**, the artefact is internally consistent; unlike tests, there is no premise to specify independently, because every copy is correct. Like **rules**, it is about a generalisation; unlike rules, no instance is wrong. It is the one face where *nothing anywhere is incorrect* and the defect is entirely in the shape.
 
 The **tests** face deserves the extra sentence, because it is the one that cannot be caught by looking harder at the artefact: *green tests are not by themselves evidence that a component is correct — only that it agrees with the assumption it was built on.* Where a component encodes a judgement about the world, specify it independently.
