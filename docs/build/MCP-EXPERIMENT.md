@@ -464,3 +464,331 @@ a model was what made anyone check.
 Findings: **OBS-111** (the audit), **OBS-112** (selection), **OBS-113**
 (argument fabrication), **OBS-114** (self-report), **OBS-115** (the dropped
 rung, with its misattribution half withdrawn — §6.6).
+
+---
+
+## 9. The control arm question, decided before rewording
+
+The operator raised it and left the call to me: rewriting 21 descriptions on
+**one** observation is §0.13's data face applied to a fix. Should two or three
+be left in the original form as a control?
+
+**Decision: no control arm. All 21 are reworded.** The reasoning, recorded
+because the alternative was reasonable and the decision should be checkable.
+
+### Why the proposed arm would not measure what it looks like it measures
+
+A control arm isolates a treatment when the arms differ **only** in the
+treatment. These arms would differ in *what the tools do*.
+
+`list_lab_devices` is not the right answer to *"why is the BGP session down?"*
+under any wording. If it keeps its old description and is not selected, that
+measures nothing — it should not be selected. The tools are not interchangeable,
+so "reworded" and "not reworded" are not two conditions the same choice can be
+made under. A negative result would be uninterpretable and a positive one would
+be luck.
+
+### The uniformity hypothesis is already controlled for, and points the other way
+
+The worry is that a fully reworded surface confounds *content* with
+*uniformity*. But look at what the baseline actually is: **twenty tools phrased
+alike, one phrased differently.**
+
+If uniformity drove selection, the twenty uniform ones would have been favoured.
+The **outlier** was selected. Uniformity-as-mechanism predicts the opposite of
+the observation, so it is not a live confound for the result in hand — the
+current surface already served as its control, by accident.
+
+### The real risk is contrast, not uniformity — and it is sharper
+
+There are two mechanisms consistent with the observation, and the operator's
+instinct is pointing at the second even though the framing named the first:
+
+| | Mechanism | Prediction after rewording all 21 |
+|---|---|---|
+| **Content** | descriptions stating what a tool achieves are more selectable, absolutely | selection holds or improves |
+| **Contrast** | the description that *differs from its neighbours* draws selection, whatever it says | **selection degrades toward chance** |
+
+**If contrast is the mechanism, rewording all 21 destroys the signal it is built
+on.** That is a real and specific risk, it is more worrying than uniformity, and
+it is the strongest argument the operator's position has.
+
+It also needs no control arm to test. The two mechanisms make **opposite**
+predictions, so measuring after the rewording discriminates them — provided the
+prediction is registered first.
+
+### Pre-registered, before any description is rewritten
+
+> **Prediction.** After all 21 descriptions are rewritten in the form *what
+> question this answers, when to prefer it*, `investigate_lab_session` is still
+> selected for *"why is X broken?"*-shaped questions.
+>
+> **If selection holds or improves**, contrast is not the mechanism and content
+> is doing the work.
+>
+> **Refuted if** selection degrades — if the model spreads across
+> `check_lab_bgp_neighbors`, `collect_lab_evidence` and others where it
+> previously went straight to the ladder. That result would mean the observed
+> effect was **differential, not absolute**, and the right response is not to
+> revert but to make the *distinction* explicit in the wording rather than
+> relying on it emerging from contrast.
+>
+> **Uninterpretable if** the question set differs from the one that produced the
+> original observation. The comparison must reuse *"why is the BGP session on
+> PE2 down?"* among others, or it measures a different thing.
+
+### What this still cannot separate
+
+Honestly: if selection improves, *"these words are better"* and *"the surface is
+now internally coherent"* remain confounded. Separating them needs a third arm —
+all 21 rewritten to be **uniform but uninformative** — and that is a surface
+nobody would ship to measure a distinction nobody would act on. Recorded as a
+known limit rather than pretended away.
+
+### What the baseline capture buys instead
+
+Appendix A preserves all 21 original descriptions verbatim. That makes the
+**right** experiment available later at no extra cost: a *between-surface* A/B —
+the same question set against two complete surfaces, all-old and all-new — which
+isolates the treatment properly because **every tool appears in both arms**.
+That is the design a within-surface mix was reaching for, and it does not
+require shipping an inconsistent production surface to get it.
+
+### The cost that decided it
+
+The arm's price is inconsistency on a surface whose entire diagnosed problem was
+inconsistency, paid for a measurement confounded by tool non-interchangeability.
+The alternative costs one pre-registered prediction and preserves a cleaner
+experiment for later.
+
+---
+
+## Appendix A — the 21 tool descriptions, as they stood for this experiment
+
+**Captured verbatim at `44f5c98`, before B-113's rewording.** These are the
+baseline for the controlled comparison; once rewritten they are gone from the
+working tree, and a comparison against a remembered version of them would be
+the failure §6.6 is about.
+
+Generated from the server's registry rather than transcribed. What appears
+here is the text the MCP SDK sends as each tool's description — the whole
+docstring, which is what a model actually reads.
+
+**The shape of the baseline, in one line:** twenty describe *what they
+collect*; one describes *what it achieves and when to prefer it*.
+
+### `assess_lab_device_health`
+
+```text
+Evaluate deterministic health verdicts (role invariants + baseline drift) for one device.
+
+Cheap, rule-based -- not an LLM call -- so a client can get a severity
+verdict (``ok``/``info``/``warning``/``critical``) and its findings
+without spending a reasoning call. See ``assess_lab_fabric_health`` to
+evaluate every device at once.
+```
+
+### `assess_lab_fabric_health`
+
+```text
+Evaluate deterministic health verdicts across every device in the fabric inventory.
+
+Same rules as ``assess_lab_device_health``, rolled up to one fabric-wide
+severity (the max over every device's own severity) -- see
+``health.evaluate_fabric``.
+```
+
+### `check_lab_bgp_neighbors`
+
+```text
+Collect read-only BGP neighbor state from a lab device.
+```
+
+### `check_lab_fabric`
+
+```text
+Run one read-only check (facts|interfaces|bgp|lldp|isis|sr) across the fabric.
+```
+
+### `check_lab_interfaces`
+
+```text
+Collect read-only interface status from a lab device.
+```
+
+### `check_lab_isis_neighbors`
+
+```text
+Collect read-only IS-IS neighbor state from a lab device.
+```
+
+### `check_lab_lldp_neighbors`
+
+```text
+Collect read-only LLDP neighbor state from a lab device.
+```
+
+### `check_lab_sr_policies`
+
+```text
+Collect read-only Segment Routing TE policy state from a lab device.
+```
+
+### `collect_lab_evidence`
+
+```text
+Collect the full read-only evidence bundle from a lab device in one session.
+```
+
+### `detect_lab_flaps`
+
+```text
+Report fields that oscillated across a device's saved snapshot history.
+
+A peer that bounced up/down/up between collections can look clean in
+every single pairwise diff -- this reads the device's *entire* saved
+snapshot history instead. Requires prior snapshots (``save_lab_snapshot``,
+``diff_lab_device_against_latest``, or ``nettools diff``/``capture``) --
+with none saved yet, ``data.flapping`` is simply empty.
+```
+
+### `diff_lab_device_against_golden`
+
+```text
+Collect fresh evidence and diff it against the device's pinned golden snapshot.
+
+``data.has_previous`` is ``false`` (and ``data.diff`` is ``null``) when no
+golden snapshot has ever been pinned for this device -- see
+``pin_lab_golden_snapshot``.
+```
+
+### `diff_lab_device_against_latest`
+
+```text
+Collect fresh evidence and diff it against the device's most recently saved snapshot.
+
+Saves the fresh collection as the new "latest" snapshot, same as
+``nettools diff DEVICE``. ``data.has_previous`` is ``false`` (and
+``data.diff`` is ``null``) the first time this runs for a device -- there
+is nothing to compare against yet, not an error.
+```
+
+### `get_lab_bgp_neighbor`
+
+```text
+Look up a specific BGP neighbor on a lab device.
+
+``address`` must be a plain IPv4 address, e.g. "10.255.0.31". Use this to
+narrow in on one peer after ``check_lab_bgp_neighbors`` shows it Idle or
+otherwise not Established.
+```
+
+### `get_lab_device_facts`
+
+```text
+Collect basic read-only facts from a lab device.
+```
+
+### `get_lab_interface`
+
+```text
+Look up a specific interface's status on a lab device.
+
+``name`` must be a valid interface name, e.g. "GigabitEthernet0/0/0/1",
+"Gi0/0/0/2.300", or "Loopback0" -- validated against an anchored
+letters/digits/``._/-`` charset, so it can never carry a shell or CLI
+metacharacter.
+```
+
+### `get_lab_logging`
+
+```text
+Show a lab device's most recent log lines.
+
+``count`` must be a plain integer from 1 to 500 (default 20).
+```
+
+### `get_lab_ping`
+
+```text
+Ping an IPv4 address from a lab device.
+
+``address`` must be a plain IPv4 address, e.g. "10.255.0.31". This is an
+active probe: it generates ICMP traffic (unlike every other tool here)
+even though it changes no device configuration, and is refused when the
+server has ``NETTOOLS_ALLOW_ACTIVE_PROBES`` set to a falsy value.
+```
+
+### `get_lab_route`
+
+```text
+Look up a specific route on a lab device.
+
+``prefix`` must be an IPv4 address or CIDR prefix, e.g. "10.255.0.31" or
+"10.0.0.0/24" -- validated and rendered from its parsed, canonical form
+(never passed through as text); anything else is rejected before any
+connection is made. Narrow this after seeing a route-related anomaly in
+other evidence (e.g. a missing or unexpected next hop).
+```
+
+### `get_lab_traceroute`
+
+```text
+Traceroute to an IPv4 address from a lab device.
+
+``address`` must be a plain IPv4 address, e.g. "10.255.0.31". An active
+probe like ``get_lab_ping``: generates traffic, changes no device state,
+and is refused when ``NETTOOLS_ALLOW_ACTIVE_PROBES`` is set to a falsy
+value.
+```
+
+### `investigate_lab_session`
+
+```text
+Localise the cause of a fault by walking a dependency ladder, deterministically.
+
+**Prefer this over calling the individual check tools yourself** when the
+question is "why is this broken?". It walks the layers beneath a symptom in
+order -- session, transport, route, IGP adjacency, physical interface -- and
+reports the *lowest* broken one as the cause, with the broken layers above
+it as the causal chain that explains the symptom. Every verdict comes from
+code comparing parsed fields, with no model involved.
+
+``device``  the device to investigate *from*, e.g. "RR1".
+``subject`` what to investigate, in the flow's own vocabulary. For
+            ``bgp_session`` that is the peer's IPv4 address as
+            ``show bgp summary`` lists it, e.g. "10.255.0.12".
+``flow``    the object type. ``bgp_session`` (default) or ``interface``.
+
+Read ``finding`` first. Values you will see:
+
+``all_layers_healthy``     no fault on the path between these two endpoints.
+``no_fault_on_path``       the session is fine; broken layers were found that
+                           are **not** on the path -- read ``off_path``, and
+                           do not report them as the cause of anything.
+``cause_not_localised``    the symptom is real and every layer beneath it is
+                           healthy. Look at configuration and policy.
+``undetermined``           a layer could not be read, so nothing below it was
+                           evaluated. ``reason`` says which.
+``temporally_incoherent``  the fabric changed while it was being read. These
+                           observations do not describe one state; run again.
+otherwise                  the terminal finding for the lowest broken layer,
+                           e.g. ``interface_line_down``, ``igp_isolated``.
+
+``trustworthy`` is false when the run did not produce an answer you may act
+on -- which is **not** the same as the network being broken. Check it before
+reporting a finding.
+
+``coherence.caveat``, when present, must be repeated to the user: the answer
+was read over a window wider than the bound, so it is true at both ends of
+that window rather than throughout it.
+
+No model is called and no paraphrase is produced. The report is rendered
+from the descent's own typed fields.
+```
+
+### `list_lab_devices`
+
+```text
+List the IOS-XR devices available in the lab inventory.
+```
