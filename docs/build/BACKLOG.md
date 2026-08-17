@@ -147,7 +147,7 @@ correct.
 | **B-450** | `DEFERRED` | until a characterised failure envelope exists | — | review §5 · C |
 | **B-451** | `DONE` | f6ea6ec | B-436 (DONE) | OBS-109 |
 | **B-452** | `BLOCKED` | deferred by decision, OBS-105 | — | OBS-116 |
-| **B-453** | `OPEN` | measured — 0 false positives on round 3's report; **scheduled in Part 1** | — | OBS-122 |
+| **B-453** | `DONE` | `check_identifier_containment`, wired into `ground_report`. 10 tests; 1786 green; the offline demo still emits | — | OBS-122 · OBS-138 |
 | **B-454** | `DONE` | 6598df8 | B-436 (DONE) | OBS-122 |
 | **B-455** | `DONE` | OBS-119 | B-436 (DONE) | OBS-119 |
 | **B-456** | `DONE` | 503b2ac | B-437 (DONE), B-431 (DONE) | OBS-121 |

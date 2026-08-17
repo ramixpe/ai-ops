@@ -53,6 +53,8 @@ model-authored text like any other.
 
 from __future__ import annotations
 
+import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from .coverage import Coverage
@@ -63,12 +65,16 @@ __all__ = [
     "MAX_LOCUS_LENGTH",
     "GroundingFailure",
     "GroundingResult",
+    "canonical_identifier",
+    "clean_token",
     "check_absence_coverage",
     "check_chain_coverage",
+    "check_identifier_containment",
     "check_timeline_citations",
     "claims_present",
     "check_grounding",
     "descent_evidence_keys",
+    "evidence_identifiers",
     "ground_correlation",
     "ground_report",
     "observation_labels",
@@ -128,6 +134,7 @@ class GroundingResult:
     rungs_required: int = 0
     absence_claims_checked: int = 0
     timeline_entries_checked: int = 0
+    identifiers_checked: int = 0
 
     @property
     def ok(self) -> bool:
@@ -148,6 +155,7 @@ class GroundingResult:
             or self.rungs_required
             or self.absence_claims_checked
             or self.timeline_entries_checked
+            or self.identifiers_checked
         )
 
     def merge(self, other: GroundingResult) -> GroundingResult:
@@ -163,6 +171,7 @@ class GroundingResult:
             timeline_entries_checked=(
                 self.timeline_entries_checked + other.timeline_entries_checked
             ),
+            identifiers_checked=self.identifiers_checked + other.identifiers_checked,
         )
 
     def summary(self) -> str:
@@ -175,7 +184,8 @@ class GroundingResult:
                 f"{self.citations_checked} citations, "
                 f"{self.rungs_covered}/{self.rungs_required} rungs cited, "
                 f"{self.absence_claims_checked} absence claims backed, "
-                f"{self.timeline_entries_checked} timeline entries cited"
+                f"{self.timeline_entries_checked} timeline entries cited, "
+                f"{self.identifiers_checked} identifiers contained"
             )
         return f"not grounded ({len(self.failures)} failures): " + "; ".join(
             str(f) for f in self.failures
@@ -206,6 +216,223 @@ def descent_evidence_keys(descent: DescentResult) -> frozenset[str]:
     for outcome in descent.outcomes:
         keys.update(outcome.result.evidence_keys)
     return frozenset(keys)
+
+
+# --- Identifier containment (B-453) ------------------------------------------
+#
+# Citation integrity asks whether every claim names an evidence key that was
+# read. It does not ask whether the claim's *subject* exists. A report can cite
+# a real key, resolve every reference, cover the chain -- and name a device that
+# is not in this fabric. Reviewer A's counterexample, and the MCP experiment
+# produced the live version of it (B-459): a fully grounded, correctly cited,
+# deterministically derived investigation of a BGP session that does not exist.
+#
+# The permitted set is **the descent's own vocabulary**, not the inventory and
+# not the evidence store. The model is handed a `DescentResult` and nothing
+# else, so every identifier it can legitimately use is in that object. One that
+# is not was invented between reading the descent and writing the prose.
+#
+# **This catches an invented entity, not a wrong relation between real ones**
+# (peer-review-response.md §3.3). A report swapping two real device names passes
+# this check and always will. It raises the floor; it is not the ceiling, and
+# B-439 is where the relational half lives.
+
+_IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?\b")
+
+#: IOS-XR interface abbreviations, expanded so `Gi0/0/0/0` and
+#: `GigabitEthernet0/0/0/0` are one identifier. Longest prefix wins, so the
+#: table is searched in descending length -- `TenGigE` must not be matched by
+#: a shorter `Te` rule that leaves `nGigE` behind as the port part.
+_IFACE_EXPANSIONS = {
+    "gi": "gigabitethernet",
+    "te": "tengige",
+    "fo": "fortygige",
+    "hu": "hundredgige",
+    "lo": "loopback",
+    "mg": "mgmteth",
+    "mgmt": "mgmteth",
+    "be": "bundle-ether",
+    "bvi": "bvi",
+    "bv": "bvi",
+    "nu": "null",
+    "ti": "tunnel-ip",
+    "tt": "tunnel-te",
+}
+
+_IFACE = re.compile(
+    r"\b([A-Za-z][A-Za-z-]{0,20}?)(\d+(?:[/.]\d+)*)\b"
+)
+
+
+#: Trailing punctuation and English possessives. `PE7's` and `PE7` are the same
+#: identifier, and a report writes the first far more often than the second --
+#: missing that is a false *negative* on the counterexample this check exists
+#: for, and a false *positive* on every legitimate `RR1's session ...`.
+_TOKEN_TRIM = re.compile(r"(?:'s|\u2019s|'|\u2019)?[.,;:!?)\]]*$")
+
+
+def clean_token(token: str) -> str:
+    """Strip trailing punctuation and a possessive from one word."""
+
+    return _TOKEN_TRIM.sub("", token.strip().lstrip("([")).strip()
+
+
+def canonical_identifier(token: str) -> str:
+    """One spelling per identifier, so a report may abbreviate freely.
+
+    An interface name is canonicalised by expanding its abbreviated head
+    against :data:`_IFACE_EXPANSIONS` and lowercasing. Everything else
+    lowercases only. A token this cannot classify is returned lowercased rather
+    than rejected -- **this function narrows the comparison, it does not decide
+    membership**, and a token that fails to canonicalise usefully simply has to
+    match the evidence literally.
+    """
+
+    token = clean_token(token)
+    match = _IFACE.fullmatch(token)
+    if match is None:
+        return token.lower()
+    head, port = match.group(1).lower(), match.group(2)
+    for abbrev in sorted(_IFACE_EXPANSIONS, key=len, reverse=True):
+        if head == abbrev or _IFACE_EXPANSIONS[abbrev] == head:
+            return _IFACE_EXPANSIONS[abbrev] + port
+    return token.lower()
+
+
+def _device_name_families(names: Iterable[str]) -> tuple[re.Pattern[str], ...]:
+    """Regexes matching the *shape* of this fabric's device names.
+
+    `PE7` must be refused and `Established` must not, and no fixed pattern can
+    tell those apart across fabrics. So the naming convention is derived from
+    the names that exist: `PE1`/`PE2`/`RR1` yield ``^(?:PE|RR)\\d+$``, which
+    `PE7` matches and no English word does.
+
+    **A fabric whose devices are named arbitrarily gets no device checking at
+    all**, and that is the correct failure mode -- silence rather than a rule
+    guessed from one instance (`BUILD-PLAN.md` §0.13, the rules face).
+    """
+
+    alphas: set[str] = set()
+    for name in names:
+        m = re.fullmatch(r"([A-Za-z]{1,6})(\d{1,3})", name.strip())
+        if m is not None:
+            alphas.add(re.escape(m.group(1)))
+    if not alphas:
+        return ()
+    joined = "|".join(sorted(alphas, key=len, reverse=True))
+    return (re.compile(rf"^(?:{joined})\d{{1,3}}$", re.IGNORECASE),)
+
+
+def evidence_identifiers(descent: DescentResult) -> frozenset[str]:
+    """Every identifier the descent itself names, canonicalised.
+
+    Drawn from the descent's devices, its subject, every rung's device, subject
+    and reason text, and every evidence key -- which is to say, exactly what
+    `prompt_library` puts in front of the model.
+    """
+
+    raw: list[str] = [descent.device, descent.subject]
+    if descent.reason:
+        raw.append(descent.reason)
+    raw.extend(descent.evidence_keys)
+    for outcome in descent.outcomes:
+        raw.append(outcome.device)
+        if outcome.result.subject:
+            raw.append(outcome.result.subject)
+        if outcome.result.reason:
+            raw.append(outcome.result.reason)
+        raw.extend(outcome.result.evidence_keys)
+
+    found: set[str] = set()
+    for text in raw:
+        if not text:
+            continue
+        # Evidence keys are `PE2:interface:Gi0/0/0/0`; split on the separators
+        # that join identifiers rather than trying to parse the key format.
+        for token in re.split(r"[\s:,()\[\]]+", text):
+            token = clean_token(token)
+            if token:
+                found.add(canonical_identifier(token))
+        for token in _IPV4.findall(text):
+            found.add(token.lower())
+    return frozenset(found)
+
+
+def _report_prose(report: dict) -> tuple[tuple[str, str], ...]:
+    """Every ``(locus, text)`` in a report that a model wrote."""
+
+    out: list[tuple[str, str]] = []
+    observations = report.get("observations")
+    if isinstance(observations, list):
+        labels = observation_labels(len(observations))
+        for label, obs in zip(labels, observations, strict=True):
+            if isinstance(obs, dict) and isinstance(obs.get("claim"), str):
+                out.append((label, obs["claim"]))
+    interpretations = report.get("interpretations")
+    if isinstance(interpretations, list):
+        for i, interp in enumerate(interpretations, start=1):
+            if isinstance(interp, dict) and isinstance(interp.get("claim"), str):
+                out.append((f"interpretation-{i}", interp["claim"]))
+    recommendation = report.get("recommendation")
+    if isinstance(recommendation, dict) and isinstance(recommendation.get("claim"), str):
+        out.append(("recommendation", recommendation["claim"]))
+    return tuple(out)
+
+
+def check_identifier_containment(
+    report: dict, descent: DescentResult
+) -> GroundingResult:
+    """Refuse a report naming an entity the descent never saw. B-453.
+
+    Measured against round 3's real report: **zero false positives**. The
+    recommendation is checked too -- it is exempt from *citation*, because it is
+    the model's advice rather than a reading, but advice about `PE7` is still
+    advice about a device that does not exist.
+    """
+
+    if not isinstance(report, dict):
+        return GroundingResult()
+
+    known = evidence_identifiers(descent)
+    device_families = _device_name_families(
+        [descent.device, *(o.device for o in descent.outcomes)]
+    )
+
+    failures: list[GroundingFailure] = []
+    checked = 0
+
+    for locus, text in _report_prose(report):
+        candidates: list[str] = []
+        candidates.extend(_IPV4.findall(text))
+        for token in re.split(r"[\s,()\[\]]+", text):
+            token = clean_token(token)
+            if not token:
+                continue
+            if _IFACE.fullmatch(token) or any(
+                p.match(token) for p in device_families
+            ):
+                candidates.append(token)
+
+        for token in candidates:
+            checked += 1
+            if canonical_identifier(token) in known or token.lower() in known:
+                continue
+            failures.append(
+                GroundingFailure(
+                    "uncontained_identifier",
+                    locus,
+                    # Names the identifier, never the sentence: a failure object
+                    # that could carry the model's prose would defeat "a failed
+                    # report is not emitted".
+                    f"names {token!r}, which appears nowhere in the descent's "
+                    f"evidence; the descent read {descent.device} -> "
+                    f"{descent.subject}",
+                )
+            )
+
+    return GroundingResult(
+        failures=tuple(failures), identifiers_checked=checked
+    )
 
 
 def _sequence(report: object, key: str) -> tuple[list, GroundingFailure | None]:
@@ -459,7 +686,11 @@ def ground_report(report: dict, descent: DescentResult) -> GroundingResult:
     """
 
     keys = descent_evidence_keys(descent)
-    merged = check_grounding(report, keys).merge(check_chain_coverage(report, descent))
+    merged = (
+        check_grounding(report, keys)
+        .merge(check_chain_coverage(report, descent))
+        .merge(check_identifier_containment(report, descent))
+    )
     return _refuse_unmeasured(merged, report, locus="report")
 
 

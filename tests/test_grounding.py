@@ -1018,3 +1018,216 @@ def test_informational_flags_are_not_turned_into_errors():
 
     assert result.ok, "a kept-unattributable count must not fail a grounded correlation"
     assert not window.coverage.complete, "nor must incomplete coverage, on a presence claim"
+
+
+# --------------------------------------------------------------------------- #
+# B-453 -- identifier containment
+#
+# Reviewer A's counterexample class, and the MCP experiment produced the live
+# version of it (B-459): a fully grounded, correctly cited, deterministically
+# derived investigation of a session that does not exist. Citation integrity
+# cannot see it, because nothing in such a report is uncited.
+# --------------------------------------------------------------------------- #
+
+
+def _contained_descent() -> DescentResult:
+    """A five-rung descent over identifiers this fabric really has."""
+
+    return DescentResult(
+        flow="bgp_session",
+        device="RR1",
+        subject="10.255.0.12",
+        finding="interface_line_down",
+        outcomes=(
+            RungOutcome("bgp_session", "RR1", CheckResult(
+                BROKEN, reason="session to 10.255.0.12 is Idle",
+                subject="10.255.0.12", evidence_keys=("RR1:bgp:10.255.0.12",))),
+            RungOutcome("interface", "PE2", CheckResult(
+                BROKEN, reason="Gi0/0/0/0 is administratively down",
+                subject="Gi0/0/0/0", evidence_keys=("PE2:interface:Gi0/0/0/0",))),
+        ),
+        evidence_keys=("RR1:bgp:10.255.0.12", "PE2:interface:Gi0/0/0/0"),
+    )
+
+
+def _report(*claims: str) -> dict:
+    return {
+        "observations": [
+            {"claim": c, "evidence_key": "RR1:bgp:10.255.0.12"} for c in claims
+        ],
+        "interpretations": [],
+    }
+
+
+def test_a_report_naming_an_invented_device_is_refused():
+    """Reviewer A's example. `PE7` is not in this fabric."""
+
+    result = grounding.check_identifier_containment(
+        _report("PE7's uplink is administratively down"), _contained_descent()
+    )
+
+    assert not result.ok
+    assert [f.kind for f in result.failures] == ["uncontained_identifier"]
+    assert "PE7" in result.failures[0].detail
+
+
+def test_a_report_naming_an_invented_address_is_refused():
+    result = grounding.check_identifier_containment(
+        _report("the session to 10.255.0.99 is Idle"), _contained_descent()
+    )
+
+    assert not result.ok
+    assert "10.255.0.99" in result.failures[0].detail
+
+
+def test_a_report_naming_an_invented_interface_is_refused():
+    result = grounding.check_identifier_containment(
+        _report("Gi0/0/0/7 is down"), _contained_descent()
+    )
+
+    assert not result.ok
+    assert "Gi0/0/0/7" in result.failures[0].detail
+
+
+def test_the_companion_a_report_naming_only_real_identifiers_passes():
+    """Without this the check could refuse everything and look like it works.
+
+    `BUILD-PLAN.md` §0.12: a guardrail needs the case that must *not* fire.
+    """
+
+    result = grounding.check_identifier_containment(
+        _report(
+            "RR1's BGP session to 10.255.0.12 is Idle",
+            "PE2's Gi0/0/0/0 is administratively down",
+        ),
+        _contained_descent(),
+    )
+
+    assert result.ok, result.summary()
+    assert result.identifiers_checked >= 4
+    assert not result.vacuous
+
+
+def test_an_abbreviated_interface_name_is_the_same_identifier():
+    """A report may write `GigabitEthernet0/0/0/0` for the descent's `Gi0/0/0/0`.
+
+    Canonicalisation goes both ways -- neither spelling is privileged, and a
+    report refused for spelling an interface out in full would be a false
+    positive of exactly the kind this check is measured on.
+    """
+
+    assert grounding.canonical_identifier("Gi0/0/0/0") == \
+        grounding.canonical_identifier("GigabitEthernet0/0/0/0")
+
+    result = grounding.check_identifier_containment(
+        _report("PE2's GigabitEthernet0/0/0/0 is administratively down"),
+        _contained_descent(),
+    )
+    assert result.ok, result.summary()
+
+
+def test_ordinary_english_is_never_mistaken_for_a_device_name():
+    """The device-name family is derived from the fabric's own names.
+
+    `PE7` matches `^(?:RR|PE)\\d+$` and `Established` does not. A fixed pattern
+    could not tell those apart across fabrics, which is why the convention is
+    read off the names that exist rather than guessed.
+    """
+
+    result = grounding.check_identifier_containment(
+        _report(
+            "The session is not Established and the adjacency count is 0. "
+            "Nothing in the evidence indicates a hardware fault."
+        ),
+        _contained_descent(),
+    )
+
+    assert result.ok, result.summary()
+
+
+def test_a_fabric_with_arbitrary_device_names_gets_no_device_checking():
+    """Silence rather than a rule generalised from one instance (§0.13, rules).
+
+    If no device name matches `letters+digits`, no family can be derived, and
+    the check must decline to guess rather than invent a pattern.
+    """
+
+    descent = DescentResult(
+        flow="bgp_session", device="core-router-alpha", subject="10.0.0.1",
+        finding="peer_not_established",
+        outcomes=(RungOutcome("bgp_session", "core-router-alpha", CheckResult(
+            BROKEN, reason="Idle", subject="10.0.0.1",
+            evidence_keys=("core-router-alpha:bgp:10.0.0.1",))),),
+        evidence_keys=("core-router-alpha:bgp:10.0.0.1",),
+    )
+
+    result = grounding.check_identifier_containment(
+        _report("edge-router-beta is unreachable"), descent
+    )
+
+    # No device family, so no device claim is refused -- but an invented
+    # *address* still is, because that kind is unambiguous everywhere.
+    assert result.ok, result.summary()
+    assert not grounding.check_identifier_containment(
+        _report("the peer 10.0.0.99 is Idle"), descent
+    ).ok
+
+
+def test_the_recommendation_is_checked_even_though_it_is_uncited():
+    """Exempt from citation, not from existing.
+
+    The recommendation is the model's advice rather than a reading, which is why
+    it carries no evidence key. Advice about `PE7` is still advice about a
+    device that is not there.
+    """
+
+    report = _report("RR1's session to 10.255.0.12 is Idle")
+    report["recommendation"] = {"claim": "Check PE7's uplinks", "requires_human": True}
+
+    result = grounding.check_identifier_containment(report, _contained_descent())
+
+    assert not result.ok
+    assert result.failures[0].locus == "recommendation"
+
+
+def test_a_failure_never_carries_the_model_s_sentence():
+    """Same rule as every other failure in this module (OBS-061).
+
+    The failure names the identifier, which is what failed and what makes the
+    failure actionable. It must not name the sentence, or a refused report's
+    prose reaches a human through the rejection.
+    """
+
+    sentence = "PE7 is the root cause and the operator should reload it immediately"
+    result = grounding.check_identifier_containment(_report(sentence), _contained_descent())
+
+    assert not result.ok
+    for failure in result.failures:
+        assert "reload" not in str(failure)
+        assert sentence not in str(failure)
+
+
+def test_ground_report_runs_containment_so_the_emit_path_cannot_miss_it():
+    """The wiring is the point.
+
+    A check that exists and is not called by `ground_report` is not a gate.
+    """
+
+    descent = _contained_descent()
+    report = {
+        "observations": [
+            {"claim": "RR1's BGP session to 10.255.0.12 is Idle",
+             "evidence_key": "RR1:bgp:10.255.0.12"},
+            {"claim": "PE7's Gi0/0/0/0 is administratively down",
+             "evidence_key": "PE2:interface:Gi0/0/0/0"},
+        ],
+        "interpretations": [
+            {"claim": "interface_line_down on PE2", "based_on": ["obs-1", "obs-2"]}
+        ],
+        "recommendation": {"claim": "Check the uplinks", "requires_human": True},
+    }
+
+    result = grounding.ground_report(report, descent)
+
+    assert not result.ok
+    assert "uncontained_identifier" in [f.kind for f in result.failures]

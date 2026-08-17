@@ -1515,6 +1515,31 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-138 · B-453 · Identifier containment, and the naming convention the check had to read rather than assume
+
+- **Kind:** decision-made
+- **Escalation:** NOTE
+- **Model:** opus-5
+- **What happened:** Shipped `check_identifier_containment`, wired into `ground_report` so the emit path cannot miss it. It refuses a report naming a device, interface, address or prefix that appears nowhere in the descent.
+
+  **The permitted set is the descent's own vocabulary** — its devices, its subject, every rung's device/subject/reason, and every evidence key — not the inventory and not the evidence store. `prompt_library` hands the model a `DescentResult` and nothing else, so every identifier the model can legitimately use is in that object. One that is not was invented between reading the descent and writing the prose. That framing also means the check needs no new input and holds no device text.
+- **Evidence:** 10 new tests; **1786 green**; `ruff` clean; the offline demo still emits its report. Reviewer A's `PE7` and `10.255.0.99` are both refused; round 3's real report still passes, which is the zero-false-positive measurement the item was filed on.
+- **What I did:** Two design decisions are worth recording, because both were places the obvious implementation would have been wrong.
+
+  **1. The device-name pattern is derived from the fabric, not written down.** `PE7` must be refused and `Established` must not, and no fixed regex tells those apart across fabrics — one tuned to `PE|P|RR` is a rule generalised from one instance, which is §0.13's rules face. So `_device_name_families` reads the convention off the names that exist: `RR1` and `PE2` yield `^(?:RR|PE)\d{1,3}$`, which `PE7` matches and no English word does.
+
+  **And a fabric whose devices are named arbitrarily gets no device checking at all.** `core-router-alpha` produces no family, so `edge-router-beta` passes. That is the correct failure mode and it is pinned by a test: **silence is better than a pattern guessed from one example**, and an invented *address* is still refused there, because that kind is unambiguous everywhere.
+
+  **2. The bug found in review was a possessive.** `PE7's` is how a report actually writes it, and the first implementation stripped only `.,;:` — so `PE7's` failed to match the device family and **the counterexample the check exists for went undetected**, while `RR1's` went uncounted. One `clean_token` helper, shared by extraction and candidate scanning, fixed both directions at once.
+
+  Worth noting *how* it surfaced: the companion test — the one asserting a legitimate report passes — failed on `identifiers_checked >= 4`. **The refusal tests were all green.** A check that silently examines nothing passes every negative test it has, and only a count assertion distinguishes "found nothing wrong" from "looked at nothing" (§0.12). The count was in `GroundingResult` because that pattern was already established here; it earned its keep on its first use.
+
+  **What this does not do, stated so it is not over-read.** It catches an **invented entity, not a wrong relation between real ones** (`peer-review-response.md` §3.3). A report swapping two real device names passes and always will. It raises the floor while B-439 is designed; it is not B-439.
+- **Needs human review:** no
+- **Blocks:** nothing. B-439 is unaffected — this is the intermediate check, not a substitute.
+
+---
+
 <!--
 Copy this block for each new entry.
 
