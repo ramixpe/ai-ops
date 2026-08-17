@@ -337,6 +337,20 @@ One family, five faces. Each has cost this build real time, and in every case th
 
 The **setup** face is the one most likely to be dismissed as an operations detail. It is not: it is the only face where the contaminating evidence is *outside the repository*, so no amount of reading the code or the tests reveals it. The fix has to be an environment, not an inspection.
 
+##### A second route into the setup face: the correction that confounds its own experiment
+
+Added 2026-08-17. The setup face was filed as a property of *environments* — a contaminated `.env`, a developer's machine. It has a second route, and it arrives from the opposite direction.
+
+> **A fix can confound the experiment that justifies it.**
+
+The case. One tool description was written differently from the other twenty, a model selected it, and its trace named the description as the reason. The remedy was to reword all twenty-one — and the instinct while doing it was to **leave the original one untouched**, on the reasoning that it is the evidence and should not be disturbed.
+
+That instinct is exactly backwards. The prediction being tested is *"selection survives rewording all 21"*. Leaving one in a structurally distinct form preserves the very contrast the prediction exists to distinguish from content, so the measurement would have been confounded **by the fix**, not by the environment and not by the measurement design.
+
+It is the setup face because the contaminating condition is neither in the code nor in the test nor in the data — it is in the *state of the world the measurement will be taken in*, arranged by the repair. And it is invisible for the familiar reason: preserving evidence is normally correct, so the instinct that produces it feels like rigour.
+
+**The check:** after designing a fix, ask what the fix does to the conditions of the measurement that will judge it. If the fix changes the thing being measured, sequence them — measure, then fix, then measure again — or accept that the second measurement answers a different question.
+
 The **tests** face deserves the extra sentence, because it is the one that cannot be caught by looking harder at the artefact: *green tests are not by themselves evidence that a component is correct — only that it agrees with the assumption it was built on.* Where a component encodes a judgement about the world, specify it independently.
 
 #### The tests face has two forms, and code review catches one of them
@@ -527,6 +541,27 @@ When tightening a protocol — a test harness, a fixture capture, a trial proced
 The corollary, which is the operational form:
 
 > **Every "we control for X" is also "we do not measure X". Write down which X, next to the protocol, at the time you tighten it.**
+
+
+---
+
+## 0.16 A turn ends with a commit hash, or with "nothing was done"
+
+> **Never end on an intention.**
+
+Recorded 2026-08-17 after it happened twice in one session. Two turns closed with *"Starting X now"*, no work followed, and it surfaced only because the operator asked whether something was running in the background.
+
+**Why it is worth a rule rather than more care.** In a transcript, a turn ending on an intention is **indistinguishable from a turn ending on completion**. Both read as forward motion; both are followed by the operator's next message. `TRACKER.md` would not have caught it either — nothing was marked done, because nothing was done, and an absent row looks exactly like a row not yet reached.
+
+So the failure has no detector. The reader cannot see it, the tracker cannot see it, and the person who produced it experiences it as having decided to do the work — which is the same confusion OBS-114 describes, an intention recalled as an action.
+
+**The rule is mechanical, for the same reason OBS-114's is.** Attentional rules do not survive their author; this one is checkable by a reader with no context:
+
+- a turn that did work ends with **a commit hash**;
+- a turn that did no work says so **explicitly** — "no code changed", "recorded only", "blocked on X";
+- *"starting now"*, *"proceeding with"*, *"next I will"* are not endings. If they appear, the work happens in that turn or the turn says it did not.
+
+The corollary matters as much: **planning is work and may legitimately be a whole turn** — a design brought for approval, an audit reported before changes. Those end with what was produced. What is forbidden is not the short turn; it is the turn whose only content is a promise about the next one.
 
 ---
 

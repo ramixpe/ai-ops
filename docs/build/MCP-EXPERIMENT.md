@@ -561,6 +561,25 @@ inconsistency, paid for a measurement confounded by tool non-interchangeability.
 The alternative costs one pre-registered prediction and preserves a cleaner
 experiment for later.
 
+### Accepted, 2026-08-17
+
+The operator accepted the decision and recorded the ground as better than the
+one they had proposed it on:
+
+> *"The arm was confounded — the tools are not interchangeable, so non-selection
+> of a tool that was never the right answer measures nothing."*
+
+and on the reframing:
+
+> *"Your contrast framing supersedes my uniformity framing, and the observation
+> that the current surface was its own control by accident is the part I would
+> not have found: twenty alike, one different, and the outlier won. Uniformity
+> predicts the opposite of what happened."*
+
+Worth keeping because it is the cheapest of the three arguments and the last one
+either of us reached: **the experiment already had a control and nobody had
+noticed, because it was the status quo rather than something anyone built.**
+
 ---
 
 ## 10. The rewording, as landed
