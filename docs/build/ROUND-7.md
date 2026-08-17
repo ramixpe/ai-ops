@@ -101,77 +101,81 @@ runs it.
 
 ## 4. Results — scored, B-462 closed
 
-Two runs are archived under `evidence-archive/round7/`. The operator reports a
-third; **I can only find two in `faultlab/round7/`, and I am not reconciling the
-count by inference** — see §4.5.
+**Corrected 2026-08-17 to what is on disk.** An earlier version of this section
+carried a three-run count reported in a transcript. Two of those run directories
+were deleted; the record below is the two that exist, and §4.5 explains why the
+third is not carried.
 
 | Run | Samples | Interval | Port-down samples | Route naming a down port |
 |---|---:|---:|---:|---:|
-| `151001` (dry-run; fault never applied) | 162 | 1.04 s | **0** | 0 |
-| `151420` (fault applied, restore verified) | 163 | 1.04 s | **99** | **0** |
+| `151001` (`--dry-run`) | 162 | 1.04 s | 0 | 0 |
+| **`151420`** (fault applied, restore verified) | **163** | **1.04 s** | **99** | **0** |
 
-### 4.1 Primary claim — CONFIRMED
+### 4.1 Primary claim — CONFIRMED, on one run
 
 > A down port does not persist as `Backup (Local-LFA)`.
 
-**99 samples with `Gi0/0/0/0` admin-down, and not one names it in PE2's route to
-`10.255.0.31`.** `EACH_PATH_INTERFACE` cannot derive a member set containing a
-dead port, so **B-456's premise is sound and the soft spot in shipped code is
-closed.**
+**99 samples with `Gi0/0/0/0` admin-down, none naming it in PE2's route to
+`10.255.0.31`**, at 1.04 s resolution, with a positive control of comparable
+magnitude in the same run (§4.3). `EACH_PATH_INTERFACE` cannot derive a member
+set containing a dead port. **B-456's premise is sound; the soft spot in shipped
+code is closed.**
+
+**One run, and that is stated rather than padded.** It is a sound result: 99
+samples spanning the whole outage, a mechanism that either persists or does not,
+and an instrument shown in the same run to be able to resolve the transition.
+Replication would strengthen it and its absence does not undermine it.
 
 ### 4.2 Secondary claim — SURVIVES, AND IS UNMEASURED
 
 The 10-second falsifier did not fire, so the claim stands. **What was
 established is "under 1.04 s", not a measured window**, and the harness said so
-itself:
+in its own verdict:
 
 > *"No sample caught the route naming an already-down port. The window is
 > bounded above by the sampling resolution (~1.035s), not measured as zero."*
 
 **A method cannot measure a window shorter than its own resolution.** Reporting
-`estimated_window_seconds: 0.0` as a result would be absence read as presence —
-the same error the whole `unevaluated` discipline exists to prevent, arriving in
-a measurement rather than a check.
+`estimated_window_seconds: 0.0` would be absence read as presence.
 
 ### 4.3 The restore transition — scored separately, and it is a positive control
 
-Free, because the harness sampled through the restore. Same question, sign
-reversed: after `no shutdown`, does the route name the port before it is up?
+Same question, sign reversed: after `no shutdown`, does the route name the port
+before it is up?
 
-- **0 samples** name the port while it is not up. Same answer as the shutdown
-  side, in the other direction.
-- **1 sample** (n=105) has the port `up/up` with the route **not yet** naming
-  it; n=106 names it.
+- **0 samples** name the port while it is not up.
+- **1 sample** (n=105) has the port `up/up` with the route **not yet** naming it;
+  n=106 names it.
 
-That single sample is worth more than it looks. **It is evidence that the
-instrument can resolve a transition of this size.** A bare zero on the shutdown
-side is consistent with "nothing happened" *and* with "the sampler is too coarse
-to see it"; catching a ≤1.04 s lag on the restore side rules out the second for
-lags of that scale. The shutdown-side zero is therefore a stronger negative than
-an unaccompanied zero would be — and it is the only reason §4.2's bound means
-anything.
+That single sample is what makes the shutdown-side zero mean something. A bare
+zero is consistent with *"nothing happened"* **and** with *"the instrument is too
+coarse to see it"*; catching a ≤1.04 s lag on the restore side rules out the
+second at that scale. **The negative is interpretable only because the same run
+produced a positive of comparable size** — and it was free, because the harness
+sampled through the restore rather than stopping at it.
 
-### 4.4 The first run counts, with a caveat
+### 4.4 The dry run is evidence that the fix works
 
-Run `151001` claimed `--dry-run` and its port stayed `up` across all 162
-samples, so it contributed **no down-port observations**. Its value is as an
-independent replication of the *baseline*: 162 samples in which the route names
-both ports and both are up.
+`151001` ran `--dry-run` and produced **zero writes and zero down-port samples**.
+That is not a failed round; it is the control for OBS-130's defect.
 
-**Its restore was never verified** — `RESTORE verified (dry-run: nothing
-written)` is the same defective guard described in §5. The fabric was healthy at
-the next run's baseline, which is **luck rather than evidence**: nothing read the
-device to establish it.
+`round7.py` line 329 sets the callee's flag explicitly —
+`fault_lab._dry_run = _dry` — which is exactly what `round5.py` does not do. The
+run is the evidence that the correction holds: the same code path that pushed
+configuration during round 5's "dry" run wrote nothing here.
 
-### 4.5 A count I cannot reconcile, recorded rather than resolved
+### 4.5 The deleted run is not carried as a replication
 
-The operator reports **three runs and 158 + 99 down-port samples**. In
-`faultlab/round7/` there are **two** run directories, with **0** and **99**
-down-port samples. A run with 158 is not present.
+A third run produced 158 down-port samples and its numbers were reported. **Its
+directory was deleted, so the samples no longer exist.**
 
-I am not inferring where it went. Either a third run exists outside that
-directory, or the 158 is from a source I have not been shown. **The conclusions
-are unaffected** — every sample in every run I can read has zero persisting
-observations — but the count in this document is the count I measured, and the
-discrepancy is a question for the operator rather than something to average out.
+> **A count quoted in a transcript is not evidence once the payload is gone.**
 
+This is §6.1d arriving from the other direction. That rule was written because
+round 4 archived a *finding* and could not be re-examined when the semantics
+changed. The same conclusion follows when inputs were archived and then lost:
+**a finding without its inputs cannot be re-examined, and how it came to lack
+them does not matter.**
+
+So the 158 is recorded here as a thing that happened and is not counted. The
+conclusion is unaffected — B-462 is answered by `151420` alone.

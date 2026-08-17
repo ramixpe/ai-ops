@@ -3683,7 +3683,13 @@ and should be scored as a corpus result, not as a diagnostic error.
 - **Needs human review:** the sample count — see below
 - **Blocks:** nothing. B-462 closed.
 
-  **One discrepancy recorded rather than resolved.** The operator reports three runs and 158 + 99 down-port samples; `faultlab/round7/` contains two runs with 0 and 99. A run with 158 is not present. The conclusions are unaffected — every sample in every run I can read has zero persisting observations — but the count in `ROUND-7.md` is the count I measured, and I am not averaging a discrepancy away.
+  **Corrected 2026-08-17 — the count, and what it cost.** I recorded a discrepancy between a reported three runs and the two on disk. The operator resolved it: two directories were deleted during a tidy-up, one of which held a **158-sample** run whose numbers had been reported.
+
+  **It is not carried as a replication.** A count quoted in a transcript is not evidence once its payload is gone — which is §6.1d arriving from the other direction. That rule exists because round 4 archived a *finding* and could not be re-examined when the semantics changed; the same conclusion follows when inputs were archived and then lost. **A finding without its inputs cannot be re-examined, and how it came to lack them does not matter.**
+
+  **So B-462 rests on one run**, `151420`: 99 down-port samples, zero naming the port, 1.04 s resolution, positive control in the same run. That is a sound result and it is stated as one run rather than padded to three.
+
+  **And `151001` is not a failed round — it is the control for OBS-130.** It ran `--dry-run` and produced zero writes and zero down-port samples, because `round7.py` line 329 sets the callee's flag explicitly (`fault_lab._dry_run = _dry`), which is exactly what `round5.py` omits. The same code path that pushed configuration during round 5's "dry" run wrote nothing here.
 
 ---
 
@@ -3714,6 +3720,31 @@ and should be scored as a corpus result, not as a diagnostic error.
   **The correction to my own record.** I attributed the dry run's 56–61 s skew to a device slowdown (OBS-107, ROUND-5 §5) and it may partly have been the fault. Probe 00 predates the commit and was already slow, so the login-penalty account survives for that sample; probes 01 and 99 span a window whose fabric state is now unknown. **The skew analysis is not invalidated, it is narrowed** — one clean sample instead of three.
 - **Needs human review:** **yes — a device write occurred outside an authorised window, and the harness is the operator's**
 - **Blocks:** nothing in this repository. The harness needs the flag fixed before the next round.
+
+---
+
+## OBS-131 · Process · An archive that is not committed is a working file that still exists
+
+- **Kind:** method-defect
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** Two round-7 run directories were deleted during a tidy-up, taking a **158-sample** result with them. Its numbers had been reported; the samples had not been committed.
+
+  **Then I reproduced the same failure while writing this up.** I copied both surviving runs into `evidence-archive/round7/` and committed — and the repository's `.gitignore` carries a blanket `*.jsonl`, so `git add -A` took `verdict.json` and **silently dropped every `samples.jsonl` beside it.** The archive step looked done and produced nothing durable. It was caught only because the operator's correction sent me back to check what was tracked.
+- **Evidence:** `git check-ignore -v` on the archived payload returns `.gitignore:10:*.jsonl`. Before the fix, `git ls-files evidence-archive/` listed two `verdict.json` files and no samples.
+- **What I did:** Force-added the round-5 and round-7 payloads, added a `!evidence-archive/**/*.jsonl` negation with the reason beside it, and extended `chaos-harness.md` §6.1d.
+
+  > **A round is archived when its payload is committed. Until then it is a working file that happens to still exist.**
+
+  **Two things make this worth a finding rather than a `.gitignore` fix.**
+
+  **The rule was already written and still did not bind.** §6.1d has required archiving the full payload since round 5, and it was followed — the files were written, the directory existed, the copy was made. Every step of the stated procedure was performed and the outcome was an empty archive, because the rule said *archive* and the failure was in what archiving meant. **A procedure can be followed exactly and produce nothing when a word in it is underspecified**, and the word will look unambiguous to whoever wrote it.
+
+  **The blanket ignore was correct for what it was written for and wrong here.** `*.jsonl` sensibly excludes evidence-store scratch and metrics files. It also silently reclassified the one class of `.jsonl` that is the project's primary evidence. Nothing warned, because a `.gitignore` match is not an event — it is the absence of one, which is the shape this build keeps meeting.
+
+  Related to §6.1d's own general form and distinct from it: that rule is about storing *inputs* rather than *conclusions*. This is about storing them **somewhere that survives**, and both failures produce the same end state — a result nobody can re-examine.
+- **Needs human review:** no
+- **Blocks:** nothing. Round 5's and round 7's payloads are now tracked.
 
 ---
 

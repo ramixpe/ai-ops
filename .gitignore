@@ -8,6 +8,11 @@ __pycache__/
 clab-*/
 *.log
 *.jsonl
+# ...except round payloads. A round's samples ARE the evidence (chaos-harness
+# §6.1d) and a broad `*.jsonl` swept them into "untracked scratch", which is one
+# `git clean` from gone -- and two round-7 directories were in fact lost that
+# way. Archiving means committed.
+!evidence-archive/**/*.jsonl
 *.tar
 *.tar.gz
 *.tar.xz

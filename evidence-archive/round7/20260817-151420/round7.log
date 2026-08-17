@@ -1,0 +1,24 @@
+2026-08-17T15:14:20.593Z  round 7 start  device=PE2  shut=Gi0/0/0/0  survivor=Gi0/0/0/1  route=show route 10.255.0.31  dry_run=False
+2026-08-17T15:14:20.593Z  opening sampler session
+2026-08-17T15:14:21.468Z  opening injector session
+2026-08-17T15:14:25.237Z  baseline captured (5 sections)
+2026-08-17T15:14:25.237Z  --- baseline: 5 samples before any change ---
+2026-08-17T15:14:30.428Z    route names: [{'via': 'GigabitEthernet0/0/0/0', 'role': 'Protected'}, {'via': 'GigabitEthernet0/0/0/1', 'role': 'Backup (Local-LFA)'}]
+2026-08-17T15:14:30.428Z    Gi0/0/0/0: up/up
+2026-08-17T15:14:30.429Z  --- applying: shutdown Gi0/0/0/0 ---
+2026-08-17T15:14:30.893Z  applied (push said 'sent+committed+exited') — sampling dense for 90s
+2026-08-17T15:16:01.289Z  --- dense window done, sparse for 60s ---
+2026-08-17T15:17:01.291Z  --- restoring: no shutdown Gi0/0/0/0, sampling through it ---
+2026-08-17T15:18:09.813Z  RESTORE starting (round-complete)
+2026-08-17T15:18:15.989Z  RESTORE verified on attempt 1 (push said 'sent+committed+exited')
+2026-08-17T15:18:15.992Z  --- verdict ---
+2026-08-17T15:18:15.992Z    samples: 163
+2026-08-17T15:18:15.992Z    mean_sample_seconds: 1.035
+2026-08-17T15:18:15.992Z    samples_with_port_down: 99
+2026-08-17T15:18:15.992Z    samples_route_named_down_port: 0
+2026-08-17T15:18:15.992Z    persisting_observed: False
+2026-08-17T15:18:15.992Z    persisting_sample_count: 0
+2026-08-17T15:18:15.992Z    persisting_span_samples: None
+2026-08-17T15:18:15.992Z    estimated_window_seconds: 0.0
+2026-08-17T15:18:15.992Z    note: No sample caught the route naming an already-down port. The window is bounded above by the sampling resolution (~1.035s), not measured as zero.
+2026-08-17T15:18:16.014Z  round 7 complete

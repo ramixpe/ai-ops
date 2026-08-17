@@ -356,6 +356,27 @@ Cheap to fix going forward: the payload is already JSON on stdout, and round 5's
 harness writes one file per probe. Nothing new is needed except doing it every
 time.
 
+**Archiving means *committed*, not *written to disk*.** Added 2026-08-17 after
+two round-7 run directories were deleted during a tidy-up, taking a 158-sample
+result with them.
+
+A payload in an untracked working directory is one `git clean` from gone, and
+the repository's own `.gitignore` carried a blanket `*.jsonl` that swept round
+samples into "scratch" — so the archive step *looked* done while producing
+nothing durable. It was noticed only because the same mistake was made twice: a
+copy into `evidence-archive/` committed the verdict files and silently dropped
+every `samples.jsonl` beside them.
+
+> **A round is archived when its payload is committed. Until then it is a
+> working file that happens to still exist.**
+
+And the corollary, which is §6.1d's rule pointed the other way: **a count quoted
+in a transcript is not evidence once its payload is gone.** §6.1d was written
+because round 4 stored a finding and could not be re-examined when the semantics
+changed; the same follows when inputs were archived and then lost. A finding
+without its inputs cannot be re-examined, and how it came to lack them does not
+matter.
+
 **And it governs more than rounds.** The general form —
 
 > a finding cannot validate a change to the layer that produced it
