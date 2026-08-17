@@ -357,4 +357,211 @@ is observable at ~1 s resolution, which §2a.2 predicts and §1.2 doubts.
 
 ## 5. Results
 
-*Empty until the run.*
+Scored 2026-08-17 against `evidence-archive/round8/`. Two runs: `20260817-160359`
+(dry, 181 samples) and `20260817-161045` (real, 182 samples).
+
+**The fault landed.** Applied 16:10:56.860, first FSM movement 16:10:59.971, and
+`peer in wrong AS` named in 156 samples. **The instrument that was to measure the
+round's primary claim did not work**, and its own baseline says so.
+
+### 5.1 The instrument, first — because it bounds everything below
+
+`round8.py` carries two defects. Both are the same idiom: **a first-match search
+over a string containing more than one candidate token.**
+
+| | |
+|---|---|
+| `_SOCKET = re.compile(r"socket.*?(armed\|not armed)", re.I)` | The real line is `Socket not armed for io, armed for read, armed for write`. A minimal-width search takes the **io** field, which is `not armed` on a healthy session. `socket_armed` is therefore `False` in every sample ever taken |
+| `as_named = any(x in resets for x in ("bad peer as", "notification", ...))` | `_NOTIF` matches `notification` before `hold time expired` in *"due to BGP Notification sent: hold time expired"*, so an ordinary hold-timer reset is classified as naming the AS |
+
+**The baseline refutes the first defect outright, and the dry run refutes the
+second.** Across both runs there are **195 samples in which the session is
+`Established`** — four pre-fault, eleven post-restore, 181 in the dry run where
+the fault never applied. **`socket_armed` is `False` in all 195.** A field that
+does not read true on a fully established BGP session is not measuring the
+socket. And the dry run reports `discriminator_reset_names_as: true` while
+containing **zero** samples naming an AS: all 181 of its resets are
+`hold time expired`.
+
+> **A falsifier is only meaningful if the instrument can produce the value that
+> would fail it.**
+>
+> §2a.2's falsifier — *"refuted if no sample shows that combination"* — fired.
+> It fired on an instrument that could not have produced the combination in any
+> state of the world. **That is a void trial, not a refutation**, and the
+> distinction is invisible in `SEPARATION_OBSERVED: false`.
+
+**And the check was already in the payload.** `samples_socket_armed: 0` counts
+over the post-fault window; had it counted over the baseline it would have read
+`0 of 4` on a healthy session and stopped the round at its own first verdict
+line. Round 7's positive control was a design decision; round 8 had one by
+accident and did not read it.
+
+**One defect did not spread, and the reason matters.** `socket_reported` is
+`bool(match)` — whether the line existed, not what it said — and it is
+robust to matching the wrong part of the line. So §2a.3 is scoreable from the
+same broken regex that voids §2a.2.
+
+### 5.2 Scored
+
+| Claim | Verdict | Evidence |
+|---|---|---|
+| **§2a.3** rung 2 reads the socket, not the `connection_state` fallback | **CONFIRMED** | `samples_socket_not_reported: 0` across all 363 samples; `socket_reported: true` everywhere. IOS-XR emits the line on this platform and release. **B-432 shipped what it thought it shipped** — the falsifier was *"rung 2's reason contains 'no socket state reported'"*, and that string never occurred |
+| **§2a.4** timing is immediate, not hold-timer bound | **CONFIRMED, weakly** | 3.11 s from commit to first FSM movement, against a 30 s falsifier. §2a.4 predicted its own weakness: the falsifier was loosened by BFD's 300 ms detection discovered after sealing, so its not firing is weak evidence. It is recorded as sealed, and read as sealed |
+| **§2a.6** BFD did not hold the session down | **CONFIRMED, both disjuncts** | `bfd_states_seen: ['No']`; no reset names BFD; and BGP **left Idle** — `Connect` in nine retry cycles and `OpenSent` once. The falsifier required BFD named *or* BGP never leaving Idle. Neither |
+| **§2a.7** the three mechanisms are distinguishable | **CONFIRMED as a design, refuted as an implementation** | See §5.3 |
+| **§2a.5** the exact `last_reset_reason` wording | **CAPTURED** (unscored by seal) | `BGP Notification sent: peer in wrong AS` — 156 samples. The immediate config event is separately visible as `due to Remote AS configuration changed`, 14 samples |
+| **§2a.1** the steady-state rung vector | **NOT MEASURED** | The round sampled fields directly and never ran `investigate`, so no rung vector was produced. Neither confirmed nor refuted |
+| **§2a.2** the transient separation | **OPEN — unresolvable from this run** | §5.4 |
+
+### 5.3 The three mechanisms were separated — by the raw text, not the discriminator
+
+§2a.7 named three failures that produce the same rung vector and said the
+discriminators, not the vector, are the result. That was right. Two of the three
+discriminators were then implemented wrongly, and the mechanisms were separated
+anyway:
+
+- **TTL/multihop — ruled out.** `OpenSent` requires a completed TCP connection
+  and a sent OPEN. `peer in wrong AS` requires the *peer's* OPEN to have been
+  received and evaluated. Either alone rules it out; both occurred.
+- **BFD — ruled out.** §2a.6.
+- **AS rejection — ruled in.** Named explicitly, 156 samples.
+
+What did the ruling out is the **raw `last_reset` string**, stored verbatim in
+every sample. What failed is `discriminator_reset_names_as`, a boolean derived
+from it.
+
+> **The round demonstrates the amendment it produced, inside its own payload.**
+> Two fields from the same command in the same file: one stored as text and one
+> stored as a conclusion. The parser was wrong about both. **The text survived
+> the defect and the boolean did not**, and the recovery of §2a.5, §2a.6 and
+> half of §2a.7 rests entirely on which of the two a field happened to be.
+>
+> This was not foresight. `last_reset` was stored raw because a string is
+> awkward to reduce, and `socket_armed` was reduced because a boolean is tidy.
+> The tidier choice is the one that lost the round.
+
+See `chaos-harness.md` §6.1d and `BUILD-PLAN.md` §0.13's procedure face.
+
+### 5.4 §2a.2 — what is actually known about the separation
+
+**The fabric produced the separating condition. The round did not measure the
+observable.** Those are two claims and only the first is settled.
+
+`OpenSent` was observed once, at 16:14:59.191, with the summary state still
+`Idle`. In `OpenSent` the TCP connection is established and BGP has sent its
+OPEN and is not Established — which is, by the definition of the state, rung 2's
+condition healthy while rung 3's is broken. **The separation occurred.**
+
+Whether `bgp_transport` *reports* it is what §2a.2 asks, and that depends on the
+socket flags, which were never validly read. Rung 2 would almost certainly have
+read healthy there — a socket in `OpenSent` is armed — but that is an inference
+from the protocol's definition, not a measurement of the rung. **This build does
+not score inferences as measurements**, so the claim stays open and B-463 stays
+open with it.
+
+**The round did bound the difficulty, which is the useful part.** `OpenSent`
+appears in **1 sample of 182**, across roughly **ten connect-retry cycles**, at
+**~1.56 s** resolution. One catch in ten cycles puts the window at order **150 ms**
+— consistent with §2a.6's note that BFD-speed retries make the window more
+frequent and shorter, and with §1.2's doubt that it is visible at ~1 s at all.
+
+> **Design input for round 8b: sub-200 ms sampling of the socket field, or the
+> round produces another uninterpretable zero.** Sampling at 1.5 s and reporting
+> `0` measures the sampler.
+
+This is evidence for **B-432's leading hypothesis** — that `bgp_session` needs a
+rung-2 observable not downstream of rung 1's — exactly as §2a.2 anticipated a
+zero would be. It is not yet evidence *for* four rungs rather than five, because
+the observable that would decide it has not been read.
+
+### 5.5 Round 7's control, repeated and confirmed
+
+The dry run saw `fsm_states_seen: ['Established']` only and 181 samples with the
+original hold-timer reset: **the fault never applied**. That is the
+`fault_lab._dry_run` fix working, and the second consecutive round in which the
+dry run is a usable negative control rather than a wasted window.
+
+### 5.6 What was not archived
+
+**Round 8's payload was not archived when it was written.** Both run directories
+were in `~/ai-agent-ops/faultlab/`, which is not a git repository — not
+untracked, no repository at all. They survived only because nothing had deleted
+them; round 7 lost 158 samples to the same state.
+
+They are committed now (`evidence-archive/round8/`), together with `round8.py`,
+because the round's numbers are wrong on account of two regexes in that file and
+a payload recording what an instrument concluded, without the instrument, cannot
+be re-read against a defect in it.
+
+**This is the OBS-131 procedure face a third time**, and the honest reading is
+that §6.1d's end-state check was not applied to this round at all — no one ran
+`git ls-files` after it.
+
+---
+
+## 6. Round 8b — re-seal
+
+Sealed 2026-08-17, after §5. **§2a's predictions are carried forward unchanged
+and are not restated here** — this section states only what differs. The sealed
+text above is not edited; a re-seal that rewrites the prediction it is re-testing
+is not a seal.
+
+### 6.1 The fault is unchanged
+
+Option 7 in `fault_lab.py`, byte-identical: `remote-as 65001` plus
+`ebgp-multihop 5` on PE2's neighbour `10.255.0.31`, two lines, reverted to a
+verified byte-identical config. It landed correctly and there is no reason to
+change it. Changing the fault would make 8b a different round rather than a
+re-run.
+
+### 6.2 What must be true before it runs
+
+Three preconditions. **The round does not start until all three hold**, because
+each one is a way the previous run became unreadable.
+
+1. **The socket regex is anchored and positional.** The shipped
+   `template_parsers._BGP_SOCKET` is already correct and is the one to use:
+
+   ```
+   ^Socket (?P<io>not armed|armed) for io, (?P<read>not armed|armed) for read, (?P<write>not armed|armed) for write$
+   ```
+
+   with a unit test asserting `Socket not armed for io, armed for read, armed
+   for write` yields `read=armed`. A first-match search over this line is the
+   defect that voided §2a.2 and it must be impossible to reintroduce.
+
+2. **Every sample stores the raw `Socket …` line beside `socket_armed`, and the
+   raw `last reset` line beside `reset_names`.** §6.1d as amended. The recovery
+   of §2a.5–§2a.7 from run 1 rests entirely on `last_reset` having been stored
+   raw; the loss of §2a.2 rests entirely on `socket_armed` not having been.
+
+3. **The verdict reports the baseline separately from the post-fault window.**
+   `samples_socket_armed` must be printed as *`n` of `m` baseline* and *`n` of
+   `m` post-fault*. A baseline reading `0 of 4 armed on an Established session`
+   is an instrument failure and stops the round at its first verdict line. This
+   is the check that was available in run 1 and not made.
+
+### 6.3 What changes in the sampling
+
+**Sub-200 ms sampling of the socket field during the connect-retry cycle.**
+§5.4 bounds the `OpenSent` window at order 150 ms. At 1.56 s the round has
+already been run and produced a zero that measures the sampler.
+
+This need not mean a full 200 ms `investigate` — it means the *socket field*
+specifically. A tight loop on `show bgp neighbor <peer>` for the duration of one
+retry cycle is enough, and the retry cycles are ~23 s apart with roughly ten of
+them in a 240 s window.
+
+> **Sealed: if sub-200 ms sampling across ten retry cycles still yields zero
+> armed-while-not-Established samples, §2a.2 is refuted rather than void, and
+> B-463 closes as "not separable at any resolution this tool can reach".**
+
+That is the outcome §2a.2 could not reach in run 1, and it is the point of 8b:
+**to convert a void trial into a result in either direction.**
+
+### 6.4 What is already settled and is not re-tested
+
+§2a.3, §2a.4, §2a.5 and §2a.6 are scored in §5 and do not need the window.
+8b tests §2a.2 and, through it, §2a.1 — nothing else. If the operator has one
+lab window, this is the only claim it needs to buy.

@@ -53,6 +53,11 @@ markers = [
 
 [tool.ruff]
 line-length = 100
+# evidence-archive/ holds committed round payloads and the instruments that
+# produced them. Those files are evidence: they must stay byte-identical to
+# what ran, so a formatter must not touch them. Linting an artefact is a
+# category error, and `--fix` on one silently rewrites the record.
+exclude = ["evidence-archive"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B"]

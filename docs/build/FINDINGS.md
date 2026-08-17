@@ -3773,6 +3773,74 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-133 · B-463 · A falsifier is only meaningful if the instrument can produce the value that would fail it
+
+- **Kind:** insight
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** Round 8's §2a.2 said *"refuted if no sample in the whole window shows `socket_armed_read: true` with the session not Established."* No sample showed it. `SEPARATION_OBSERVED: false`, `separation_sample_count: 0`, over 178 post-fault samples.
+
+  **The falsifier fired on an instrument that could not have produced the value in any state of the world.** `round8.py`'s `_SOCKET = re.compile(r"socket.*?(armed|not armed)", re.I)` is a minimal-width search over `Socket not armed for io, armed for read, armed for write`, so it reads the **io** field — which is `not armed` on a healthy session — and returns `False` unconditionally.
+
+  Across both runs there are **195 samples in which the session is `Established`**: four pre-fault, eleven post-restore, and all 181 of the dry run. **`socket_armed` is `False` in all 195.**
+- **Evidence:** `evidence-archive/round8/`, both runs. `20260817-160359/verdict.json` reports `samples_socket_armed: 0` on a run whose `fsm_states_seen` is `['Established']` alone — the fault never applied, the session never left Established, and the socket still never armed.
+- **What I did:** Scored §2a.2 as **void, not refuted**, and recorded the general rule in `ROUND-8.md` §5.1.
+
+  **The distinction is not pedantry: a refutation and a void trial license opposite next actions.** A refutation of §2a.2 closes B-463 as "not separable". A void trial leaves it exactly where it was and costs a lab window. `SEPARATION_OBSERVED: false` is the same three characters either way, which is what makes this worth a rule rather than a note.
+
+  **And the check was already in the payload, unread.** `samples_socket_armed` counts over the post-fault window only. Had it counted over the baseline it would have printed `0 of 4 armed on an Established session` and stopped the round at its own first verdict line. Round 7's positive control was designed in (OBS-129); round 8 had one by accident and did not look at it. **A control you do not read is not a control** — it is a column.
+
+  Round 8b's re-seal (§6.2, precondition 3) now requires the baseline and post-fault counts to be reported separately, which makes the check unavoidable rather than available.
+- **Needs human review:** no
+- **Blocks:** nothing — B-463 stays open, which is where it already was.
+
+---
+
+## OBS-134 · B-463 · Two fields, one command, one parser defect — the raw one survived and the derived one did not
+
+- **Kind:** insight
+- **Escalation:** NOTE
+- **Model:** opus-5
+- **What happened:** `round8.py` has two defects, and they are the **same idiom**: a first-match search over a string carrying more than one candidate token.
+
+  1. `_SOCKET` takes the `io` field instead of `read` (OBS-133).
+  2. `_NOTIF` matches `notification` before `hold time expired` in *"due to BGP Notification sent: hold time expired"*, so `reset_names` is `"notification"` — and `as_named` treats `"notification"` as evidence of an AS mismatch. **The dry run reports `discriminator_reset_names_as: true` while containing zero samples that name an AS**; all 181 of its resets are hold-timer expiries.
+
+  So two of §2a.7's three discriminators were implemented wrongly. **The mechanisms were separated anyway**, and what separated them is the raw `last_reset` string stored verbatim in every sample: `BGP Notification sent: peer in wrong AS`, 156 samples. That rules in the AS rejection, and rules out TTL/multihop (the peer's OPEN was received and evaluated, so TCP established) and BFD (§2a.6).
+- **Evidence:** `evidence-archive/round8/round8.py` lines 117–120 and 294–297, committed beside the payloads. Counts from both `samples.jsonl`.
+- **What I did:** Recorded it in `ROUND-8.md` §5.3.
+
+  **The round demonstrates the amendment it produced, inside its own payload.** Two fields, from the same command, in the same file, under the same defective parser. One was stored as text and one as a boolean. **The text survived and the boolean did not**, and the recovery of §2a.5, §2a.6 and two thirds of §2a.7 rests entirely on which of the two a field happened to be.
+
+  This was not foresight. `last_reset` stayed raw because a string is awkward to reduce; `socket_armed` was reduced because a boolean is tidy. **The tidier choice is the one that lost the round** — which is a better argument for §6.1d's amendment than the amendment's own reasoning, because nobody was trying to prove it.
+- **Needs human review:** no
+- **Blocks:** nothing.
+
+---
+
+## OBS-135 · Process · The procedure face a third time, and the first remedy was working
+
+- **Kind:** defect-found
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** Round 8's payload was **not archived**. Both run directories were in `~/ai-agent-ops/faultlab/`, which is not a git repository — not untracked within one, no repository at all. Round 7 lost 158 samples to precisely this state (OBS-131).
+
+  Nothing detected it, and OBS-131's remedy would not have: `git ls-files evidence-archive/round8/` returns empty, which is the right answer to the wrong question, because nobody ran it.
+- **Evidence:** `git -C ~/ai-agent-ops/faultlab status` → `fatal: not a git repository`. `find` over the repo for `*round8*` → nothing.
+- **What I did:** Committed both runs plus `round8.py` to `evidence-archive/round8/` (7 files, `git ls-files` confirms), and excluded `evidence-archive/` from ruff — a formatter must not rewrite an artefact that has to stay byte-identical to what ran, and `--fix` on one silently alters the record.
+
+  **What makes this worth a separate finding is that the first remedy held.** OBS-131 replaced *archive* with *committed* and named `git ls-files` as the check. That fix is correct and it is still correct. §6.1d's **other** underspecified word is the noun: *"archive the full payload"*. Round 8 archived the `investigate`-shaped payload, which is a structure of already-parsed fields, and so held 355 copies of a broken parse's output and no copy of the line it came from.
+
+  > **Specifying the end state fixes *whether* the artefact exists. It says nothing about *what the artefact is*, and a procedure has two ways to be void.**
+
+  Recorded in `BUILD-PLAN.md` §0.13 under the procedure face as a second instance, and in `chaos-harness.md` §6.1d as *a parsed field is a conclusion; the input is the text it was parsed from*.
+
+  **The generalisation.** *Payload*, *evidence*, *result*, *record*, *sample* all name a boundary the author fixes implicitly and the reader re-fixes on their own terms. The boundary that matters is not where any module draws it — it is **wherever the next dispute lands**, which by definition is unknown when the rule is written. So the detector cannot be "name the boundary correctly"; it has to be *store one layer lower than seems necessary*. A raw line beside a boolean costs bytes.
+- **Needs human review:** no
+- **Blocks:** nothing.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**
