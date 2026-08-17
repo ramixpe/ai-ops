@@ -1951,6 +1951,27 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-154 · FIX-PLAN · Six agents, six merges, and what the orchestration layer itself learned
+
+- **Kind:** decision-made
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5 (gates and merges); sonnet-5 × 6 (implementation)
+- **What happened:** Both reviews' actionable findings implemented in two waves per `FIX-PLAN.md`. All six agents merged; suite went **1820 → 1916**, 96 net new tests; `ruff` clean; frozen files byte-identical throughout; **.venv rebuilt last** with normal and fresh-bytecode runs in parity (1916/1916), which closes the expert review's P0-01 acceptance criterion in full.
+
+  Closed: B-467, B-470, B-471, B-472, B-473, B-474, B-475 (scoped), B-476 — plus SECURITY.md and the count corrections.
+- **Evidence:** merge commits on `feat/investigation-layer`; each wave's report; `scripts/mutate_guards.py` — **18/18 guards hold**.
+- **What I did:** Three observations about the *process*, which is what this entry is for.
+
+  **1. Two agents corrected my specifications, and both were right.** Wave 1-A: my spec named `last_reset` (the field is `last_reset_reason`) and `interfaces` (the template context is `interface`) — under the literal spec the free-text protection would have silently covered nothing for those entries. Wave 1-D found `ToolAnnotations`' signature reports pydantic *aliases* (camelCase), so a snake_case capability probe returns false on a capable SDK. **The instruction that mattered in every brief was "say what met resistance — do not silently deviate."** An agent that builds faithfully on a wrong spec produces exactly the §0.13 failure: internally consistent, wrong, and green.
+
+  **2. The merge gate caught what line-by-line review did not, twice.** OBS-153: wave 1-C's atomic-write tests proved the helper and not the wiring — VACUOUS under mutation, invisible to reading. And wave 2-B surfaced a genuine design tension (validation refusals classified into uselessness) by *reporting* it as resistance rather than resolving it silently; the fix — eleven refusal kinds added to both ERROR_KINDS copies — restores the reason the agent loop's own prompt depends on, while the offending value still never crosses. **Review reads intent; mutation tests wiring; agents report friction. Each catches a class the others cannot.**
+
+  **3. Disjoint file sets did more for merge quality than isolation did.** Five worktrees produced zero merge conflicts because the waves were partitioned by file, not by topic — the one shared file (`cli.py`) was partitioned by *function* with an explicit "do not touch any existing command body" clause. The sequencing constraint that mattered was semantic, not textual: 2-B waited for 1-A's public contract, and its brief named the contract rather than the diff.
+- **Needs human review:** no
+- **Blocks:** nothing. What remains from both reviews is deliberately deferred and filed: the explorer claim-graph (P0-03's expensive half), RBAC (B-301), the module split (their P2-01), the cross-surface scheduler, and the packaging matrix (their P1-09) — the last is worth a small wave of its own before publication.
+
+---
+
 <!--
 Copy this block for each new entry.
 
