@@ -298,12 +298,17 @@ def bgp_session_state(evidence: dict[str, Any], peer: str) -> CheckResult:
     for record in parsed_records(section):
         if record.get("neighbor") != peer:
             continue
-        state = record.get("state_pfx_rcd", "")
-        if _is_numeric(state):
+        # `session_state` and `prefixes_received` rather than one field whose
+        # type depends on its value (B-460). The `_is_numeric` re-derivation
+        # this replaced was the discriminator the CLI discards, reconstructed
+        # here and in two other places.
+        state = record.get("session_state", "")
+        prefixes = record.get("prefixes_received")
+        if state == "Established":
             return healthy(
                 subject=peer,
                 evidence_keys=(key,),
-                reason=f"BGP session to {peer} is Established ({state} prefixes received)",
+                reason=f"BGP session to {peer} is Established ({prefixes} prefixes received)",
             )
         return broken(
             reason=f"BGP session to {peer} is not Established (state: {state})",
@@ -1006,8 +1011,8 @@ def _bgp_session_down(ctx: RuleContext) -> list[dict[str, Any]]:
         return []
     findings = []
     for record in ctx.bgp_records:
-        state = record.get("state_pfx_rcd", "")
-        if not _is_numeric(state):
+        state = record.get("session_state", "")
+        if state != "Established":
             findings.append(
                 {
                     "intent": "bgp",
@@ -1058,8 +1063,12 @@ def _bgp_no_prefixes(ctx: RuleContext) -> list[dict[str, Any]]:
         return []
     findings = []
     for record in ctx.bgp_records:
-        state = record.get("state_pfx_rcd", "")
-        if _is_numeric(state) and int(state) == 0:
+        # Absent means the session is not Established, which this rule is not
+        # about -- `bgp_no_prefixes` fires on an *Established* peer carrying
+        # nothing. Reading absence as zero would make every down session report
+        # a prefix problem on top of its real one.
+        prefixes = record.get("prefixes_received")
+        if prefixes == 0:
             findings.append(
                 {
                     "intent": "bgp",

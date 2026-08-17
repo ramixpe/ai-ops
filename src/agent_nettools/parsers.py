@@ -384,6 +384,25 @@ BGP_IGNORES: tuple[IgnoreRule, ...] = (
 )
 
 
+def _split_state_pfx_rcd(value: str) -> dict[str, Any]:
+    """``St/PfxRcd`` into the two fields it actually holds (B-460).
+
+    A numeric value means the session is Established and the number is the
+    prefix count -- that is what the column means, and it is the discriminator
+    every consumer was re-deriving with `_is_numeric`.
+
+    `prefixes_received` is **absent, not zero**, when the session is not
+    Established. Same rule Phase 3 applies to `router_id`/`local_as` for a
+    device with no BGP process, and for the same reason: zero is a measurement,
+    absence is not one.
+    """
+
+    text = (value or "").strip()
+    if text.isdigit():
+        return {"session_state": "Established", "prefixes_received": int(text)}
+    return {"session_state": text}
+
+
 def parse_xr_bgp(outputs: dict[str, str]) -> dict[str, Any]:
     """Parse ``show bgp summary``.
 
@@ -431,7 +450,19 @@ def parse_xr_bgp(outputs: dict[str, str]) -> dict[str, Any]:
                 "in_q": fields[6],
                 "out_q": fields[7],
                 "up_down": fields[8],
-                "state_pfx_rcd": fields[9],
+                # `St/PfxRcd` holds **either** a prefix count **or** a session
+                # state, and which one depends on the state (B-460). A field
+                # whose *type* depends on its value cannot be checked, diffed or
+                # compared without every consumer re-deriving the discriminator
+                # the CLI threw away -- `checks.py` did exactly that in three
+                # places, and `diff_evidence` recorded a session going down as
+                # `"0"` changing to `"Idle"`: one field, one value change. The
+                # flap detector reads those same diffs, so a session bouncing
+                # Established/Idle was counted as *a string oscillating* rather
+                # than *a session flapping*.
+                #
+                # Split here, where the discriminator is still available.
+                **_split_state_pfx_rcd(fields[9]),
             }
         )
         consumed.append(stripped)

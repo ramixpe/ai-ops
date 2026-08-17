@@ -608,7 +608,15 @@ def test_pinning_golden_twice_overwrites_the_previous_pin(tmp_path):
     }
 
 
-def _bgp_snapshot(state: str, *, up_down: str = "00:00:01") -> dict:
+def _bgp_snapshot(state, *, up_down: str = "00:00:01") -> dict:
+    """`state` is a session-state word, or a dict of already-split fields."""
+
+    if isinstance(state, str):
+        state = (
+            {"session_state": "Established", "prefixes_received": int(state)}
+            if state.isdigit()
+            else {"session_state": state}
+        )
     """One synthetic snapshot with a single BGP peer at the given St/PfxRcd state.
 
     ``up_down`` is a volatile field (see ``parsers.VOLATILE_FIELDS``) included
@@ -626,7 +634,7 @@ def _bgp_snapshot(state: str, *, up_down: str = "00:00:01") -> dict:
                 "parsed": {
                     "meta": {"router_id": "10.0.0.9", "neighbor_count": 1},
                     "records": [
-                        {"neighbor": "10.0.0.1", "state_pfx_rcd": state, "up_down": up_down}
+                        {"neighbor": "10.0.0.1", **state, "up_down": up_down}
                     ],
                 },
             },
@@ -652,24 +660,48 @@ def _write_snapshot_at(tmp_path, device: str, index: int, evidence: dict) -> Non
 
 
 def test_detect_flaps_reports_an_oscillating_field(tmp_path):
+    """**B-460 changed what this reports, and the change is the item.**
+
+    Before the split, a session bouncing Established/Idle oscillated
+    `state_pfx_rcd` between `"5"` and `"Idle"` -- the flap detector saw *a
+    string changing type*, and its output could not be filtered to "sessions
+    that flapped" without re-deriving the discriminator the CLI discards.
+
+    Now it reports `session_state` oscillating between `Established` and
+    `Idle`, which is the same event named correctly.
+    """
+
     from agent_nettools.network_tools import detect_flaps
 
     # Idle/Established/Idle/Established/Idle: 4 transitions, well past the
     # default min_transitions=3 threshold.
-    states = ["Idle", "5", "Idle", "5", "Idle"]
+    states = [
+        {"session_state": "Idle"},
+        {"session_state": "Established", "prefixes_received": 5},
+        {"session_state": "Idle"},
+        {"session_state": "Established", "prefixes_received": 5},
+        {"session_state": "Idle"},
+    ]
     for index, state in enumerate(states):
         _write_snapshot_at(tmp_path, "PE9", index, _bgp_snapshot(state, up_down=f"00:0{index}:00"))
 
     result = detect_flaps("PE9", base_dir=str(tmp_path))
 
     assert result["snapshots_examined"] == 5
-    assert len(result["flapping"]) == 1
-    entry = result["flapping"][0]
+    by_field = {e["field"]: e for e in result["flapping"]}
+
+    assert "session_state" in by_field, (
+        "the oscillation is a session state, and now says so"
+    )
+    entry = by_field["session_state"]
     assert entry["intent"] == "bgp"
     assert entry["subject"] == "10.0.0.1"
-    assert entry["field"] == "state_pfx_rcd"
     assert entry["transitions"] == 4
-    assert entry["values"] == states
+    assert entry["values"] == [s["session_state"] for s in states]
+
+    assert "state_pfx_rcd" not in by_field, (
+        "the field whose type depended on its value is gone"
+    )
 
 
 def test_detect_flaps_ignores_volatile_fields(tmp_path):

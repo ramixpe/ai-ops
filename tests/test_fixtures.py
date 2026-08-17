@@ -271,7 +271,7 @@ def test_diff_detects_a_real_non_volatile_change(monkeypatch):
 
     neighbor = new["bgp"]["data"]["parsed"]["records"][0]
     assert neighbor["neighbor"] == "10.255.0.31"
-    neighbor["state_pfx_rcd"] = "12"  # was "0" -- a real prefix-count change.
+    neighbor["prefixes_received"] = 12  # was 0 -- a real prefix-count change.
 
     diff = diff_evidence(old, new)
 
@@ -279,7 +279,7 @@ def test_diff_detects_a_real_non_volatile_change(monkeypatch):
     entry = diff["details"]["bgp"]
     assert entry["compared_via"] == "parsed"
     assert entry["changed_records"] == [
-        {"key": "10.255.0.31", "changes": {"state_pfx_rcd": {"old": "0", "new": "12"}}}
+        {"key": "10.255.0.31", "changes": {"prefixes_received": {"old": 0, "new": 12}}}
     ]
 
 

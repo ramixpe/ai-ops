@@ -264,14 +264,14 @@ def test_bgp_process_absent_excluded_for_core_but_flagged_for_edge():
     )["severity"] == "warning"
 
 
-def test_bgp_session_down_uses_numeric_vs_state_word():
+def test_bgp_session_down_reads_session_state_directly():
     device = _device("PE9")
     evidence = {
         "platform": "cisco_xr",
         "bgp": _parsed_section(
             [
-                {"neighbor": "10.0.0.1", "state_pfx_rcd": "5"},
-                {"neighbor": "10.0.0.2", "state_pfx_rcd": "Idle"},
+                {"neighbor": "10.0.0.1", "session_state": "Established", "prefixes_received": 5},
+                {"neighbor": "10.0.0.2", "session_state": "Idle"},
             ]
         ),
     }
@@ -286,7 +286,7 @@ def test_bgp_session_down_uses_numeric_vs_state_word():
 def test_bgp_no_prefixes_is_info_only():
     device = _device("PE9")
     evidence = _healthy_evidence(
-        bgp=_parsed_section([{"neighbor": "10.0.0.1", "state_pfx_rcd": "0"}], {"active": True}),
+        bgp=_parsed_section([{"neighbor": "10.0.0.1", "session_state": "Established", "prefixes_received": 0}], {"active": True}),
     )
 
     verdict = evaluate_device(evidence, device)
@@ -359,7 +359,7 @@ def test_isis_adjacency_count_drift_fires_on_mismatch_and_skips_when_absent():
 def test_bgp_peer_count_drift_fires_on_mismatch_and_skips_when_absent():
     evidence = {
         "platform": "cisco_xr",
-        "bgp": _parsed_section([{"neighbor": "10.0.0.1", "state_pfx_rcd": "5"}]),
+        "bgp": _parsed_section([{"neighbor": "10.0.0.1", "session_state": "Established", "prefixes_received": 5}]),
     }
 
     drifted = evaluate_device(evidence, _device("PE9", bgp_peers=2))
@@ -555,8 +555,8 @@ def test_device_severity_is_the_max_of_its_findings():
     evidence = _healthy_evidence(
         bgp=_parsed_section(
             [
-                {"neighbor": "10.0.0.1", "state_pfx_rcd": "0"},  # info
-                {"neighbor": "10.0.0.2", "state_pfx_rcd": "Idle"},  # critical
+                {"neighbor": "10.0.0.1", "session_state": "Established", "prefixes_received": 0},  # info
+                {"neighbor": "10.0.0.2", "session_state": "Idle"},  # critical
             ],
             {"active": True},
         ),

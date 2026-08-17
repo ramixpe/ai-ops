@@ -3429,6 +3429,27 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-120 · B-460 · A field whose type depends on its value cannot be diffed
+
+- **Kind:** defect-fixed
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** `show bgp summary`'s `St/PfxRcd` column holds **either** a prefix count **or** a session-state name, and the parser stored whichever appeared in one field. So `state_pfx_rcd == "0"` and `state_pfx_rcd == "Idle"` were the same field carrying different *kinds* of value.
+
+  Filed initially as a naming improvement. The operator sharpened it, and the sharpening is what made it worth doing now: **the defect is live, in flap detection.** `diff_evidence` compares parsed records field by field, so a session going Established → Idle is recorded as one field changing value. `detect_flaps` reads those same diffs, so **a session bouncing Established/Idle was counted as a string oscillating, not as a session flapping** — and the flap detector exists precisely because a bouncing peer looks clean in every pairwise diff.
+
+  It was detecting the right transitions for the wrong reason and under the wrong name, which means its output could not be filtered to "sessions that flapped" without re-deriving the discriminator the CLI discards.
+- **Evidence:** Three `_is_numeric(state)` re-derivations in `checks.py`, one per consumer. Flap test now reports `session_state` with values `[Idle, Established, Idle, Established, Idle]`. 1751 passing.
+- **What I did:** Split at the parser: `session_state` always present, `prefixes_received` **absent — not zero** — when the session is not Established.
+
+  **The absence rule is the part that matters.** Emitting `prefixes_received: 0` for an Idle session would be a measurement nobody took, and it would have a consequence: `bgp_no_prefixes` fires on `prefixes_received == 0`, so every down session would report *"Established with 0 prefixes received"* alongside its real fault. Absence makes that structurally impossible rather than requiring the rule to remember. Same rule Phase 3 applies to `router_id`/`local_as` for a device with no BGP process.
+
+  **The general form, which is why this is a finding and not a chore.** A field whose *type* depends on its value cannot be checked, diffed or compared without every consumer reconstructing the discriminator that was thrown away at parse time. Three consumers did exactly that, identically, and agreed — which is why nothing looked wrong. **Agreement among re-derivations is not the same as not needing to re-derive**, and the place to split is the parser, because it is the last point at which the discriminator is still observable.
+- **Needs human review:** no
+- **Blocks:** nothing.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**
