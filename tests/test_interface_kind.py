@@ -114,16 +114,69 @@ def test_an_empty_member_set_is_unevaluated_not_a_crash_and_not_healthy():
     assert "no members" in (result.reason or "")
 
 
-def test_the_descent_and_the_runner_use_the_same_predicate():
+def test_no_module_on_the_descent_path_keeps_its_own_copy():
     """The point of the item. Two copies agreeing today by accident of nobody
-    having edited one is not the same as one definition."""
+    having edited one is not the same as one definition.
+
+    `epoch` joined the list at B-436, which is when the *runner* stopped naming
+    `physical_members` at all: the fan-out moved into `epoch.template_calls`, so
+    `investigation` now reaches the taxonomy through the shared helper instead
+    of applying it itself. That is the consolidation going further, not
+    unravelling -- the member set and the collection that feeds it are now one
+    definition rather than two that agreed.
+
+    **The source grep for `physical_members` was dropped here deliberately, and
+    replaced rather than deleted.** It was a proxy for "uses the shared rule",
+    and a proxy stops being one the moment a module reaches the rule
+    transitively. The property it stood for is asserted directly by
+    `test_collection_and_aggregation_agree_on_the_member_set` below, on
+    behaviour instead of on text. What is kept here is the half a grep can
+    genuinely check: that nobody has grown a private copy.
+    """
 
     import inspect
 
-    for module in (descent, investigation):
+    from agent_nettools import epoch
+
+    for module in (descent, investigation, epoch):
         source = inspect.getsource(module)
         assert 'startswith("Gi")' not in source, f"{module.__name__} still has its own copy"
-        assert "physical_members" in source
+
+
+def test_collection_and_aggregation_agree_on_the_member_set():
+    """What the grep was standing in for, measured instead of matched.
+
+    The failure B-431 exists to prevent is a descent that **collects** one
+    member set and **aggregates over** another: every interface would be read,
+    the rung would be evaluated over a different list, and the verdict would be
+    plausible and wrong. The two sides live in different modules now
+    (`epoch.template_calls` collects; `descent._physical_interfaces` enumerates
+    what the rung is checked over), which is precisely why this is worth
+    asserting on real evidence rather than on the presence of an identifier.
+    """
+
+    from agent_nettools import epoch
+
+    interfaces = fixtures.load_fixture_evidence("PE2", label="broken")
+    step = next(
+        s
+        for r in flows.flow_for("bgp_session").descent
+        if r.name == "interface"
+        for s in r.collect
+        if s.is_template
+    )
+
+    collected = [
+        key.split(":", 1)[1]
+        for key, _ in epoch.template_calls(step, "10.255.0.12", dict(interfaces))
+    ]
+    aggregated = descent._physical_interfaces(dict(interfaces))
+
+    assert collected, "the fixture must actually produce members, or this is vacuous"
+    assert collected == aggregated, (
+        "the epoch collects one member set and the descent aggregates over "
+        f"another: collected={collected} aggregated={aggregated}"
+    )
 
 
 def test_the_capture_manifest_differs_deliberately_and_visibly():

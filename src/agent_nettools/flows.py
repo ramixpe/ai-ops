@@ -202,7 +202,31 @@ class Rung:
 
 @dataclass(frozen=True)
 class Flow:
-    """An investigation scoped to one object type."""
+    """An investigation scoped to one object type.
+
+    Precondition on every flow — collection must be resolvable before the walk
+    ---------------------------------------------------------------------------
+    **Every collect step in every rung must be resolvable from the subject and
+    the device alone, before the walk begins. A rung may not collect something
+    whose identity depends on what an earlier rung concluded.**
+
+    This is stated here, on the type a flow author is writing, rather than only
+    as a guard inside the collector. A guard tells you the constraint exists
+    after you have designed a ladder that violates it, and tells you in a stack
+    trace; a precondition tells you before. `epoch.validate_prewalk_collection`
+    enforces it, as the enforcement of a stated rule rather than as the only
+    place the rule appears.
+
+    Why it matters: evidence is collected **once per device** in a single
+    observation window, and the window is what makes a causal finding assertable
+    at all (`epoch.py`). A rung whose collection depended on an earlier verdict
+    could not be collected in that window, so the flow would silently fall back
+    to reading each rung at a different instant -- the defect the epoch exists
+    to remove.
+
+    No flow violates it today, and ``SubjectRule`` offers no way to express such
+    a dependency. That is a property to preserve, not a coincidence to rely on.
+    """
 
     object_type: str
     subject_schema: str
@@ -246,8 +270,29 @@ CAUSE_NOT_LOCALISED = "cause_not_localised"
 #: `interface_line_down` with exit code 1 until this finding existed.
 NO_FAULT_ON_PATH = "no_fault_on_path"
 
+#: The observations do not support one present-tense claim about the fabric.
+#:
+#: Either the observation window was wider than the bound, or the symptom or the
+#: proposed cause changed between being read and being re-read at the end. The
+#: rungs were all read successfully -- this is not `undetermined` -- and each
+#: verdict was true of the instant it was taken. What is missing is any basis for
+#: treating them as a description of *one* state.
+#:
+#: The scenario all three reviewers converged on: a BGP outage read at t0, the
+#: fault recovering at t50, an unrelated interface failing at t105, and the
+#: interface rung reading that new failure at t115. Every citation resolves, the
+#: chain is deterministic, grounding passes, and the report describes a fabric
+#: that never existed. See `epoch.py`.
+TEMPORALLY_INCOHERENT = "temporally_incoherent"
+
 UNIVERSAL_FINDINGS = frozenset(
-    {ALL_LAYERS_HEALTHY, UNDETERMINED, CAUSE_NOT_LOCALISED, NO_FAULT_ON_PATH}
+    {
+        ALL_LAYERS_HEALTHY,
+        UNDETERMINED,
+        CAUSE_NOT_LOCALISED,
+        NO_FAULT_ON_PATH,
+        TEMPORALLY_INCOHERENT,
+    }
 )
 
 

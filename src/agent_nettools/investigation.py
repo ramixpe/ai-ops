@@ -58,8 +58,14 @@ from typing import Any
 from . import flows
 from .coverage import Coverage
 from .descent import DescentResult, run_descent
+from .epoch import (
+    DEFAULT_SKEW_BOUND_SECONDS,
+    EvidenceEpoch,
+    check_coherence,
+    collect_epoch,
+    template_calls,
+)
 from .grounding import GroundingResult, ground_correlation, ground_report
-from .interface_kind import physical_members
 from .log_window import ShapedWindow, coverage_from_logging, shape_window
 from .network_tools import collect_evidence, run_template
 from .prompt_library import RenderedPrompt, build_correlate_prompt, build_report_prompt
@@ -103,7 +109,14 @@ Analyst = Callable[[RenderedPrompt], str]
 #: `no_fault_on_path` -- rung 1 is healthy, so there is no symptom and nothing
 #: below can be its cause. The broken rungs are real and are **observations**
 #: about the device, not an explanation of anything (B-428).
-_FINDINGS_WITHOUT_A_CAUSE = frozenset({flows.UNDETERMINED, flows.NO_FAULT_ON_PATH})
+#:
+#: `temporally_incoherent` -- the rungs were read at instants too far apart, or
+#: the fabric moved between the walk and the re-read. The lowest broken rung is
+#: a real observation of some instant, and presenting it as the cause of a
+#: symptom read at a different instant is exactly the defect the epoch removes.
+_FINDINGS_WITHOUT_A_CAUSE = frozenset(
+    {flows.UNDETERMINED, flows.NO_FAULT_ON_PATH, flows.TEMPORALLY_INCOHERENT}
+)
 
 _FENCE = re.compile(r"^\s*```(?:json)?\s*\n(?P<body>.*?)\n?\s*```\s*$", re.DOTALL)
 
@@ -230,6 +243,13 @@ class InvestigationResult:
                 "caveat": self.caveat,
             },
             "off_path": list(self.off_path),
+            # Present whatever the outcome, including a comfortable pass. A
+            # bound that only speaks when violated says nothing about how close
+            # we routinely run, and a threshold with no observed distribution
+            # behind it can only ever be revised on argument (design §2.3a).
+            "coherence": (
+                descent.coherence.as_dict() if descent.coherence is not None else None
+            ),
             "usage": self.usage.as_dict() if self.usage is not None else None,
             "coverage": self.coverage.as_dict() if self.coverage is not None else None,
             "repairs": list(self.repairs),
@@ -289,6 +309,12 @@ class InvestigationResult:
 
         if self.descent.finding == flows.UNDETERMINED:
             return False
+        # `temporally_incoherent` is an answer problem, not a network problem:
+        # the fabric may be fine or broken and this run cannot say which. Exit 2
+        # by the same rule as `undetermined`, and for the same reason -- the
+        # observations were real, and they do not describe one state.
+        if self.descent.finding == flows.TEMPORALLY_INCOHERENT:
+            return False
         if self.report_status == WITHHELD or self.correlation_status == WITHHELD:
             return False
         return True
@@ -329,6 +355,13 @@ def inventory_resolver(subject: str) -> str:
     )
 
 
+#: Collect-per-rung, the pre-epoch behaviour. Kept for one reason and one only:
+#: a caller that injects its own ``collector`` opts out of the epoch, and the
+#: descent then behaves exactly as it did before item 3 -- which is what lets
+#: every test written against the old contract keep passing unmodified, and is
+#: the evidence that the evidence *shape* did not change.
+#:
+#: It is not the live path. `investigate()` builds an epoch.
 def _collect_for_rung(device: str, rung: flows.Rung, subject: str, *, sender=None) -> dict:
     """Everything one rung needs, keyed by the convention `checks.py` reads.
 
@@ -339,31 +372,14 @@ def _collect_for_rung(device: str, rung: flows.Rung, subject: str, *, sender=Non
     """
 
     evidence = dict(collect_evidence(device, sender=sender))
-
+    # One definition of how a template parameter is filled, shared with the
+    # epoch builder and the re-read. Three copies of this rule is what B-431
+    # was about.
     for step in rung.collect:
         if not step.is_template:
             continue
-        if step.parameter == "prefix":
-            key = f"{subject}/32"
-            evidence[f"{step.name}:{key}"] = run_template(
-                device, step.name, sender=sender, prefix=key
-            )
-        elif step.parameter == "interface":
-            parsed = evidence.get("interfaces", {}).get("data", {}).get("parsed") or {}
-            # The same declared taxonomy the descent aggregates over. Collecting
-            # one member set and aggregating over another is what three copies
-            # of this rule made possible (B-431).
-            members, _ = physical_members(
-                [r.get("interface", "") for r in parsed.get("records", [])]
-            )
-            for name in members:
-                evidence[f"{step.name}:{name}"] = run_template(
-                    device, step.name, sender=sender, interface=name
-                )
-        else:
-            evidence[f"{step.name}:{subject}"] = run_template(
-                device, step.name, sender=sender, **{step.parameter: subject}
-            )
+        for key, kwargs in template_calls(step, subject, evidence):
+            evidence[key] = run_template(device, step.name, sender=sender, **kwargs)
     return evidence
 
 
@@ -411,22 +427,50 @@ def investigate(
     resolver: Callable[[str], str | Sequence[str]] | None = None,
     window: Callable[[str], ShapedWindow] | None = None,
     sender=None,
+    skew_bound_seconds: float = DEFAULT_SKEW_BOUND_SECONDS,
 ) -> InvestigationResult:
     """Run one investigation end to end.
 
     ``analyst`` is the only model in the path. Omit it and the descent runs
     alone, which is a complete result -- the deterministic half is the half that
     finds the cause.
+
+    Evidence is collected **once per device** into an :class:`~.epoch.EvidenceEpoch`
+    and reused across every rung, and the symptom and proposed cause are re-read
+    at the end. See `epoch.py` for why that is a correctness measure and not
+    only an efficiency one.
+
+    ``collector`` opts out of both: a caller supplying its own collector gets the
+    pre-epoch behaviour, one collection per rung and no coherence check. That is
+    for tests and fixture-driven callers that already hold their evidence -- a
+    coherence check over evidence that never came from a device would be
+    measuring the test harness.
     """
 
     the_flow = flows.flow_for(flow)
-    collect = collector or (
-        lambda d, r, s: _collect_for_rung(d, r, s, sender=sender)
-    )
     resolve = resolver or inventory_resolver
 
+    epoch: EvidenceEpoch | None = None
+    coherence = None
+    if collector is not None:
+        collect = collector
+    else:
+        epoch = collect_epoch(
+            the_flow, device, subject, resolver=resolve, sender=sender,
+            bound_seconds=skew_bound_seconds,
+        )
+        # Every rung reads the same window. `for_device` hands back exactly the
+        # dict shape `checks.py` already read, which is what keeps this a change
+        # to *when* evidence is gathered rather than to what a check sees.
+        collect = lambda d, _rung, _subject: epoch.for_device(d)  # noqa: E731
+        coherence = lambda outcomes: check_coherence(  # noqa: E731
+            the_flow, outcomes, epoch, subject,
+            device=device, resolver=resolve, sender=sender,
+        )
+
     descent = run_descent(
-        the_flow, device, subject, collector=collect, resolver=resolve
+        the_flow, device, subject,
+        collector=collect, resolver=resolve, coherence=coherence,
     )
 
     if analyst is None:

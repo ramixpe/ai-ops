@@ -50,13 +50,14 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .checks import BROKEN, HEALTHY, UNEVALUATED, CheckResult
 from .flows import (
     ALL_LAYERS_HEALTHY,
     CAUSE_NOT_LOCALISED,
     NO_FAULT_ON_PATH,
+    TEMPORALLY_INCOHERENT,
     UNDETERMINED,
     Aggregation,
     DeviceScope,
@@ -66,11 +67,20 @@ from .flows import (
 )
 from .interface_kind import physical_members
 
+if TYPE_CHECKING:  # `epoch` imports this module, so the dependency is one-way
+    from .epoch import Coherence
+
 #: Module logger. No handler is installed here, so this is silent unless the
 #: application configures logging -- the module stays free of I/O by default.
 LOGGER = logging.getLogger(__name__)
 
-__all__ = ["DescentResult", "RungOutcome", "run_descent"]
+__all__ = [
+    "DescentResult",
+    "RungOutcome",
+    "evaluate_rung",
+    "resolve_devices",
+    "run_descent",
+]
 
 
 @dataclass(frozen=True)
@@ -98,6 +108,12 @@ class DescentResult:
     evidence_keys: tuple[str, ...] = field(default_factory=tuple)
     reason: str | None = None
 
+    #: When the evidence was read and whether it held still while it was being
+    #: read. ``None`` when no coherence check ran -- an injected collector, or a
+    #: caller that has not opted in. Reviewer A's note was that the per-command
+    #: timestamp existed and was not preserved here; this is where it lands.
+    coherence: Coherence | None = None
+
     @property
     def cause(self) -> RungOutcome | None:
         """The lowest broken rung — the root cause, or ``None`` if nothing broke."""
@@ -122,7 +138,7 @@ class DescentResult:
         return tuple(o.rung for o in self.outcomes)
 
 
-def _resolve_devices(
+def resolve_devices(
     rung: Rung,
     local_device: str,
     subject: str,
@@ -243,6 +259,43 @@ def _aggregate(rung: Rung, results: list[CheckResult]) -> CheckResult:
     return CheckResult(status, reason=reason, subject=results[0].subject, evidence_keys=keys)
 
 
+def evaluate_rung(
+    rung: Rung,
+    devices: Sequence[str],
+    subject: str,
+    evidence_for: Callable[[str], dict[str, Any]],
+) -> CheckResult:
+    """One rung's verdict over its device set, aggregated.
+
+    Extracted from :func:`run_descent` so the epoch's re-read evaluates a rung
+    by *calling the walker's own logic* rather than reproducing it. Two copies
+    of the fan-out-and-aggregate rule would agree until someone edited one, and
+    then a re-read would compare a verdict against a differently-computed
+    version of itself — which would read as instability in the fabric rather
+    than as a bug here (B-431's lesson, applied before it could happen again).
+    """
+
+    per_device: list[CheckResult] = []
+    for target in devices:
+        evidence = evidence_for(target)
+        rung_subjects = _rung_subjects(rung, subject, evidence)
+        if not rung_subjects:
+            # A fan-out that found no objects to check. Not healthy -- we
+            # verified nothing -- and not broken either.
+            per_device.append(
+                CheckResult(
+                    UNEVALUATED,
+                    reason=f"no objects to check on {target} for rung {rung.name!r}",
+                    subject=subject,
+                )
+            )
+            continue
+        for rung_subject in rung_subjects:
+            per_device.append(rung.check(evidence, rung_subject))
+
+    return _aggregate(rung, per_device)
+
+
 def run_descent(
     flow: Flow,
     device: str,
@@ -250,6 +303,7 @@ def run_descent(
     *,
     collector: Callable[[str, Rung, str], dict[str, Any]],
     resolver: Callable[[str], str | Sequence[str]] | None = None,
+    coherence: Callable[[list[RungOutcome]], Coherence] | None = None,
 ) -> DescentResult:
     """Walk one flow's ladder and return the lowest broken rung as the cause.
 
@@ -263,6 +317,14 @@ def run_descent(
     descent path**, and it is arithmetic over inventory rather than an
     inference -- `10.255.0.12` is PE2 because the inventory says so, not
     because the numbers look alike.
+
+    ``coherence(outcomes) -> Coherence`` re-reads the symptom and the proposed
+    cause once the walk is done, and is consulted by :func:`_finding_for`. It is
+    a **callable** rather than a value because it needs the walk's outcomes to
+    know which rung the cause is, and the finding still has to be decided in one
+    place. Omit it and the walk behaves exactly as it did before the epoch
+    contract existed -- which is what every test injecting a ``collector``
+    relies on.
     """
 
     outcomes: list[RungOutcome] = []
@@ -271,32 +333,21 @@ def run_descent(
 
     for rung in flow.descent:
         try:
-            devices = _resolve_devices(rung, device, subject, resolver)
+            devices = resolve_devices(rung, device, subject, resolver)
         except ValueError as exc:
             outcome = RungOutcome(rung.name, device, CheckResult(UNEVALUATED, reason=str(exc)))
             outcomes.append(outcome)
             stopped_reason = str(exc)
             break
 
-        per_device: list[CheckResult] = []
-        for target in devices:
-            evidence = collector(target, rung, subject)
-            rung_subjects = _rung_subjects(rung, subject, evidence)
-            if not rung_subjects:
-                # A fan-out that found no objects to check. Not healthy -- we
-                # verified nothing -- and not broken either.
-                per_device.append(
-                    CheckResult(
-                        UNEVALUATED,
-                        reason=f"no objects to check on {target} for rung {rung.name!r}",
-                        subject=subject,
-                    )
-                )
-                continue
-            for rung_subject in rung_subjects:
-                per_device.append(rung.check(evidence, rung_subject))
-
-        result = _aggregate(rung, per_device)
+        result = evaluate_rung(
+            rung, devices, subject,
+            # `rung=rung` binds the loop variable. The lambda is consumed
+            # inside this iteration, so late binding could not bite today --
+            # but a future `evaluate_rung` that deferred the call would
+            # silently evaluate every rung against the last one's evidence.
+            lambda target, rung=rung: collector(target, rung, subject),
+        )
         outcomes.append(RungOutcome(rung.name, ", ".join(devices), result))
         evidence_keys.extend(result.evidence_keys)
 
@@ -309,7 +360,8 @@ def run_descent(
         # broken -> keep descending. The lowest broken rung is the cause; this
         # one may only be a consequence of something further down.
 
-    finding = _finding_for(flow, outcomes, stopped_reason)
+    verdict = coherence(outcomes) if coherence is not None else None
+    finding = _finding_for(flow, outcomes, stopped_reason, verdict)
 
     return DescentResult(
         flow=flow.object_type,
@@ -319,14 +371,31 @@ def run_descent(
         outcomes=tuple(outcomes),
         evidence_keys=tuple(dict.fromkeys(evidence_keys)),
         reason=stopped_reason,
+        coherence=verdict,
     )
 
 
-def _finding_for(flow: Flow, outcomes: list[RungOutcome], stopped_reason: str | None) -> str:
+def _finding_for(
+    flow: Flow,
+    outcomes: list[RungOutcome],
+    stopped_reason: str | None,
+    coherence: Coherence | None = None,
+) -> str:
     """Turn the walk into one terminal finding."""
 
     if any(o.status == UNEVALUATED for o in outcomes):
+        # `undetermined` outranks incoherence deliberately. Both are exit 2 --
+        # "no trustworthy answer" -- so nothing is lost by ordering them, and
+        # `undetermined` carries *which rung could not be read*, which is the
+        # more actionable of the two. Replacing it would trade a specific reason
+        # for a general one.
         return UNDETERMINED
+
+    if coherence is not None and not coherence.ok:
+        # Every remaining finding asserts something about the fabric's present
+        # state, not only the ones that name a cause: `all_layers_healthy` over
+        # an incoherent window is as unsupported as a causal chain over one.
+        return TEMPORALLY_INCOHERENT
 
     broken = [o for o in outcomes if o.status == BROKEN]
     if not broken:

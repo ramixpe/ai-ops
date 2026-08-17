@@ -349,8 +349,16 @@ def _cmd_investigate(args: argparse.Namespace) -> int:
     ==== =========================================================
 
     Exit 1 is a problem with the **network**. Exit 2 is a problem with the
-    **answer** — `undetermined`, a withheld report, a collection failure, a
-    flow that could not run. Conflating them is the failure this scheme exists
+    **answer** — `undetermined`, `temporally_incoherent`, a withheld report, a
+    collection failure, a flow that could not run.
+
+    `temporally_incoherent` is worth naming here because it is the one that
+    reads like a network fault and is not: the rungs were all read, and each
+    verdict was true of the instant it was taken. What is missing is any basis
+    for treating them as one state, so the fabric may be fine or broken and this
+    run cannot say which. That is an answer problem (B-436, `epoch.py`).
+
+    Conflating them is the failure this scheme exists
     to prevent, and the decisive case is not the obvious one: if a grounding
     failure exited 1, a *systematic* grounding regression (a prompt change, a
     model change) would hide in the noise of routine faults. Faults are normal.

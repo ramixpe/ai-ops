@@ -111,6 +111,7 @@ its own, each module depending only on the ones above it in this list:
 | `checks.py` | Pure predicates over parsed records. `healthy`/`broken`/`unevaluated`, and a check may only answer `healthy` about a field it actually read | `template_parsers` |
 | `flows.py` | The ladder: `Rung`, `DeviceScope`, `SubjectRule`, `Aggregation`, and the `bgp_session` flow | `checks` |
 | `descent.py` | `run_descent()` — the deterministic walk. **No model call anywhere in this module**, and that is the claim the layer rests on | `flows`, `checks` |
+| `epoch.py` | One observation window: collect once per device, reuse across rungs, re-read the symptom and the cause at the end. `temporally_incoherent` when the skew exceeds its bound or the fabric moved | `descent`, `flows`, `network_tools` |
 | `coverage.py` | What an evidence source was able to tell us; `gaps()` is why a negative may not be assertable | nothing |
 | `log_window.py` | Shapes a log window by *attribution* (`NoiseRule`), never by content; builds the coverage record | `coverage` |
 | `prompt_library.py` | Loads versioned prompts from `prompts/` and renders them. **Structurally cannot receive device text** — it takes a `DescentResult` | `descent`, `log_window` |
@@ -131,6 +132,15 @@ model call, deliberately and permanently — if it ever needs one, something abo
 it has been designed wrong. And `grounding.py`'s failure objects have no field a
 model's prose can occupy, so "a failed report is not emitted" cannot be defeated
 by forgetting to redact.
+
+**One precondition every flow must satisfy.** Every collect step in every rung
+must be resolvable from the subject and the device alone, *before* the walk
+begins — a rung may not collect something whose identity depends on what an
+earlier rung concluded. Evidence is gathered once per device into a single
+observation window, and a rung that could not be collected in that window would
+silently fall back to being read at its own instant, which is the defect
+`epoch.py` exists to remove. Stated on `flows.Flow`, enforced by
+`epoch.validate_prewalk_collection`.
 
 `build/lib/` and `agent_nettools.egg-info/` are stale build artifacts. Never edit
 those copies; `make clean` removes them.
