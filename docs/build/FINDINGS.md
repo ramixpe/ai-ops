@@ -1632,6 +1632,83 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-142 · MCP re-test · A selection experiment needs the fabric in the same state, not only the same questions
+
+- **Kind:** surprise
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5 (scoring); `gemma-4-e4b` under test
+- **What happened:** The operator ran `MCP-RETEST-PROTOCOL.md` against LM Studio. Scored in `MCP-EXPERIMENT.md` §10. **§9's registered question came back void, and the reason is a confound the seal did not think to guard.**
+
+  §9's refutation clause names `check_lab_bgp_neighbors` by name. On **Q1, the registered question, the model called `check_lab_bgp_neighbors`.** By the letter, refuted.
+
+  But two of the three "why" questions went **straight to `investigate_lab_session`**, and the negative control chose `assess_lab_device_health` correctly. That is not a model spreading across tools, and the Q1 trace says what actually happened: it named `investigate_lab_session` as the right tool, found it lacked the `subject` argument, and called `check_lab_bgp_neighbors` **to discover it**. In the original run the model had the same gap and *asked the user*. It now goes and finds it.
+
+  **Then the trajectory ended, because the session was Established.** The original observation was made with PE2's session **down**. This run refuted the question's premise at step one, so step two of the model's stated plan never ran.
+- **Evidence:** `MCP-EXPERIMENT.md` §10; the exported transcript, `gemma-4-e4b`, LM Studio 0.4.21.
+- **What I did:** Scored §9 as **content survives on Q2/Q4, control passes on Q3, Q1 void**, and recorded the general form:
+
+  > **A tool-selection experiment needs the fabric in the same state, not merely the same questions.** The question is the stimulus; the **first tool result** is what shapes everything after it. A question whose premise is false ends the trajectory at step one, and every later step is unobserved rather than changed.
+
+  §9 wrote *"uninterpretable if the question set differs"*. It is equally uninterpretable if the **ground truth** differs, and that clause was not written. The seal controlled the input and left the environment free.
+
+  **The fix costs no extra window: ask Q1 while round 6 or 8b's fault is applied.** Both put a real BGP fault on PE2, which is the state the original observation was made in. The selection experiment and the fault round want the same fabric, and asking a model a question does not perturb a descent sampled by a separate process. **Two experiments, one window** — and B-113's consolidation, held back to keep the 21-tool structure intact for this measurement, unblocks once that third arm lands.
+
+  **Four guarantees held live for the first time**, all previously exercised only by tests: B-458 withheld 748 characters of device text and said so; B-459 refused the invented peer end to end through MCP; B-456 evaluated 2 of PE2's 3 physical ports because the third is off-path; B-428 returned `all_layers_healthy` with no cause named.
+
+  **B-456's is partial pre-confirmation of round 6** — `ROUND-6.md` §2.2 predicts a shut `Gi0/0/0/2` will not be evaluated, and this shows it is already outside the member set while healthy. The mechanism is now observed rather than inferred; the two-fault case still needs the round.
+
+  **And one thing the protocol claimed to test and did not.** Q4's refusal came from subject resolution, not from B-453 — the payload reads `"paraphrase": {"status": "not_attempted"}` and `"0 identifiers contained"`. No paraphrase was generated, so the grounding gate had nothing to grade. **B-453 is still unexercised on a live path**, and I wrote a protocol asserting otherwise. Same shape as §0.12: a test that cannot fail because the thing it tests never runs.
+- **Needs human review:** no
+- **Blocks:** nothing. Q1 needs re-asking during a fault window.
+
+---
+
+## OBS-143 · B-465 · A baseline learned from a broken fabric has a second failure mode, and it appears after the repair
+
+- **Kind:** insight
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** The MCP re-test's health check on PE1 reported `isis_adjacency_count_drift`: *"IS-IS adjacency count 2 differs from the recorded baseline 1."*
+
+  The recorded `expected:` blocks were derived by `learn-topology` from the **broken** fabric: PE2 records `isis_adjacencies: 0`, PE4 records `0`, PE1 records `1`. This run observed **2 on PE2** and **2 on PE1**. The fabric has been repaired and the baselines never re-derived.
+- **Evidence:** `inventory/lab.yaml` expected blocks against the transcript's Q2 rung 4 (*"2 IS-IS adjacency(ies), all Up"* on PE2) and Q3's drift finding on PE1.
+- **What I did:** Filed **B-465**, and recorded the half that is new.
+
+  **The known failure of a baseline learned from a broken fabric is that it suppresses the fault it learned from.** `health.py`'s `suspicious_baseline` meta rule exists for exactly that, and `CLAUDE.md` documents it: *"'matches the baseline' is never read as 'is healthy' for a device whose baseline was learned from a broken fabric."*
+
+  > **The second failure mode: once the fabric is repaired, the same baseline emits false drift alarms — and `isis_adjacency_count_drift` reporting a repair is indistinguishable from reporting a regression.**
+
+  Nobody wrote that down, and it is the one an operator meets. A suppressed fault is silent; a false drift alarm pages someone.
+
+  **And `suspicious_baseline` cannot catch it.** It fires on `isis_adjacencies == 0`, so PE2 and PE4 are flagged and **PE1's `1` is not** — equally wrong, structurally invisible. The rule tests for a *value* where the defect is a *relationship*: the baseline disagrees with what a role invariant would require. That is the fix, and it is why B-465 is two pieces of work rather than a `learn-topology` re-run.
+- **Needs human review:** no
+- **Blocks:** nothing.
+
+---
+
+## OBS-144 · B-466 · The coherence bound runs at 77% on a fabric with nothing wrong with it
+
+- **Kind:** risk
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** The MCP re-test's `investigate RR1 -> 10.255.0.12` payload carries `"skew_seconds": 23.117, "bound_seconds": 30.0, "within_bound": true` on a **routine, uneventful, all-five-rungs-healthy** descent.
+- **Evidence:** the transcript's Q2 payload, `coherence` block.
+- **What I did:** Filed **B-466**. `evidence-epoch.md` §3 asked for this number and could not produce it:
+
+  > *"A bound that only speaks when violated says nothing about how close we routinely run. If real epochs land at 25 s against a 30 s bound, that is a finding."*
+
+  **23.1 of 30 is 77%.** Not a violation, and not comfortable. The bound was **derived** — the fastest relevant timer, IS-IS hold at 30 s — and never fitted to how long an epoch actually takes.
+
+  **The consequence is a refusal mode nobody costed.** One slow device, one connection retry, or the ~8 s consecutive-login penalty (chaos-harness §6.1c) landing twice inside a single epoch pushes a healthy fabric over the bound to `temporally_incoherent` and **exit 2** — *no trustworthy answer* — **caused by the tool's own latency, on a fabric with nothing wrong with it.**
+
+  That is a worse failure than it sounds, because it is the exact shape reviewer B's §3.3 warns about, inverted: not a confident wrong answer, but a refusal an operator cannot distinguish from a real one. And `nettools health` and `nettools diff` use a different exit-code scheme, so a script calling both sees `2` mean two things.
+
+  **What B-466 must not do is widen the bound to make the number look better.** The bound is derived from a protocol timer and that derivation is sound; a bound relaxed to fit the tool's latency stops bounding anything. The work is to measure the skew distribution across several runs first, then either **defend** the 30 s or **reduce the epoch's duration** — and the epoch has already been reduced once, from 5 sessions to 2 (`evidence-epoch.md` §1), so there may be less headroom left than there was.
+- **Needs human review:** no
+- **Blocks:** nothing yet. It becomes blocking the first time a healthy fabric returns exit 2.
+
+---
+
 <!--
 Copy this block for each new entry.
 

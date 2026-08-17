@@ -866,3 +866,175 @@ from the descent's own typed fields.
 ```text
 List the IOS-XR devices available in the lab inventory.
 ```
+
+---
+
+## 10. The re-test, scored — 2026-08-17
+
+Run by the operator against `gemma-4-e4b` in LM Studio 0.4.21, following
+`MCP-RETEST-PROTOCOL.md`. Six questions plus one the protocol did not ask.
+
+**§9 is not edited.** A prediction rewritten after its result is not a prediction.
+
+### 10.1 §9's score: the content hypothesis survives, and the registered question is contaminated
+
+**The strict reading first, because it is against me.** §9's refutation clause names
+`check_lab_bgp_neighbors` explicitly: *"refuted if the model spreads across
+`check_lab_bgp_neighbors`, `collect_lab_evidence` and others where it previously went
+straight to the ladder."* On **Q1, the registered question, the model called
+`check_lab_bgp_neighbors`.** By the letter, that is the refutation condition.
+
+**Why I do not think it is the right reading, stated so it can be disagreed with.**
+
+| | Q1 *"why is the BGP session on PE2 down?"* | Q2 *"why can't RR1 reach 10.255.0.12?"* | Q3 *"is PE1 healthy?"* | Q4 *"…PE2 to 10.255.0.99?"* |
+|---|---|---|---|---|
+| First tool | `check_lab_bgp_neighbors` | **`investigate_lab_session`** | **`assess_lab_device_health`** | **`investigate_lab_session`** |
+| Verdict | discovery step | direct | correct alternative | direct |
+
+Two of three "why" questions went **straight to the ladder**. The negative control chose
+the right alternative. That is not a model spreading across tools.
+
+**And the trace says what happened on Q1.** The model named `investigate_lab_session` as
+correct — *"Since the user is asking 'why' (a root cause analysis), `investigate_lab_session`
+is the most appropriate tool"* — then:
+
+> *"I need the BGP peer address (the `subject`) on PE2 to investigate the session… First,
+> I need to find out which BGP sessions PE2 has."*
+
+It chose a discovery step **toward** the ladder, not an alternative **to** it. In the
+original run the model had the same gap and **asked the user** for the address. Now it went
+and found it. That is a different behaviour and, on its face, a better one.
+
+### 10.2 The confound the seal did not anticipate: the fabric was healthy
+
+**§2a of the seal guarded the question set and not the answer.** In the original
+observation PE2's session was down. In this run it is **Established** — so the model's
+discovery step *terminated the trajectory* by refuting the question's premise, and step 2
+of its stated plan never ran.
+
+> **A tool-selection experiment needs the fabric in the same state, not merely the same
+> questions.** The question is the stimulus; the *first tool result* is what shapes
+> everything after it, and a false-premise question ends the trajectory at step one.
+>
+> §9 said the comparison is uninterpretable if the question set differs. It is equally
+> uninterpretable if the **ground truth** differs, and that clause was not written.
+
+**Score: content survives on Q2/Q4, control passes on Q3, Q1 is void.** B-113's
+consolidation was held back to keep the 21-tool structure intact for this measurement;
+**that structure has now served two of the three arms, and the third needs a broken
+fabric rather than a different surface.**
+
+> **Cheap fix, and it costs no extra window: ask Q1 while round 6 or 8b's fault is
+> applied.** Both rounds put a real BGP fault on PE2. The selection question and the fault
+> round want the same fabric state, and nothing about asking a model a question perturbs a
+> descent that is being sampled by a separate process.
+
+### 10.3 What the run confirmed, live and for the first time
+
+Four guarantees had only ever been exercised by tests. All four held in production:
+
+| | Evidence in the transcript |
+|---|---|
+| **B-458** boundary sanitisation | `"commands_withheld": {"show bgp summary": {"withheld": "raw device text is not sent to a model (invariant 4)", "chars": 748, "lines": 21}}`. **748 characters of device text did not reach the model**, and the model was told so rather than silently given less |
+| **B-459** subject resolution | Q4 refused: *"no device in the inventory owns '10.255.0.99'; refusing to fall back to the local device, because reading the wrong device's state produces a healthy-looking answer about the wrong thing."* The fabrication boundary holds end to end through MCP |
+| **B-456** `EACH_PATH_INTERFACE` | Rung 5 on PE2: *"2 of 2 members healthy (any suffices)"*, citing `Gi0/0/0/0` and `Gi0/0/0/1`. **PE2 has three physical ports.** `Gi0/0/0/2` is off the path and was not evaluated |
+| **B-428** `all_layers_healthy` | Q2 returned no cause, exit-equivalent 0, and a recommendation saying the flow does not cover the question — rather than naming a rung |
+
+**B-456's confirmation is worth more than it looks: it is partial pre-confirmation of
+round 6.** `ROUND-6.md` §2.2 predicts a shut `Gi0/0/0/2` will not be evaluated because it
+is not in the path member set. This run shows it is **already** not in the member set while
+healthy. Round 6 still has to confirm it under the two-fault case, where the BGP fault
+could change the route — but the mechanism is now observed rather than inferred.
+
+**And one that was *not* exercised, contrary to the protocol's expectation.** Q4's refusal
+came from subject resolution, **not** from B-453's identifier containment: the payload
+shows `"paraphrase": {"status": "not_attempted"}` and `"0 identifiers contained"`. No model
+paraphrase was generated, so the grounding gate had nothing to grade. **B-453 remains
+unexercised on a live path**, and Q4 did not test what the protocol said it would.
+
+### 10.4 Two defects the run surfaced, neither of them in the tool
+
+**(a) Every IS-IS baseline is stale, and the drift rule is now firing on the fabric having
+been repaired.**
+
+Q3 reported `isis_adjacency_count_drift`: *"IS-IS adjacency count 2 differs from the
+recorded baseline 1."* The recorded `expected:` blocks are:
+
+| | P1 | P2 | P3 | P4 | PE1 | PE2 | PE3 | PE4 | RR1 |
+|---|---|---|---|---|---|---|---|---|---|
+| expected `isis_adjacencies` | 2 | 4 | 1 | 3 | **1** | **0** | 2 | **0** | 1 |
+
+**PE2 is recorded as expecting 0 and this run observed 2.** The baselines were derived from
+the broken fabric; the fabric has since been repaired and `learn-topology` has not been
+re-run.
+
+`suspicious_baseline` was built for exactly this and catches only PE2 and PE4, because it
+fires on `isis_adjacencies == 0`. **PE1's `1` is equally wrong and equally invisible.**
+
+> **A baseline learned from a broken fabric has a second failure mode nobody wrote down.**
+> The known one is that it suppresses the fault it was learned from. The new one is that
+> **once the fabric is repaired, the same baseline generates false drift alarms** — and
+> `isis_adjacency_count_drift` reporting a *repair* is worse than useless, because it is
+> indistinguishable from reporting a regression.
+
+Filed as **B-465**.
+
+**(b) `bgp_no_prefixes` fires on every device, every run, and the inventory already says it
+is normal.**
+
+Q3 reported it on PE1. `inventory/lab.yaml` carries an operator note dated 2026-08-16:
+
+> *"Every BGP session on this lab carries 0 prefixes -- nothing is advertised into it.
+> `bgp_no_prefixes` is the normal state here and is not a fault."*
+
+The descent agrees — `checks.bgp_session` reads `prefixes_received`, prints it in the
+reason, and correctly does **not** treat it as broken. `health.py` has no such knowledge and
+flags it every time.
+
+**This is B-210 with live evidence** (*"operator knowledge in the descent — known
+conditions stop being rediscovered on every run"*), and it is the second time in two days
+that a correct finding sat unread in a YAML `notes:` block: B-435's fix was specified there
+too (OBS-139). **A structured note beside the data is a good place to record a finding and a
+bad place to track work** — twice is a pattern, and B-210 should be read as the fix for the
+class rather than for this instance.
+
+### 10.5 The two failure modes the protocol went looking for, and why neither was tested
+
+**§6.2's restatement failure (rung dropped, device misattributed) was not exercised.** The
+protocol asked for Q5 *"immediately after Q1 or Q2"*, so it would summarise a real
+five-rung investigation. It was asked after **Q4**, which was a refusal with no rungs at
+all. The summary was accurate — and about nothing.
+
+**§6.1's self-report failure did not recur, on an easy case.** Q6 asked whether the summary
+included every rung; the model answered *"No, it did not. The investigation failed
+immediately… so no diagnostic rungs were generated."* **Correct.** But there were no rungs
+to have dropped, so this is a model correctly reporting the absence of a thing rather than
+correctly recalling a thing it said. §6.1's finding stands untested.
+
+**Both need a re-ask against Q2's payload**, which is five real rungs and is the case
+B-439 has to be designed against. Cheap: two questions, no lab.
+
+### 10.6 One measurement nobody asked for, and it is the most useful number here
+
+Q2's payload carries:
+
+```
+"skew_seconds": 23.117, "bound_seconds": 30.0, "within_bound": true
+```
+
+`evidence-epoch.md` §3 asked for precisely this and could not answer it:
+
+> *"A bound that only speaks when violated says nothing about how close we routinely run.
+> If real epochs land at 25 s against a 30 s bound, that is a finding."*
+
+**A routine, uneventful, fully healthy descent runs at 23.1 s of a 30 s bound — 77%.** Not
+a violation, and not comfortable. The 30 s bound was derived as the fastest relevant timer
+(IS-IS hold), not fitted to observed behaviour, and this is the first evidence about the
+margin.
+
+**It also means the epoch is closer to refusing than anyone thought.** A slightly slower
+device, one connection retry, or the ~8 s consecutive-login penalty (§6.1c) landing twice
+inside one epoch would push a healthy fabric into `temporally_incoherent` and exit 2 — a
+refusal caused by *the tool's own latency*, on a fabric with nothing wrong with it.
+
+Filed as **B-466**, and it is the highest-value item this run produced.
