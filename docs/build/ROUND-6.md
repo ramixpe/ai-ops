@@ -23,10 +23,27 @@ one.** It is the only round whose failure mode is a *correct-looking* answer.
 **Two changes, applied together, and the second is the point.**
 
 ```
-option 5   router bgp 65000 / neighbor 10.255.0.31 / shutdown       <- the real fault
-plus       interface GigabitEthernet0/0/0/2 / shutdown              <- the spare, unrelated
+option 8   router bgp 65000 / neighbor 10.255.0.31 / shutdown       <- the real fault
+           interface GigabitEthernet0/0/0/2 / shutdown              <- the spare, unrelated
 ```
 revert: `no shutdown` on both.
+
+> **Amended before the run — this said "option 5 plus a shut `Gi0/0/0/2`", and that
+> was not a runnable fault.** `fault_lab.py`'s option 5 is the BGP shutdown alone;
+> nothing in the table applied both lines, so the seal described a fault the injector
+> could not produce. **Option 8 now exists and applies both in one commit**, which is
+> also what makes them concurrent rather than sequential.
+>
+> **And the second half of the amendment matters more than the first.**
+> `SNAPSHOT_SECTIONS` did not include `Gi0/0/0/2`, and restore verification is an
+> exact comparison of *those sections only*. A section that is not listed **cannot
+> fail the check no matter what is left in it** — so a `shutdown` lingering on the
+> spare port would have been inert on a restored fabric *and* invisible to the
+> verification built to catch exactly that.
+>
+> §0.1 of this document already names *"harmless and undetectable is the combination
+> worth checking for"*. It was written about the fault. It arrived in the machinery
+> that checks the fault, one layer out, and the sealed text is what pointed at it.
 
 **Why `Gi0/0/0/2` and not the subinterface B named.** PE1 and PE3 carry a permanently
 line-down `Gi0/0/0/2.300`, and `EACH_PATH_INTERFACE` excludes subinterfaces **by
@@ -139,7 +156,10 @@ construction is nameable, which means it can be regression-tested.
 
 - **`Gi0/0/0/2` must be up and off-path at baseline.** If PE2's route to RR1 currently
   egresses `Gi0/0/0/2`, the round is void before it starts — check first, and if so pick
-  the other unused port.
+  the other unused port. `fault_lab.py --preflight` reads the port; **the off-path half
+  it cannot tell you**, and the MCP re-test's incidental observation (rung 5 evaluating
+  `Gi0/0/0/0` and `Gi0/0/0/1` only) is evidence for a *healthy* fabric and not a promise
+  about this one. Confirm fresh.
 - **Two faults, one revert path.** The restore must clear **both**, and be verified by
   reading the device back rather than by trusting the write (B-412). A lingering
   `shutdown` on a spare port is inert and undetectable, which is the combination worth

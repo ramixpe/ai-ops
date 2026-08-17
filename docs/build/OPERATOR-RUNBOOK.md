@@ -15,7 +15,7 @@ This is a read-only IOS-XR inspection tool with a deterministic dependency
 descent underneath it: point it at a device and a subject, and it walks a fixed
 ladder of rungs (`bgp_session → transport → route_to_peer → igp_adjacency →
 interface`) reporting the *lowest broken one* as the cause, with no model in the
-loop for the diagnosis itself. MVP-0 shipped and is scored — 1808 tests pass,
+loop for the diagnosis itself. MVP-0 shipped and is scored — 1813 tests pass,
 lint is clean, and four fault-injection rounds have run against the real
 9-device lab, each with a prediction sealed and pushed before the fault landed.
 
@@ -23,16 +23,11 @@ What is left is not building. It is spending lab time to settle two open
 claims (B-463 — does `bgp_session` separate from `transport` at all, and B-440 —
 does the tool stay quiet about an unrelated shut port when a real fault is
 elsewhere), plus a small amount of no-lab work re-testing how an MCP client
-picks tools and wiring up a Telegram relay so a report can leave the terminal.
-Round 8b and round 6 are both sealed and waiting; nothing about them can go
-stale by sitting, but every hour they don't run is an hour B-463 and B-440 stay
-open.
-
-**One live thing worth knowing before you start:** the working tree currently
-has T-035 (the Telegram relay) sitting **uncommitted** — `notifier.py`, its 18
-tests, and the CLI wiring are all there and pass, but `git status` will show
-them as changes, not history. This is expected and is what Task D is about; it
-is not something broken that needs investigating first.
+picks tools and finishing off a Telegram relay so a report can leave the
+terminal — the relay's code, tests and CLI wiring are already sitting in the
+working tree, just not yet committed. Round 8b and round 6 are both sealed and
+waiting; nothing about them can go stale by sitting, but every hour they don't
+run is an hour B-463 and B-440 stay open.
 
 ---
 
@@ -47,13 +42,13 @@ cd /home/rami/ai-agent-ops/ios-xr-nettools
 git fetch origin
 git status -sb
 #   -> "## feat/investigation-layer...origin/feat/investigation-layer"
-#      with no [ahead]/[behind]. Untracked/modified files relating to T-035
-#      are expected right now (see §1) — that is not a blocker for Tasks A-C.
+#      with no [ahead]/[behind]. Untracked/modified files touching
+#      notifier.py, cli.py, TRACKER.md, .env.example or interfaces.md are
 
 # 2. Tests and lint, from the venv.
 source .venv/bin/activate
 make test
-#   -> 1808 passed, 24 skipped, no network and no credentials needed for this.
+#   -> 1813 passed, 24 skipped, no network and no credentials needed for this.
 #      A LOWER number, or a failure, means something changed under you --
 #      stop and find out what before you touch the lab.
 make lint
@@ -70,17 +65,24 @@ make facts DEVICE=PE1
 
 # 5. Fabric health, live, every device.
 make health
-#   -> exit 0/1/2 per device severity. Read the JSON, don't just trust the
-#      exit code: B-465 (filed, unfixed) means isis_adjacency_count_drift may
-#      fire on PE2/PE4/PE1 even on a perfectly healthy fabric -- the expected
-#      baseline was learned while the fabric was broken and nobody has re-run
-#      learn-topology since it was repaired. That specific finding is a known
-#      false alarm, not a reason to stop.
+#   -> exit 0/1/2 per device severity. Read the JSON findings, don't just
+#      trust the exit code -- a live check while writing this runbook came
+#      back WARNING on several PE-series devices, and read cleanly as two
+#      already-filed, already-understood false alarms rather than anything
+#      broken:
+#        - isis_adjacency_count_drift (B-465, unfixed): the expected baseline
+#          was learned while the fabric was broken, nobody has re-run
+#          learn-topology since it was repaired, so a *healthy* adjacency
+#          count now reads as drift.
+#        - bgp_no_prefixes: inventory/lab.yaml already carries an operator
+#          note that every session on this lab carries 0 prefixes by design;
+#          health.py has no such knowledge and flags it every time regardless.
 ```
 
-If steps 1-4 are clean and step 5's only surprises are `isis_adjacency_count_drift`
-on the devices B-465 names, the fabric is in the state every round below
-assumes.
+If steps 1-4 are clean and step 5's only findings are one or both of those two,
+the fabric is in the state every round below assumes. Anything else -- a
+device that won't collect, a finding that isn't one of these two -- stop and
+look before starting a round.
 
 ---
 
@@ -206,51 +208,32 @@ It is the first round with **two concurrent faults live at once**, deliberately
 raising the harness's one-fault ceiling under `chaos-harness.md` §3.3's explicit
 exception.
 
-Unlike round 8b, **there is no dedicated script for this round.** `fault_lab.py`'s
-menu option 5 applies only the BGP-neighbour-shutdown half of the fault; the
-second line (shutting PE2's spare physical port `GigabitEthernet0/0/0/2`) is not
-in its `FAULTS` table at all. Rather than hand-apply that second line over a raw
-SSH session — which would put a device write outside `fault_lab.py` and break
-"only the injector writes, and only the two lines a round seals" — extend the
-table the same way option 7 was added for round 8b (`ROUND-8.md` §4: *"added by
-the operator after this analysis"*). This keeps both lines going through the
-same snapshot/push/restore/verify machinery, atomically, with the restore
-verified by reading the device back rather than trusted from the push's report.
+Unlike round 8b, **there is no dedicated script for this round** — it runs from
+`fault_lab.py`'s menu.
 
-### 4.1 One-time setup: extend `fault_lab.py`
+### 4.1 Setup: already done, and worth knowing why
 
-In `~/ai-agent-ops/faultlab/fault_lab.py`:
+When this runbook was drafted, `fault_lab.py` had no entry applying both lines:
+option 5 is the BGP-neighbour shutdown alone. **That has been fixed — use
+option 8**, `bgp_shut_plus_spare_port_down`, which applies both in one commit
+and reverts both.
 
-1. Add a named constant next to `CORE_IF_A`/`CORE_IF_B` (around line 78):
+It was added as a *new* option rather than by extending option 5, because
+earlier rounds are recorded against option numbers and changing what option 5
+means would rewrite their history.
 
-   ```python
-   SPARE_IF = "GigabitEthernet0/0/0/2"   # PE2, physical, up, off-path (round 6)
-   ```
-
-2. Add it to `SNAPSHOT_SECTIONS` (around line 84), so restore verification
-   actually covers this interface instead of silently ignoring it:
-
-   ```python
-   f"show running-config interface {SPARE_IF}",
-   ```
-
-3. Extend `FAULTS[5]`'s `apply`/`revert` lists to carry both lines:
-
-   ```python
-   5: {
-       "id": "bgp_neighbor_shut",
-       "name": "Administratively shut the BGP neighbor toward RR1, plus PE2's spare port",
-       "note": "round 6 (B-440): two faults, the spare is off-path",
-       "apply": [f"router bgp {BGP_AS}", f" neighbor {RR_NEIGHBOR}", "  shutdown",
-                 f"interface {SPARE_IF}", " shutdown"],
-       "revert": [f"router bgp {BGP_AS}", f" neighbor {RR_NEIGHBOR}", "  no shutdown",
-                  f"interface {SPARE_IF}", " no shutdown"],
-   },
-   ```
-
-`fault_lab.py` is not part of this repository and is not tracked by git — this
-edit is yours to make and keep, the same way option 7 already lives there from
-round 8's analysis.
+> **The second half of that fix matters more than the first, and it is worth
+> reading before you trust the restore.** `SNAPSHOT_SECTIONS` did not include
+> `GigabitEthernet0/0/0/2`, and restore verification is an exact comparison of
+> *those sections only*. **A section that is not listed cannot fail the check,
+> whatever is left in it** — so a `shutdown` lingering on the spare port would
+> have been inert on a restored fabric *and* invisible to the verification built
+> to catch exactly that.
+>
+> `ROUND-6.md` §0.1 already warns that *"harmless and undetectable is the
+> combination worth checking for."* It was written about the fault. It turned up
+> in the machinery that checks the fault. `SPARE_IF` is in `SNAPSHOT_SECTIONS`
+> now, so the restore covers it.
 
 ### 4.2 Before the window: confirm the spare is actually off-path
 
@@ -276,8 +259,10 @@ cd ~/ai-agent-ops/faultlab
 python fault_lab.py
 ```
 
-At the menu, choose `5`. `fault_lab.py` applies both lines, verifies by reading
-the device, and then blocks:
+At the menu, choose **`8`** — `bgp_shut_plus_spare_port_down`. Not `5`, which is
+the BGP shutdown alone and would run a different, one-fault round.
+`fault_lab.py` applies both lines in one commit, verifies by reading the device,
+and then blocks:
 
 ```
   FAULT IS LIVE.  Subject to investigate:  RR1 10.255.0.12
@@ -405,14 +390,16 @@ investigation, so nothing was actually tested.
 
 ## 6. Task D — Telegram (T-035)
 
-**Check the live state before assuming anything, on both counts.**
-`docs/build/TRACKER.md`'s T-035 row is authoritative on status — read it fresh,
-because the committed history and the working tree can disagree (right now
-they do: the committed history still shows `TODO`, but the working tree's copy
-of `TRACKER.md`, `notifier.py`, `tests/test_notifier.py` and the `cli.py`
-wiring all show it built and passing, just not yet committed). If by the time
-you read this it has been committed, the file paths below are still correct;
-if the working tree has since diverged further, trust what's on disk over this
+**T-035 is built, committed and pushed** (`808f9b4`) — `notifier.py`,
+`tests/test_notifier.py`, and the `--notify` wiring in `cli.py`. This runbook
+was drafted while that work was still in the working tree and said otherwise;
+`docs/build/TRACKER.md`'s T-035 row is authoritative if the two ever disagree
+again.
+
+**Nothing about it delivers until you put a token in `.env`.** Until then
+`--notify` is a no-op that says so on stderr, which is deliberate: the flag is
+meant to be safe in a cron entry written before a channel exists. Trust what's
+on disk over this
 document.
 
 ```bash
@@ -484,7 +471,7 @@ Gather all of this in one pass once Tasks A-D are done:
 | **Task B** | The pushed commit hash for `evidence-archive/round6/<timestamp>/`; whether `Gi0/0/0/2` appeared anywhere in the investigate report's prose |
 | **Task C — Q1** | Full transcript, reasoning trace (or a note that the client doesn't expose one), first tool called + arguments, wall-clock time, model/client identity, which fault window it rode along with (A or B) |
 | **Task C — Q2/Q5/Q6** | Full transcript and trace for all three; explicitly note whether Q6 ran (only if Q5 erred) |
-| **Task D** | Whether `--notify` delivered; if not, the exact failure note; whether the uncommitted T-035 changes got committed |
+| **Task D** | Whether `--notify` delivered, and if not, the exact failure note from stderr (the token is redacted from it by design — check that it is) |
 | **Anything that felt wrong** | Per `MCP-RETEST-PROTOCOL.md` — slow, confusing, a tool that should exist and doesn't. Worth as much as a defect |
 
 ---
