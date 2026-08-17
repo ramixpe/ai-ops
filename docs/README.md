@@ -1,47 +1,91 @@
 # Documentation map
 
+Regenerated 2026-08-17 from the tree. The previous version listed 15 of 32 files
+and pointed at two that did not exist.
+
+## If you have just cloned this
+
+You do not need any of it to try the tool — `README.md` opens with a command that
+runs against committed captures with no lab, no credentials and no API key.
+
+When you want to know whether to believe the output, read in this order:
+
+1. **[design/glossary.md](design/glossary.md)** — short, and `intent` means *a
+   question name* here, which collides with how the word is usually used.
+2. **[build/MVP0-REVIEW.md](build/MVP0-REVIEW.md)** §5, *"What it does not do"* —
+   the limits, stated by the people who built it.
+3. **[design/design-thinking.md](design/design-thinking.md)** — the decisions and
+   what would make each one wrong. Every one carries a *Revisit if*.
+4. **[design/peer-review-response.md](design/peer-review-response.md)** — three
+   independent external reviews, and which claims they forced us to withdraw.
+
+**[design/chaos-harness.md](design/chaos-harness.md)** §1 is the honest statement
+of what "measured" means here and what it does not yet cover.
+
+## The tree
+
 ```
 ios-xr-nettools/
-├── CLAUDE.md                          Architecture, layers 0-5, the safety boundary
+├── README.md                           Start here. Runnable demo in the first ten lines
+├── CLAUDE.md                           Agent instructions and the rules that must not break
 ├── docs/
-│   ├── design/     WHY — reference. Read before building. Changes rarely.
-│   │   ├── glossary.md                Pinned terminology. Read this FIRST — `intent` collides
-│   │   ├── design-thinking.md         Decisions D1-D20: options, choice, rationale, growth path
-│   │   ├── lld-investigation-layer.md Delta spec: what to add to this repo and where
-│   │   └── interfaces.md              Human interaction ladder + residency/identity. Before T-035
-│   ├── build/      HOW — active during the build
-│   │   ├── BUILD-PLAN.md              35 sequential tasks. Part 0 is binding. Status in place
-│   │   ├── TRACKER.md                 Progress. Authoritative on status
-│   │   ├── FINDINGS.md                Append-only log + the Open Questions table
-│   │   ├── discovery-loki.md          T-004 — log pipeline, label scheme, mnemonics
-│   │   ├── discovery-alerting.md      T-005 — Alertmanager routing, Prometheus metric surface
-│   │   ├── discovery-l3vpn.md         T-006 — VRF/RT map, CE attachment, subject naming
-│   │   └── capture-manifest.md        T-007 — what T-011 must capture, per device and label
-│   ├── devices.md                     Generated from inventory — do not hand-edit
-│   ├── REVIEW.md                      Code review
-│   └── architecture.drawio            Diagram source
-├── prompts/                           Versioned prompt artifacts (GRACE). Created at T-026
-│   └── tests/cases/                   Golden input -> expected output shape
-├── scripts/
-│   └── probe_minimax.py               T-002 — the six MiniMax contract checks
-└── tests/fixtures/
-    └── README.md                      What each fixture label means, and how to reproduce it
+│   ├── design/     WHY — reference. Changes rarely.
+│   │   ├── glossary.md                 Pinned terminology. Read FIRST — `intent` collides
+│   │   ├── architecture.md             The layer stack and every phase's design notes
+│   │   ├── design-thinking.md          Decisions D1-D20: options, choice, rationale, Revisit if
+│   │   ├── lld-investigation-layer.md  Pre-build delta spec. Partly superseded; says where
+│   │   ├── interfaces.md               Human interaction ladder + residency/identity
+│   │   ├── evidence-reduction.md       Making large sources model-readable without a model
+│   │   ├── evidence-epoch.md           One observation window; why skew is not coherence
+│   │   ├── chaos-harness.md            Fault injection and how accuracy is measured
+│   │   └── peer-review-response.md     Three external reviews; accepted, corrected, deferred
+│   ├── build/      HOW — the build's own record. Append-only in spirit.
+│   │   ├── BUILD-PLAN.md               The task plan. Part 0 is binding
+│   │   ├── TRACKER.md                  Progress. Authoritative on task status
+│   │   ├── FINDINGS.md                 Append-only log + the Open Questions table
+│   │   ├── BACKLOG.md                  Every open item with its reconciled state
+│   │   ├── MVP0-REVIEW.md              The M4 review: what it does, and what it does not
+│   │   ├── SESSION-HANDOVER.md         Read first if resuming a build session
+│   │   ├── PLAN-V2.md                  The current plan
+│   │   ├── BACKLOG-COMPLETION-PLAN.md  Superseded by PLAN-V2; kept for its reasoning
+│   │   ├── MCP-EXPERIMENT.md           The MCP experiment: audit, refuted prediction, B-459
+│   │   ├── ROUND-5.md                  Injection round 5 — invoke during propagation
+│   │   ├── ROUND-7.md                  Injection round 7 — does a down port persist
+│   │   ├── ROUND-8.md                  Injection round 8 — AS mismatch; §5 scored, §6 re-sealed
+│   │   ├── AUTONOMOUS-LOG.md           Unattended-run log
+│   │   ├── capture-manifest.md         T-007 — what to capture, per device and label
+│   │   ├── discovery-loki.md           T-004 — log pipeline, label scheme, mnemonics
+│   │   ├── discovery-alerting.md       T-005 — Alertmanager routing, Prometheus surface
+│   │   └── discovery-l3vpn.md          T-006 — VRF/RT map, CE attachment, subject naming
+│   ├── devices.md                      Generated from inventory — do not hand-edit
+│   ├── REVIEW.md                       Code review
+│   ├── ARCHITECTURE-REVIEW.md          External review A
+│   ├── OPERATIONS-REVIEW.md            External review B
+│   ├── EVALUATION-METHODOLOGY-REVIEW.md  External review C
+│   └── architecture.drawio             Diagram source
+├── prompts/README.md                   Versioned prompt artifacts (GRACE) and their rules
+├── evidence-archive/                   Committed round payloads. See its own README
+├── scripts/                            Probes and round samplers
+└── tests/fixtures/README.md            What each label means, and how to reproduce it
 ```
 
-`docs/design/architecture.md` is referenced by `install-docs.sh` but **has not been written**. Nothing depends on it; `CLAUDE.md` carries the architecture today.
+## Reading order, by what you are doing
 
-## Reading order
+**Building or resuming:** `build/SESSION-HANDOVER.md` → `build/TRACKER.md` →
+`build/FINDINGS.md` for anything logged since you last looked → `build/PLAN-V2.md`.
 
-**Starting the build:** `design/glossary.md` → `design/design-thinking.md` →
-`design/lld-investigation-layer.md` → `build/BUILD-PLAN.md` Part 0 → T-001.
+**Changing the investigation layer:** `design/glossary.md` →
+`design/architecture.md` → `CLAUDE.md`'s safety boundary → the rung rules on
+`flows.Rung`.
 
-**Resuming:** `build/TRACKER.md` for where things stand, then `build/FINDINGS.md`
-for anything logged since you last looked, then the next `TODO` task.
+**Reviewing:** `build/FINDINGS.md` Open Questions, then the entries it references,
+then `design/peer-review-response.md` §4 for the claims already withdrawn.
 
-**Reviewing:** `build/FINDINGS.md` Open Questions table, then the entries it references.
+**Touching fixtures:** `tests/fixtures/README.md` before capturing anything. `t0`
+and `t1` are frozen and the reason is not obvious from looking at them.
 
-**Touching fixtures:** `tests/fixtures/README.md` before capturing anything. `t0` and
-`t1` are frozen, and the reason is not obvious from looking at them.
+**Running or scoring a round:** `design/chaos-harness.md` §6 — the protocol is
+binding, and §6.1d has cost two rounds their evidence.
 
 ## The three build documents
 
@@ -53,3 +97,9 @@ for anything logged since you last looked, then the next `TODO` task.
 
 If `BUILD-PLAN.md` and `TRACKER.md` disagree about whether a task is done,
 **`TRACKER.md` wins and the discrepancy is itself a finding.**
+
+**`FINDINGS.md` is not tidied.** It is long, it is out of order, and it contains
+wrong turns that were later corrected in place with the original left visible.
+That is deliberate: the order things were learned in is most of its value, and a
+narrative rewrite would lose the one thing a build log can offer that a design
+document cannot.

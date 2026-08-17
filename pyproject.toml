@@ -9,6 +9,18 @@ description = "Safe, read-only Cisco IOS-XR network inspection tools with an LLM
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
+keywords = ["networking", "cisco", "ios-xr", "netmiko", "mcp", "llm", "read-only"]
+# `authors` and `[project.urls]` are deliberately absent rather than guessed:
+# how to attribute this, and which repository URL is canonical, are the
+# maintainer's calls. Add them before any publish to an index.
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: System :: Networking :: Monitoring",
+]
 dependencies = [
     "netmiko>=4.4.0",
     "mcp>=1.9.0",

@@ -8,6 +8,7 @@ Python, Netmiko, an LLM reasoning layer, and MCP.
 ## Try it in ten seconds — no lab, no API key
 
 ```bash
+make setup && source .venv/bin/activate
 nettools investigate RR1 10.255.0.12 --from-fixtures --format table
 ```
 
@@ -28,6 +29,13 @@ interface      PE2     BROKEN  1 of 3 members healthy (all required)            
 through the same deterministic descent that runs against live devices — it
 needs no devices, no credentials, and no API key, and a test asserts that by
 running it with the environment stripped.
+
+**And you do not have to take that on trust.** CI's `offline-demo` job runs the
+command above on every push, in a clean checkout, with no `.env` present and
+seven credential environment variables asserted unset. It parses the JSON
+standalone and checks that all three exit codes are reachable. **The claim this
+README opens with is machine-checked**, which is a different kind of statement
+from a claim that is merely written down.
 
 Read it bottom-up and it is an argument an engineer can check link by link:
 PE2's uplinks are administratively down, so PE2 has no IS-IS adjacencies, so
@@ -386,7 +394,7 @@ no device to verify against yet.
 There is no configuration mode, reload, commit, rollback, shell access, or a
 generic `run_command(device, command)` tool.
 
-### Parameterized commands (Phase 5)
+### Parameterized commands — asking about one peer, route or interface
 
 The allowlist above is exact-match, so it can only express zero-argument
 commands. A second, narrower allowlist in `agent_nettools.templates` (see
@@ -527,7 +535,7 @@ instead of silently producing an "ok" finding.
 **Exit codes** (for CI/cron gating): `0` when the fabric is ok/info, `1` when
 the worst device is `warning`, `2` when the worst device is `critical`.
 
-## Output Formats and Exit Codes (Phase 8)
+## Output Formats and Exit Codes
 
 Every command that prints a structured result accepts `--format
 json|table|summary` (default `json`, so nothing that already parses this
@@ -601,7 +609,7 @@ excluding `parsers.volatile_fields` -- the same identity and noise rules
 `diff_evidence` already uses, so a field that legitimately changes every
 collection (e.g. BGP `Up/Down`) is never reported as flapping.
 
-## Scaling to a Larger Fabric (Phase 7)
+## Scaling to a Larger Fabric
 
 `check_fabric`/`nettools fabric` resolve every device once (an O(1) name
 lookup, not a linear scan) and thread that record down to each per-device
@@ -675,7 +683,7 @@ need an identity provider this project does not have -- something a caller
 cannot simply set an environment variable to become (a verified SSO/OIDC
 token, a signed client certificate) -- checked *before* any command runs.
 
-## Pluggable Credential Resolution (Phase 8)
+## Pluggable Credential Resolution
 
 Device credentials resolve through a small, pluggable interface
 (`agent_nettools.credential_resolver`) instead of being read from the
@@ -713,7 +721,7 @@ zero credential access regardless of which provider is configured --
 `test_refuses_another_platforms_command_without_credentials` run with an
 empty environment and are unmodified by this feature.
 
-## Operational Metrics (Phase 8)
+## Operational Metrics
 
 `nettools metrics` reports per-device collection outcomes (success/failure
 counts, total and average latency, retries consumed) and health verdict
@@ -752,7 +760,7 @@ committing, since fixtures are permanent once pushed.
 Replay a capture offline with `load_fixture_evidence("PE1", label="t0")` — it
 returns the same structure a live `collect_evidence` call would.
 
-### Live-lab integration tests (Phase 8)
+### Live-lab integration tests
 
 `tests/test_live_lab.py` exercises `nettools` against a real, reachable lab
 instead of fixtures or a fake transport -- the one tier of test in this suite
@@ -872,5 +880,25 @@ mcp_server/                        Read-only MCP server (tools, resources, and a
 tests/                             Inventory, tool, provider, docs, safety, and CLI tests
 tests/fixtures/                    Captured real IOS-XR output (t0/t1 pairs)
 tests/test_live_lab.py             Live-lab integration tier (marker `live_lab`, skipped by default)
-docs/                              devices.md (generated) and the code review
+docs/                              Design, the build record, and three external reviews
+                                   -- see docs/README.md for the map
 ```
+
+---
+
+## Licence and contributing
+
+MIT — see [LICENSE](LICENSE).
+
+[CONTRIBUTING.md](CONTRIBUTING.md) has the setup, the test seams, and the rules
+that are not up for negotiation: the frozen files, the allowlist ordering,
+reconstruction rather than interpolation, and why a guardrail here is a test and
+never a line in a prompt.
+
+**On the evidence behind the claims above.** This has run on a thirteen-node
+containerlab fabric, on one vendor, with a small number of blind fault-injection
+trials whose cases were designed by someone who knows the ladder. Three
+independent external reviews are in `docs/`, and
+`docs/design/peer-review-response.md` records which claims they forced us to
+withdraw. `docs/build/MVP0-REVIEW.md` §5 is the honest list of what this does not
+do. Nothing here has run in production.
