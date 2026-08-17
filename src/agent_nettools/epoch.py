@@ -86,6 +86,7 @@ from .descent import RungOutcome, evaluate_rung, resolve_devices
 from .interface_kind import physical_members
 from .network_tools import (
     collect_evidence,
+    collect_evidence_and_templates,
     run_intent,
     run_templates_split,
 )
@@ -487,6 +488,20 @@ def _plan(
     return plan
 
 
+def _manifest_for(
+    steps: list[flows.CollectStep], subject: str, evidence: dict[str, Any]
+) -> tuple[list[str], list[tuple[str, dict[str, str]]]]:
+    """``(evidence keys, manifest)`` for a device's template steps."""
+
+    keys: list[str] = []
+    manifest: list[tuple[str, dict[str, str]]] = []
+    for step in steps:
+        for key, kwargs in template_calls(step, subject, evidence):
+            keys.append(key)
+            manifest.append((step.name, kwargs))
+    return keys, manifest
+
+
 def collect_epoch(
     flow: flows.Flow,
     device: str,
@@ -512,35 +527,49 @@ def collect_epoch(
     opened = clock()
 
     for target, steps in _plan(flow, device, subject, resolver).items():
+        # **One session per device**, intents and templates together (B-455).
+        #
+        # Skew is `(sessions − 1) × an ~8s device-side login penalty` on this
+        # fabric, and session count is the only term the tool controls. This
+        # ladder went 10 sessions → 4 (batching templates) → 2, which is the
+        # floor for a two-device flow.
+        #
+        # **The honest limit: one session per device holds only when no rung
+        # fans out over objects the device itself reports.** An
+        # `EACH_PHYSICAL_INTERFACE` rung is parameterised by the member list
+        # inside the `interfaces` intent, so that device cannot be read in one
+        # pass -- the manifest is not known until the first pass returns. Such a
+        # device costs two sessions and there is no way around it short of
+        # deriving the members from somewhere else (B-456's candidate: the route
+        # already names its outgoing interface).
+        #
+        # For `bgp_session` that is RR1 in one session and PE2 in two: 3, down
+        # from 4, down from 10 before the epoch.
+        fans_out = any(s.parameter in FANOUT_PARAMETERS for s in steps)
+
         started = clock()
-        evidence = dict(collect_evidence(target, sender=sender))
+        if fans_out:
+            evidence = dict(collect_evidence(target, sender=sender))
+            keys, manifest = _manifest_for(steps, subject, evidence)
+            envelopes = run_templates_split(target, manifest, sender=sender)
+        else:
+            keys, manifest = _manifest_for(steps, subject, {})
+            evidence, envelopes = collect_evidence_and_templates(
+                target, manifest, sender=sender
+            )
         completed = clock()
+
+        # One span for the device, because it was one observation of it. Two
+        # sessions on a fan-out device are still one pass in the sense that
+        # matters here -- nothing between them was allowed to change the plan.
         observations.extend(
             Observation(key, target, started, completed, envelope)
             for key, envelope in evidence.items()
         )
-
-        # Every template for this device in **one** session, not one login each.
-        # Measured before this was batched: 7 logins per epoch, 5 of them to run
-        # a single command, ~10s per login, a 61s window against a 30s bound --
-        # so the tool refused to answer about a healthy fabric (OBS-109). Skew is
-        # dominated by login count, and the design said "one pass per device, in
-        # a single session" before the first version failed to do it.
-        keys: list[str] = []
-        manifest: list[tuple[str, dict[str, str]]] = []
-        for step in steps:
-            for key, kwargs in template_calls(step, subject, evidence):
-                keys.append(key)
-                manifest.append((step.name, kwargs))
-
-        if manifest:
-            begun = clock()
-            envelopes = run_templates_split(target, manifest, sender=sender)
-            ended = clock()
-            observations.extend(
-                Observation(key, target, begun, ended, envelope)
-                for key, envelope in zip(keys, envelopes, strict=True)
-            )
+        observations.extend(
+            Observation(key, target, started, completed, envelope)
+            for key, envelope in zip(keys, envelopes, strict=True)
+        )
 
     return EvidenceEpoch(
         observations=tuple(observations),

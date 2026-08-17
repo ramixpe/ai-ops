@@ -1370,3 +1370,104 @@ def test_parsed_template_output_is_usable_by_a_descent_rung(monkeypatch):
     assert meta["state"] == "Established"
     assert meta["connection_state"] == "Established"
     assert isinstance(result["data"]["parsed"]["records"], list)
+
+
+# --------------------------------------------------------------------------- #
+# B-455 -- the combined runner keeps both authorization rules
+# --------------------------------------------------------------------------- #
+
+
+def test_the_combined_runner_refuses_an_unapproved_intent_command_with_no_credentials(
+    monkeypatch,
+):
+    """The operator's required test for B-455, and the reason it is required.
+
+    `collect_evidence_and_templates` runs intents and rendered templates over
+    **one** SSH session, which means it authorizes two kinds of command by two
+    different rules -- `is_approved` against the exact-match frozenset for
+    intents, `render_command` + `is_safe_rendered_command` for templates. The
+    risk a combined runner creates is that one rule quietly becomes the other's,
+    so this pins the ordering invariant on the new path exactly as
+    `test_refuses_unapproved_commands_before_loading_credentials` pins it on the
+    old one.
+
+    **No DEVICE_USERNAME/DEVICE_PASSWORD is set.** If the allowlist check ran
+    after credential loading this would raise `InventoryError` rather than
+    refusing, and the refusal is what proves platform resolved from static
+    inventory and the check happened before any socket.
+    """
+
+    from agent_nettools import network_tools
+
+    monkeypatch.delenv("DEVICE_USERNAME", raising=False)
+    monkeypatch.delenv("DEVICE_PASSWORD", raising=False)
+    monkeypatch.delenv("DEVICE_SSH_KEYFILE", raising=False)
+
+    # An intent whose command is not approved for this platform. Patching the
+    # intent table rather than the allowlist: `platforms.py` takes additions
+    # only and is frozen, and widening the allowlist to test a refusal would
+    # test the opposite of the thing.
+    monkeypatch.setattr(
+        network_tools, "intents_for", lambda _platform: ("bgp",)
+    )
+    monkeypatch.setattr(
+        network_tools, "commands_for", lambda _platform, _intent: ("configure terminal",)
+    )
+
+    evidence, envelopes = network_tools.collect_evidence_and_templates("PE1", [])
+
+    assert evidence["bgp"]["status"] == "error"
+    assert "Refusing unapproved commands" in evidence["bgp"]["errors"][0]
+    assert "configure terminal" in evidence["bgp"]["errors"][0]
+    assert envelopes == []
+
+
+def test_the_combined_runner_refuses_a_bad_template_parameter_with_no_credentials(
+    monkeypatch,
+):
+    """The template half of the same invariant.
+
+    A malformed parameter is rejected by `render_command`'s reconstruction
+    before `get_device` is reached, so this returns a structured refusal rather
+    than an `InventoryError` -- with no credentials in the environment at all.
+    """
+
+    from agent_nettools import network_tools
+
+    monkeypatch.delenv("DEVICE_USERNAME", raising=False)
+    monkeypatch.delenv("DEVICE_PASSWORD", raising=False)
+    monkeypatch.delenv("DEVICE_SSH_KEYFILE", raising=False)
+
+    _, envelopes = network_tools.collect_evidence_and_templates(
+        "PE1", [("route", {"prefix": "10.0.0.1 | reload"})], sender=lambda _d, _c: ""
+    )
+
+    assert len(envelopes) == 1
+    assert envelopes[0]["status"] == "error"
+    assert envelopes[0]["errors"], "the refusal must say why"
+
+
+def test_the_combined_runner_never_renders_a_refused_batch(monkeypatch):
+    """One unapproved intent command refuses the **whole** call.
+
+    Partially collecting after refusing part of a batch would make "the
+    allowlist refused something" a condition a caller could miss while holding
+    plausible-looking evidence -- which is the failure mode a refusal exists to
+    prevent, arriving by a different route.
+    """
+
+    from agent_nettools import network_tools
+
+    sent: list[str] = []
+
+    monkeypatch.setattr(network_tools, "intents_for", lambda _p: ("bgp",))
+    monkeypatch.setattr(network_tools, "commands_for", lambda _p, _i: ("reload",))
+
+    _, envelopes = network_tools.collect_evidence_and_templates(
+        "PE1",
+        [("route", {"prefix": "10.255.0.12/32"})],
+        sender=lambda _d, c: sent.append(c) or "",
+    )
+
+    assert sent == [], "nothing reached the transport at all"
+    assert all(e["status"] == "error" for e in envelopes)

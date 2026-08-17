@@ -979,6 +979,222 @@ def run_templates_split(
     return envelopes
 
 
+def collect_evidence_and_templates(
+    device_name: str,
+    manifest: list[tuple[str, dict[str, str]]],
+    *,
+    sender: Callable[[dict[str, Any], str], str] | None = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """A full evidence collection **and** a template batch, over **one** session.
+
+    Returns ``(evidence, template_envelopes)`` -- the same dict
+    ``collect_evidence`` returns, and one ``run_template``-shaped envelope per
+    manifest entry in manifest order, so both callers read exactly what they
+    read before.
+
+    Why this exists
+    ---------------
+    Measured on this fabric (B-455): the **first** SSH login after a gap costs
+    ~0.6 s and every consecutive one costs ~8 s, resetting after roughly 20 s of
+    quiet. Skew is therefore ``(sessions − 1) × penalty``, and session count is
+    the only term the tool controls. An evidence epoch went 10 sessions → 4 by
+    batching; this takes it to **2**, one per device, which is the floor for a
+    two-device ladder.
+
+    The safety ordering, unchanged and load-bearing
+    ------------------------------------------------
+    This function authorizes **two kinds of command by two different rules**,
+    and the reason it is a new function rather than a widened
+    ``_run_approved_commands`` is that neither rule may be loosened to
+    accommodate the other:
+
+    * **intents** resolve through ``commands_for`` and are checked against the
+      exact-match ``APPROVED_COMMANDS`` frozenset with ``is_approved`` -- a
+      rendered template command is never a member of that set and must never be
+      admitted to it;
+    * **templates** are rendered by reconstruction in ``render_command`` and
+      re-checked with ``is_safe_rendered_command`` -- the Phase 5 rule.
+
+    Both run **before** ``get_device`` is called even once. Platform still
+    resolves from static inventory through ``platform_for``, so the allowlist
+    check still precedes any credential access or socket, exactly as it does in
+    ``_run_approved_commands`` and ``run_templates``. A single unapproved intent
+    command refuses the **whole** call: partially collecting after refusing part
+    of a batch would make "the allowlist refused something" a condition a caller
+    could miss while holding plausible-looking evidence.
+    """
+
+    platform = platform_for(device_name)
+
+    if platform not in known_platforms():
+        message = f"No command definitions for platform: {platform}."
+        evidence: dict[str, Any] = {
+            "device": device_name, "platform": platform, "timestamp": _timestamp(),
+        }
+        for intent in all_intents():
+            section = _safe_error("run_approved_commands", device_name, message)
+            _attach_parsed(section, platform, intent)
+            evidence[intent] = section
+        return evidence, [
+            _safe_error("run_template", device_name, message) for _ in manifest
+        ]
+
+    # ---- Phase 1a: intents, against the static allowlist. -------------------
+    supported = intents_for(platform)
+    intent_commands = [
+        command for intent in supported for command in commands_for(platform, intent)
+    ]
+    unsafe = [c for c in intent_commands if not is_approved(platform, c)]
+    if unsafe:
+        # Identical wording and identical timing to `_run_approved_commands`,
+        # deliberately: this path must be indistinguishable from that one to
+        # anything reading the result, including a test written against it.
+        refusal = _safe_error(
+            "run_approved_commands",
+            device_name,
+            f"Refusing unapproved commands for {platform}: {', '.join(unsafe)}",
+        )
+        evidence = {
+            "device": device_name, "platform": platform, "timestamp": _timestamp(),
+        }
+        for intent in all_intents():
+            section = dict(refusal)
+            _attach_parsed(section, platform, intent)
+            evidence[intent] = section
+        return evidence, [
+            _safe_error("run_template", device_name, "batch refused") for _ in manifest
+        ]
+
+    # ---- Phase 1b: templates, rendered by reconstruction. -------------------
+    rendered: list[tuple[str, str] | None] = []
+    errors: list[str] = []
+    read_timeouts: list[float] = []
+    for template_name, params in manifest:
+        template = template_for(platform, template_name)
+        if template is None:
+            rendered.append(None)
+            errors.append(f"{template_name}: no such template for {platform}")
+            continue
+        if template.active_probe and not _active_probes_allowed():
+            rendered.append(None)
+            errors.append(
+                f"{template_name}: active probes are disabled by "
+                f"{NETTOOLS_ALLOW_ACTIVE_PROBES_ENV}"
+            )
+            continue
+        try:
+            command = render_command(platform, template_name, **params)
+        except TemplateValidationError as exc:
+            rendered.append(None)
+            errors.append(f"{template_name}: {exc}")
+            continue
+        if not is_safe_rendered_command(command):
+            rendered.append(None)
+            errors.append(f"{template_name}: refusing unsafe rendered command")
+            continue
+        rendered.append((template_name, command))
+        if template.read_timeout is not None:
+            read_timeouts.append(template.read_timeout)
+
+    # ---- Phase 2: one session for everything. Credentials only now. ---------
+    all_commands = intent_commands + [r[1] for r in rendered if r is not None]
+    combined = _run_approved_commands_and_templates(
+        device_name, all_commands, platform=platform, sender=sender,
+        read_timeout=max(read_timeouts) if read_timeouts else None,
+    )
+
+    # ---- Phase 3: slice, exactly as the two single-purpose runners do. ------
+    evidence = {"device": device_name, "platform": platform, "timestamp": _timestamp()}
+    for intent in all_intents():
+        if intent in supported:
+            section = _section_from_combined(
+                device_name, list(commands_for(platform, intent)), combined
+            )
+        else:
+            section = _unsupported_result(
+                "run_approved_commands", device_name, intent, platform
+            )
+        _attach_parsed(section, platform, intent)
+        evidence[intent] = section
+
+    outputs = (combined.get("data") or {}).get("commands") or {}
+    envelopes: list[dict[str, Any]] = []
+    error_index = 0
+    for entry in rendered:
+        if entry is None:
+            envelopes.append(
+                _safe_error("run_template", device_name, errors[error_index])
+            )
+            error_index += 1
+            continue
+        template_name, command = entry
+        result = _base_result("run_template", device_name)
+        result["data"] = {
+            "template": template_name, "platform": platform, "command": command,
+            "commands": {command: outputs[command]} if command in outputs else {},
+        }
+        if command not in outputs:
+            result["status"] = STATUS_ERROR
+            result["errors"].extend(
+                list(combined.get("errors") or [])
+                or [f"{command}: no output returned by the batch"]
+            )
+        _attach_parsed_template(result, platform, template_name)
+        envelopes.append(result)
+
+    return evidence, envelopes
+
+
+def _run_approved_commands_and_templates(
+    device_name: str,
+    commands: list[str],
+    *,
+    platform: str,
+    sender: Callable[[dict[str, Any], str], str] | None = None,
+    read_timeout: float | None = None,
+) -> dict[str, Any]:
+    """Transport for :func:`collect_evidence_and_templates`. **Authorizes nothing.**
+
+    Every command reaching here has already passed its own rule in that
+    function's phase 1 -- intents through ``is_approved``, templates through
+    ``render_command`` and ``is_safe_rendered_command``. This exists only so the
+    two kinds share one login.
+
+    It is private and takes ``platform`` as a required keyword precisely so it
+    cannot be mistaken for a general-purpose runner: there is no path into it
+    that skips a check, because there is no public path into it at all.
+    """
+
+    if sender is not None:
+        device = {"name": device_name, "platform": platform}
+        result = _base_result("run_approved_commands", device_name)
+        result["data"] = {"platform": platform, "commands": {}}
+        for command in commands:
+            try:
+                result["data"]["commands"][command] = sender(device, command)
+            except Exception as exc:  # noqa: BLE001 - structured errors at the boundary.
+                result["status"] = STATUS_ERROR
+                result["errors"].append(f"{command}: {exc}")
+        return result
+
+    try:
+        device = get_device(device_name)
+    except InventoryError as exc:
+        return _safe_error("run_approved_commands", device_name, str(exc))
+
+    result = _base_result("run_approved_commands", device_name)
+    outputs, errors, retries = _netmiko_send_commands(
+        device, commands, read_timeout=read_timeout
+    )
+    result["data"] = {"platform": platform, "commands": dict(outputs)}
+    if retries:
+        result["data"]["retries"] = retries
+    if errors:
+        result["errors"].extend(errors)
+        result["status"] = STATUS_ERROR
+    return result
+
+
 # Named single-parameter template tools, one per registered template, kept
 # alongside CHECK_TOOLS's per-intent functions so the CLI and MCP server call
 # the same thing: a thin, typed wrapper over run_template(). The parameter is

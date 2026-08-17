@@ -3124,6 +3124,34 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-110 · B-455 · One session per device, except where a rung fans out
+
+- **Kind:** improvement
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** B-455 established that skew is `(sessions − 1) × an ~8 s device-side login penalty`, so session count is the only term the tool controls. `collect_evidence_and_templates` runs a device's intents **and** its rendered templates over one login.
+
+  **The result is 3 sessions, not 2, and the reason is worth more than the saving.** RR1 collects in one pass. PE2 cannot: its `interface` rung fans out over `EACH_PHYSICAL_INTERFACE`, and the member list lives *inside* the `interfaces` intent — so the manifest is not known until the first pass returns. That device costs two logins and no amount of batching removes it.
+
+  | | Sessions | Skew, penalty armed |
+  |---|---:|---:|
+  | Before the epoch | 10 | — |
+  | Epoch, per-template logins | 7 | 61–75 s |
+  | Batched templates | 4 | 34–38 s (round 5) |
+  | Combined runner | **3** | **25–31 s** |
+- **Evidence:** Live, penalty deliberately armed first so the measurement is of the condition round 5 actually hit. 1728 passing, four frozen files byte-identical.
+- **What I did:** Added `collect_evidence_and_templates` and a private transport that **authorizes nothing** — every command reaching it has already passed its own rule. Two rules, kept separate and neither loosened: intents through `is_approved` against the exact-match frozenset, templates through `render_command` + `is_safe_rendered_command`. Both before `get_device`. Three tests, two of them with the credential environment explicitly cleared.
+
+  **The design risk a combined runner creates, and what was done about it.** The temptation is one validation path for two kinds of command, because that is simpler and reads better. It is also how a rendered template command ends up admitted to the static allowlist, or how an intent stops being exact-matched. So the transport function is **private, authorizes nothing, and takes `platform` as a required keyword** — there is no path into it that skips a check because there is no public path into it at all. Structural containment, the same argument as `prompt_library` never holding device text.
+
+  **One refusal refuses the whole batch.** Partially collecting after refusing part of it would make "the allowlist refused something" a condition a caller could miss while holding plausible-looking evidence — the exact failure a refusal exists to prevent, arriving by a different route.
+
+  **This connects B-456 to something it was not filed for.** Removing PE2's probe pass needs the member set to be knowable without reading the device first, and the operator's B-456 candidate says the route output already names its outgoing interface. So B-456 is not only about whether `no_fault_on_path` is rare — **it is also the remaining session, and therefore the remaining ~8 s.** A correctness candidate and a performance fix turn out to be the same change, which is not how either was filed.
+- **Needs human review:** no
+- **Blocks:** nothing.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**
