@@ -390,3 +390,41 @@ def test_check_fabric_error_message_still_names_the_device_and_the_check(monkeyp
     assert "show bgp summary" in message  # the enriched reason, not just the verdict
     # And the device name that failed is identifiable from the message itself.
     assert message.split(":", 1)[0] in result["data"]["devices"]
+
+
+def test_save_paths_actually_route_through_the_atomic_writer(tmp_path, monkeypatch):
+    """The wiring, not the helper. Found by mutation, not by review.
+
+    The tests above prove `_atomic_write_text` behaves; none of them proved
+    `save_snapshot`/`save_golden_snapshot` *call* it -- reverting either to a
+    bare `write_text` passed all 35, which is §0.13's tests face wearing a
+    green suite (the mutation harness reported the guard VACUOUS, and it was
+    right). A recorder pins the route itself, so the revert now fails here.
+    """
+
+    import agent_nettools.evidence_store as es
+
+    calls: list[str] = []
+    real = es._atomic_write_text
+
+    def recording(path, text):
+        calls.append(path.name)
+        real(path, text)
+
+    monkeypatch.setattr(es, "_atomic_write_text", recording)
+
+    store = es.FileEvidenceStore(str(tmp_path))
+    store.save_snapshot({"device": "PE1", "timestamp": "2026-08-17T00:00:00+00:00"})
+    store.save_golden_snapshot({"device": "PE1"})
+
+    assert len(calls) == 2, "both save paths must route through _atomic_write_text"
+    assert es.GOLDEN_SNAPSHOT_FILENAME in calls
+
+    # metrics' persist too -- same helper, same wiring risk.
+    import agent_nettools.metrics as m
+
+    calls.clear()
+    monkeypatch.setattr(m, "_atomic_write_text", recording)
+    monkeypatch.setenv("NETTOOLS_METRICS_FILE", str(tmp_path / "metrics.json"))
+    m.MetricsCollector().record_collection("PE1", success=True, duration_s=0.1)
+    assert calls, "metrics._persist must route through _atomic_write_text"

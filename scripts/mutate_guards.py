@@ -127,6 +127,47 @@ MUTATIONS = [
     ("B-461", "rungs are numbered in the report",
      "src/agent_nettools/render.py", '"{position}/{total} ', '"',
      "position"),
+
+    # ---- Wave 1 guards (FIX-PLAN). Three of these first ran with wrong
+    # anchors/symbols or against a genuinely vacuous suite; the B-474 entry
+    # below is the one that found a real gap -- the tests proved the atomic
+    # helper behaved and nothing proved the save paths CALLED it. The wiring
+    # test exists because this entry reported VACUOUS (OBS-153). ----
+
+    ("B-470", "the analyze path projects evidence before serializing",
+     "src/agent_nettools/llm_analysis.py",
+     "project_evidence(", "(lambda e, **k: e)(",
+     "test_the_raw_text_canaries_never_reach_the_prompt"),
+
+    ("B-467", "embedded delimiters cannot escape the quote block",
+     "src/agent_nettools/model_egress.py",
+     'text.replace(DEVICE_TEXT_OPEN, "").replace(DEVICE_TEXT_CLOSE, "")',
+     "text",
+     "test_quote_device_text_strips_embedded_delimiters"),
+
+    ("B-474", "save paths route through the atomic writer",
+     "src/agent_nettools/evidence_store.py",
+     "_atomic_write_text(path, json.dumps(evidence, indent=2))",
+     'path.write_text(json.dumps(evidence, indent=2), encoding="utf-8")',
+     "test_save_paths_actually_route_through_the_atomic_writer"),
+
+    ("B-474b", "one golden row per device is enforced by index",
+     "src/agent_nettools/evidence_store.py",
+     "CREATE UNIQUE INDEX IF NOT EXISTS idx_snapshots_one_golden",
+     "CREATE INDEX IF NOT EXISTS idx_snapshots_one_golden",
+     "rejects_a_second_golden_row"),
+
+    ("B-473", "active probes carry distinct annotations",
+     "mcp_server/server.py",
+     '"title": "ACTIVE PROBE — generates network traffic"',
+     '"title": "probe"',
+     "ACTIVE PROBE"),
+
+    ("B-468", "a probe with zero received exits nonzero",
+     "src/agent_nettools/cli.py",
+     "    return EXIT_OK if received > 0 else EXIT_WARNING",
+     "    return EXIT_OK",
+     "test_a_ping_with_total_loss_exits_nonzero"),
 ]
 
 

@@ -1932,6 +1932,25 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-153 · Merge gate · The mutation harness found a vacuous guard in freshly merged, freshly reviewed work
+
+- **Kind:** defect-found
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5 (gate); sonnet-5 (the wave under test)
+- **What happened:** Running the merge-gate mutations over Wave 1's guards, **B-474's came back VACUOUS**: reverting `save_snapshot` from `_atomic_write_text` back to a bare `write_text` passed **all 35** of the wave's new persistence tests.
+
+  The tests were good tests — they proved `_atomic_write_text` behaves correctly under a failed replace, in both the exists and never-existed cases. **None of them proved the save paths *call* it.** The helper was pinned; the wiring was not. §0.13's tests face, in work that had just passed a full line-by-line review at merge.
+- **Evidence:** `scripts/mutate_guards.py` run log — `B-474 ... VACUOUS ... 35 passed`. After the wiring test: `1 failed, 35 passed` under the same mutation.
+- **What I did:** Added `test_save_paths_actually_route_through_the_atomic_writer` — a recorder monkeypatched over the helper, asserting both save paths and `metrics._persist` route through it. The same run also surfaced two harness-entry defects of my own (a wrong anchor for B-473's title — a dict entry, not a kwarg — and a resolve symbol no test mentioned for B-474b), each reported as `ANCHOR-MISSING`/`UNRESOLVED` rather than `VACUOUS`, which is OBS-148's three-verdict distinction doing exactly what it was built for.
+
+  **Why this one is worth a finding when eighteen guards now hold.** The wave's tests were written by the same agent that wrote the fix, from the same premise — *"the atomic writer must behave"* — and both the code and the tests satisfied it perfectly while the actual guarantee (saves are atomic) was one silent revert away from false. **Review read the tests and found them good; only removing the guard showed they guarded the wrong layer.** The merge-gate order matters: mutation runs *after* review precisely because it catches what reading cannot.
+
+  18/18 guards hold under the corrected harness.
+- **Needs human review:** no
+- **Blocks:** nothing.
+
+---
+
 <!--
 Copy this block for each new entry.
 
