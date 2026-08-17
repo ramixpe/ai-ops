@@ -201,9 +201,9 @@ cost of the state a reconciliation cannot express, measured (OBS-140).
 | **B-470** | `OPEN` | **model-egress projector** (expert review P0-02): one typed projection every model path must use; no raw fallback. Rides with B-467. Wave 1-A | — | FIX-PLAN |
 | **B-471** | `OPEN` | **agent trust labelling** (P0-03 cheap half): `trust_class: exploratory`, unknown stop reason = incomplete not success, CLI label. Wave 2-B | B-470 (OPEN) | FIX-PLAN |
 | **B-472** | `OPEN` | **agent deadline is real** (P1-01): absolute deadline propagated to provider timeouts; tools not started when budget exhausted. Wave 2-B | — | FIX-PLAN |
-| **B-473** | `OPEN` | **active probes distinguishable from passive reads in MCP annotations** (P1-03). Wave 1-D | — | FIX-PLAN |
+| **B-473** | `DONE` | `_active_probe_tool`: same sanitisation boundary via shared `_register_sanitized_tool`, distinct annotations (`open_world_hint` + ACTIVE PROBE title), docstring prefix. Signalling, not enforcement — stated | — | FIX-PLAN · wave 1-D |
 | **B-474** | `DONE` | `_atomic_write_text` (tmp+fsync+replace), one-transaction golden + partial unique index with MAX(id) dedup migration, guarded reads with loud warnings, `snapshots_skipped` in `detect_flaps`, device-name validation both backends. **35 tests** | — | FIX-PLAN · wave 1-C |
-| **B-475** | `OPEN` | **parallel fabric-health paths** (P1-08 scoped): pool `assess_lab_fabric_health` and the agent's `_assess_health`; full scheduler stays future. Waves 1-D + 2-B | — | FIX-PLAN |
+| **B-475** | `OPEN` | **half done** (wave 1-D): `assess_lab_fabric_health` pooled, concurrency test proven non-vacuous by reversion. Remaining: the agent loop's `_assess_health` (wave 2-B); the full cross-surface scheduler stays future | — | FIX-PLAN |
 | **B-476** | `OPEN` | **settings validator + `nettools config show/check`** (P2-02 scoped): loud warnings on malformed env values; effective config, secrets redacted. Wave 1-E | — | FIX-PLAN |
 
 **Totals:** `BLOCKED` 13 · `DONE` 33 · `OPEN` 7 · `unverified` 42 · **95 items**
