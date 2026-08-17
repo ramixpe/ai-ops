@@ -26,7 +26,7 @@
 
 **One operational note.** `~/ai-agent-ops/faultlab/` **is not a git repository**, so anything a round writes there is unarchived by §6.1d's definition (OBS-135). Round 8's payload has been copied into `evidence-archive/round8/` and committed. Round 8b should write somewhere tracked, or be copied in the same session it runs.
 
-**Backlog state** (`BACKLOG.md`, 95 items): 36 `DONE` · 25 `DEFERRED` · 18 `OPEN` · 15 `BLOCKED` · 1 `CLOSED-AS-MEASURED` · **0 `unverified`**.
+**Backlog state** (`BACKLOG.md`, 96 items): 36 `DONE` · 25 `DEFERRED` · 18 `OPEN` · 16 `BLOCKED` · 1 `CLOSED-AS-MEASURED` · **0 `unverified`**.
 
 Gate Zero is complete. All 33 `unverified` items were read and given a real state (OBS-140), which found three stale dependencies — B-110's naming blocker was resolved by Q-004, B-202's T-004/T-015 are both `DONE`, and B-209 is `BLOCKED` on T-035 rather than unexamined. No item turned out to be obsolete or already built: the backlog's content was accurate and only its bookkeeping had drifted.
 

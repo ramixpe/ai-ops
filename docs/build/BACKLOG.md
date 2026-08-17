@@ -54,16 +54,22 @@ labelled unexamined (OBS-136).
 
 ### Gate Zero completed — 2026-08-17
 
-All 33 `unverified` items were read and given a real state. **Counts, 95 items:**
+All 33 `unverified` items were read and given a real state. **Counts, 96 items:**
 
 | | |
 |---|---|
 | `DONE` | **36** |
 | `DEFERRED` | **25** — examined, unscheduled, each carrying its unblocking condition |
 | `OPEN` | **18** — valid and startable when its phase begins |
-| `BLOCKED` | **15** — cannot proceed |
+| `BLOCKED` | **16** — cannot proceed |
 | `CLOSED-AS-MEASURED` | **1** |
 | `unverified` | **0** |
+
+**96, not 95.** B-464 had been filed *into the reconciliation table in the main table's
+format* — item, title, description — so it carried no state, no dependency and no
+last-touched, and every count taken since has silently excluded it. A row that is
+well-formed for the wrong table is invisible to a reader and to a `grep` for states.
+Split into both tables and counted.
 
 **What "examined" means here, stated precisely so the zero is not over-read.** For each
 item this pass established that it is real, that its description still matches the
@@ -185,7 +191,7 @@ cost of the state a reconciliation cannot express, measured (OBS-140).
 | **B-461** | `DONE` | numbered rungs, 61af0d0 | B-439 (DONE) | OBS-117 |
 | **B-462** | `DONE` | OBS-129 — round 7, 99 down-port samples, 0 persisting | B-456 (DONE) | OBS-121 |
 | **B-463** | `BLOCKED` | **round 8 ran and was scored; the primary claim is void, not answered.** §2a.3/§2a.4/§2a.5/§2a.6 CONFIRMED — rung 2 reads the socket (`samples_socket_not_reported: 0` on 363 samples), teardown in 3.11 s, BFD ruled out, and `peer in wrong AS` captured. §2a.2 unresolvable: the sampler's socket regex read `False` in all 195 Established samples, so the falsifier fired on an instrument that could not fail it (OBS-133). `OpenSent` was observed once, which proves the **fabric** produced the separating condition; whether rung 2 *reports* it is unmeasured. Needs **round 8b** — same fault, sub-200 ms sampling, raw line archived (`ROUND-8.md` §6) | B-437 (DONE) | OBS-121 · OBS-133 · OBS-134 |
-| **B-464** | **Round 9 — capture `transport_blocked` from an MD5 mismatch** | **Split off from B-463 (round 8), which changed fault.** MD5 **provably cannot** close the rung 1|2 boundary: TCP MD5 breaks TCP, so the socket never arms and rung 2 is broken by the same failure as rung 1 (`ROUND-8.md` §1.1). Running it would spend a lab window confirming analysis that is already sound. **What it is still worth:** a captured `transport_blocked` from a *second, independent mechanism* beside round 3's administrative shutdown, and a `last_reset_reason` no capture currently holds. Lower priority than any round that closes a boundary. `fault_lab.py` option 6, unchanged. The sealed MD5 prediction stands as a recorded unrun claim in `ROUND-8.md` §3 | — | S | ROUND-8 §1.1 |
+| **B-464** | `BLOCKED` | needs the lab; **lower priority than any round that closes a boundary**. `fault_lab.py` option 6 unchanged; the sealed MD5 prediction stands as a recorded unrun claim in `ROUND-8.md` §3 | — | ROUND-8 §1.1 |
 
 **Totals:** `BLOCKED` 13 · `DONE` 33 · `OPEN` 7 · `unverified` 42 · **95 items**
 
@@ -322,6 +328,7 @@ Not tied to a stage. Several are cheap enough to slot into any gap.
 | **B-461** | **The unowned surface: a chat client restating our output is a boundary we do not own** | **A distinct boundary, not an instance of B-439** — recorded separately on the operator's correction, because collapsing them hides which half is fixable. B-439 governs **our** `paraphrase` field: produced here, graded here, marked non-authoritative here. **This is different in kind.** A chat client restating a *correct* deterministic report degrades it downstream of every gate in the build, on a surface with no field to mark, no grounding hook and no instrumentation. Observed live (OBS-115): five rungs became four, and two PE2 rungs were attributed to RR1. **Nothing here can be enforced, and the item must never be written as though it can.** What is available is *detectability*: the report shape now states `rungs_examined` and numbers each observation `1/5 … 5/5` with its device, so a four-item restatement is visibly short to a human reading both. That is the sub-item under B-439 and it is done. What remains open is everything else this boundary implies — the same degradation applies to the causal chain, the coverage caveat and the `off_path` list, and none of those is numbered or counted. **Open question for the operator:** whether an unowned surface is worth designing further for at all, or whether the honest position is that the payload is the artefact and prose about it is not the product | B-439 | M | OBS-115 · operator |
 | **B-462** | **Round 7 — does a down interface persist in the route table as an LFA backup?** | **The gating question B-456 could not settle (OBS-118).** Path scoping takes the interface member set from the route's named paths, which is only sound if a down port leaves the route table promptly. The committed corpus **cannot answer it**: 70 routes with a path, zero naming a down interface, and zero devices with a down port *and* a surviving route — so the zero is vacuous, not reassuring. **The round:** shut one uplink on a device with two (round 4's topology, so it is cheap to arrange) and sample the route table on that device through reconvergence, asking whether the down interface appears as `Backup (Local-LFA)` and for how long. Round 5's sampler runs it unchanged. If it persists, `EACH_PATH_INTERFACE` needs a liveness cross-check against `show interfaces` before a named path counts as a member — which is a different rung, not a tweak | B-456 | S | OBS-118 |
 | **B-463** | **Round 8 — a fault that leaves TCP up and BGP down** | **The one gap B-437's audit found.** The `bgp_session|transport` boundary is separated only by a composed vector; every captured fault so far breaks both rungs together. Since B-432, rung 2 reads the **TCP socket**, so separating it needs a fault where **the socket connects and the FSM never reaches Established** — an AS mismatch, an MD5/authentication mismatch, or a hold-timer mismatch. Any of the three is a one-line config change on a single neighbour and fully reversible. Expected vector `BHHHH`, finding `cause_not_localised`, which would also replace this build's last composed fixture with a captured one. Note the shape: **rung 2 was given a distinct subsystem fifteen commits before anyone checked whether the fabric could exhibit the distinction** — a capability added and never exercised is indistinguishable from one that does not work | B-437 | S | B-437 audit |
+| **B-464** | **Round 9 — capture `transport_blocked` from an MD5 mismatch** | **Split off from B-463 (round 8), which changed fault.** MD5 **provably cannot** close the rung 1|2 boundary: TCP MD5 breaks TCP, so the socket never arms and rung 2 is broken by the same failure as rung 1 (`ROUND-8.md` §1.1). Running it would spend a lab window confirming analysis that is already sound. **What it is still worth:** a captured `transport_blocked` from a *second, independent mechanism* beside round 3's administrative shutdown, and a `last_reset_reason` no capture currently holds. Lower priority than any round that closes a boundary. `fault_lab.py` option 6, unchanged. The sealed MD5 prediction stands as a recorded unrun claim in `ROUND-8.md` §3 | — | S | ROUND-8 §1.1 |
 
 ---
 
