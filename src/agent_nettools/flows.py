@@ -206,6 +206,33 @@ class Rung:
     left to a convention, because a `PATH` rung with no declared aggregation
     would silently pick one.
 
+    What makes a rung a rung (B-437, reviewer A §2.2)
+    --------------------------------------------------
+    Rungs are easy to define by *available CLI view* — one per `show` command
+    that seemed relevant — and that is not a ladder, it is a menu. A rung is a
+    **falsifiable dependency hypothesis**, and four things make it one:
+
+    1. **a dependency assertion** — "the layer above cannot work unless this
+       one does", stated, not implied by ordering;
+    2. **an observation from a distinct subsystem** — otherwise the rung
+       re-reads its neighbour and cannot disagree with it. Rungs 1 and 2 both
+       concern BGP and are distinct because rung 2 reads the **TCP socket**
+       (B-432), not the FSM;
+    3. **a separating case in the evidence base** — at least one captured or
+       injected fault where this rung is broken and the one below it healthy,
+       proving the boundary is real rather than notional;
+    4. **the upper-layer signature** this rung alone should produce, so a
+       descent can check forward consistency rather than only downward.
+
+    **Binding on every rung added from here.** `test_rungs.py` pins (3) as an
+    audit over every boundary in every flow, so a new rung without separating
+    evidence fails rather than being noticed later — the audit is the enforcement
+    and this paragraph is the reason.
+
+    Point (4) is deliberately not enforced yet: it is forward consistency, which
+    is **Q-019**'s open question, and duplicating it here would be two items
+    answering one question badly.
+
     The member set and the aggregation are one decision
     ----------------------------------------------------
     **A rule that changes what a rung is evaluated over must state how those

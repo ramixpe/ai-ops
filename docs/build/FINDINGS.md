@@ -3450,6 +3450,40 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-121 · B-437 · The criterion audited: one gap, and it is the one B-432 predicted
+
+- **Kind:** audit
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** The operator asked for B-437 to be **measured before building to its filed spec**, on the grounds that B-456 may have shrunk it, and to close it at its real size rather than pad it.
+
+  Measured across every rung vector this project has — three from the committed fixtures, four from the injection rounds, one composed:
+
+  | Boundary | Separated by |
+  |---|---|
+  | `bgp_session` \| `transport` | **nothing captured** — only the composed `BHHHH` |
+  | `transport` \| `route_to_peer` | rounds 2 and 3 |
+  | `route_to_peer` \| `igp_adjacency` | the `RR1 → PE1 broken` fixture |
+  | `igp_adjacency` \| `interface` | round 1 |
+
+  **Three of four boundaries hold on captured evidence. The fourth is exactly the gap B-432 flagged** when it gave rung 2 the TCP socket: *"no captured fault yet separates it."*
+- **Evidence:** `tests/test_rungs.py`, auditing every boundary in the flow. 1758 passing.
+- **What I did:** Closed B-437 at its measured size and filed **B-463** for the one gap.
+
+  **What was left of it, precisely.** Part 2 (distinct subsystem) is satisfied for all five rungs, and the mechanically checkable half of it is now pinned: no two rungs draw from an identical set of collect steps, which would make them unable to disagree by construction. Parts 3/4 reduce to one missing round. Part 5 (the expected upper-layer signature) is **deliberately not built** — it is forward consistency, which is Q-019's open question, and two items answering one question badly is worse than one answering it later.
+
+  So the item's durable content is a rule on `Rung` plus an audit that **fails** when a rung is added without separating evidence. That was the load-bearing half of "binding on every future rung" all along; the rest was an audit of five rungs that turns out to pass.
+
+  **The finding worth more than the audit.** Round 3 was supposed to close the 1\|2 gap and did not: it produced `BBHHH`, because the administrative shutdown broke the socket as well as the FSM. So **rung 2 was given a distinct subsystem fifteen commits before anyone checked whether the fabric could exhibit the distinction.**
+
+  > **A capability added and never exercised is indistinguishable from one that does not work.**
+
+  That is not a variant of the vacuity rule — a vacuous *test* passes over nothing, while here the code is real, correct and unexercised. It is closer to §0.13's duplication face in its detector: nothing disagrees, nothing is wrong, and the only way to see it is to *count* — here, to ask which distinctions the evidence base has ever actually shown. B-463 is a one-line reversible config change (AS, MD5 or hold-timer mismatch on one neighbour) and would also replace this build's last composed fixture with a captured one.
+- **Needs human review:** no — closed at measured size, as the operator invited
+- **Blocks:** nothing. B-463 and B-462 are both operator-scheduled rounds.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**
