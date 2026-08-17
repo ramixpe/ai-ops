@@ -192,11 +192,13 @@ def test_the_off_path_rungs_are_still_reported_when_the_epoch_is_incoherent():
 # --------------------------------------------------------------------------- #
 
 
-def test_agreeing_rereads_are_not_enough_when_the_window_was_too_wide():
-    """Two samples across a window too wide to interpolate.
+def test_a_wide_window_with_agreeing_rereads_qualifies_and_does_not_refuse():
+    """B-454, the half round 5 measured the cost of.
 
-    The half of the reviewer rule that the re-read cannot supply: agreement at
-    two points says nothing about a 200-second gap between them.
+    Two agreeing reads across a wide window **bracket** a stable interval. What
+    is unestablished is the middle, not the endpoints — so this qualifies the
+    finding rather than destroying it, the same treatment `COVERAGE_LIMITED`
+    gives a correlation the source could not fully support.
     """
 
     verdict = epoch.Coherence(
@@ -205,10 +207,32 @@ def test_agreeing_rereads_are_not_enough_when_the_window_was_too_wide():
         rereads=(epoch.Reread("bgp_session", "RR1", "broken", "broken"),),
     )
 
-    assert verdict.stable, "the re-read did agree"
-    assert not verdict.within_bound
-    assert not verdict.ok, "and it is still not a coherent observation"
-    assert "EXCEEDED" in verdict.detail
+    assert verdict.stable and not verdict.within_bound
+    assert verdict.status == epoch.WINDOW_LIMITED
+    assert not verdict.refuses, "a wide window qualifies a finding; it does not forbid one"
+    assert not verdict.ok, "but it is not clean either, and says so"
+    assert verdict.caveat and "not as 'true throughout'" in verdict.caveat
+
+
+def test_a_disagreeing_reread_refuses_however_narrow_the_window():
+    """The other half, and the asymmetry between them.
+
+    Disagreement is *positive evidence* that the premise of a causal claim is
+    false. Width is only absence of evidence about an interval whose endpoints
+    both looked the same — and absence of evidence is what this layer refuses to
+    convert into a verdict everywhere else.
+    """
+
+    verdict = epoch.Coherence(
+        skew_seconds=0.5,
+        bound_seconds=30.0,
+        rereads=(epoch.Reread("bgp_session", "RR1", "healthy", "broken"),),
+    )
+
+    assert verdict.within_bound, "well inside the bound"
+    assert verdict.status == epoch.FABRIC_MOVED
+    assert verdict.refuses
+    assert verdict.caveat is None, "a refusal carries no qualification -- there is no finding"
 
 
 def test_the_skew_is_reported_on_a_pass_as_well_as_a_breach():
@@ -231,19 +255,39 @@ def test_the_skew_is_reported_on_a_pass_as_well_as_a_breach():
     assert "of 30s allowed" in coherence["detail"], "the margin, not only the breach"
 
 
-def test_an_over_bound_epoch_refuses_even_a_stable_fabric():
-    """The bound reaching the real path, not only the dataclass."""
+def test_an_over_bound_epoch_keeps_its_finding_and_carries_the_caveat():
+    """B-454 end to end, and the regression round 5 paid for.
+
+    **This test asserted the opposite until 2026-08-17**, and the change is a
+    specification reversal rather than a fix to a broken test — recorded so the
+    reversal is visible in the history rather than looking like drift.
+
+    Round 5 probes 10, 11 and 99 saw a settled, fully converged broken fabric
+    whose lowest broken rung was `igp_adjacency`. The right answer was
+    `igp_isolated`. The bound replaced it with a refusal, four minutes after the
+    fabric had stopped changing, because collecting it had taken 36 s.
+    """
 
     result = investigation.investigate(
         "RR1", SUBJECT, sender=fixture_sender(label="broken"), resolver=_resolver,
         skew_bound_seconds=0.0,
     )
+    coherence = result.descent.coherence
 
-    assert result.descent.coherence.skew_seconds > 0.0, (
-        "a zero-skew epoch would make this vacuous"
+    assert coherence.skew_seconds > 0.0, "a zero-skew epoch would make this vacuous"
+    assert not coherence.within_bound and coherence.stable
+
+    assert result.descent.finding == "interface_line_down", (
+        "the finding survives a width breach"
     )
-    assert result.descent.finding == flows.TEMPORALLY_INCOHERENT
-    assert result.trustworthy is False
+    assert result.trustworthy is True, "a qualified answer is still an answer"
+    assert coherence.status == epoch.WINDOW_LIMITED
+
+    payload = result.to_payload()
+    assert payload["coherence"]["caveat"], (
+        "and it never travels without its qualification -- a field, not something "
+        "a renderer is trusted to add"
+    )
 
 
 # --------------------------------------------------------------------------- #

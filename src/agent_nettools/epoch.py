@@ -91,7 +91,11 @@ from .network_tools import (
 )
 
 __all__ = [
+    "COHERENT",
     "DEFAULT_SKEW_BOUND_SECONDS",
+    "FABRIC_MOVED",
+    "UNVERIFIED",
+    "WINDOW_LIMITED",
     "Coherence",
     "EvidenceEpoch",
     "Observation",
@@ -266,9 +270,59 @@ class Reread:
         }
 
 
+#: The observations bracket a stable window inside the bound. Nothing to say.
+COHERENT = "coherent"
+#: The re-read **disagreed**: the fabric moved while the ladder was being walked.
+#: The observations do not describe one state, so no finding can be asserted
+#: from them. Refusal.
+FABRIC_MOVED = "fabric_moved"
+#: The window was wider than the bound and **every re-read agreed**. The
+#: observations bracket a stable interval; what is missing is confidence about
+#: the middle of it. Qualification, not refusal — see :class:`Coherence`.
+WINDOW_LIMITED = "window_limited"
+#: No re-read was performed at all, so stability was never checked. Refusal, for
+#: the same reason ``_aggregate`` refuses to call an empty member set healthy.
+UNVERIFIED = "unverified"
+
+
 @dataclass(frozen=True)
 class Coherence:
-    """Whether this epoch's observations support one present-tense claim."""
+    """Whether this epoch's observations support one present-tense claim.
+
+    Two failures, not one (B-454, found by round 5)
+    ------------------------------------------------
+    The first version collapsed *the fabric moved* and *collection was slow*
+    into a single refusal, and round 5 measured what that costs. Probe 09 was
+    incoherent because rung 1 flipped between the walk and the re-read — the
+    real signal. Probes 08, 10, 11 and 99 were incoherent because collection
+    took 34–38 s against a 30 s bound, **with every re-read agreeing**. Same
+    finding, same exit code, and an operator could not tell them apart.
+
+    The cost was concrete: probes 10, 11 and 99 saw a settled, fully converged
+    broken fabric whose lowest broken rung was `igp_adjacency`. **The correct
+    answer was `igp_isolated` and the bound threw it away**, four minutes after
+    the fabric had stopped changing.
+
+    So they are separated, and the separation follows a pattern this build
+    already had and had not applied here. `investigation.COVERAGE_LIMITED` keeps
+    a correlation and labels it, on the reasoning that *a real answer at the
+    wrong strength* is worth more than no answer. A width breach is that shape:
+
+    ================  =========================================================
+    :data:`FABRIC_MOVED`   a re-read disagreed. **Refuse** — the observations do
+                           not describe one state, and any finding built from
+                           them is about a fabric that never existed
+    :data:`WINDOW_LIMITED` the window was wide and every re-read agreed.
+                           **Keep the finding, carry the caveat** — two agreeing
+                           reads *bracket* a stable interval; the uncertainty is
+                           about the middle, not about the endpoints
+    ================  =========================================================
+
+    The asymmetry is the point. Disagreement is positive evidence that the
+    premise of a causal claim is false. Width is only absence of evidence about
+    an interval whose endpoints both looked the same, and absence of evidence is
+    exactly what this layer refuses to convert into a verdict anywhere else.
+    """
 
     skew_seconds: float
     bound_seconds: float
@@ -291,8 +345,46 @@ class Coherence:
         return bool(self.rereads) and all(r.agrees for r in self.rereads)
 
     @property
+    def status(self) -> str:
+        """Which of the four outcomes this is. The load-bearing property."""
+
+        if not self.rereads:
+            return UNVERIFIED
+        if not all(r.agrees for r in self.rereads):
+            return FABRIC_MOVED
+        return COHERENT if self.within_bound else WINDOW_LIMITED
+
+    @property
+    def refuses(self) -> bool:
+        """Whether this outcome forbids a finding, as opposed to qualifying one."""
+
+        return self.status in (FABRIC_MOVED, UNVERIFIED)
+
+    @property
     def ok(self) -> bool:
-        return self.within_bound and self.stable
+        return self.status == COHERENT
+
+    @property
+    def caveat(self) -> str | None:
+        """The qualification a :data:`WINDOW_LIMITED` result must carry.
+
+        A field rather than something a renderer is trusted to add, for the same
+        reason `InvestigationResult.caveat` is: a qualified answer printed
+        without its qualification is just an answer.
+
+        Explicitly **not** a qualification of the fabric's state. Both reads
+        agreed; what is unestablished is the interval between them.
+        """
+
+        if self.status != WINDOW_LIMITED:
+            return None
+        agreed = ", ".join(r.rung for r in self.rereads)
+        return (
+            f"The finding stands. It was read over {self.skew_seconds:.1f}s, wider "
+            f"than the {self.bound_seconds:.1f}s bound, and {agreed} were unchanged at "
+            f"both ends of that window. Read it as 'true at the start and at the end', "
+            f"not as 'true throughout' — nothing observed the middle."
+        )
 
     @property
     def detail(self) -> str:
@@ -311,14 +403,18 @@ class Coherence:
         agreed = ", ".join(r.rung for r in self.rereads)
         if not self.within_bound:
             return (
-                f"{margin} — EXCEEDED; {agreed} agreed on re-read, but two samples "
-                f"across a window this wide do not establish what happened between them"
+                f"{margin} — EXCEEDED; {agreed} agreed at both ends, so the finding "
+                f"stands qualified: the window brackets a stable interval, and nothing "
+                f"observed its middle"
             )
         return f"{margin}; {agreed} unchanged on re-read"
 
     def as_dict(self) -> dict:
         return {
+            "status": self.status,
             "ok": self.ok,
+            "refuses": self.refuses,
+            "caveat": self.caveat,
             "skew_seconds": round(self.skew_seconds, 3),
             "bound_seconds": self.bound_seconds,
             "within_bound": self.within_bound,

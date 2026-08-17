@@ -95,10 +95,27 @@ So the skew is a **precondition on trusting the re-read**, and the re-read is th
 
 | Skew | Re-read | Result |
 |---|---|---|
-| within bound | agrees | the finding stands |
-| within bound | disagrees | **`temporally_incoherent`** |
-| over bound | agrees | **`temporally_incoherent`** — stability was sampled at two points across a window too wide to interpolate |
-| over bound | disagrees | **`temporally_incoherent`** |
+| within bound | agrees | `coherent` — the finding stands |
+| within bound | disagrees | **`fabric_moved`** → `temporally_incoherent`, exit 2 |
+| over bound | agrees | **`window_limited`** → the finding stands, **qualified** |
+| over bound | disagrees | **`fabric_moved`** → `temporally_incoherent`, exit 2 |
+
+> **Revised 2026-08-17 after round 5 (B-454).** The third row originally read
+> `temporally_incoherent`, and round 5 measured what that costs: probes 10, 11
+> and 99 saw a settled, fully converged broken fabric whose correct finding was
+> `igp_isolated`, and the bound threw it away four minutes after the fabric
+> stopped changing.
+>
+> **The asymmetry is the point.** A disagreeing re-read is *positive evidence*
+> that the premise of a causal claim is false — refuse. A wide window with both
+> ends agreeing is only *absence of evidence* about the middle of an interval
+> whose endpoints matched — qualify. Absence of evidence is exactly what this
+> layer refuses to convert into a verdict everywhere else, and converting it
+> into a refusal is the same mistake in the other direction.
+>
+> This is the treatment `COVERAGE_LIMITED` already gives a correlation the log
+> source could not fully support: *a real answer at the wrong strength is worth
+> more than no answer.* The pattern existed and was not applied here.
 
 ### 2.3a The skew is recorded when it passes, not only when it fails
 

@@ -407,6 +407,13 @@ def _cmd_investigate(args: argparse.Namespace) -> int:
         _note(f"# Repaired a model response: {repair}", args)
     for reason in result.withheld_because():
         _note(f"# {reason}", args)
+    # A qualified answer must never print as an unqualified one (B-454). The
+    # caveat is a field on the result rather than something composed here, so a
+    # second front end cannot forget it -- the same reasoning as the correlation
+    # caveat beside it.
+    coherence = result.descent.coherence
+    if coherence is not None and coherence.caveat:
+        _note(f"# {coherence.caveat}", args)
 
     if not result.trustworthy:
         return EXIT_CRITICAL

@@ -391,10 +391,17 @@ def _finding_for(
         # for a general one.
         return UNDETERMINED
 
-    if coherence is not None and not coherence.ok:
-        # Every remaining finding asserts something about the fabric's present
-        # state, not only the ones that name a cause: `all_layers_healthy` over
-        # an incoherent window is as unsupported as a causal chain over one.
+    if coherence is not None and coherence.refuses:
+        # `refuses`, not `not ok` -- B-454. Only a re-read *disagreement* (or no
+        # re-read at all) forbids a finding: that is positive evidence that the
+        # observations describe two states rather than one. A window merely
+        # wider than the bound, with both ends agreeing, *qualifies* the finding
+        # instead and travels as `Coherence.caveat`.
+        #
+        # Measured cost of not separating them: round 5 probes 10/11/99 saw a
+        # settled broken fabric whose correct finding was `igp_isolated`, and the
+        # bound replaced it with a refusal four minutes after the fabric stopped
+        # changing (OBS-109).
         return TEMPORALLY_INCOHERENT
 
     broken = [o for o in outcomes if o.status == BROKEN]
