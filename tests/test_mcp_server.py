@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 
+import pytest
 from mcp import ClientSession
 from mcp.shared.memory import create_client_server_memory_streams
 
@@ -81,6 +82,77 @@ def test_list_tools_includes_the_new_phase_8_tools_with_read_only_hints():
         assert by_name["assess_lab_fabric_health"].annotations.read_only_hint is True
 
 
+# --------------------------------------------------------------------------- #
+# B-473 -- active probes are annotated distinctly from a passive read
+# --------------------------------------------------------------------------- #
+
+
+def test_active_probe_tools_are_annotated_distinctly_from_a_passive_tool():
+    """A client that auto-approves purely on `readOnlyHint` cannot otherwise
+    tell `get_lab_ping`/`get_lab_traceroute` apart from a passive `show` read
+    -- both generate traffic, unlike every other tool this server exposes.
+
+    `read_only_hint` must still be `True` for the two probes: they genuinely
+    change no device state, and flipping it would be lying in the other
+    direction rather than fixing the signalling gap (B-473). `open_world_hint`
+    and `title` are what actually differ from a passive tool's annotations,
+    and the docstring-derived description carries the same signal for a
+    client that reads only descriptions.
+    """
+
+    async def body(session: ClientSession):
+        return await session.list_tools()
+
+    result = asyncio.run(_run_session(body))
+    by_name = {tool.name: tool for tool in result.tools}
+    passive = by_name["list_lab_devices"]
+
+    if not server.READ_ONLY_ANNOTATIONS_SUPPORTED:
+        pytest.skip("installed MCP SDK does not support ToolAnnotations")
+
+    assert passive.description is not None
+    assert not passive.description.startswith("ACTIVE PROBE: ")
+
+    for probe_name in ("get_lab_ping", "get_lab_traceroute"):
+        probe = by_name[probe_name]
+        assert probe.annotations.read_only_hint is True, (
+            f"{probe_name} changes no device state and must stay readOnlyHint=True"
+        )
+        assert probe.annotations.title == "ACTIVE PROBE — generates network traffic"
+        assert probe.annotations.title != passive.annotations.title
+        assert probe.description.startswith("ACTIVE PROBE: sends ICMP/UDP traffic to the target. ")
+
+        if server.ACTIVE_PROBE_ANNOTATIONS_SUPPORTED:
+            assert probe.annotations.open_world_hint is True
+            assert passive.annotations.open_world_hint is not True
+
+
+def test_every_other_tool_still_carries_read_only_hint_and_no_open_world_hint():
+    """The active-probe annotation (B-473) is additive for exactly two tools,
+    not a change to what every other registration gets by default."""
+
+    async def body(session: ClientSession):
+        return await session.list_tools()
+
+    result = asyncio.run(_run_session(body))
+
+    if not server.READ_ONLY_ANNOTATIONS_SUPPORTED:
+        pytest.skip("installed MCP SDK does not support ToolAnnotations")
+
+    active_probes = {"get_lab_ping", "get_lab_traceroute"}
+    checked = 0
+    for tool in result.tools:
+        if tool.name in active_probes:
+            continue
+        assert tool.annotations.read_only_hint is True, f"{tool.name} lost readOnlyHint"
+        assert tool.annotations.open_world_hint is not True, (
+            f"{tool.name} is not an active probe and must not claim open_world_hint"
+        )
+        checked += 1
+
+    assert checked >= 18, "expected at least 18 non-probe tools to have been checked"
+
+
 def test_call_list_lab_devices_through_a_real_session_returns_the_envelope():
     """No credentials or fake transport needed: list_devices() never touches
     the network, so this exercises the full protocol round trip (request ->
@@ -119,6 +191,62 @@ def test_call_assess_lab_device_health_through_a_real_session(monkeypatch):
     assert payload["device"] == "PE1"
     assert "severity" in payload
     assert payload["severity"] in ("ok", "info", "warning", "critical")
+
+
+# --------------------------------------------------------------------------- #
+# B-475/P1-08 -- assess_lab_fabric_health collects devices concurrently
+# --------------------------------------------------------------------------- #
+
+
+def test_assess_lab_fabric_health_collects_devices_concurrently(monkeypatch):
+    """This was `{name: collect_evidence(name) for name in names}` -- nine
+    sequential logins end to end, one device's connect latency paid nine times
+    in series.
+
+    A wall-clock timing assertion here would be flaky under load. Instead this
+    proves concurrency deterministically: a `threading.Barrier` sized to
+    exactly the device count blocks every fake collection until *all* of them
+    have started. That can only complete if the pool schedules every device's
+    call before any of them returns -- a reintroduced serial loop would call
+    the first device, block forever waiting for the other three to also have
+    started (which they never would, being unreached), and this test would
+    time out and fail loudly rather than pass quietly.
+
+    Four devices, not the real inventory's nine, so this stays exactly one
+    barrier cycle regardless of the pool's own worker cap (`min(8, len(names))`)
+    -- with nine devices and eight workers the ninth call is queued behind the
+    others and would deadlock a nine-party barrier for a reason that has
+    nothing to do with whether the fix works.
+    """
+
+    import threading
+
+    fake_names = ["D1", "D2", "D3", "D4"]
+    monkeypatch.setattr(
+        server,
+        "list_devices",
+        lambda: {"status": "success", "data": {"devices": [{"name": n} for n in fake_names]}},
+    )
+
+    barrier = threading.Barrier(len(fake_names), timeout=5)
+    lock = threading.Lock()
+    started: list[str] = []
+
+    def fake_collect_evidence(device_name):
+        with lock:
+            started.append(device_name)
+        barrier.wait()  # only returns once every device's call has arrived
+        return {"device": device_name, "status": "success", "data": {}, "errors": []}
+
+    monkeypatch.setattr(server, "collect_evidence", fake_collect_evidence)
+    monkeypatch.setattr(
+        server, "evaluate_fabric", lambda evidence_by_device: {"devices": dict(evidence_by_device)}
+    )
+
+    result = server.assess_lab_fabric_health()
+
+    assert sorted(started) == sorted(fake_names), "every device must have been collected"
+    assert list(result["devices"]) == fake_names, "inventory order is preserved in the result"
 
 
 def test_read_lab_inventory_resource_through_a_real_session():

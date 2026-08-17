@@ -40,6 +40,17 @@ canonical form -- never passed through as text. `get_lab_ping` and
 other tool listed) even though they change no device state, and are gated by
 the `NETTOOLS_ALLOW_ACTIVE_PROBES` environment variable (default enabled).
 
+A client auto-approving purely on `readOnlyHint` cannot otherwise tell these
+two apart from a passive `show` read (B-473, expert review P1-03): they are
+registered through `_active_probe_tool` instead of `_read_only_tool`, which
+keeps `read_only_hint=True` (still true -- neither changes device state) but
+also sets `open_world_hint=True` and an annotation `title` of "ACTIVE PROBE —
+generates network traffic", and prefixes both tools' descriptions with
+"ACTIVE PROBE: sends ICMP/UDP traffic to the target." for a client that reads
+only descriptions. **This is signalling, not enforcement** --
+`NETTOOLS_ALLOW_ACTIVE_PROBES` above is what actually refuses the traffic;
+annotations are hints a client is free to ignore.
+
 ### Snapshots, diffing, health, and flap detection (Phase 8)
 
 Through Phase 7 these were CLI-only (`nettools diff`/`baseline`/`health`/
@@ -91,6 +102,9 @@ safety guarantee without inspecting this server's source -- see
 `server.READ_ONLY_ANNOTATIONS_SUPPORTED` for whether the installed MCP SDK
 accepted it (an older SDK's `tool()` decorator without an `annotations=`
 parameter degrades to the bare decorator instead of crashing the server).
+`get_lab_ping`/`get_lab_traceroute` additionally carry `open_world_hint=True`
+and a distinguishing `title` (`server.ACTIVE_PROBE_ANNOTATIONS_SUPPORTED`,
+B-473) -- see "Active probes" above.
 
 Two MCP **resources** let a client ground itself without spending a tool
 call:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import functools
 import inspect
 import json
@@ -64,6 +65,24 @@ mcp = FastMCP("IOS-XR Read-Only Network Tools")
 # older SDK's decorator does not accept that keyword at all -- passing it
 # would be a TypeError on every single tool registration, which would take
 # the whole server down rather than just omitting a nice-to-have annotation.
+#
+# B-473 (expert review P1-03): read-only is not the whole story for
+# `get_lab_ping`/`get_lab_traceroute` -- they change no device state (so
+# `read_only_hint=True` is still true and is not weakened below), but they
+# generate ICMP/UDP traffic toward a caller-supplied address, which a passive
+# `show` read never does. A client that auto-approves on `readOnlyHint` alone
+# cannot tell the two kinds apart from that annotation. `_active_probe_tool`
+# below also sets `open_world_hint=True` (probe traffic leaves the device
+# toward the wider network, not a fixed internal set of endpoints -- the MCP
+# spec's own meaning for that hint) and an annotation `title` naming what it
+# is, and the docstring is prefixed the same way for a client that only reads
+# descriptions.
+#
+# This is signalling, not enforcement. `NETTOOLS_ALLOW_ACTIVE_PROBES`
+# (network_tools.py) is what actually refuses to send the traffic; these
+# annotations are hints a client is free to ignore, same as `read_only_hint`
+# always was -- they widen what a client *can* know without inspecting this
+# file, not what the server *allows*.
 # --------------------------------------------------------------------------- #
 
 _TOOL_ACCEPTS_ANNOTATIONS = "annotations" in inspect.signature(FastMCP.tool).parameters
@@ -72,21 +91,50 @@ try:
     from mcp.types import ToolAnnotations
 
     READ_ONLY_HINT: Any | None = ToolAnnotations(read_only_hint=True) if _TOOL_ACCEPTS_ANNOTATIONS else None
+
+    # open_world_hint is a newer field than read_only_hint; an SDK old enough to
+    # lack it would raise on construction. Checked via inspect.signature the
+    # same way `_TOOL_ACCEPTS_ANNOTATIONS` is checked above, rather than
+    # assumed -- pydantic's generated signature reports fields by their alias
+    # (camelCase), not the snake_case constructor kwarg, so both spellings are
+    # checked rather than guessing which one this SDK version uses.
+    _annotation_fields = set(inspect.signature(ToolAnnotations).parameters)
+    _ANNOTATIONS_ACCEPT_OPEN_WORLD = _TOOL_ACCEPTS_ANNOTATIONS and bool(
+        _annotation_fields & {"open_world_hint", "openWorldHint"}
+    )
+
+    _active_probe_kwargs: dict[str, Any] = {
+        "read_only_hint": True,
+        "title": "ACTIVE PROBE — generates network traffic",
+    }
+    if _ANNOTATIONS_ACCEPT_OPEN_WORLD:
+        _active_probe_kwargs["open_world_hint"] = True
+
+    ACTIVE_PROBE_HINT: Any | None = (
+        ToolAnnotations(**_active_probe_kwargs) if _TOOL_ACCEPTS_ANNOTATIONS else None
+    )
 except ImportError:
     READ_ONLY_HINT = None
+    ACTIVE_PROBE_HINT = None
+    _ANNOTATIONS_ACCEPT_OPEN_WORLD = False
 
 # What actually happened, so a caller/reviewer can tell without re-deriving it
-# from the two checks above.
+# from the checks above.
 READ_ONLY_ANNOTATIONS_SUPPORTED = READ_ONLY_HINT is not None
+ACTIVE_PROBE_ANNOTATIONS_SUPPORTED = ACTIVE_PROBE_HINT is not None
 
 
-def _read_only_tool(*args: Any, **kwargs: Any) -> Callable[[Callable], Callable]:
-    """``@mcp.tool()``, plus ``readOnlyHint``, plus **the raw-text boundary**.
+def _register_sanitized_tool(
+    annotations: Any | None, *args: Any, **kwargs: Any
+) -> Callable[[Callable], Callable]:
+    """The shared body of `_read_only_tool` and `_active_probe_tool`.
 
-    Every tool below uses this instead of the bare ``@mcp.tool()`` decorator.
-    Degrades silently (no annotation, no error) on an SDK old enough to lack
-    ``ToolAnnotations``/the ``annotations=`` keyword -- see
-    ``READ_ONLY_ANNOTATIONS_SUPPORTED`` for which path this process took.
+    Registration and **the raw-text boundary** are identical for both -- the
+    only thing that may ever legitimately differ between a passive read and an
+    active probe is the annotations describing it (B-473), and the sanitisation
+    guarantee below must hold for both regardless. Written once here and called
+    by both wrappers, rather than duplicated, so that property cannot drift
+    between them by one being edited and not the other.
 
     **Every return value passes through `boundary.sanitize`.** That is here, in
     the registration decorator, rather than in each tool or behind an argument,
@@ -98,8 +146,8 @@ def _read_only_tool(*args: Any, **kwargs: Any) -> Callable[[Callable], Callable]
     `data.commands`, up to 37,962 characters. See `boundary.py`.
     """
 
-    if READ_ONLY_HINT is not None:
-        kwargs.setdefault("annotations", READ_ONLY_HINT)
+    if annotations is not None:
+        kwargs.setdefault("annotations", annotations)
     register = mcp.tool(*args, **kwargs)
 
     def decorate(function: Callable) -> Callable:
@@ -114,6 +162,35 @@ def _read_only_tool(*args: Any, **kwargs: Any) -> Callable[[Callable], Callable]
         return sanitized
 
     return decorate
+
+
+def _read_only_tool(*args: Any, **kwargs: Any) -> Callable[[Callable], Callable]:
+    """``@mcp.tool()``, plus ``readOnlyHint``, plus **the raw-text boundary**.
+
+    Every passive-read tool below uses this instead of the bare ``@mcp.tool()``
+    decorator. Degrades silently (no annotation, no error) on an SDK old enough
+    to lack ``ToolAnnotations``/the ``annotations=`` keyword -- see
+    ``READ_ONLY_ANNOTATIONS_SUPPORTED`` for which path this process took.
+
+    See `_register_sanitized_tool` for what registering through this actually
+    does; this only supplies which annotations to register with.
+    """
+
+    return _register_sanitized_tool(READ_ONLY_HINT, *args, **kwargs)
+
+
+def _active_probe_tool(*args: Any, **kwargs: Any) -> Callable[[Callable], Callable]:
+    """``_read_only_tool``'s twin for tools that generate network traffic (B-473).
+
+    Used only by `get_lab_ping` and `get_lab_traceroute`. Same registration,
+    same sanitisation boundary (`_register_sanitized_tool`) -- annotated with
+    `ACTIVE_PROBE_HINT` instead of `READ_ONLY_HINT` so a client reading
+    annotations, not just descriptions, can tell these two apart from the
+    eighteen passive reads. See the module comment above for why this is a
+    hint and not the enforcement mechanism.
+    """
+
+    return _register_sanitized_tool(ACTIVE_PROBE_HINT, *args, **kwargs)
 
 
 @_read_only_tool()
@@ -312,9 +389,9 @@ def get_lab_logging(device_name: str, count: int = 20) -> dict:
     return get_logging(device_name, count)
 
 
-@_read_only_tool()
+@_active_probe_tool()
 def get_lab_ping(device_name: str, address: str) -> dict:
-    """Answers: *can this device actually reach that address right now?*
+    """ACTIVE PROBE: sends ICMP/UDP traffic to the target. Answers: *can this device actually reach that address right now?*
 
     Prefer this to confirm or rule out data-plane reachability once you have a
     hypothesis -- for example after finding a route exists, to check the path
@@ -330,9 +407,9 @@ def get_lab_ping(device_name: str, address: str) -> dict:
     return ping_device(device_name, address)
 
 
-@_read_only_tool()
+@_active_probe_tool()
 def get_lab_traceroute(device_name: str, address: str) -> dict:
-    """Answers: *which hops does traffic from this device actually take?*
+    """ACTIVE PROBE: sends ICMP/UDP traffic to the target. Answers: *which hops does traffic from this device actually take?*
 
     Prefer this when reachability fails and you need to know **where** it stops
     -- the last responding hop localises the problem to a segment. Like
@@ -470,7 +547,31 @@ def assess_lab_fabric_health() -> dict:
     if listed.get("status") != "success":
         return listed
     names = [device["name"] for device in listed["data"]["devices"]]
-    evidence_by_device = {name: collect_evidence(name) for name in names}
+
+    # B-475/P1-08: this was `{name: collect_evidence(name) for name in names}`
+    # -- nine sequential logins end to end, each one paying this fabric's own
+    # connect latency in series. A bounded pool overlaps them instead, the same
+    # move `network_tools._iter_check_results` already makes for every
+    # `check_lab_fabric` call; the worker-count clamp is copied from there
+    # (`max(1, min(max_workers, len(devices)))`) so this never opens more
+    # sockets than there are devices to open them to, and never a zero-worker
+    # pool when the inventory is empty. Futures are submitted in inventory
+    # order and collected in that same order (not completion order), so the
+    # resulting dict's key order matches `names` regardless of which device
+    # answers first -- callers that rely on inventory-ordered output (like
+    # `check_fabric` does for its own parallel runner) get it here too.
+    #
+    # This closes the one serial path on the MCP surface. `assess_lab_device_health`,
+    # the diff tools, and `check_lab_fabric` each still open their own
+    # sequential or independent set of connections; a single scheduler shared
+    # across every fabric-wide tool on this surface is future work, not this
+    # change.
+    workers = max(1, min(8, len(names)))
+    evidence_by_device: dict[str, Any] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {name: pool.submit(collect_evidence, name) for name in names}
+        for name in names:
+            evidence_by_device[name] = futures[name].result()
     return evaluate_fabric(evidence_by_device)
 
 

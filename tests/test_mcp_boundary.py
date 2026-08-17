@@ -107,6 +107,11 @@ def test_every_registered_tool_return_is_free_of_raw_device_text(monkeypatch):
         ("get_bgp_neighbor", "bgp_neighbor", "address"),
         ("get_interface", "interface", "interface"),
         ("get_logging", "logging", "count"),
+        # B-473's two active probes go through this same run_template seam
+        # (see network_tools.ping_device/traceroute_device) -- the boundary
+        # must hold for them too, annotations are only signalling.
+        ("ping_device", "ping", "address"),
+        ("traceroute_device", "traceroute", "address"),
     ):
         patched = (
             lambda t, kw: lambda d, v, **k: network_tools.run_template(
@@ -128,6 +133,8 @@ def test_every_registered_tool_return_is_free_of_raw_device_text(monkeypatch):
         "get_lab_bgp_neighbor": ("RR1", "10.255.0.12"),
         "get_lab_interface": ("PE2", "Gi0/0/0/0"),
         "get_lab_logging": ("PE2", 200),
+        "get_lab_ping": ("PE2", "10.255.0.31"),
+        "get_lab_traceroute": ("PE2", "10.255.0.31"),
     }
 
     swept = 0
@@ -175,12 +182,60 @@ def test_registration_is_what_applies_the_boundary():
     Not "every tool calls sanitize" -- that is a convention. The decorator
     wraps, so there is no registered function that skips it and a new tool
     cannot be written without it.
+
+    B-473 split this into a shared `_register_sanitized_tool` that both
+    `_read_only_tool` and `_active_probe_tool` call, so the boundary itself now
+    lives in one place rather than in `_read_only_tool` alone -- checked here,
+    plus that both public wrappers actually route through it, so the guarantee
+    cannot be true of one and silently false of the other.
     """
 
-    source = inspect.getsource(server._read_only_tool)
+    source = inspect.getsource(server._register_sanitized_tool)
 
     assert "sanitize(" in source, "the boundary is applied at registration"
     assert "register(sanitized)" in source, "the *wrapped* function is what gets registered"
+
+
+def test_active_probe_tools_still_lose_a_canary_in_their_commands(monkeypatch):
+    """B-473 added `_active_probe_tool`, a second registration wrapper for
+    `get_lab_ping`/`get_lab_traceroute`. This is the direct check that the new
+    wrapper did not quietly drop the property that makes `_read_only_tool`
+    load-bearing in the first place: a canary placed under `data.commands`, as
+    if a real device had said it, must not survive the call.
+    """
+
+    canary = "CANARY -- a real device would never say this"
+
+    def fake_ping_device(device_name, address, **kwargs):
+        return {
+            "tool": "ping_device", "device": device_name, "status": "success",
+            "data": {"commands": {f"ping {address}": canary}, "parsed": {"meta": {}}},
+            "errors": [],
+        }
+
+    def fake_traceroute_device(device_name, address, **kwargs):
+        return {
+            "tool": "traceroute_device", "device": device_name, "status": "success",
+            "data": {"commands": {f"traceroute {address}": canary}, "parsed": {"meta": {}}},
+            "errors": [],
+        }
+
+    monkeypatch.setattr(server, "ping_device", fake_ping_device)
+    monkeypatch.setattr(server, "traceroute_device", fake_traceroute_device)
+
+    for result in (
+        server.get_lab_ping("PE1", "10.0.0.1"),
+        server.get_lab_traceroute("PE1", "10.0.0.1"),
+    ):
+        assert canary not in repr(result), "the canary must not survive registration"
+        assert not _raw_text_keys_in(result)
+        assert "commands_withheld" in result["data"], "withheld, not silently dropped"
+
+    for wrapper_name in ("_read_only_tool", "_active_probe_tool"):
+        wrapper_source = inspect.getsource(getattr(server, wrapper_name))
+        assert "_register_sanitized_tool(" in wrapper_source, (
+            f"{wrapper_name} must go through the shared boundary, not its own copy"
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -360,6 +415,15 @@ def test_sanitize_is_total_over_the_shapes_these_tools_return():
 # --------------------------------------------------------------------------- #
 
 
+# B-473: `get_lab_ping`/`get_lab_traceroute` additionally open with an
+# "ACTIVE PROBE: ..." sentence ahead of "Answers:", so a client that only
+# reads descriptions (not annotations) still sees that these two generate
+# traffic. Named here rather than pattern-matched, for the same reason the
+# rest of this file iterates the registry instead of a hand list -- the
+# exception itself should not be able to silently swallow a future tool.
+_ACTIVE_PROBE_TOOL_NAMES = {"get_lab_ping", "get_lab_traceroute"}
+
+
 def test_every_tool_description_states_what_it_answers_and_when_to_prefer_it():
     """The B-113 rewording, held as a property rather than a one-off edit.
 
@@ -384,9 +448,17 @@ def test_every_tool_description_states_what_it_answers_and_when_to_prefer_it():
         doc = inspect.getdoc(function) or ""
         first = doc.split("\n")[0]
 
-        assert first.startswith("Answers:"), (
-            f"{name} does not open by saying what question it answers: {first!r}"
-        )
+        if name in _ACTIVE_PROBE_TOOL_NAMES:
+            assert first.startswith("ACTIVE PROBE: "), (
+                f"{name} is an active probe and must say so before anything else: {first!r}"
+            )
+            assert "Answers:" in first, (
+                f"{name} must still say what question it answers: {first!r}"
+            )
+        else:
+            assert first.startswith("Answers:"), (
+                f"{name} does not open by saying what question it answers: {first!r}"
+            )
         assert "refer" in doc, (
             f"{name} never says when to prefer it over another tool"
         )
