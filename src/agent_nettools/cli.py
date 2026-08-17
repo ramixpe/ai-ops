@@ -25,6 +25,8 @@ Exposed as the ``nettools`` console script. Subcommands:
     nettools evidence prune [--keep-days N] [--keep-count M] [--device DEVICE]
     nettools evidence history [DEVICE]
     nettools metrics [--format json|prometheus] [--quiet]
+    nettools config show
+    nettools config check [--quiet]
     nettools inspect [DEVICE]
     nettools version
 
@@ -93,7 +95,7 @@ from pathlib import Path
 
 from dotenv import find_dotenv, load_dotenv
 
-from . import __version__, flows, metrics, output
+from . import __version__, flows, metrics, output, settings
 from .agent_loop import run_agent_loop
 from .fabric_analysis import analyze_fabric
 from .fixtures import capture_device, load_fixture_evidence
@@ -793,6 +795,31 @@ def _cmd_metrics(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _cmd_config(args: argparse.Namespace) -> int:
+    """Inspect (``show``) or validate (``check``) the environment configuration.
+
+    B-476/P2-02: report-only. ``show`` renders ``settings.effective_config()``
+    through the standard ``output.render`` path, same as every other
+    structured command. ``check`` prints each problem ``settings.
+    validate_environment()`` finds and exits ``1``; a clean environment
+    prints nothing extra and exits ``0`` -- the same 0/1 shape ``nettools
+    health`` uses for "nothing actionable" vs. "found a problem".
+    """
+
+    if args.config_command == "check":
+        problems = settings.validate_environment()
+        if not getattr(args, "quiet", False):
+            if problems:
+                for problem in problems:
+                    print(problem)
+            else:
+                print("OK: no configuration problems found.")
+        return EXIT_WARNING if problems else EXIT_OK
+
+    _emit(settings.effective_config(), args)
+    return EXIT_OK
+
+
 def _cmd_version(args: argparse.Namespace) -> int:
     import platform as platform_module
 
@@ -1175,6 +1202,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_metrics.set_defaults(func=_cmd_metrics)
 
+    p_config = sub.add_parser(
+        "config", help="Inspect and validate the environment-variable configuration (B-476)."
+    )
+    config_sub = p_config.add_subparsers(dest="config_command", required=True)
+
+    p_config_show = config_sub.add_parser(
+        "show", help="Print every declared setting's effective value, source, and any problem."
+    )
+    _add_output_arguments(p_config_show)
+    p_config_show.set_defaults(func=_cmd_config)
+
+    p_config_check = config_sub.add_parser(
+        "check",
+        help="Validate the environment: print problems and exit 1 if any are found, 0 if clean.",
+    )
+    p_config_check.add_argument(
+        "--quiet", "-q", action="store_true", help="Suppress output; only the exit code carries the outcome."
+    )
+    p_config_check.set_defaults(func=_cmd_config)
+
     p_version = sub.add_parser("version", help="Print the installed nettools version.")
     _add_output_arguments(p_version)
     p_version.set_defaults(func=_cmd_version)
@@ -1190,6 +1237,13 @@ def main() -> int:
     # Two lookups so .env is found both from the current directory upward and
     # next to an editable install of the package.
     load_dotenv(find_dotenv(usecwd=True)) or load_dotenv()
+    # B-476/P2-02: report-only. Warn loudly on a malformed/out-of-range env
+    # value instead of silently falling back to a default -- but never fail
+    # startup over it. Failing closed on a bad value is the settings-model
+    # rewire's job (see settings.py's module docstring), not this
+    # validator's; this only makes the problem visible.
+    for problem in settings.validate_environment():
+        print(f"# config warning: {problem}", file=sys.stderr)
     parser = build_parser()
     args = parser.parse_args()
     try:
