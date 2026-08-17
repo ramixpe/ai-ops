@@ -28,7 +28,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
+import sys
+import tempfile
 import time
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
@@ -61,6 +64,100 @@ def _snapshot_dir(base_dir: str | None) -> Path:
 
 def _timestamp_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write via tempfile in the same directory + fsync + os.replace.
+
+    Same-directory matters: os.replace is only atomic within a filesystem, so
+    a tempfile created under the platform default (often a different mount,
+    e.g. a tmpfs ``/tmp``) would turn "atomic replace" back into a non-atomic
+    copy across filesystems. ``save_snapshot``/``save_golden_snapshot``
+    (file backend) and ``metrics._persist`` used to ``Path.write_text``
+    straight to the final path -- a crash or kill mid-write left truncated
+    JSON there, which is exactly what B-474 / DEEP-REVIEW-2026-08-17 §2.4
+    found. fsync before the rename so the tempfile's bytes are actually on
+    disk, not just sitting in the OS write cache, before the rename that
+    makes them visible under the final name.
+    """
+
+    directory = path.parent
+    directory.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=directory, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_name, path)
+    except BaseException:
+        # os.replace failing (this is the crash-mid-write this helper exists
+        # to prevent) must leave the final path exactly as it was -- so clean
+        # up the tempfile rather than leave a stray ``.tmp`` file behind, and
+        # re-raise so the caller's own error handling (or lack of it, for
+        # save_snapshot -- a crash here is meant to be loud) still applies.
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
+# Device names are joined directly into a filesystem path by the file backend
+# (``FileEvidenceStore._device_dir``); this bounds what a "device" is allowed
+# to look like at the storage boundary itself. Normal callers only ever pass
+# names already validated by ``inventory_model`` (alphanumerics, ``_``, ``.``,
+# ``-``), so this should never fire for a real caller -- it exists because an
+# API that merely trusts its callers' discipline instead of enforcing its own
+# contract is not actually guarded (B-474 / DEEP-REVIEW-2026-08-17 §2.4,
+# EXPERT-PEER-REVIEW-2026-08-17 P1-07). ".." on its own already fails the
+# length-1 fullmatch below in every case except "." and ".." themselves
+# (both are valid single/double "." characters under this charset), so those
+# two are excluded explicitly rather than relying on the regex to catch them.
+_DEVICE_NAME_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+
+
+def _validate_device_name(device: str) -> None:
+    """Raise ``ValueError`` if ``device`` is not a safe storage key.
+
+    Applied in both backends' save paths, not just the file one that has the
+    literal path-traversal risk -- so the two backends stay behaviorally
+    identical about what counts as a valid device rather than one silently
+    accepting what the other would refuse.
+    """
+
+    if device in (".", "..") or not _DEVICE_NAME_RE.fullmatch(device):
+        raise ValueError(f"invalid device name for evidence storage: {device!r}")
+
+
+def _read_snapshot_json(path: Path) -> dict[str, Any] | None:
+    """Parse one snapshot file, or ``None`` (+ a stderr warning) if it will not parse.
+
+    A truncated or otherwise corrupt file must not crash a reader -- but a
+    silent ``None`` would itself be the failure this project treats as its
+    worst kind: absence read as health, with nothing to tell an operator that
+    a device's history just quietly lost a snapshot. So this always prints a
+    warning naming the file before returning ``None`` (B-474 /
+    DEEP-REVIEW-2026-08-17 §2.4).
+    """
+
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        print(f"WARNING: corrupt snapshot file, skipping: {path} ({exc})", file=sys.stderr)
+        return None
+
+
+def _read_evidence_json(raw: str, *, source: str) -> dict[str, Any] | None:
+    """Same corrupt-read guard as ``_read_snapshot_json``, for one SQLite row's
+    ``evidence`` column -- ``source`` names the row (path + rowid) in the
+    warning since there is no filename to point at."""
+
+    try:
+        return json.loads(raw)
+    except ValueError as exc:
+        print(f"WARNING: corrupt snapshot row, skipping: {source} ({exc})", file=sys.stderr)
+        return None
 
 
 def _retained(
@@ -158,38 +255,41 @@ class FileEvidenceStore(EvidenceStore):
 
     def save_snapshot(self, evidence: dict[str, Any]) -> str:
         device = str(evidence.get("device", "unknown"))
+        _validate_device_name(device)
         stamp = _timestamp_now().replace(":", "-")
         directory = self._device_dir(device)
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / f"{stamp}.json"
-        path.write_text(json.dumps(evidence, indent=2), encoding="utf-8")
+        _atomic_write_text(path, json.dumps(evidence, indent=2))
         return str(path)
 
     def load_latest_snapshot(self, device_name: str) -> dict[str, Any] | None:
         paths = self._timestamped_paths(device_name)
         if not paths:
             return None
-        return json.loads(paths[-1].read_text(encoding="utf-8"))
+        return _read_snapshot_json(paths[-1])
 
     def save_golden_snapshot(self, evidence: dict[str, Any]) -> str:
         device = str(evidence.get("device", "unknown"))
+        _validate_device_name(device)
         directory = self._device_dir(device)
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / GOLDEN_SNAPSHOT_FILENAME
-        path.write_text(json.dumps(evidence, indent=2), encoding="utf-8")
+        _atomic_write_text(path, json.dumps(evidence, indent=2))
         return str(path)
 
     def load_golden_snapshot(self, device_name: str) -> dict[str, Any] | None:
         path = self._device_dir(device_name) / GOLDEN_SNAPSHOT_FILENAME
         if not path.is_file():
             return None
-        return json.loads(path.read_text(encoding="utf-8"))
+        return _read_snapshot_json(path)
 
     def list_history(self, device_name: str) -> list[dict[str, Any]]:
-        return [
-            json.loads(path.read_text(encoding="utf-8"))
-            for path in self._timestamped_paths(device_name)
-        ]
+        # A corrupt snapshot must not erase the rest of a device's history --
+        # skip it (with its own warning from `_read_snapshot_json`) and keep
+        # going, rather than letting one bad file take down the whole read.
+        parsed = (_read_snapshot_json(path) for path in self._timestamped_paths(device_name))
+        return [snapshot for snapshot in parsed if snapshot is not None]
 
     def list_devices(self) -> list[str]:
         if not self._root.is_dir():
@@ -273,22 +373,59 @@ class SQLiteEvidenceStore(EvidenceStore):
                 "CREATE INDEX IF NOT EXISTS idx_snapshots_device_timestamp "
                 "ON snapshots (device, timestamp)"
             )
+            # Migration for databases created before B-474: the old
+            # save_golden_snapshot DELETEd and INSERTed through two separate
+            # connections, so a DB that predates this fix could already hold
+            # more than one 'golden' row for a device -- the exact defect
+            # DEEP-REVIEW-2026-08-17 §2.4 found (and load_golden_snapshot's
+            # own `ORDER BY id DESC` meant a duplicate was invisible, so
+            # nothing would have surfaced it by observation). A UNIQUE index
+            # cannot be created over data that already violates it, so any
+            # pre-existing duplicates are collapsed down to the highest id
+            # (the most recently pinned, and the one `id DESC` was already
+            # treating as "the" golden) before the index below is added.
+            connection.execute(
+                """
+                DELETE FROM snapshots
+                WHERE kind = 'golden'
+                  AND id NOT IN (
+                      SELECT MAX(id) FROM snapshots WHERE kind = 'golden' GROUP BY device
+                  )
+                """
+            )
+            connection.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_snapshots_one_golden "
+                "ON snapshots (device) WHERE kind = 'golden'"
+            )
 
     def save_snapshot(self, evidence: dict[str, Any]) -> str:
         return self._insert(evidence, kind="snapshot")
 
     def save_golden_snapshot(self, evidence: dict[str, Any]) -> str:
-        # Exactly one golden row per device, like the file backend's single
-        # golden.json -- delete any previous pin before inserting the new one.
+        # DELETE + INSERT in one connection/transaction. The previous version
+        # deleted the old pin on one connection and inserted the new row via
+        # `_insert`'s own separate connection -- a crash between the two left
+        # the device with *no* golden row, not a duplicate (B-474 /
+        # DEEP-REVIEW-2026-08-17 §2.4). `_insert` is deliberately not reused
+        # here for exactly that reason: it opens and commits its own
+        # connection, which is the bug.
         device = str(evidence.get("device", "unknown"))
+        _validate_device_name(device)
+        timestamp = str(evidence.get("timestamp") or _timestamp_now())
         with self._connect() as connection:
             connection.execute(
                 "DELETE FROM snapshots WHERE device = ? AND kind = 'golden'", (device,)
             )
-        return self._insert(evidence, kind="golden")
+            cursor = connection.execute(
+                "INSERT INTO snapshots (device, timestamp, kind, evidence) VALUES (?, ?, ?, ?)",
+                (device, timestamp, "golden", json.dumps(evidence)),
+            )
+            row_id = cursor.lastrowid
+        return f"sqlite:{self._path}#{row_id}"
 
     def _insert(self, evidence: dict[str, Any], *, kind: str) -> str:
         device = str(evidence.get("device", "unknown"))
+        _validate_device_name(device)
         timestamp = str(evidence.get("timestamp") or _timestamp_now())
         with self._connect() as connection:
             cursor = connection.execute(
@@ -301,29 +438,39 @@ class SQLiteEvidenceStore(EvidenceStore):
     def load_latest_snapshot(self, device_name: str) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT evidence FROM snapshots WHERE device = ? AND kind = 'snapshot' "
+                "SELECT id, evidence FROM snapshots WHERE device = ? AND kind = 'snapshot' "
                 "ORDER BY timestamp DESC, id DESC LIMIT 1",
                 (device_name,),
             ).fetchone()
-        return json.loads(row["evidence"]) if row else None
+        if row is None:
+            return None
+        return _read_evidence_json(row["evidence"], source=f"{self._path}#{row['id']}")
 
     def load_golden_snapshot(self, device_name: str) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT evidence FROM snapshots WHERE device = ? AND kind = 'golden' "
+                "SELECT id, evidence FROM snapshots WHERE device = ? AND kind = 'golden' "
                 "ORDER BY id DESC LIMIT 1",
                 (device_name,),
             ).fetchone()
-        return json.loads(row["evidence"]) if row else None
+        if row is None:
+            return None
+        return _read_evidence_json(row["evidence"], source=f"{self._path}#{row['id']}")
 
     def list_history(self, device_name: str) -> list[dict[str, Any]]:
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT evidence FROM snapshots WHERE device = ? AND kind = 'snapshot' "
+                "SELECT id, evidence FROM snapshots WHERE device = ? AND kind = 'snapshot' "
                 "ORDER BY timestamp ASC, id ASC",
                 (device_name,),
             ).fetchall()
-        return [json.loads(row["evidence"]) for row in rows]
+        # Same "skip the corrupt one, keep the rest" behavior as the file
+        # backend's list_history -- see _read_evidence_json.
+        parsed = (
+            _read_evidence_json(row["evidence"], source=f"{self._path}#{row['id']}")
+            for row in rows
+        )
+        return [snapshot for snapshot in parsed if snapshot is not None]
 
     def list_devices(self) -> list[str]:
         with self._connect() as connection:

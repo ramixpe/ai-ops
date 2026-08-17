@@ -9,6 +9,7 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import os
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1485,7 +1486,14 @@ def check_fabric(
             result["data"]["unsupported"].append(name)
         elif status != STATUS_SUCCESS:
             result["status"] = STATUS_ERROR
-            result["errors"].append(f"{name}: {check} check failed")
+            # The per-device envelope already has the real reason in
+            # device_result["errors"]; the old summary line dropped it, so an
+            # operator reading only the top-level errors got no reason at all
+            # (B-474 / DEEP-REVIEW-2026-08-17 §2.4, network_tools.py:1482).
+            # Guarded for an empty list -- some error paths never populate it.
+            device_errors = device_result.get("errors") or []
+            reason = f" ({device_errors[0]})" if device_errors else ""
+            result["errors"].append(f"{name}: {check} check failed{reason}")
 
     return result
 
@@ -1963,11 +1971,26 @@ def detect_flaps(
     snapshot is excluded, same as ``load_latest_snapshot``), grouped into
     per-(intent, subject, field) value sequences, and a sequence is reported
     once it has accumulated at least ``min_transitions`` changes in value.
+
+    A truncated/corrupt snapshot file must not turn flap detection into a
+    stack trace, and one bad snapshot must not erase the rest of a device's
+    history either -- so a file that fails to parse is skipped (with a loud
+    stderr warning naming it, not a silent drop) and counted in
+    ``snapshots_skipped`` on the return payload, so the degradation is visible
+    in the result itself and not only on stderr (B-474 /
+    DEEP-REVIEW-2026-08-17 §2.4).
     """
 
     directory = _snapshot_dir(base_dir) / device_name
     paths = _timestamped_snapshot_paths(directory)
-    snapshots = [json.loads(path.read_text(encoding="utf-8")) for path in paths]
+    snapshots: list[dict[str, Any]] = []
+    snapshots_skipped = 0
+    for path in paths:
+        try:
+            snapshots.append(json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, ValueError) as exc:
+            print(f"WARNING: corrupt snapshot file, skipping: {path} ({exc})", file=sys.stderr)
+            snapshots_skipped += 1
 
     flapping: list[dict[str, Any]] = []
     for (intent, subject, field), values in _flap_sequences(snapshots).items():
@@ -1984,4 +2007,9 @@ def detect_flaps(
             )
 
     flapping.sort(key=lambda item: (-item["transitions"], item["intent"], str(item["subject"]), item["field"]))
-    return {"device": device_name, "snapshots_examined": len(snapshots), "flapping": flapping}
+    return {
+        "device": device_name,
+        "snapshots_examined": len(snapshots),
+        "snapshots_skipped": snapshots_skipped,
+        "flapping": flapping,
+    }
