@@ -281,6 +281,19 @@ On NOTE: **do not fix it.** Write the finding, continue. Out-of-scope fixes are 
 
 The shape to watch for is a test that iterates a collection, a registry, a fixture glob or a parametrised set that is currently empty or currently uniform. pytest reports "empty parameter set" as a skip and moves on; an `all()` over nothing is `True`; a comparison across a corpus that only contains one verdict compares nothing.
 
+> **Added 2026-08-17 — the same rule, turned on the auditor (OBS-147).** A verification
+> pass that reports no findings has two explanations its own output cannot distinguish:
+> the thing is sound, or the check did not look. **The discriminator is what the pass
+> found wrong with itself.** A real pass exercises its own instruments and finds them
+> imperfect, because instruments are. So state what was checked, what the check cannot
+> see, and what the pass found wrong with its own apparatus — and if that last answer is
+> "nothing", say so explicitly and treat it as grounds for suspicion rather than comfort.
+>
+> Coverage can be inflated deliberately; finding your own instrument wrong cannot. It is a
+> costly signal, which is what makes it worth reading. `BACKLOG-STATUS.md` §7 is the worked
+> example: nothing changed state, and the pass is readable only because all three defects
+> it found were in the verifier.
+
 Three instances so far, each caught only because something else was watching:
 
 - **T-010 → T-012.** The template-parser registry was empty by design. `test_registry_is_empty_until_the_parsers_land` failed the moment the first parser landed, which was the signal to replace it with the real expectation.

@@ -1767,6 +1767,105 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-147 · Method · A verification that finds nothing must be asked what it found wrong with itself
+
+- **Kind:** insight
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** `BACKLOG-STATUS.md` checked 36 DONE claims and 12 guardrails. **Nothing changed state and no guard proved vacuous.** A clean sweep is indistinguishable, in its output, from a pass that was skipped — both produce a document full of ticks.
+
+  What made the pass readable was not the ticks. It was that **every defect it found was in the verifier rather than in the thing verified**: two wrong test files and a cache-invalidation gap in the mutation harness, and five stale dependency rows found by resolving what the reconciliation asserted.
+- **Evidence:** `BACKLOG-STATUS.md` §5.2, §5.3, §6, §7.
+- **What I did:** Promoted the framing out of that document, because it generalises past this build.
+
+  > **A verification pass that reports no findings has two possible explanations, and its
+  > own output cannot distinguish them: the thing is sound, or the check did not look.**
+  >
+  > **The discriminator is what the pass found wrong with itself.** A real pass exercises
+  > its own instruments and finds them imperfect, because instruments are. A pass that
+  > reports nothing wrong anywhere — including in its own method — has produced a result
+  > that cannot be read.
+  >
+  > So: **state what was checked, state what the check cannot see, and state what the pass
+  > found wrong with its own apparatus.** If that third answer is "nothing", say so
+  > explicitly, and treat it as a reason for suspicion rather than confidence.
+
+  **This is §0.12 turned on the auditor.** §0.12 says a guardrail that can pass by measuring nothing needs its empty case made visible. The same is true of an audit, and the audit's empty case is *"I found nothing, including in myself."*
+
+  **Why the self-check is the right discriminator rather than, say, coverage.** Coverage can be inflated deliberately. Finding your own instrument wrong cannot — nobody breaks their own tool on purpose to look thorough, and the specific defects are checkable afterwards. It is a costly signal, which is what makes it worth reading.
+
+  **The honest reading of two clean passes**, recorded in `BACKLOG-STATUS.md` §7 and worth repeating: not *"everything is correct"* but **"the cheap checks are exhausted"**. The next assurance costs a lab window or an outside reader. An audit that keeps returning clean is telling you to change instrument, not to relax.
+
+  Added as a pointer from `BUILD-PLAN.md` §0.12, which is where the vacuity rules live.
+- **Needs human review:** no
+- **Blocks:** nothing.
+
+---
+
+## OBS-148 · Harness · A verifier whose errors produce plausible alarms is worse than one whose errors produce noise
+
+- **Kind:** defect-found
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** The first mutation harness reported **B-458 and B-456 as `GUARD VACUOUS`**. Both were false. It had chosen each guard's test file by **name similarity** — `test_mcp_server.py` for a guard in `mcp_server/server.py`, `test_descent.py` for one in `descent.py`. The guards live in `test_mcp_boundary.py` and `test_flows.py`. Run against the right files, both fail immediately.
+- **Evidence:** `BACKLOG-STATUS.md` §5.2. `test_registration_is_what_applies_the_boundary` and `test_each_member_set_carries_its_own_aggregation` both fail under their mutations.
+- **What I did:** Rewrote the harness as `scripts/mutate_guards.py`. **A test target is never guessed**: `resolve_guard_tests` greps `tests/` for the *guard's own symbol*. When it finds nothing it returns `UNRESOLVED` and exits non-zero, **which must never render the same as `VACUOUS`** — those are different answers and conflating them is the defect.
+
+  **Why this failure mode is worse than an ordinary false negative, which is the finding.**
+
+  > **A verifier's errors should look like noise. When they look like findings, they are
+  > adopted.**
+  >
+  > *"This guard is vacuous"* is precisely the output this tool exists to produce. Its
+  > false negatives are therefore **indistinguishable from its true positives** — same
+  > word, same column, same weight. And they point at the **more alarming** conclusion,
+  > which is the direction a tired reader accepts without re-deriving.
+
+  **B-458 and B-456 would have been reopened on a false report**, and the work would have been to re-test guards that already held. The cost is not just wasted effort: an item reopened on a false alarm arrives with evidence attached, and the evidence is wrong.
+
+  **The second harness defect, which matters more than the first.** It left stale `__pycache__`. After a pass, `make test` reported a failure that existed in no source file — loud, and self-correcting. **The other direction is not.** Source restored, bytecode still mutated, a later run executing code that exists nowhere and reporting green: **a mutation recorded as caught when it was not.** That is a vacuous guard certified as sound by the tool built to find vacuous guards.
+
+  Every mutation is now bracketed by a cache purge, and `assert_no_stale_bytecode` refuses to continue if a `.pyc` survives. Restores are asserted byte-for-byte, and the run ends by re-checking the four frozen files against `6629a2c` and requiring a clean `git status`.
+
+  **Three defects in one harness, all found by using it and none in the thing it verifies.** That is OBS-147's discriminator, and this is the finding it points at.
+- **Needs human review:** no
+- **Blocks:** nothing. 12/12 guards hold under the corrected harness.
+
+---
+
+## OBS-149 · Gate Zero · Two mechanisms found stale dependencies and neither would have found the other's
+
+- **Kind:** insight
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** **Gate Zero (OBS-140) found three stale dependencies by reading items**: B-110's naming blocker had been resolved by Q-004, B-202's T-004/T-015 were both `DONE`, and B-209 was `BLOCKED` rather than unexamined.
+
+  **`BACKLOG-STATUS.md` found five more by resolving them** — comparing each row's claimed dependency state against the state that dependency actually holds:
+
+  | Item | Row claims | Actually |
+  |---|---|---|
+  | B-416, B-418, B-419 | B-414 (BLOCKED) | **CLOSED-AS-MEASURED** |
+  | B-426 | B-201 (unverified) | **DEFERRED** |
+  | B-459 | B-453 (OPEN) | **DONE** |
+
+  **Neither pass would have found the other's.** Reading an item catches a blocker that was discharged elsewhere and never propagated back. Resolving a reference catches a *recorded state* that has drifted from the record it names. The first is about the world; the second is about the table.
+- **Evidence:** OBS-140 for the three; `BACKLOG-STATUS.md` §6 for the five. B-459's row says it waits on B-453, which shipped the same day.
+- **What I did:** Recorded the consequence, which is procedural rather than a fix.
+
+  > **A dependency is a claim about another item, written once and re-read never.** It goes
+  > stale silently, in a cell that stays perfectly well-formed. **So dependency resolution
+  > has to run on every verification pass, not once at reconciliation** — a one-time
+  > reconciliation fixes the table as it stood that morning and starts decaying that
+  > afternoon.
+
+  `BACKLOG-STATUS.md` resolves every dependency at generation time rather than printing the string in the row, so **this class cannot recur in that document** — only in `BACKLOG.md` itself, which is where the five still are until someone edits them.
+
+  **The general shape, and it is the third instance in two days.** OBS-136: a vocabulary that could not express what eight items said. OBS-140: dependencies that had been discharged elsewhere. This: dependencies whose recorded state had drifted. **All three are the index disagreeing with the content, and none of them is visible from inside the index** — every row was well-formed every time. The only thing that finds them is deriving the same fact twice by different routes and comparing.
+- **Needs human review:** no
+- **Blocks:** nothing. The five rows are cosmetic today; B-459's is the one that would mislead.
+
+---
+
 <!--
 Copy this block for each new entry.
 

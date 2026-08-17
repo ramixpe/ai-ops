@@ -150,7 +150,8 @@ See §8 for the Part 1 / Part 2 split.
 ## 5. Guardrails — mutation-tested, not merely run
 
 **A test that passes proves the code does something. Only removing the guard proves the
-test would notice if it stopped.** Eight guards were removed one at a time, the guarded
+test would notice if it stopped.** The harness is committed at `scripts/mutate_guards.py`
+and is rerunnable. Twelve guards were removed one at a time, the guarded
 test run, and the source restored from an in-memory copy with the restore asserted.
 
 **No frozen file was touched.** The harness refuses by name — which means §5.1 covers
