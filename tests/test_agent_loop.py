@@ -313,12 +313,15 @@ def test_malicious_template_argument_is_refused_inside_the_loop(monkeypatch):
     content = tool_result_block["content"]
     # B-470/P0-02: `content` (what the model actually sees) is routed through
     # model_egress.project_envelope, which classifies every `errors` entry
-    # against a fixed table rather than passing the raw validation message
-    # through -- an already-shipped model_egress.py trade-off (ERROR_KINDS),
-    # not something new here. The model learns the call was refused, not the
-    # literal validation text.
-    assert "unclassified error" in content
-    assert "whitespace is not allowed" not in content
+    # against a fixed table rather than passing raw exception text through.
+    # Validation-refusal phrases are IN that table (added after wave 2-B):
+    # they originate in the frozen validators, are tool-authored, and the
+    # agent loop's own prompt tells the model to act on WHY a call was
+    # refused -- which is only possible if the kind crosses the boundary.
+    # The offending value itself still never does.
+    assert "refused" in content
+    assert "whitespace is not allowed" in content
+    assert "reload" not in content
     # The command was never assembled, so nothing resembling it reached a device.
     assert "| reload" not in content.replace("\\u007c", "|").split("errors")[0]
 

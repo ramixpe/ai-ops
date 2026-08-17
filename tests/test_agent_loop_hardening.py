@@ -550,3 +550,33 @@ def test_two_tool_batch_still_returns_both_results_in_block_order(monkeypatch):
     assert [block["tool_use_id"] for block in tool_result_turn] == ["toolu_1", "toolu_2"]
     assert [call["skipped"] for call in result["tool_calls"]] == [False, False]
     assert [call["is_error"] for call in result["tool_calls"]] == [False, False]
+
+
+def test_a_validation_refusal_reaches_the_model_with_its_reason():
+    """The reason survives the boundary; the offending value does not.
+
+    Wave 2-B's projection initially rewrote a validation refusal into "an
+    unclassified error" -- conservative, but the agent loop's own prompt tells
+    the model to act on WHY a call was refused ("say so plainly rather than
+    retrying the same call unchanged"), which is only possible if the reason
+    crosses. The refusal phrases originate in the FROZEN validators, are
+    tool-authored, and carry no device text -- so they are classified into
+    fixed KIND phrases rather than withheld. The model-supplied value itself
+    still never crosses: the kind is the whole message.
+    """
+
+    from agent_nettools import model_egress, network_tools
+
+    result = network_tools.run_template(
+        "PE1", "bgp_neighbor", address="10.0.0.1 | reload",
+        sender=lambda d, c: "",
+    )
+    assert result["status"] == "error"
+
+    projected = model_egress.project_envelope(result)
+    joined = " ".join(projected["errors"])
+
+    assert "refused" in joined, "the model must learn the call was refused"
+    assert "whitespace is not allowed" in joined, "and why"
+    assert "reload" not in joined, "the offending value itself never crosses"
+    assert "unclassified" not in joined

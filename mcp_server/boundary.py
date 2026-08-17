@@ -111,6 +111,26 @@ ERROR_KINDS: tuple[tuple[str, str], ...] = (
     ("no such template", "no such template for this platform"),
     ("required environment variable", "a credential is not configured"),
     ("is not in the lab inventory", "the device is not in the inventory"),
+    # --- Parameter-validation refusals (added after wave 2-B). ------------
+    #
+    # These phrases originate in the FROZEN validators (`templates.py`) --
+    # tool-authored, stable, and containing no device text. Before these
+    # entries a validation refusal classified as "unclassified" and the model
+    # lost the one thing the agent loop's own prompt tells it to act on: WHY
+    # the call was refused. "Say so plainly rather than retrying the same
+    # call unchanged" is only possible if the reason survives the boundary.
+    # The KIND phrase is what crosses; the offending value never does.
+    ("must not be empty", "the parameter was refused: it must not be empty"),
+    ("exceeds the maximum length", "the parameter was refused: too long"),
+    ("non-ascii characters are not allowed", "the parameter was refused: non-ASCII characters"),
+    ("whitespace is not allowed", "the parameter was refused: whitespace is not allowed"),
+    ("contains a control character", "the parameter was refused: control characters"),
+    ("contains a forbidden character", "the parameter was refused: a forbidden character"),
+    ("not a valid ipv4 address", "the parameter was refused: not a valid IPv4 address"),
+    ("not a valid ipv4 prefix", "the parameter was refused: not a valid IPv4 prefix"),
+    ("not a valid interface name", "the parameter was refused: not a valid interface name"),
+    ("must be between", "the parameter was refused: out of range"),
+    ("expected a string", "the parameter was refused: wrong type"),
 )
 
 
