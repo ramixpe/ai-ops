@@ -19,7 +19,7 @@ Nine devices: `P1 P2 P3 P4 PE1 PE2 PE3 PE4 RR1`. One platform so far: `cisco_xr`
 |---|---|---|---|
 | `t0` | **Partly broken** (original) | 7 static intents | Committed — **frozen** |
 | `t1` | **Partly broken**, ~90s after `t0` | 7 static intents | Committed — **frozen** |
-| `healthy` | **Clean** — the rebuilt fabric | intents **+ templates** | **Captured 2026-08-15. 220 files** |
+| `healthy` | **Clean** — the rebuilt fabric | intents **+ templates** | **Captured 2026-08-15. 221 files** |
 | `broken` | **PE2 isolated — `Gi0/0/0/0` *and* `Gi0/0/0/1` shut** | intents **+ templates** | **Not captured.** See below and FINDINGS OBS-039 |
 
 ### `t0` / `t1` — frozen, do not recapture
@@ -41,10 +41,15 @@ What they record:
 
 The rebuilt fabric with nothing wrong: every IS-IS adjacency up, all 16 BGP sessions `Established`, all interface error counters at zero.
 
-**220 files.** Per-device counts differ by design — the manifest is derived from
+**221 files.** Per-device counts differ by design — the manifest is derived from
 each device's own reported interface list, and a device with a `router_id`
 skips its own loopback as a BGP subject. P1–P4 26, PE1/PE3 23, PE4 24, PE2 22,
-RR1 21, plus three `show-route-192-0-2-1-32.txt` captures (see below).
+RR1 21, plus three `show-route-192-0-2-1-32.txt` captures and PE1's single
+`ping-192-0-2-1.txt` (see below).
+
+*Corrected 2026-08-17: this read 220. The arithmetic above omitted the `ping`
+capture added at T-016. Verified by `find tests/fixtures/cisco_xr/*/healthy
+-name '*.txt' | wc -l`.*
 
 **Three deliberate extras.** `192.0.2.1/32` is TEST-NET-1 (RFC 5737) and is
 absent from any real routing table, so asking for it captures the device's
@@ -151,6 +156,10 @@ nettools capture --all --label <label>
 ```
 
 - **Review every captured file by eye before committing.** Fixtures are permanent once pushed. `scrub_output` covers credential- and serial-shaped material, but current XRd output contains none, so the scrubber's only real coverage is its own unit test — it is a safety net, not a reviewer.
+
+  **What the scrubber deliberately does not cover, and why these fixtures are still publishable.** Hostnames, management IPs and **usernames** pass through untouched (`fixtures.py:35`). A full audit of all 563 `.txt` files on 2026-08-17 found no serial, licence key, UDI, certificate or UUID; all 51 IPv4 addresses are RFC 1918 or RFC 5737 documentation space; both IPv6 addresses are `2001:db8::/32`; the ASN is private; and all 34 MAC addresses are containerlab's synthetic `aa:c1:ab` locally-administered range, regenerated on every lab rebuild.
+
+  **`clab` appears in 1,281 lines across the 18 `show-logging-last-200.txt` files** and is kept on purpose. It is containerlab's default account, not a person, and those SSH records are the evidence `log_window`'s whole noise-attribution design is built on — 97% of the corpus, and the reason the reduction rules exist. Scrubbing them would leave a filtered corpus that made the filter look unnecessary. **The one condition: if that account name is ever reused on something real, rotate it** — the account name plus its access pattern is the only genuine signal these fixtures publish.
 - **Check nothing was silently excluded.** `git status --ignored` and confirm the file count, rather than trusting `git add`'s exit code. An unanchored `.gitignore` rule already swallowed a whole directory once in this project (OBS-002), and `git add` reported success while doing it.
 - **Never overwrite an existing label to record a new state.** Add a label.
 - Filenames derive from the command, slugified — e.g. `show-bgp-summary.txt`, `show-bgp-neighbor-10-255-0-12.txt` for parameterized templates.
