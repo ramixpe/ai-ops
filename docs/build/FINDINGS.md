@@ -3484,6 +3484,37 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-124 · Track B · Six of seven items are blocked, and the seventh is done
+
+- **Kind:** blockage
+- **Escalation:** **HALT the track** (§0.5 — the other tracks continue)
+- **Model:** opus-5
+- **What happened:** Track B's seven items, measured against their own recorded dependencies before any implementation:
+
+  | Item | Depends on | State |
+  |---|---|---|
+  | **B1** B-414 log normalisation | **B-206** | blocked — B-206 is Stage 2, excluded by this plan's own Part 1 |
+  | **B2** B-418 temporal shape | B-414 | blocked transitively |
+  | **B3** B-416 event episodes | B-414 | blocked transitively |
+  | **B4** B-420 coverage metadata | — | **done** (pulled forward as T-029a) |
+  | **B5** B-415 clock skew | **B-206** | blocked — *"scope it into the same change as B-206"* |
+  | **B6** B-417 relationship projection | **B-107** | blocked — the `isis_adjacency` flow is not implemented |
+  | **B7** B-419 four tiers | B-101, B-414 | blocked transitively |
+
+  **Nothing on this track is runnable.** Not one item halted on contact with the code; all six were already recorded as blocked, in the dependency column of the backlog the plan was written from.
+- **Evidence:** Dependency column read for all seven. B-420 verified complete in **both** halves: `Coverage` with `gaps()` exists, and `ground_correlation` returns `unbacked_absence_claim` for an absence claim with no coverage — measured, not assumed.
+- **What I did:** Halted the track and recorded it. Two things came out of the measurement that are worth more than the halt.
+
+  **B-414's deferral reason was checked and holds exactly.** The item says reductions 3 and 4 are deliberately not applied because *"at 28 records the aggregate carries no information the records do not."* My first probe read **200** records and I nearly treated the premise as stale. That was the pre-shaping count. After `shape_window` the corpus gives **28 kept records on PE2**, 7 on RR1, 9 on PE3 — the backlog's number, unchanged. Collapsing 28 records into 9 groups costs the verbatim ordering the timeline is built from and gains nothing; the argument is as good today as when it was written.
+
+  **The dependency that blocks the track is the one the plan excluded on the previous page.** Part 1 lists Stage 2 as not running. B-206 is Stage 2. Track B is six items whose common prerequisite the same document had already ruled out — visible from the backlog's dependency column without reading a line of code, and it is the same failure as Track A's: **the plan was written from item titles rather than from item metadata.** Track A's version cost four items of restated work; this one cost a whole track.
+
+  So OBS-123's rule is not enough on its own. A plan item must cite its last finding **and** its dependencies must be checked against the plan's own exclusion list — because an item can be perfectly well described, never previously measured, and still unbuildable.
+- **Needs human review:** no — halted with the reason, per §0.5
+- **Blocks:** Track B in full. Unblocked by B-206 (Stage 2) for five items, by B-107 for one.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**
