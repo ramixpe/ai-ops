@@ -26,7 +26,11 @@
 
 **One operational note.** `~/ai-agent-ops/faultlab/` **is not a git repository**, so anything a round writes there is unarchived by §6.1d's definition (OBS-135). Round 8's payload has been copied into `evidence-archive/round8/` and committed. Round 8b should write somewhere tracked, or be copied in the same session it runs.
 
-**Backlog state** (`BACKLOG.md`, 95 items): 34 `DONE` · 33 `unverified` · 14 `BLOCKED` · 7 `DEFERRED` · 6 `OPEN` · 1 `CLOSED-AS-MEASURED`. `DEFERRED` was added 2026-08-17 because eight examined items had been labelled unexamined (OBS-136). **33 `unverified` should fall by examination, never by relabelling.**
+**Backlog state** (`BACKLOG.md`, 95 items): 36 `DONE` · 25 `DEFERRED` · 18 `OPEN` · 15 `BLOCKED` · 1 `CLOSED-AS-MEASURED` · **0 `unverified`**.
+
+Gate Zero is complete. All 33 `unverified` items were read and given a real state (OBS-140), which found three stale dependencies — B-110's naming blocker was resolved by Q-004, B-202's T-004/T-015 are both `DONE`, and B-209 is `BLOCKED` on T-035 rather than unexamined. No item turned out to be obsolete or already built: the backlog's content was accurate and only its bookkeeping had drifted.
+
+**Do not over-read the zero.** `OPEN` here means nobody has argued against the item, not that anybody has argued for it. The 18 `OPEN` items are almost all MVP-1 feature work (the reasoning gate, the config axis, three more flows) and begin with Part 2.
 
 ---
 

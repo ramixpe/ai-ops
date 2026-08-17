@@ -52,59 +52,86 @@ as the states available to it**, and a missing state does not fail loudly — it
 silently rounds to the nearest one, which is how eight examined items came to be
 labelled unexamined (OBS-136).
 
-**Counts after the correction — 95 items:** 34 `DONE` · 33 `unverified` · 14 `BLOCKED`
-· 7 `DEFERRED` · 6 `OPEN` · 1 `CLOSED-AS-MEASURED`.
+### Gate Zero completed — 2026-08-17
 
-**33 `unverified` is the honest measure of what nobody has looked at**, and it is the
-number to watch. It should fall because items get examined, never because they get
-relabelled — a backlog reaching zero `unverified` by reclassification would have
-reproduced, in its own bookkeeping, the failure this whole reconciliation exists to
-correct.
+All 33 `unverified` items were read and given a real state. **Counts, 95 items:**
+
+| | |
+|---|---|
+| `DONE` | **36** |
+| `DEFERRED` | **25** — examined, unscheduled, each carrying its unblocking condition |
+| `OPEN` | **18** — valid and startable when its phase begins |
+| `BLOCKED` | **15** — cannot proceed |
+| `CLOSED-AS-MEASURED` | **1** |
+| `unverified` | **0** |
+
+**What "examined" means here, stated precisely so the zero is not over-read.** For each
+item this pass established that it is real, that its description still matches the
+repository, that its **stated dependencies are accurate**, and that it belongs to a named
+phase. It did **not** re-derive whether each item is the right thing to build, and it did
+not design any of them. An item at `OPEN` is one nobody has argued against, not one
+anybody has argued for.
+
+**The zero was reached by reading, not by relabelling** — which was the thing to avoid,
+since a backlog reaching zero `unverified` by reclassification would have reproduced, in
+its own bookkeeping, the failure this reconciliation exists to correct.
+
+**Three dependencies turned out to be stale, and each was silently holding an item back:**
+
+- **B-110** (`l3vpn_service` flow) waited on a subject naming scheme. **Q-004 accepted
+  `<pe>:<vrf>` (OBS-035)** — the blocker was resolved and the item never updated.
+- **B-202** (mnemonic → flow lookup) waited on T-004 and T-015. **Both DONE.** Unblocked,
+  merely unscheduled.
+- **B-209** (report relay hardening) was `unverified` and is in fact **`BLOCKED`**: T-035
+  is `TODO` and gated on Q-007's residency decision, so there is no relay to harden.
+
+Two of those three had been startable for some time and read as unexamined. That is the
+cost of the state a reconciliation cannot express, measured (OBS-140).
 
 | Item | State | Evidence | Depends on (state) | Last touched |
 |---|---|---|---|---|
 | **B-101** | `OPEN` | PLAN-V2 P2.1 | MVP-0 complete | OBS-124 |
-| **B-102** | `unverified` | unverified | B-101 (OPEN) | — |
-| **B-103** | `unverified` | unverified | B-101 (OPEN), B-102 (unverified) | — |
-| **B-104** | `unverified` | unverified | MVP-0 complete | — |
-| **B-105** | `unverified` | unverified | B-104 (unverified) | — |
-| **B-106** | `unverified` | unverified | B-104 (unverified) | — |
+| **B-102** | `OPEN` | reasoning gate, half 2. D7; PLAN-V2 P2.1 | B-101 (OPEN) | OBS-140 |
+| **B-103** | `OPEN` | narrowing pass. D6; PLAN-V2 P2.1 | B-101 (OPEN), B-102 (OPEN) | OBS-140 |
+| **B-104** | `OPEN` | config axis. D16; **dependency satisfied — MVP-0 shipped at M4** | — (was: MVP-0 complete) | OBS-140 |
+| **B-105** | `OPEN` | inheritance resolution. D16 | B-104 (OPEN) | OBS-140 |
+| **B-106** | `OPEN` | intent-vs-observed diff. D16 | B-104 (OPEN) | OBS-140 |
 | **B-107** | `OPEN` | PLAN-V2 P2.2 | MVP-0 complete | OBS-124 |
-| **B-108** | `unverified` | unverified | B-107 (OPEN) | — |
-| **B-109** | `unverified` | unverified | B-107 (OPEN) | — |
-| **B-110** | `unverified` | unverified | T-006 finding | — |
+| **B-108** | `OPEN` | flow: `device_health`. PLAN-V2 P2.2 | B-107 (OPEN) | OBS-140 |
+| **B-109** | `OPEN` | flow: `ldp_session`. PLAN-V2 P2.2 | B-107 (OPEN) | OBS-140 |
+| **B-110** | `OPEN` | flow: `l3vpn_service`. **Blocker resolved — Q-004 accepted `<pe>:<vrf>` (OBS-035); the naming scheme it waited on exists** | — (was: T-006 finding) | OBS-140 |
 | **B-111** | `OPEN` | PLAN-V2 P2.3 | T-006 | OBS-086 |
-| **B-112** | `unverified` | unverified | B-101 (OPEN) | — |
+| **B-112** | `OPEN` | free-text flow selection. D5 | B-101 (OPEN) | OBS-140 |
 | **B-113** | `OPEN` | rewording DONE 6637368; consolidation open, P1.4 | MVP-0 complete | OBS-117 |
-| **B-114** | `unverified` | unverified | B-101 (OPEN) | — |
-| **B-115** | `unverified` | unverified | MVP-0 complete | — |
-| **B-201** | `unverified` | unverified | T-005 finding | — |
-| **B-202** | `unverified` | unverified | T-004, T-015 | — |
-| **B-203** | `unverified` | unverified | MVP-1 complete | — |
-| **B-204** | `unverified` | unverified | B-203 (unverified) | — |
-| **B-205** | `unverified` | unverified | B-203 (unverified) | — |
+| **B-114** | `OPEN` | gate model evaluation. D7 | B-101 (OPEN) | OBS-140 |
+| **B-115** | `OPEN` | health-check pipeline. Part 7 open item 4; **MVP-0 shipped** | — (was: MVP-0 complete) | OBS-140 |
+| **B-201** | `DEFERRED` | until Stage 2 — event-driven intake. B-426 is how it gets tested end to end | — | OBS-140 |
+| **B-202** | `DEFERRED` | until Stage 2. **Dependencies satisfied — T-004 and T-015 both DONE**; unblocked, not scheduled | — (was: T-004, T-015) | OBS-140 |
+| **B-203** | `DEFERRED` | until Stage 2 — operational memory. D14 | — | OBS-140 |
+| **B-204** | `DEFERRED` | until B-203 | B-203 (DEFERRED) | OBS-140 |
+| **B-205** | `DEFERRED` | until B-203 | B-203 (DEFERRED) | OBS-140 |
 | **B-206** | `BLOCKED` | platform work B-206a/b | B-206 (BLOCKED), B-206 (BLOCKED) | OBS-124 |
-| **B-207** | `unverified` | unverified | B-201 (unverified) | — |
-| **B-208** | `unverified` | unverified | B-201 (unverified) | — |
-| **B-209** | `unverified` | unverified | T-035 | — |
-| **B-210** | `unverified` | unverified | B-402 (DONE) | — |
-| **B-301** | `unverified` | unverified | — | — |
-| **B-302** | `unverified` | unverified | B-301 (unverified) | — |
-| **B-303** | `unverified` | unverified | B-302 (unverified) | — |
-| **B-304** | `unverified` | unverified | B-301 (unverified), B-303 (unverified) | — |
-| **B-305** | `unverified` | unverified | B-304 (unverified) | — |
-| **B-306** | `unverified` | unverified | B-305 (unverified) | — |
-| **B-307** | `unverified` | unverified | B-305 (unverified) | — |
+| **B-207** | `DEFERRED` | until Stage 2, and **before it ships, not after** — the item says so | B-201 (DEFERRED) | OBS-140 |
+| **B-208** | `DEFERRED` | until Stage 2 — this is the gate on the transition | B-201 (DEFERRED) | OBS-140 |
+| **B-209** | `BLOCKED` | **T-035 is TODO and blocked on Q-007** (Telegram vs Mattermost residency). No relay exists to harden | T-035 (TODO), Q-007 (OPEN) | OBS-140 |
+| **B-210** | `DEFERRED` | until Stage 2 memory. B-402 is DONE, so unblocked and unscheduled | B-402 (DONE) | OBS-140 |
+| **B-301** | `DEFERRED` | until Stage 3. **Nothing else in Stage 3 starts without this** | — | OBS-140 |
+| **B-302** | `DEFERRED` | until B-301 | B-301 (DEFERRED) | OBS-140 |
+| **B-303** | `DEFERRED` | until B-302 | B-302 (DEFERRED) | OBS-140 |
+| **B-304** | `DEFERRED` | until B-301 and B-303 | B-301, B-303 (DEFERRED) | OBS-140 |
+| **B-305** | `DEFERRED` | until B-304 | B-304 (DEFERRED) | OBS-140 |
+| **B-306** | `DEFERRED` | until B-305 | B-305 (DEFERRED) | OBS-140 |
+| **B-307** | `DEFERRED` | until B-305 | B-305 (DEFERRED) | OBS-140 |
 | **B-401** | `BLOCKED` | no Junos device | **a Junos device** | OBS-086 |
 | **B-402** | `DONE` | OBS-103 | — | OBS-103 |
 | **B-403** | `DONE` | OBS-123 | B-107 (OPEN) | OBS-123 |
 | **B-404** | `DONE` | OBS-123 | MVP-0 | OBS-123 |
-| **B-405** | `unverified` | unverified | MVP-1 | — |
-| **B-406** | `unverified` | unverified | Stage 2 | — |
-| **B-407** | `unverified` | unverified | MVP-1 | — |
-| **B-408** | `unverified` | unverified | Stage 2 | — |
-| **B-409** | `unverified` | unverified | MVP-1 | — |
-| **B-410** | `unverified` | unverified | Stage 2 | — |
+| **B-405** | `OPEN` | prompt library expansion. D18; MVP-1 | MVP-1 | OBS-140 |
+| **B-406** | `DEFERRED` | until Stage 2 — gNMI telemetry. D8 | Stage 2 | OBS-140 |
+| **B-407** | `OPEN` | session memory, multi-turn. D14; MVP-1, and small | MVP-1 | OBS-140 |
+| **B-408** | `DEFERRED` | until Stage 2 — probe budgeting matters under event storms. D13 | Stage 2 | OBS-140 |
+| **B-409** | `OPEN` | scale test. Part 6 — the device-count-independence claim is unmeasured | MVP-1 | OBS-140 |
+| **B-410** | `DEFERRED` | until Stage 2 — a runbook for an unattended agent. D3 | Stage 2 | OBS-140 |
 | **B-411** | `DONE` | OBS-123 | — | OBS-123 |
 | **B-412** | `BLOCKED` | **outside this repository** — `~/ai-agent-ops/faultlab/`, which is not a git repo (OBS-135). Cannot be closed from here | — | OBS-075 · OBS-135 |
 | **B-413** | `DONE` | OBS-059 | — | OBS-059 |

@@ -1575,6 +1575,29 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-140 · Gate Zero · Examining 33 items found three stale dependencies and no new work
+
+- **Kind:** audit
+- **Escalation:** NOTE
+- **Model:** opus-5
+- **What happened:** Read all 33 `unverified` backlog items and gave each a real state. `unverified` is now **0**, reached by reading rather than relabelling. Final counts across 95 items: 36 `DONE` · 25 `DEFERRED` · 18 `OPEN` · 15 `BLOCKED` · 1 `CLOSED-AS-MEASURED`.
+- **Evidence:** `BACKLOG.md` reconciliation table; `TRACKER.md` for T-004/T-015/T-035; Q-004 in the Open Questions table.
+- **What I did:** **The examination found three stale dependencies, and that is its entire yield.**
+
+  - **B-110** (`l3vpn_service` flow) was recorded as waiting on the T-006 subject-naming finding. **Q-004 accepted `<pe>:<vrf>` (OBS-035)** on the grounds that RD is reused across PEs. The blocker was resolved and the item was never updated.
+  - **B-202** (mnemonic → flow lookup) waited on T-004 and T-015. **Both `DONE`.** Unblocked, merely unscheduled.
+  - **B-209** (report relay hardening) was `unverified` and is actually **`BLOCKED`** — T-035 is `TODO`, gated on Q-007's residency decision, so there is no relay to harden.
+
+  Two of the three had been startable for some time while reading as unexamined. **A dependency is a claim, and claims go stale**; nothing in the backlog re-checked whether a stated blocker still blocked, so an item could be freed by work elsewhere and stay parked indefinitely. Cheap fix, and the same shape as OBS-137's: *when something is resolved, grep for what was waiting on it.*
+
+  **What the pass did not find is worth recording too.** No item turned out to be obsolete, duplicated, or already built. The backlog's *content* was accurate; only its *bookkeeping* had drifted. That is a reassuring result and it bounds what this kind of audit is for — it corrects the index, not the substance.
+
+  **And a caveat against over-reading the zero.** "Examined" here means: the item is real, its description still matches the repository, its stated dependencies are accurate, and it belongs to a named phase. It does **not** mean anyone has re-argued that the item is the right thing to build. **An item at `OPEN` is one nobody has argued against, not one anybody has argued for** — and a state column cannot carry that difference, which is exactly the limitation OBS-136 was about, one turn later and now stated in the document rather than discovered again.
+- **Needs human review:** no
+- **Blocks:** nothing. B-110 and B-202 are now visibly startable when their phases begin.
+
+---
+
 <!--
 Copy this block for each new entry.
 
