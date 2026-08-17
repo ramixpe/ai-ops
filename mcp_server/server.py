@@ -7,6 +7,7 @@ import functools
 import inspect
 import json
 import logging
+import os
 import sys
 from typing import Any, Callable
 
@@ -778,6 +779,23 @@ def protect_stdio() -> list[str]:
         changed.append("installed a stderr handler on an unconfigured root logger")
 
     return changed
+
+
+# --------------------------------------------------------------------------- #
+# Surface selection (B-479). `classic` (default) is everything registered
+# above, byte-identical in behaviour to before this flag existed. `staged`
+# replaces it with five stage-shaped tools plus a probe -- see
+# `staged_surface.py` for why both exist (the §9/§10 A/B must stay
+# measurable) and why apply() fails loudly rather than half-applying.
+# --------------------------------------------------------------------------- #
+
+NETTOOLS_MCP_SURFACE_ENV = "NETTOOLS_MCP_SURFACE"
+ACTIVE_SURFACE = os.getenv(NETTOOLS_MCP_SURFACE_ENV, "classic").strip().lower()
+
+if ACTIVE_SURFACE == "staged":
+    from . import staged_surface as _staged
+
+    _staged.apply(sys.modules[__name__])
 
 
 def main() -> None:

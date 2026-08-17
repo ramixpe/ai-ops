@@ -201,3 +201,20 @@ see. Repeated diffs here now compare against a **stable** baseline.
 The guarantee is structural rather than a decorator's name: this module does not
 import `save_snapshot` or `save_golden_snapshot` at all, so no tool it exposes
 can reach one. `tests/test_mcp_server.py` asserts that.
+
+## Two surfaces (B-479)
+
+`NETTOOLS_MCP_SURFACE` selects what this server registers:
+
+- **`classic`** (default) — the full per-function tool set listed above,
+  byte-identical in behaviour to before the flag existed.
+- **`staged`** — five stage-shaped tools plus a probe (`explore_lab`,
+  `check_lab`, `lookup_lab`, `investigate_lab`, `history_lab`, `probe_lab`),
+  each a thin composition of the same already-safe functions through the same
+  sanitisation boundary, with the active probe still separately annotated.
+
+Both exist because the tool-selection A/B (`MCP-EXPERIMENT.md` §9/§10,
+Appendix A) needs both surfaces measurable; the staged manifest is
+deliberately smaller than the classic one — a test asserts it — and the
+default flips only after the outstanding measurement lands.
+

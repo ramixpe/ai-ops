@@ -202,6 +202,14 @@ SETTINGS: tuple[Setting, ...] = (
         "evidence_store",
         choices=_EVIDENCE_BACKEND_CHOICES,
     ),
+    Setting(
+        "NETTOOLS_MCP_SURFACE", "enum", "classic",
+        "Which MCP tool surface the server registers: 'classic' (the full "
+        "per-function set) or 'staged' (five stage-shaped tools plus a probe, "
+        "B-479 -- both exist so the selection A/B stays measurable).",
+        "mcp_server.server",
+        choices=("classic", "staged"),
+    ),
     # -- inventory_model.py --
     Setting(
         "NETTOOLS_INVENTORY", "path", None,
