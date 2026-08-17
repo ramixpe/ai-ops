@@ -198,6 +198,13 @@ cost of the state a reconciliation cannot express, measured (OBS-140).
 | **B-467** | `OPEN` | **parsing bounds structure, not content** — 17,916 chars of device-authored log prose survive `sanitize()` under `parsed.records[].text`, and the correlate prompt embeds shaped records verbatim. Free-text device fields need provenance typing + delimited quoting + a per-prompt cap; subsumes the expert review's P0-02/P2-06 | — | DEEP-REVIEW §2.1 |
 | **B-468** | `DONE` | `_probe_exit` + `_envelope_exit` in `cli.py`; 6 tests both directions. Partial loss exits 0 deliberately and says why | — | DEEP-REVIEW §2.2-2.3 |
 | **B-469** | `DONE` | catch narrowed to `ValueError`; `origin_unresolved` carried in the payload; the wrong comment (`unevaluated`) corrected against the code | — | DEEP-REVIEW §2.5 |
+| **B-470** | `OPEN` | **model-egress projector** (expert review P0-02): one typed projection every model path must use; no raw fallback. Rides with B-467. Wave 1-A | — | FIX-PLAN |
+| **B-471** | `OPEN` | **agent trust labelling** (P0-03 cheap half): `trust_class: exploratory`, unknown stop reason = incomplete not success, CLI label. Wave 2-B | B-470 (OPEN) | FIX-PLAN |
+| **B-472** | `OPEN` | **agent deadline is real** (P1-01): absolute deadline propagated to provider timeouts; tools not started when budget exhausted. Wave 2-B | — | FIX-PLAN |
+| **B-473** | `OPEN` | **active probes distinguishable from passive reads in MCP annotations** (P1-03). Wave 1-D | — | FIX-PLAN |
+| **B-474** | `OPEN` | **atomic persistence** (P1-07 + DEEP-REVIEW §2.4): tmp+fsync+rename, one-transaction golden + unique index, guarded reads, device-name validation at the storage boundary. Wave 1-C | — | FIX-PLAN |
+| **B-475** | `OPEN` | **parallel fabric-health paths** (P1-08 scoped): pool `assess_lab_fabric_health` and the agent's `_assess_health`; full scheduler stays future. Waves 1-D + 2-B | — | FIX-PLAN |
+| **B-476** | `OPEN` | **settings validator + `nettools config show/check`** (P2-02 scoped): loud warnings on malformed env values; effective config, secrets redacted. Wave 1-E | — | FIX-PLAN |
 
 **Totals:** `BLOCKED` 13 · `DONE` 33 · `OPEN` 7 · `unverified` 42 · **95 items**
 
