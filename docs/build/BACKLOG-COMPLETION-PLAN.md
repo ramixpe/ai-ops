@@ -38,6 +38,51 @@ A change to any of these is a HALT on the track that wants it, escalated to the 
 
 Track A owns the descent's contracts because most semantic change lands there. B and C consume them and may not alter them.
 
+## 0.2a A plan item cites the last finding that touched it
+
+Added 2026-08-17, after Track A ran.
+
+> **Every item in a plan must cite the most recent `FINDINGS.md` entry that
+> touched it, or state explicitly that none has.**
+
+**Four of Track A's five items were already done or already measured false**, and
+the plan said otherwise because it was written from `BACKLOG.md`'s item *titles*
+rather than from the findings that had closed them:
+
+| Item | The plan said | The record already said |
+|---|---|---|
+| A2 · B-411 | a read timeout returns `status: success` | **OBS-099** measured the mechanism does not exist in netmiko 4.7 |
+| A3 · B-425 | usage not instrumented | done at B-425 |
+| A4 · B-403 | consolidation to judge | done on instruction, OBS-104 |
+| A5 · B-404 | six parsers predate §0.10 | done, all six report `unaccounted_lines` |
+
+**This is §0.13's data face applied to a plan.** A backlog entry records *what
+someone thought at filing time*. Reading it as a record of *what is* is the same
+error as reading a survey as a census — the entry was accurate when written and
+the conclusion drawn from it was not.
+
+It is worth a mechanical rule rather than more care for the usual reason: the
+plan's author cannot see the gap from inside, because a stale entry and a
+current one are indistinguishable in `BACKLOG.md`. A citation is checkable by
+someone who was not there.
+
+**In practice:** an item reads `B-4xx — description (last touched: OBS-nnn)` or
+`(no findings entry)`. Writing the second is itself informative — an item nobody
+has measured is a different risk from one measured and left open.
+
+**And the citation is not sufficient on its own.** Track B (OBS-124) produced
+the other half: six of its seven items were blocked on **B-206**, which this
+plan's Part 1 excludes on the previous page. None of them had a stale finding —
+most had none at all. They were simply unbuildable, and the backlog's dependency
+column said so.
+
+> **A plan item cites its last finding, *and* its dependencies are checked
+> against the plan's own exclusion list.**
+
+Track A's version of this cost four items of restated work. Track B's cost the
+whole track. Both came from writing a plan out of item *titles* rather than item
+*metadata*, and both are invisible to a reader who trusts the plan.
+
 ## 0.3 Model delegation
 
 Unchanged from §0.9. Opus 5 orchestrates and owns every decision and every acceptance judgement. Sonnet 5 implements against a precise specification. Fable 5 is consulted on a hard call and logged as `consultation`.
@@ -152,7 +197,17 @@ The six hand-written parsers predate §0.10. Deliberate inconsistency, scheduled
 
 ---
 
-## TRACK B — `feat/evidence-reduction`
+## TRACK B — `feat/evidence-reduction` · **HALTED 2026-08-17 (OBS-124)**
+
+> **Six of seven items are blocked on dependencies this plan's own Part 1
+> excludes; the seventh (B-420) is already done.** B-414, B-415 depend on
+> **B-206**, which is Stage 2. B-418, B-416, B-419 depend on B-414. B-417
+> depends on **B-107**, an unimplemented flow. Nothing here is runnable, and it
+> was visible from the backlog's dependency column before any code was read.
+>
+> The rule this produced is in §0.2a, extended: a plan item cites its last
+> finding **and** its dependencies are checked against the plan's own exclusion
+> list.
 
 **Owns:** `ShapedWindow` and the reduction pipeline. **Model:** Sonnet 5, Opus 5 judging.
 

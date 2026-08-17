@@ -545,6 +545,32 @@ all 21 rewritten to be **uniform but uninformative** — and that is a surface
 nobody would ship to measure a distinction nobody would act on. Recorded as a
 known limit rather than pretended away.
 
+### Confounded and unfalsifiable are not the same objection
+
+Recorded 2026-08-17, because the distinction decided a sequencing question and
+is worth having in general.
+
+The operator's reason for not consolidating the 21 tools before the LM Studio
+re-test was that it would **confound** §9's prediction: selection would change
+for two reasons at once. That is true and it understates it.
+
+> **A confounded experiment gives an ambiguous answer. An unfalsifiable one
+> gives no answer at all.**
+
+§9's discriminator is *content versus contrast*, and **contrast is a property of
+the 21-tool surface** — twenty descriptions alike, one different. Collapse to
+five and there is no longer a structure in which *"the outlier was selected"*
+can be true or false. The prediction does not become hard to interpret; it stops
+being a prediction.
+
+The same applies to the between-surface A/B that Appendix A makes possible: both
+arms must contain the same tools, or they are not two measurements of one thing.
+
+**The general form**, which is the reason to record it: before sequencing a
+change ahead of a measurement, ask not only *would this muddy the result* but
+*would the result still be capable of being wrong*. The second is a stronger
+objection and it is the one that settles the order.
+
 ### What the baseline capture buys instead
 
 Appendix A preserves all 21 original descriptions verbatim. That makes the
