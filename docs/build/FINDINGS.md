@@ -1889,6 +1889,29 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-151 · Deep review · The expert review verified finding-by-finding, and the sharpest defect was one it missed
+
+- **Kind:** audit
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** The operator commissioned a third-eye review (`docs/EXPERT-PEER-REVIEW-2026-08-17.md`) and asked for a deep line-by-line pass of my own. Written up in `docs/DEEP-REVIEW-2026-08-17.md`: every load-bearing claim in theirs re-derived against source (twelve confirmed, several sharpened, none materially wrong), plus what this pass found that theirs did not.
+- **Evidence:** fourteen live probes against the committed fixtures, each quoted with output in the review document.
+- **What I did:** Filed **B-467/B-468/B-469**; fixed B-468 and B-469 plus two §2.6 defects the same day; B-467 is the substantial one and stays open.
+
+  **The finding that matters (B-467): parsing bounds *structure*, not *content*.** The invariant — no *unparsed* device text reaches a model — is honoured everywhere it applies and does not bound prompt injection: `sanitize()` leaves `parsed` intact, and `get_lab_logging`'s parsed records carry **17,916 measured characters** of verbatim device-authored prose in one sanitised return. The trusted path is included: `build_correlate_prompt` embeds all 28 shaped records' text verbatim. Syslog is attacker-writable from the network. What contains it today is **output-side** — grounded timelines, B-453, non-authoritative labelling — so an injected line cannot fabricate a *cited* finding, but the input side has no content typing at all. The expert review's P2-06 said a future parser *could* introduce a raw field; the measured reality is today's parser already ships the prose.
+
+  **B-468, both halves measured then fixed.** `nettools ping` exited 0 on 100% packet loss — `loss_pct` was parsed, carried, and never read by the exit computation, which is **shape 7 in the CLI's own logic**. And `unsupported` exited 1 from the per-device commands against a contract the code states three times. Partial loss exits 0 deliberately and the docstring says why.
+
+  **B-469, fixed.** `except (ValueError, Exception)` around `origin_prefix_for` would have converted any future programming error into a silent switch of rung 5's semantics to the ALL_HEALTHY fallback — the exact residual `ROUND-6.md` §2.3 seals as the remaining trust-loss exposure — fabric-wide, with every collector-injecting test green. Narrowed to `ValueError`; the degradation now travels in the payload as `origin_unresolved`. **The comment on that catch also claimed the rung goes `unevaluated`, and the code it sat on falls back to all-interfaces** — a doc-versus-code lie inside one function.
+
+  **Also fixed:** dead code in `run_templates` (an unreachable second `sender` branch), and the audit log recording the configured retry maximum instead of retries consumed — an auth failure was logged as having retried once when the auth check's whole point is that it never retries. `_with_retries` gained an `on_failure` hook so the count is what actually hit the wire.
+
+  **Scoring the third-eye review:** P0-01/02/03, P1-01/03/07/08/09, P2-01/02/06 all confirmed at source, several sharpened (the SQLite golden failure direction is *loss*, not duplication; two read paths crash on the truncated files the write path can produce). Nothing materially wrong found in it. Its Tier 1–4 roadmap maps almost item-for-item onto the existing backlog — **both reviews and the backlog now agree on the same list, so the next level is sequencing, not ideas.**
+- **Needs human review:** no
+- **Blocks:** nothing. B-467 is the first row of the reconciled priority order and should ride with the model-egress projector.
+
+---
+
 <!--
 Copy this block for each new entry.
 

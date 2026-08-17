@@ -252,6 +252,7 @@ def _with_retries(
     retries: int,
     backoff: float,
     on_retry: Callable[[int], None] | None = None,
+    on_failure: Callable[[int], None] | None = None,
 ) -> Any:
     """Call ``fn()`` with bounded retries and exponential backoff on transient failure.
 
@@ -261,6 +262,16 @@ def _with_retries(
     succeed. ``on_retry(attempts_consumed)`` fires once, only on eventual
     success after at least one retry, so callers can record that a retry
     happened without threading a counter through every call site.
+
+    ``on_failure(retries_consumed)`` fires once, just before the final raise,
+    with the retries *actually* consumed -- **zero for a non-transient failure
+    raised on the first attempt**, ``attempts - 1`` when the budget was truly
+    exhausted. It exists because the audit log used to record the configured
+    maximum for every failure: an authentication failure was logged as having
+    retried once when the whole point of the auth check is that it never
+    retries. An audit field that is approximately right is worse than one
+    that is absent -- a reviewer reconciling NETTOOLS_LOG against device-side
+    AAA records needs the count of attempts that really hit the wire.
     """
 
     attempts = max(1, retries)
@@ -269,6 +280,8 @@ def _with_retries(
             result = fn()
         except Exception as exc:  # noqa: BLE001 - classified below; re-raised once exhausted.
             if attempt == attempts or not _is_transient_failure(exc):
+                if on_failure is not None:
+                    on_failure(attempt - 1)
                 raise
             if backoff > 0:
                 time.sleep(backoff * (2 ** (attempt - 1)))
@@ -384,6 +397,7 @@ def _netmiko_send_commands(
                         retries=effective_retries,
                         backoff=effective_backoff,
                         on_retry=lambda used, c=command: retries_used.__setitem__(c, used),
+                        on_failure=lambda used, c=command: retries_used.__setitem__(c, used),
                     )
                     outputs[command] = output
                     _audit_log(
@@ -405,7 +419,11 @@ def _netmiko_send_commands(
                             "duration_ms": round((time.monotonic() - started) * 1000, 1),
                             "status": "error",
                             "error": str(exc),
-                            "retries": effective_retries - 1,
+                            # Populated by _with_retries's on_failure hook --
+                            # the retries actually consumed, which is zero for
+                            # a non-transient (auth) failure and the exhausted
+                            # budget otherwise. See _with_retries's docstring.
+                            "retries": retries_used.get(command, 0),
                         }
                     )
     except Exception as exc:  # noqa: BLE001 - the session itself failed; no command ran.
@@ -889,18 +907,6 @@ def run_templates(
         result["status"] = STATUS_ERROR
         result["errors"].append(str(exc))
         result["data"]["commands"] = {}
-        return result
-
-    if sender is not None:
-        outputs: dict[str, str] = {}
-        for command in commands:
-            try:
-                outputs[command] = sender(device, command)
-            except Exception as exc:  # noqa: BLE001 - structured errors, not exceptions.
-                result["errors"].append(f"{command}: {exc}")
-        result["data"]["commands"] = outputs
-        if result["errors"]:
-            result["status"] = STATUS_ERROR
         return result
 
     outputs, errors, retries = _netmiko_send_commands(

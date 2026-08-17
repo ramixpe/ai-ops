@@ -741,3 +741,68 @@ def test_main_propagates_argparse_usage_errors(monkeypatch):
     with pytest.raises(SystemExit) as excinfo:
         cli.main()
     assert excinfo.value.code == 2
+
+
+# --------------------------------------------------------------------------- #
+# B-468 -- exit codes honour their own contracts
+# --------------------------------------------------------------------------- #
+
+
+def _probe_result(status="success", parse_status="ok", received="5"):
+    return {
+        "tool": "run_template", "device": "PE1", "status": status,
+        "timestamp": "t", "errors": [],
+        "data": {"parse_status": parse_status,
+                 "parsed": {"meta": {"received": received, "sent": "5"}}},
+    }
+
+
+def test_a_ping_with_total_loss_exits_nonzero():
+    """Measured before the fix: loss_pct 100, received 0 -- and exit 0.
+
+    `ping && next-step` means the target answered; here it meant the SSH
+    session to the device worked. The loss percentage was parsed, carried,
+    and never read by the exit computation -- shape 7, in the CLI itself.
+    """
+
+    assert cli._probe_exit(_probe_result(received="0")) == cli.EXIT_WARNING
+
+
+def test_a_ping_that_reaches_its_target_still_exits_zero():
+    """The companion: the fix must not fail the healthy case."""
+
+    assert cli._probe_exit(_probe_result(received="5")) == cli.EXIT_OK
+
+
+def test_partial_loss_exits_zero_deliberately():
+    """One lost packet of five is a quality signal, not unreachability."""
+
+    assert cli._probe_exit(_probe_result(received="4")) == cli.EXIT_OK
+
+
+def test_an_unparsed_probe_cannot_claim_success():
+    """A probe whose output could not be read has no basis for exit 0."""
+
+    assert cli._probe_exit(_probe_result(parse_status="failed")) == cli.EXIT_WARNING
+
+
+def test_unsupported_exits_zero_from_the_per_device_cli():
+    """The contract, stated three times in the docs, now held by the CLI too.
+
+    `unsupported` "is a property of the fabric, not a failure" and
+    `check_fabric` stays green on it -- but the per-device commands had two
+    buckets, so the same fact was green from `nettools fabric` and red from
+    `nettools sr <junos-device>`.
+    """
+
+    unsupported = {"tool": "run_approved_commands", "device": "J1",
+                   "status": "unsupported", "timestamp": "t",
+                   "data": {}, "errors": []}
+    assert cli._envelope_exit(unsupported) == cli.EXIT_OK
+
+
+def test_a_real_error_still_exits_nonzero():
+    """The other companion: widening unsupported must not widen error."""
+
+    error = {"status": "error", "errors": ["x"], "data": {}}
+    assert cli._envelope_exit(error) == cli.EXIT_WARNING

@@ -193,6 +193,15 @@ class InvestigationResult:
     correlation_paraphrase: dict | None = None
     correlation_paraphrase_status: str = NOT_ATTEMPTED
 
+    #: Why the reverse-path member set could not be resolved, when it could
+    #: not. `None` means the origin resolved (or the flow never needed it).
+    #: **B-469**: when this is set, rung 5 was evaluated over ALL physical
+    #: interfaces (`ALL_HEALTHY`) instead of the path member set -- the exact
+    #: fallback ROUND-6.md §2.3 names as the residual trust-loss exposure --
+    #: and a reader of the payload deserves to know the semantics changed and
+    #: why, rather than inferring it from the rung's member count.
+    origin_unresolved: str | None = None
+
     #: Non-semantic fixes applied to a model response, e.g. a stripped fence.
     repairs: tuple[str, ...] = field(default_factory=tuple)
     #: What the model calls cost, when the analyst reports it (B-425). `None`
@@ -248,6 +257,7 @@ class InvestigationResult:
             "flow": self.flow,
             "finding": descent.finding,
             "reason": descent.reason,
+            "origin_unresolved": self.origin_unresolved,
             # Suppressed for the findings that name no cause -- see
             # `_FINDINGS_WITHOUT_A_CAUSE`. The rungs are still all present under
             # "rungs", so a broken-but-off-path rung is reported, just not as an
@@ -552,12 +562,25 @@ def investigate(
     resolve = resolver or inventory_resolver
 
     # The route the *subject* device holds back toward here, for a path-scoped
-    # rung. A device with no router ID has no reverse route to look up, and the
-    # rung is `unevaluated` rather than falling back to every interface.
+    # rung. A device with no router ID (or absent from the inventory) has no
+    # reverse route to look up, and rung 5 then falls back to evaluating ALL
+    # physical interfaces with ALL_HEALTHY -- the previous comment here said
+    # "unevaluated", which was wrong about the code it sat on.
+    #
+    # B-469: the catch is ValueError ONLY (InventoryError subclasses it), which
+    # is exactly what `origin_prefix_for` raises for its two legitimate gaps.
+    # It used to be `except (ValueError, Exception)` -- a blanket that would
+    # have converted a future programming error into a silent switch of rung
+    # 5's semantics, fabric-wide, with every collector-injecting test still
+    # green. The fallback is the exact residual ROUND-6.md §2.3 seals as the
+    # remaining trust-loss exposure, so degrading into it must be deliberate,
+    # narrow, and visible in the payload.
+    origin_unresolved: str | None = None
     try:
         origin = origin_prefix_for(device)
-    except (ValueError, Exception):  # noqa: BLE001 -- an inventory gap, not a crash
+    except ValueError as exc:
         origin = None
+        origin_unresolved = str(exc)
 
     epoch: EvidenceEpoch | None = None
     coherence = None
@@ -599,6 +622,7 @@ def investigate(
             )
             return InvestigationResult(
                 device=device, subject=subject, flow=flow, descent=refused,
+                origin_unresolved=origin_unresolved,
                 # Still rendered. The refusal is the answer, and B-439's
                 # contract is that the authoritative half is always produced --
                 # a `None` here would send a caller to a model's prose for the
@@ -640,7 +664,7 @@ def investigate(
             device=device, subject=subject, flow=flow, descent=descent,
             report=report, report_status=report_status,
             correlation=correlation, correlation_status=correlation_status,
-            coverage=coverage,
+            coverage=coverage, origin_unresolved=origin_unresolved,
         )
 
     # -- The paraphrase. A model, and nothing downstream may prefer it. ------
@@ -695,6 +719,7 @@ def investigate(
         report=report, report_status=report_status,
         correlation=correlation, correlation_status=correlation_status,
         correlation_grounding=correlation_grounding, coverage=coverage,
+        origin_unresolved=origin_unresolved,
         paraphrase=paraphrase, paraphrase_status=paraphrase_status,
         paraphrase_grounding=paraphrase_grounding,
         correlation_paraphrase=correlation_paraphrase,

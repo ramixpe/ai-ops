@@ -698,3 +698,29 @@ def test_unreported_usage_is_distinguishable_from_zero_usage():
     assert "did not report" in silent.summary()
     assert "did not report" not in free.summary()
     assert (silent + free).reported is False, "one unreported call taints the total"
+
+
+def test_an_unresolvable_origin_is_visible_in_the_payload():
+    """B-469's output half: the degradation is stated, not inferred.
+
+    When the origin cannot resolve, rung 5 is evaluated over ALL physical
+    interfaces instead of the path member set -- a semantics change the
+    payload must carry, because it is the exact fallback ROUND-6.md §2.3
+    seals as the residual trust-loss exposure.
+    """
+
+    from agent_nettools.investigation import InvestigationResult
+
+    result = InvestigationResult(
+        device="RR1", subject="10.255.0.12", flow="bgp_session",
+        descent=_BROKEN_DESCENT,
+        origin_unresolved="'RR1' has no router_id in the inventory",
+    )
+    payload = result.to_payload()
+    assert payload["origin_unresolved"] == "'RR1' has no router_id in the inventory"
+
+    resolved = InvestigationResult(
+        device="RR1", subject="10.255.0.12", flow="bgp_session",
+        descent=_BROKEN_DESCENT,
+    )
+    assert resolved.to_payload()["origin_unresolved"] is None

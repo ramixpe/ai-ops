@@ -197,6 +197,24 @@ def _resolve_device(name: str | None) -> str:
     return name or get_default_device_name()
 
 
+def _envelope_exit(result: dict) -> int:
+    """Exit code for a single tool envelope. B-468.
+
+    ``unsupported`` exits 0: the project's documented position -- in three
+    places -- is that a platform lacking a command for an intent *"is a
+    property of the fabric, not a failure"*, and `check_fabric` already stays
+    green on it. Before this helper the per-device commands had only two
+    buckets, so the same fact was green from `nettools fabric` and red from
+    `nettools sr <junos-device>`; the front ends disagreed about a contract
+    the code itself states.
+    """
+
+    status = result.get("status")
+    if status in ("success", "unsupported"):
+        return EXIT_OK
+    return EXIT_WARNING
+
+
 def _cmd_inventory(args: argparse.Namespace) -> int:
     result = list_devices()
     _emit(result, args)
@@ -207,7 +225,7 @@ def _cmd_check(args: argparse.Namespace) -> int:
     device = _resolve_device(args.device)
     result = CHECK_TOOLS[args.check](device)
     _emit(result, args)
-    return EXIT_OK if result.get("status") == "success" else EXIT_WARNING
+    return _envelope_exit(result)
 
 
 def _cmd_fabric(args: argparse.Namespace) -> int:
@@ -219,37 +237,76 @@ def _cmd_fabric(args: argparse.Namespace) -> int:
 def _cmd_route(args: argparse.Namespace) -> int:
     result = get_route(args.device, args.prefix)
     _emit(result, args)
-    return EXIT_OK if result.get("status") == "success" else EXIT_WARNING
+    return _envelope_exit(result)
 
 
 def _cmd_bgp_neighbor(args: argparse.Namespace) -> int:
     result = get_bgp_neighbor(args.device, args.address)
     _emit(result, args)
-    return EXIT_OK if result.get("status") == "success" else EXIT_WARNING
+    return _envelope_exit(result)
 
 
 def _cmd_interface(args: argparse.Namespace) -> int:
     result = get_interface(args.device, args.name)
     _emit(result, args)
-    return EXIT_OK if result.get("status") == "success" else EXIT_WARNING
+    return _envelope_exit(result)
 
 
 def _cmd_logging(args: argparse.Namespace) -> int:
     result = get_logging(args.device, args.count)
     _emit(result, args)
-    return EXIT_OK if result.get("status") == "success" else EXIT_WARNING
+    return _envelope_exit(result)
+
+
+def _probe_exit(result: dict) -> int:
+    """Exit code for an active probe: the PROBE's outcome, not the transport's. B-468.
+
+    Four decades of `ping && next-step` mean *the target answered*. Before
+    this, `nettools ping` exited 0 whenever the SSH session to the device
+    worked -- measured on the committed fixtures, a ping with `loss_pct: 100`
+    and 0 of 5 received exited success, inverting the convention at the exact
+    place an operator's muscle memory is strongest. The loss percentage was
+    parsed, carried in the payload, and never read by the exit computation --
+    shape 7 (`BUILD-PLAN.md` §0.13's catalogue) in the CLI's own logic.
+
+    The rule: transport or parse failure exits 1 as before; a parsed probe
+    with **zero received** exits 1; anything received exits 0. Partial loss
+    exits 0 deliberately -- one lost packet of five is a quality signal, not
+    "the target is unreachable", and the payload carries the percentages for
+    a caller that wants a stricter policy.
+
+    `unsupported` exits 0, same as `_envelope_exit` and for the same reason.
+    """
+
+    status = result.get("status")
+    if status == "unsupported":
+        return EXIT_OK
+    if status != "success":
+        return EXIT_WARNING
+    data = result.get("data") or {}
+    if data.get("parse_status") != "ok":
+        # The probe ran and its output could not be read: no basis for exit 0.
+        return EXIT_WARNING
+    meta = (data.get("parsed") or {}).get("meta") or {}
+    try:
+        received = int(meta.get("received", 0))
+    except (TypeError, ValueError):
+        return EXIT_WARNING
+    return EXIT_OK if received > 0 else EXIT_WARNING
 
 
 def _cmd_ping(args: argparse.Namespace) -> int:
     result = ping_device(args.device, args.address)
     _emit(result, args)
-    return EXIT_OK if result.get("status") == "success" else EXIT_WARNING
+    return _probe_exit(result)
 
 
 def _cmd_traceroute(args: argparse.Namespace) -> int:
     result = traceroute_device(args.device, args.address)
     _emit(result, args)
-    return EXIT_OK if result.get("status") == "success" else EXIT_WARNING
+    # Traceroute has no received-count semantics -- an incomplete trace is
+    # still information -- so its exit stays envelope-shaped.
+    return _envelope_exit(result)
 
 
 def _cmd_analyze(args: argparse.Namespace) -> int:
