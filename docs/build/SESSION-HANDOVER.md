@@ -1,14 +1,38 @@
 # Session Handover
 
-**2026-08-16.** Branch `feat/investigation-layer`. Tree green: **1391 pass, 22 skipped**, lint clean, four frozen files byte-identical against `6629a2c`.
+**2026-08-17.** Branch `feat/investigation-layer`. Tree green: **1786 pass, 24 skipped**, lint clean, four frozen files byte-identical against `6629a2c`.
 
-> ## ✅ The HALT is resolved and B-428 has landed
+> ## Where things stand
 >
-> Q-020 answered: **clause 2 dropped** — it was an error, and an empty causal chain with rung 1 as the cause is necessary by construction, not contradictory. B-428 shipped as **clause 1 alone**.
+> **Publication work is done.** `CLAUDE.md` split (941 → 216 lines) with the architecture reference at `docs/design/architecture.md`; `docs/README.md` regenerated from the tree with a reader's path; `CONTRIBUTING.md` written; `evidence-archive/README.md` written; the README's phase-numbered headings renamed and CI's `offline-demo` claim finally documented.
 >
-> **The most important line in `MVP0-REVIEW.md` has been corrected.** *"It cannot tell you nothing is wrong"* no longer holds.
+> **The H2 claims audit found ten cross-file contradictions**, all fixed (OBS-137). Two were substantive: `MVP0-REVIEW.md` used the fabricated timestamp as evidence *the grounding gate works* when the correlation path had no gate at all, and `glossary.md` plus the LLD still taught the pre-Q-017 walk rule.
 >
-> Nothing else was started. **B-430, B-431, B-432, tracks B and C, and MVP-1 are all untouched.**
+> **Round 8 is scored** (`ROUND-8.md` §5). Four claims confirmed; §2a.2 is **void rather than refuted** — the sampler's socket regex read `False` in all 195 Established samples, so the falsifier fired on an instrument that could not fail it (OBS-133). Round 8b is re-sealed in §6 and needs a lab window.
+>
+> **B-453 shipped.** Identifier containment is wired into `ground_report`.
+
+## What is waiting on the operator
+
+| | |
+|---|---|
+| **Round 8b** | Next lab window. §6.2's three preconditions must hold before it runs; §6.3 requires sub-200 ms sampling of the socket field |
+| **B-440 round 6** | After 8b. Needs a sealed prediction, which can be written any time |
+| **MCP re-test** | Prediction sealed and pushed in `MCP-EXPERIMENT.md` §9 |
+| **B-113 consolidation** | Blocked on the re-test — unfalsifiable if done first |
+| **B-464** | MD5 round. Lower priority; the analysis is already sound |
+| **`pyproject.toml`** | `authors` and `urls` deliberately absent. Add before publishing to an index |
+| **`clab` in fixtures** | Kept, with the reason recorded. Rotate that account if it is reused on anything real |
+
+**One operational note.** `~/ai-agent-ops/faultlab/` **is not a git repository**, so anything a round writes there is unarchived by §6.1d's definition (OBS-135). Round 8's payload has been copied into `evidence-archive/round8/` and committed. Round 8b should write somewhere tracked, or be copied in the same session it runs.
+
+**Backlog state** (`BACKLOG.md`, 95 items): 34 `DONE` · 33 `unverified` · 14 `BLOCKED` · 7 `DEFERRED` · 6 `OPEN` · 1 `CLOSED-AS-MEASURED`. `DEFERRED` was added 2026-08-17 because eight examined items had been labelled unexamined (OBS-136). **33 `unverified` should fall by examination, never by relabelling.**
+
+---
+
+## Earlier: B-428 and the resolved HALT
+
+Q-020 answered: **clause 2 dropped** — it was an error, and an empty causal chain with rung 1 as the cause is necessary by construction, not contradictory. B-428 shipped as **clause 1 alone**.
 
 ---
 
