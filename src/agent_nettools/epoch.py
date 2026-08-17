@@ -84,7 +84,11 @@ from . import flows
 from .checks import CheckResult
 from .descent import RungOutcome, evaluate_rung, resolve_devices
 from .interface_kind import physical_members
-from .network_tools import collect_evidence, run_intent, run_template
+from .network_tools import (
+    collect_evidence,
+    run_intent,
+    run_templates_split,
+)
 
 __all__ = [
     "DEFAULT_SKEW_BOUND_SECONDS",
@@ -420,11 +424,27 @@ def collect_epoch(
             for key, envelope in evidence.items()
         )
 
+        # Every template for this device in **one** session, not one login each.
+        # Measured before this was batched: 7 logins per epoch, 5 of them to run
+        # a single command, ~10s per login, a 61s window against a 30s bound --
+        # so the tool refused to answer about a healthy fabric (OBS-109). Skew is
+        # dominated by login count, and the design said "one pass per device, in
+        # a single session" before the first version failed to do it.
+        keys: list[str] = []
+        manifest: list[tuple[str, dict[str, str]]] = []
         for step in steps:
             for key, kwargs in template_calls(step, subject, evidence):
-                begun = clock()
-                envelope = run_template(target, step.name, sender=sender, **kwargs)
-                observations.append(Observation(key, target, begun, clock(), envelope))
+                keys.append(key)
+                manifest.append((step.name, kwargs))
+
+        if manifest:
+            begun = clock()
+            envelopes = run_templates_split(target, manifest, sender=sender)
+            ended = clock()
+            observations.extend(
+                Observation(key, target, begun, ended, envelope)
+                for key, envelope in zip(keys, envelopes, strict=True)
+            )
 
     return EvidenceEpoch(
         observations=tuple(observations),
@@ -452,11 +472,25 @@ def _collect_one_rung(device: str, rung: flows.Rung, subject: str, *, sender=Non
         for step in rung.collect
         if not step.is_template
     }
+
+    keys: list[str] = []
+    manifest: list[tuple[str, dict[str, str]]] = []
     for step in rung.collect:
         if not step.is_template:
             continue
         for key, kwargs in template_calls(step, subject, evidence):
-            evidence[key] = run_template(device, step.name, sender=sender, **kwargs)
+            keys.append(key)
+            manifest.append((step.name, kwargs))
+
+    # One session for the batch, for the same reason as the epoch build: the
+    # interface rung fans out over every physical member, and a login each would
+    # make the re-read cost more than the walk it is checking.
+    if manifest:
+        for key, envelope in zip(
+            keys, run_templates_split(device, manifest, sender=sender), strict=True
+        ):
+            evidence[key] = envelope
+
     return evidence
 
 

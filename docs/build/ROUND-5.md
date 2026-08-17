@@ -138,6 +138,75 @@ qualifies B-428, which is the finding I have been most confident about.
 
 ---
 
-## 5. Results
+## 5. Dry run, 2026-08-17 09:29 — one prediction already refuted
 
-*Empty until the run. Filled from `evidence/round5/samples.jsonl`.*
+The harness was dry-run first (no fault applied, fabric healthy). **Three probes,
+all three `temporally_incoherent`, all five rungs healthy, skew 56–61 s against
+the 30 s bound.**
+
+> **Prediction 4.4 is refuted.** *"Skew stays under 10 s throughout… refuted if
+> any sample exceeds 30 s."* It exceeded it on every sample, before any fault
+> existed. Recorded as a refutation rather than amended away.
+
+### What it was, and what it was not
+
+The first explanation was wrong and is recorded because the correction is the
+useful part. The unbatched epoch opened **7 SSH sessions, 5 of them to run a
+single command**, and during the dry run each login cost ~10 s. That looked
+structural, and it is not:
+
+| | Sessions | Skew |
+|---|---:|---:|
+| Before batching, devices responsive (09:1x) | 7 | **5.2 s** |
+| Before batching, devices degraded (09:29–09:35) | 7 | **61–75 s** |
+| After batching, devices responsive (09:4x) | 4 | **3.8–4.0 s** |
+
+Isolated afterwards: one `run_template` costs **0.52 s**, not 11 s. So batching
+did **not** take 61 s to 3.9 s — the devices recovered. Claiming the fix would
+have been OBS-108's error a third time in one session.
+
+**Two separate results, kept separate:**
+
+**Batching is a real fix and was already required by the approved design** —
+§2.2 says "one pass per device, in a single session" and the first implementation
+did not do it. `run_templates_split` uses the existing, already-reviewed
+`run_templates`, so no authorization path changed. Sessions 7 → 4, permanently.
+
+**The 61 s episode is the finding, and it is about availability, not speed.** The
+bound is sensitive to device SSH responsiveness, which is not under the tool's
+control. When responsiveness degraded, the tool **refused to answer about a
+completely healthy fabric** — five rungs healthy, re-read agreeing, refused for
+width alone. That is the bound working as designed and it is worth stating
+plainly: *this tool's willingness to answer depends on how fast the devices feel
+like replying.* Whether refusing is right at 61 s is a real question and not one
+this round settles.
+
+**A hypothesis tested and refuted:** that the tool's own repeated use degrades
+login cost, so dense sampling would be self-defeating. Twelve back-to-back
+epochs, skew flat at 3.8–4.0 s. No feedback loop at 4 sessions per epoch. Dense
+sampling is viable.
+
+---
+
+## 6. Re-seal, 2026-08-17 — before the fault
+
+The code changed after §4 was sealed (batching), so §4 is re-sealed here rather
+than silently inherited. **Predictions 4.1, 4.2 and 4.3 are unchanged in
+substance** — none of them was tested by the dry run, which applied no fault.
+
+**4.4 is replaced**, and the replacement is weaker on purpose, because the
+original was written from a single unrepresentative measurement:
+
+> Skew stays **under 10 s** on a responsive fabric and no sample is refused for
+> width alone. *Refuted if* any sample exceeds 30 s while every device is
+> answering normally.
+
+The condition attached to the falsifier is the honest part: a sample refused for
+width during a device slowdown refutes nothing about the ladder, and conflating
+the two is what the dry run nearly caused me to do.
+
+---
+
+## 7. Results
+
+*Empty until the run.*

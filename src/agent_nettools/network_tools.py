@@ -915,6 +915,70 @@ def run_templates(
     return result
 
 
+def run_templates_split(
+    device_name: str,
+    manifest: list[tuple[str, dict[str, str]]],
+    *,
+    platform: str | None = None,
+    sender: Callable[[dict[str, Any], str], str] | None = None,
+) -> list[dict[str, Any]]:
+    """``run_templates``'s one session, ``run_template``'s per-template envelopes.
+
+    ``run_templates`` returns a single envelope for the whole batch, which is
+    right for capture and wrong for any consumer that reads one template's
+    parsed records -- ``checks.py`` and everything in the investigation layer.
+    Those callers were therefore stuck on ``run_template``, one login each.
+
+    Measured on this fabric, an evidence epoch for ``bgp_session`` opened seven
+    SSH sessions, **five of them to run a single command**, and each login cost
+    about ten seconds. The observation window was 61s wide against a 30s bound,
+    so the tool refused to answer about a completely healthy fabric (OBS-109).
+    Skew is dominated by login count, not command count.
+
+    **This adds no authorization path.** Every command is rendered and checked
+    by ``run_templates``, which owns phase 1 in full and touches no credential
+    until the whole batch is authorized. This function re-renders each manifest
+    entry only to learn *which* command belongs to *which* entry --
+    ``render_command`` is pure, deterministic and device-free, so calling it a
+    second time is arithmetic, not a second chance at authorization.
+
+    Returns one envelope per manifest entry, **in manifest order**, each shaped
+    exactly like ``run_template``'s so a caller cannot tell the difference.
+    """
+
+    platform = platform or platform_for(device_name)
+    batch = run_templates(device_name, manifest, platform=platform, sender=sender)
+    outputs = (batch.get("data") or {}).get("commands") or {}
+    batch_errors = list(batch.get("errors") or [])
+
+    envelopes: list[dict[str, Any]] = []
+    for template_name, params in manifest:
+        try:
+            command = render_command(platform, template_name, **params)
+        except TemplateValidationError as exc:
+            envelopes.append(_safe_error("run_template", device_name, str(exc)))
+            continue
+
+        result = _base_result("run_template", device_name)
+        result["data"] = {
+            "template": template_name, "platform": platform, "command": command,
+            "commands": {command: outputs[command]} if command in outputs else {},
+        }
+        if command not in outputs:
+            # The batch did not produce this one. Carrying the batch's errors is
+            # deliberate: the reason lives there, and an envelope that said only
+            # "no output" would be an absence the caller could read as an empty
+            # result rather than a failure.
+            result["status"] = STATUS_ERROR
+            result["errors"].extend(
+                batch_errors or [f"{command}: no output returned by the batch"]
+            )
+        _attach_parsed_template(result, platform, template_name)
+        envelopes.append(result)
+
+    return envelopes
+
+
 # Named single-parameter template tools, one per registered template, kept
 # alongside CHECK_TOOLS's per-intent functions so the CLI and MCP server call
 # the same thing: a thin, typed wrapper over run_template(). The parameter is
