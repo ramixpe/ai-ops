@@ -1866,6 +1866,29 @@ Append-only record of everything learned during the build of the investigation l
 
 ---
 
+## OBS-150 · Process · `git add -A` swept a 745-line file I had not read into a commit about something else
+
+- **Kind:** defect-found
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** `docs/EXPERT-PEER-REVIEW-2026-08-17.md` appeared in the working tree at 19:37, written by the operator or a review they commissioned. I noticed it, identified it, and then ran `git add -A` for an unrelated commit. **It went in — 745 lines, in a commit whose message describes OBS-147/148/149 and does not mention it.** Pushed before I checked.
+- **Evidence:** `git show --stat 294bf9e` lists it first, at `745 ++++`.
+- **What I did:** Recorded it rather than rewriting history — the file almost certainly belongs in the repository, and a force-push to fix a commit message is worse than the defect. **The operator decides whether it stays; I should not have been the one to decide it by accident.**
+
+  **Two things wrong, and the second is the one worth keeping.**
+
+  The narrow one: I committed a document I had not read. This session's own rule for the Artifact path is that you never distribute what you have not seen, and a push is distribution.
+
+  The general one: **`git add -A` is the mirror image of a blanket `.gitignore`, and it fails the same way.** OBS-131's detector note says *"anything whose contribution is a non-action cannot report a mistaken non-action"* — a `.gitignore` cannot warn when it swallows the wrong file. **A blanket `git add` cannot warn when it includes one.** Both are wildcards whose effect is invisible at the point of use, and both produce a commit that looks exactly like a correct one.
+
+  > **`archive.sh` exists because of precisely this class**, and it verifies its end state with `git ls-files` before reporting success. I wrote that yesterday and then staged by hand with `git add -A` today, in the same repository, four commits later. **Knowing the rule does not protect against it** — which is OBS-114's finding, arriving against me for the second time.
+
+  **The cheap remedy, adopted:** `git add` the paths a commit is about, and read `git status --porcelain` *before* staging rather than after. A commit whose `--stat` contains a file its message does not mention is a defect regardless of whether the file belongs there.
+- **Needs human review:** **yes** — whether `docs/EXPERT-PEER-REVIEW-2026-08-17.md` should be tracked, and whether it wants its own commit.
+- **Blocks:** nothing.
+
+---
+
 <!--
 Copy this block for each new entry.
 
