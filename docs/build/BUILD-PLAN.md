@@ -438,8 +438,13 @@ A separate section from §0.13 because **the remedy is different**. §0.13 asks 
 | Two-fault output is "true but incomplete" | a completeness problem | **a detectability problem** — the rung tables are byte-identical | "Incomplete" invites a fix inside the descent. Nothing inside it can help: the signal is not in the rung verdicts |
 | Non-contiguity of broken rungs | the primary two-fault signal | **a corner detector** | It cannot fire on the canonical case. Pointing the harness at it first would have produced a clean result and no information |
 | "No consistently-behaving fabric can produce `cause_not_localised`" | a fact about fabrics | **a fact about *single* faults** | Left the build's only synthetic fixture permanently synthetic. An administratively shut session with a healthy underlay produces it directly |
+| "Frozen-release audit governance" (OBS-105) | **tooling for** the one-shot audit set | **the definition of** the one-shot audit set | Deferring it while building the set would have shipped a development set labelled one-shot. Access control is the *only* thing separating the three datasets |
 
 Note what all four have in common: **the statement was accurate and the action it licensed was wrong.** No amount of re-checking the evidence corrects a misclassification, because the evidence supports the statement. Only asking what kind of claim it is does.
+
+The fifth was found in `peer-review-response.md`'s own deferral table — **a document written to apply this section committed it while doing so**, which is worth more than the entry. A misclassification is not a thing you check for once and clear; the table above is a list of shapes, not a list of closed cases. It also adds a check the other four did not need:
+
+- **A deferral** — is the deferred thing the subject's *support*, or is it the subject? Deferring the second does not delay the work, it deletes it while leaving the name.
 
 ### The checks, cheap enough to be habits
 

@@ -117,6 +117,16 @@ Small fix, active hole, first item.
 
 Deferred — see §5.
 
+#### Correction, 2026-08-17 — "only structural" was wrong
+
+The paragraph above says the only available response is the structural one. That was asserted, not measured, and it is **false**. An intermediate check exists short of entailment, and it was found by asking what *else* a report contains besides relations.
+
+**Identifier containment** (B-453): every device name, interface name, IP address and prefix appearing in a report's prose must be an identifier that appears somewhere in the evidence, canonicalised through `interface_kind`'s prefix table so `Gi0/0/0/0` and `GigabitEthernet0/0/0/0` are one identifier. Measured against round 3's real report: **zero false positives**, and it catches A's own counterexample class — a report naming `PE7` or `10.255.0.99` is refused.
+
+It is not entailment, and the boundary is exact: **it catches an invented entity, not a wrong relation between real ones.** A report asserting a chassis power failure while citing an interface-down key still passes, because every identifier in it is real. So this raises the floor and does not replace the deferred deterministic rendering (B-439).
+
+The reviewer position was right about the limit and wrong about the remedy set. Recording it because "no intermediate option exists" is the kind of claim that ends a search, and this one ended it one step early.
+
 ### 3.3 The trust-loss scenario — B
 
 The most operationally useful paragraph in any of the three reviews, and it describes this fabric:
@@ -208,6 +218,16 @@ All correct. None urgent at thirteen devices with one flow. Recorded so their de
 | Frozen-release audit governance | C | when the harness matures |
 
 **On C's scale.** C's thirteen trust conditions are correct for publishing a scientific result and disproportionate for deciding whether one flow is worth a second. Three are taken now — estimand definition, three datasets, and stopping the unsupported claims. The remainder is the target for a mature harness, not a precondition for the next round.
+
+### Correction, 2026-08-17 — governance is not tooling (OBS-105)
+
+The row *"Frozen-release audit governance — deferred until the harness matures"* is load-bearing for item 8, and this table missed it. **This document commits §0.14 in its own deferral table.**
+
+The misclassification: governance was filed as **tooling for** the one-shot audit set — a process to be built around it later. It is not. **Governance is the definition.** §3.6's three datasets differ in exactly one respect — who may see the results and how often they may be run — and that is a governance property, not a technical one. A one-shot set with no mechanism restricting access to it is a development set that has been *described* as one-shot. There is nothing else that distinguishes them.
+
+So item 8 cannot establish the third dataset while B-452 is deferred. **Narrow fix taken, on instruction:** item 8 writes development and regression in full and specifies the one-shot set completely, marked **specified but not established**, naming its two live leakage routes (the same tool-aware person defining both catalogues; local Git history treated as an immutable seal). B-452 stays deferred. What the deferral now costs is written down where the harness's reader will meet it, instead of appearing as a dataset the harness has.
+
+The check that would have caught it is §0.14's fourth: *is it impossible, or impossible under the conditions you have so far?* — run in reverse. Not "can this be lifted", but **"is the deferred thing the subject's support, or is it the subject?"**
 
 ---
 

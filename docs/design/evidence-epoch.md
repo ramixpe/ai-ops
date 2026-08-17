@@ -1,6 +1,6 @@
-# Evidence Epoch — design for review
+# Evidence Epoch
 
-**Item 3 of `peer-review-response.md` §6. Not implemented — this is the design the standing rules require before a shared-contract change is written.**
+**Item 3 of `peer-review-response.md` §6. Approved 2026-08-17 — D1, D2 and D3 as recommended, with one addition to D2.**
 
 Addresses the convergent finding (§2.1, all three reviewers), A's device-load concern (§4.6) and B's speed objection (§3.4). One change, three defects.
 
@@ -67,17 +67,29 @@ Before the walk, resolve every device the flow will touch and collect each once,
 
 > **A flow whose collection depends on an earlier rung's *verdict* cannot use a single epoch.**
 
-No flow does today, and `SubjectRule` resolves from the subject or the device, never from a prior result. That is a property worth asserting rather than assuming, so the epoch builder raises if a flow declares a collect step it cannot resolve before the walk.
+No flow does today, and `SubjectRule` resolves from the subject or the device, never from a prior result.
 
-### 2.3 Coherence is established by re-read, not by skew
+**This is a documented precondition on `Flow`, not an internal guard.** The distinction matters and was called out in review: a guard inside the epoch builder tells a flow author they were wrong *after* they have written the flow, and it tells them in a stack trace. A precondition on the type they are writing tells them the constraint exists *before* they design around it. So it is stated in `Flow`'s docstring, next to `Rung` and `SubjectRule`, in the place someone reads while writing a new ladder — and the builder still raises, as the enforcement of a stated rule rather than as the only place the rule appears.
 
-A's rule: *a causal finding may be asserted only when the observations have a bounded, recorded skew and the symptom and proposed cause remain stable across the observation interval.*
+The rule in the form a flow author needs it:
 
-Both halves, and they do different work:
+> Every collect step in every rung must be resolvable from the **subject and the device alone**, before the walk begins. A rung may not collect something whose identity depends on what an earlier rung concluded.
 
-**Skew is recorded, always, and bounds the window in which incoherence could hide.** It does not prove coherence. An interface can change state in under a second, so no non-zero skew is provably safe, and a threshold alone would be theatre.
+### 2.3 Coherence is established by the re-read, not by the skew
 
-**The re-read is what establishes stability.** After the walk, re-read two things — the **symptom** (rung 1) and the **cause rung** — and compare the verdicts to the epoch's. Two commands.
+This is the design's reason, not a caveat on it, so it is stated before the mechanism.
+
+A's rule reads: *a causal finding may be asserted only when the observations have a bounded, recorded skew and the symptom and proposed cause remain stable across the observation interval.* A natural implementation reads that as two thresholds and checks both. **That implementation would be theatre**, and here is why.
+
+> **Skew does not establish coherence. The re-read does.**
+>
+> An interface can change state in under a second. There is therefore **no non-zero skew that is provably safe** — a bound of 30 s and a bound of 3 s differ in how likely they are to hide a transition, not in whether they can. A design that passed a run because its skew came in under a threshold would be asserting a guarantee that no threshold can supply.
+>
+> **The bound's job is to say what a two-point re-read is worth.** Two agreeing reads across 20 seconds are strong evidence that nothing moved. The same two reads across 200 seconds are two samples from a window in which anything could have happened. The bound does not certify the interval; it calibrates the only instrument that says anything about the interval at all.
+
+So the skew is a **precondition on trusting the re-read**, and the re-read is the check. Both halves of A's rule are kept, with the work assigned to the half that can do it.
+
+**Mechanism.** After the walk, re-read two things — the **symptom** (rung 1) and the **cause rung** — and compare the verdicts to the epoch's. Two commands.
 
 | Skew | Re-read | Result |
 |---|---|---|
@@ -86,7 +98,13 @@ Both halves, and they do different work:
 | over bound | agrees | **`temporally_incoherent`** — stability was sampled at two points across a window too wide to interpolate |
 | over bound | disagrees | **`temporally_incoherent`** |
 
-The skew bound's role is to say *how much a two-point re-read is worth*. Over a 20-second epoch, two agreeing reads are strong evidence nothing moved. Over 200 seconds they are two samples from a window in which anything could have happened between them.
+### 2.3a The skew is recorded when it passes, not only when it fails
+
+**A bound that only speaks when violated says nothing about how close we routinely run.**
+
+Every result carries `skew_seconds` and the bound it was measured against, whatever the outcome. If real epochs land at 25 s against a 30 s bound, that is a finding — the tool is one slow device away from refusing every answer, and nobody would know until it started. A silent pass and a comfortable pass look identical from outside, and only one of them is safe to leave alone.
+
+This is the same discipline as `coverage.gaps()` and `unaccounted_lines`: report the margin, not just the breach. A threshold that is only ever observed at the moment it fails has no observed distribution, and a limit with no distribution behind it cannot be revised on evidence — only on argument.
 
 ### 2.4 `temporally_incoherent`
 
@@ -98,9 +116,11 @@ A new member of the closed finding set, the same shape as `no_fault_on_path`:
 
 ---
 
-## 3. Three decisions I need, and what I recommend
+## 3. Three decisions, taken 2026-08-17
 
-### D1 — where the finding is decided
+All three as recommended. D2 gained one addition — §2.3a, record the skew on a pass as well as a breach.
+
+### D1 — where the finding is decided → (b)
 
 `_finding_for()` in `descent.py` owns every finding today. The coherence check needs the epoch and a re-read, which live in `investigation.py`.
 
@@ -109,9 +129,9 @@ A new member of the closed finding set, the same shape as `no_fault_on_path`:
 | **(a)** `investigation.py` overrides the finding after the walk | `descent.py` untouched except an optional `epoch` field on `DescentResult` | **Splits finding authority across two modules.** `_finding_for` would no longer be the single place a finding is decided |
 | **(b) *recommended*** | `run_descent(..., coherence=...)` takes a coherence verdict; `_finding_for` consults it first | `descent.py` gains one parameter and one branch; `investigation.py` computes the verdict and passes it. Finding authority stays in one function |
 
-**(b).** The extra parameter is cheap; splitting the authority is the kind of thing that is invisible until two places disagree.
+**Taken: (b).** The extra parameter is cheap; splitting the authority is the kind of thing that is invisible until two places disagree.
 
-### D2 — the skew bound
+### D2 — the skew bound → derived, plus §2.3a
 
 | Option | |
 |---|---|
@@ -119,9 +139,9 @@ A new member of the closed finding set, the same shape as `no_fault_on_path`:
 | **Derived from the flow *(recommended)*** | The slowest protocol timer the ladder depends on, since that is the interval over which a state change could complete unobserved. For `bgp_session`: BGP hold 180 s, IS-IS hold 30 s → bound at the **fastest** relevant timer, 30 s, because the fastest is what can change within the window |
 | No bound, re-read only | Simplest; discards A's first half |
 
-**Derived, defaulting to 30 s for this flow, configurable.** It is a number with a reason attached, which is the difference between a bound and a guess. Note today's descent takes **114–122 s**, so it would exceed a 30 s bound *until the epoch change lands* — which is the point: the current implementation cannot satisfy the rule, and the epoch is what makes ~20 s achievable.
+**Taken: derived, defaulting to 30 s for this flow, configurable.** It is a number with a reason attached, which is the difference between a bound and a guess. Note today's descent takes **114–122 s**, so it would exceed a 30 s bound *until the epoch change lands* — which is the point: the current implementation cannot satisfy the rule, and the epoch is what makes ~20 s achievable.
 
-### D3 — what the re-read covers
+### D3 — what the re-read covers → symptom + cause rung
 
 | Option | |
 |---|---|

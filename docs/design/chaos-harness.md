@@ -267,7 +267,7 @@ A single accuracy figure hides the thing worth knowing: **whether failures clust
   3. injector applies, verifies by reading the device
   4. injector waits for propagation                      (poll, never sleep)
   5. agent is invoked                                    (knows only the subject)
-  6. agent's answer is recorded                          (committed before reveal)
+  6. agent's answer is recorded                          (PUSHED before reveal)
   7. injector restores, verifies by reading
   8. supervisor confirms fabric matches golden
   9. trial scored against sealed ground truth
@@ -277,13 +277,23 @@ A single accuracy figure hides the thing worth knowing: **whether failures clust
 
 **Steps 3 and 7 verify by reading the device, never by the write's report.** A push that reported failure may have succeeded; a push that raised may still have applied. This rule was written after a restore reported failure three times while having succeeded on the first attempt.
 
-**Step 6 commits before step 9 reveals.** Ordering must be verifiable, not asserted.
+**Step 6 pushes before step 9 reveals.** Not commits — *pushes*.
+
+A local commit is not a seal. `git commit --amend` rewrites it, `git rebase` reorders it, and both leave a history that reads as though the original ordering held. The property the protocol needs is that the record became **unalterable by the person being tested** before the answer was known, and only publishing to a remote does that.
+
+This is one of the two leakage routes reviewer C named (§3.6): *local Git history treated as an immutable seal when it can be amended or rebased.* C aimed it at the fault catalogue. It applies with equal force to the hand diagnosis and to the agent's recorded answer — which is to say, **to this protocol's central guarantee.**
+
+> **Rounds 1–4 used the weaker form.** Their hand diagnoses were committed before the agent ran, not pushed, and `git commit --amend` was in fact used elsewhere in that session. Their sealing therefore rests on **trust rather than mechanism**.
+>
+> This does not invalidate them. The ordering claimed is the ordering that happened, and round 1's timestamps (14:11:50 diagnosis, 14:12:02 run) are consistent with it. But "you have my word" and "you have a timestamped remote" are different guarantees, and a protocol that cannot tell you which one it gave you is asserting the stronger while providing the weaker. Stated rather than assumed.
+
+An operator reading a future round's result should be able to check the seal without asking anyone. That is the whole difference.
 
 ### 6.1a The hand diagnosis, and hedging
 
-The comparison diagnosis is written by a human, before the agent runs, and committed before the agent runs (OBS-076). Two rules govern its content, the second learned from round 2.
+The comparison diagnosis is written by a human, before the agent runs, and **pushed** before the agent runs (OBS-076, tightened by OBS-105 — see §6.1 step 6). Two rules govern its content, the second learned from round 2.
 
-**It is recorded verbatim and not evaluated before the run.** No commentary, no assessment, no "this looks right". The point of committing it is that the ordering becomes a fact in git history rather than a claim in a document.
+**It is recorded verbatim and not evaluated before the run.** No commentary, no assessment, no "this looks right". The point of pushing it is that the ordering becomes a fact in a history the tested party cannot rewrite, rather than a claim in a document.
 
 **An alternative reading may be included only if it states what would refute it.**
 

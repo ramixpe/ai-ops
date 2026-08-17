@@ -2993,6 +2993,10 @@ and should be scored as a corpus result, not as a diagnostic error.
 - **Needs human review:** **yes — this is a HALT on item 8's scope, and a correction to a protocol I have used four times**
 - **Blocks:** B-442 as specified. Items 1–7 unaffected.
 
+  **Resolved 2026-08-17 — HALT accepted, narrow fix taken.** Item 8 writes development and regression in full, and the one-shot set **as specified but not established**, naming its two live leakage routes. B-452 stays deferred. The protocol correction was taken separately and immediately (OBS-107).
+
+  The operator recorded the misclassification against the review response itself: *"my deferral table classified governance as tooling when it is the definition — that is §0.14 in the review response itself."* Filed as a fifth row in BUILD-PLAN §0.14, which also gained a check the first four did not need: **a deferral — is the deferred thing the subject's support, or is it the subject?** A document written to apply §0.14 committed §0.14 while doing so, which is the more useful half of this finding: the section is a list of shapes, not a list of closed cases.
+
 ---
 
 ## OBS-106 · B-438 · The model-visible surface had three writes, not one
@@ -3015,6 +3019,33 @@ and should be scored as a corpus result, not as a diagnostic error.
   **The diff tools' behaviour genuinely changed, and it is better here.** The CLI still saves on diff, deliberately — a human's diff advances the baseline. The MCP surface now compares against a **stable** baseline instead of a moving one, which for a read-only surface is the more defensible semantics rather than a compromise. Worth stating because a reviewer of this change would otherwise read a lost feature; the feature moved to where the writer is a person.
 - **Needs human review:** no
 - **Blocks:** none. Items 3 and 4 next, and the design goes to the operator first.
+
+  **Operator confirmation, 2026-08-17.** `_diff_against` named as the most important of the three, for the reason given above — it is the one a model hits most and snapshot history feeds flap detection. Removing the imports rather than the functions confirmed as the right shape, and placed explicitly in the same family as `build_report_prompt` never receiving device text. The `_read_only_tool` reading recorded as canonical: **an accurate hint read as a guarantee, false for three of twenty tools, checked by nothing.**
+
+---
+
+## OBS-107 · chaos-harness · The blind protocol's seal was trust, not mechanism
+
+- **Kind:** method-defect
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5
+- **What happened:** §6.1 step 6 said the agent's answer is *committed* before the reveal, and §6.1a said the hand diagnosis is *committed* before the agent runs. Both were written as though a commit were a seal.
+
+  **It is not.** `git commit --amend` rewrites it and `git rebase` reorders it, and both leave a history that reads exactly as though the original ordering held. The guarantee the protocol needs is that the record became unalterable **by the person being tested** before the answer was known. Only a push does that.
+
+  This is reviewer C's second live leakage route (§3.6) — *local Git history treated as an immutable seal.* C aimed it at the fault catalogue. It lands with more force on the diagnosis, because the diagnosis **is** the protocol's central guarantee.
+- **Evidence:** `git commit --amend` was used during the same session that ran the rounds — not on a diagnosis, but its availability is the point. Round 1's timestamps (14:11:50 diagnosis, 14:12:02 run) are consistent with the ordering claimed.
+- **What I did:** Amended `chaos-harness.md` §6.1 step 6 and §6.1a to **push**, not commit, on operator instruction. Recorded that **rounds 1–4 used the weaker form and their sealing rests on trust rather than mechanism.**
+
+  Two things worth keeping separate, because collapsing them is the temptation.
+
+  **This does not invalidate rounds 1–4.** The ordering claimed is the ordering that happened. What changed is who has to take that on faith.
+
+  **But it should be stated rather than assumed, and the reason is not politeness.** A protocol that provides trust while asserting mechanism has a defect that is invisible from inside it: everyone involved knows the ordering was honest, so nobody notices the seal was never tested. It is only visible to a reader who was not there — which is precisely the reader a blind protocol exists to convince. **The failure mode of a seal is not that it breaks; it is that nobody ever tries it.**
+
+  Generalises past this build: any "recorded before" claim should name the mechanism that makes it checkable by someone who does not trust the recorder. If there is no such mechanism, the claim is a testimony, and testimony is fine as long as it is labelled.
+- **Needs human review:** no
+- **Blocks:** nothing. Round 5 (B-451) is the first to use the stronger form.
 
 ---
 
