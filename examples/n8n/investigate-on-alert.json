@@ -1,0 +1,25 @@
+{
+  "name": "nettools: investigate on alert",
+  "nodes": [
+    {"parameters": {"path": "nettools-alert", "options": {}}, "name": "Alertmanager Webhook",
+     "type": "n8n-nodes-base.webhook", "typeVersion": 1, "position": [240, 300]},
+    {"parameters": {"command": "=echo '{{ JSON.stringify($json.body) }}' | nettools route-event --format json"},
+     "name": "Route Event (nettools decides)", "type": "n8n-nodes-base.executeCommand",
+     "typeVersion": 1, "position": [460, 300]},
+    {"parameters": {"conditions": {"number": [{"value1": "={{ JSON.parse($json.stdout).routable_count }}", "operation": "larger", "value2": 0}]}},
+     "name": "IF routable", "type": "n8n-nodes-base.if", "typeVersion": 1, "position": [680, 300]},
+    {"parameters": {"command": "={{ JSON.parse($json.stdout).decisions.filter(d => d.routable)[0].suggested_command.join(' ') }} --format json --notify"},
+     "name": "Investigate (deterministic)", "type": "n8n-nodes-base.executeCommand",
+     "typeVersion": 1, "position": [900, 200]},
+    {"parameters": {}, "name": "NoOp (unroutable — reason is in decisions[].reason)",
+     "type": "n8n-nodes-base.noOp", "typeVersion": 1, "position": [900, 420]}
+  ],
+  "connections": {
+    "Alertmanager Webhook": {"main": [[{"node": "Route Event (nettools decides)", "type": "main", "index": 0}]]},
+    "Route Event (nettools decides)": {"main": [[{"node": "IF routable", "type": "main", "index": 0}]]},
+    "IF routable": {"main": [[{"node": "Investigate (deterministic)", "type": "main", "index": 0}],
+                              [{"node": "NoOp (unroutable — reason is in decisions[].reason)", "type": "main", "index": 0}]]}
+  },
+  "settings": {}, "pinData": {},
+  "meta": {"comment": "n8n v1 workflow-export shape. The workflow holds NO diagnostic logic: nettools route-event decides, nettools investigate answers, --notify delivers. Suggested_command elements are re-validated by nettools at run time."}
+}

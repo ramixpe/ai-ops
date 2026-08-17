@@ -1,0 +1,13 @@
+# EXAMPLE unit. Localhost listener only — see examples/README.md and SECURITY.md.
+[Unit]
+Description=nettools alert webhook bridge (example)
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/nettools/examples/systemd/nettools-webhook.py
+Restart=on-failure
+User=nettools
+WorkingDirectory=/opt/nettools
+
+[Install]
+WantedBy=multi-user.target

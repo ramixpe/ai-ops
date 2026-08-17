@@ -1,0 +1,20 @@
+{
+  "name": "nettools: daily fabric audit",
+  "nodes": [
+    {"parameters": {"triggerTimes": {"item": [{"hour": 9}]}}, "name": "Every day 09:00",
+     "type": "n8n-nodes-base.cron", "typeVersion": 1, "position": [240, 300]},
+    {"parameters": {"command": "nettools audit --format json"},
+     "name": "Audit (rules live in audit.py, not here)", "type": "n8n-nodes-base.executeCommand",
+     "typeVersion": 1, "position": [460, 300]},
+    {"parameters": {"conditions": {"number": [{"value1": "={{ $json.exitCode }}", "operation": "larger", "value2": 0}]}},
+     "name": "IF findings", "type": "n8n-nodes-base.if", "typeVersion": 1, "position": [680, 300]},
+    {"parameters": {}, "name": "Notify (your channel here)",
+     "type": "n8n-nodes-base.noOp", "typeVersion": 1, "position": [900, 200]}
+  ],
+  "connections": {
+    "Every day 09:00": {"main": [[{"node": "Audit (rules live in audit.py, not here)", "type": "main", "index": 0}]]},
+    "Audit (rules live in audit.py, not here)": {"main": [[{"node": "IF findings", "type": "main", "index": 0}]]},
+    "IF findings": {"main": [[{"node": "Notify (your channel here)", "type": "main", "index": 0}]]}
+  },
+  "settings": {}, "meta": {"comment": "n8n v1 shape. The schedule is the only thing this workflow owns."}
+}

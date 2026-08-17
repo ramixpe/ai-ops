@@ -834,6 +834,36 @@ def _cmd_config(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _cmd_route_event(args: argparse.Namespace) -> int:
+    """Route one inbound event to an investigation, or say why not. B-480.
+
+    Reads the raw event from --file or stdin. Exit codes let an orchestrator
+    branch without parsing: 0 at least one decision is routable, 1 none is,
+    2 the input could not be read at all. The routing itself is
+    `event_routing.route_event` — a pure table lookup, never a model.
+    """
+
+    from .event_routing import route_event
+
+    try:
+        if getattr(args, "file", None):
+            raw = Path(args.file).read_text(encoding="utf-8")
+        else:
+            raw = sys.stdin.read()
+    except OSError as exc:
+        _emit({"tool": "route_event", "status": "error", "errors": [str(exc)]}, args)
+        return EXIT_CRITICAL
+
+    decisions = route_event(raw, device=getattr(args, "device", None))
+    _emit({
+        "tool": "route_event",
+        "status": "success",
+        "decisions": [d.as_dict() for d in decisions],
+        "routable_count": sum(1 for d in decisions if d.routable),
+    }, args)
+    return EXIT_OK if any(d.routable for d in decisions) else EXIT_WARNING
+
+
 def _cmd_version(args: argparse.Namespace) -> int:
     import platform as platform_module
 
@@ -1248,6 +1278,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--quiet", "-q", action="store_true", help="Suppress output; only the exit code carries the outcome."
     )
     p_config_check.set_defaults(func=_cmd_config)
+
+    p_route = sub.add_parser(
+        "route-event",
+        help="Route an Alertmanager webhook or IOS-XR syslog line to an investigation "
+             "(table lookup, no model). Exit 0 if routable, 1 if not, 2 unreadable.",
+    )
+    p_route.add_argument("--file", help="Read the event from a file instead of stdin.")
+    p_route.add_argument(
+        "--device",
+        help="The originating device, from the receiver's transport metadata "
+             "(required for syslog lines — the line's own text never supplies it).",
+    )
+    _add_output_arguments(p_route)
+    p_route.set_defaults(func=_cmd_route_event)
 
     p_version = sub.add_parser("version", help="Print the installed nettools version.")
     _add_output_arguments(p_version)
