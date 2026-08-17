@@ -3240,6 +3240,55 @@ and should be scored as a corpus result, not as a diagnostic error.
 
 ---
 
+## OBS-114 · MCP experiment · A model is not a reliable source about its own prior output
+
+- **Kind:** observation
+- **Escalation:** NOTE
+- **Model:** opus-5 (recording an operator result)
+- **What happened:** Asked about an earlier statement, the model said *"I did not explicitly say it was 'not established'"*. **It had, verbatim, one message earlier.**
+- **Evidence:** Operator-observed, same session as OBS-112/113.
+- **What I did:** Recorded. Small on its own, and it bears on a class of thing this build does in several places.
+
+  **The rule: a model's account of its own prior output is not evidence about that output.** The transcript is. Anywhere a design has a model refer to, summarise, or reason about a previous turn, the referenced content has to be re-supplied from the record rather than recalled — because recall and generation are the same operation, and a plausible reconstruction of what it probably said is indistinguishable to the model from what it did say.
+
+  Two places this already touches. The `agent_loop` accumulates its own prior turns and reasons over them, which is fine while the tool results are in the context verbatim and not fine if anything ever summarises them. And it is a caution on any future gate that asks a model to check its own earlier claim — a self-consistency check between a generated claim and a *recalled* claim measures nothing.
+
+  Worth noting the shape rather than only the instance: this is the same failure as **shape 6** (wrong evidence read as right evidence) with the model's own memory as the wrong evidence, and it is invisible for the same reason — the recalled version is fluent, specific, and confidently wrong.
+- **Needs human review:** no
+- **Blocks:** nothing.
+
+---
+
+## OBS-115 · B-439 · The live case: a model restatement dropped a rung and misattributed a device
+
+- **Kind:** defect-observed
+- **Escalation:** DECIDE-AND-LOG
+- **Model:** opus-5 (recording an operator result)
+- **What happened:** **B-439 was justified by argument. It now has an observation.**
+
+  `investigate_lab_session` returned a deterministic report carrying **five rungs, each with the device it was evaluated against**. The model's prose restatement of that result, in conversation:
+
+  * **listed four rungs, omitting `route_to_peer`** — which it had reported correctly one message earlier;
+  * **attributed IS-IS and interface health to RR1**, when both rungs resolve to **PE2**.
+
+  Three messages, no probing, no adversarial prompt. Nobody was testing for it.
+- **Evidence:** Operator-observed, `gemma-4-e4b` over LM Studio, same session as OBS-112/113.
+- **What I did:** Recorded against B-439.
+
+  **Both errors are exactly the failure the reviewers described, in miniature.** Dropping `route_to_peer` removes a link from the causal chain, so the remaining four still read as a coherent explanation — of a path that was never checked. Misattributing IS-IS and interface health to RR1 inverts the single most important thing the descent establishes: **those rungs resolve to PE2 because the far end is where the fault lives** (Q-013, OBS-055), and reporting them against RR1 would send an engineer to the wrong device with a confident, specific, fully-sourced answer.
+
+  **The distinction that makes this a stronger result than expected.** This was **not** the `paraphrase` field — the MCP tool produces none, by design. This was the chat model restating a *correct* deterministic report in ordinary conversation. So the degradation happened **downstream of every gate this build has**, on a surface we do not control and cannot instrument.
+
+  Two consequences follow, and the second is the uncomfortable one:
+
+  **B-439 is validated and its scope was too narrow.** Rendering the authoritative report deterministically was right, and marking a model paraphrase non-authoritative was right — but the marking only governs *our* paraphrase field. A chat client's own prose is a paraphrase nothing labels.
+
+  **The defence available is the report's shape, not a gate.** If the authoritative report is structured so that dropping a rung or moving a device is *visibly* a deletion — an explicit per-rung device column, a stated rung count, a chain the reader can re-count — then a restatement that loses one is checkable against the tool output sitting directly above it. That is weaker than enforcement and it is what is available at a boundary we do not own. Currently `to_payload()` emits the rungs as a list with devices, which is most of the way there; what is missing is anything that makes the *count* explicit enough to notice a missing element.
+- **Needs human review:** no — but the "make omissions visible" idea is a design call, not a fix I should take unilaterally
+- **Blocks:** nothing. Strengthens B-439's justification and widens its scope.
+
+---
+
 ## OBS-nnn · T-xxx · <short title>
 
 - **Kind:**
