@@ -809,6 +809,40 @@ def _cmd_metrics(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _cmd_audit(args: argparse.Namespace) -> int:
+    """Deterministic fabric audit: the fabric judged against itself. B-477.
+
+    Cross-device consistency — duplicate router-IDs, MTU mismatch across
+    adjacencies, configured-but-dead BGP — none of it visible from any single
+    device's evidence. Exit codes on the health scheme: 0 ok/info, 1 warning,
+    2 critical.
+    """
+
+    from .audit import run_audit
+    from .lab import all_devices  # credential-free: fixture replay needs no .env
+
+    names = list(all_devices())
+    if args.from_fixtures:
+        evidence_by_device = {
+            name: load_fixture_evidence(name, label=args.label) for name in names
+        }
+        _note(f"# Fixture replay: label={args.label}, no lab", args)
+    else:
+        import concurrent.futures as _cf
+        workers = max(1, min(8, len(names)))
+        with _cf.ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {name: pool.submit(collect_evidence, name) for name in names}
+            evidence_by_device = {name: futures[name].result() for name in names}
+
+    result = run_audit(evidence_by_device)
+    _emit(result, args)
+    if result["severity"] == "critical":
+        return EXIT_CRITICAL
+    if result["severity"] == "warning":
+        return EXIT_WARNING
+    return EXIT_OK
+
+
 def _cmd_config(args: argparse.Namespace) -> int:
     """Inspect (``show``) or validate (``check``) the environment configuration.
 
@@ -1258,6 +1292,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--quiet", "-q", action="store_true", help="Suppress output; still exits 0."
     )
     p_metrics.set_defaults(func=_cmd_metrics)
+
+    p_audit = sub.add_parser(
+        "audit",
+        help="Deterministic fabric audit: duplicate router-IDs, MTU mismatch across "
+             "adjacencies, configured-but-dead BGP. Exit 0 ok/info, 1 warning, 2 critical.",
+    )
+    p_audit.add_argument("--from-fixtures", action="store_true",
+                         help="Replay committed captures instead of the live lab.")
+    p_audit.add_argument("--label", default="healthy",
+                         help="Fixture label with --from-fixtures (default: healthy).")
+    _add_output_arguments(p_audit)
+    p_audit.set_defaults(func=_cmd_audit)
 
     p_config = sub.add_parser(
         "config", help="Inspect and validate the environment-variable configuration (B-476)."
