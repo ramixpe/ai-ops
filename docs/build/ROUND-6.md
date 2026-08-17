@@ -163,7 +163,18 @@ construction is nameable, which means it can be regression-tested.
 - **Two faults, one revert path.** The restore must clear **both**, and be verified by
   reading the device back rather than by trusting the write (B-412). A lingering
   `shutdown` on a spare port is inert and undetectable, which is the combination worth
-  checking for (§0.13, the procedure face).
+  checking for (§0.13, the procedure face). `SPARE_IF` is in `SNAPSHOT_SECTIONS` now, so
+  the verification can see it — see §1.
+
+- **Run with `--max-hold 45`.** The default is 20 minutes, and this window holds an
+  `investigate` run (~110 s), an MCP Q1 exchange, and **a human reading a report carefully
+  enough to notice whether it mentions a port it should not**. Twenty minutes is racing a
+  watchdog, and a watchdog firing mid-read does not produce a wrong answer — it produces
+  **no answer, from a spent window**.
+
+  > The reading is the measurement here. §2.4's falsifier is *"the prose names the shut
+  > port as a contributing cause anywhere, even hedged"*, and that is not something to
+  > skim for under time pressure. **Budget for the reading, not for the run.**
 - **Archive into the tracked repo.** `~/ai-agent-ops/faultlab/` is not a git repository
   (OBS-135). `evidence-archive/round6/`.
 

@@ -31,9 +31,55 @@ run is an hour B-463 and B-440 stay open.
 
 ---
 
+## The running order
+
+Do these in this order. The sequencing is not arbitrary — two of the four
+reasons cost a window if you get them wrong.
+
+| # | Task | Lab? | Why here |
+|---|---|---|---|
+| **0** | **Q5/Q6** — §5.2 | no fault | Costs no window. Doing it first surfaces any MCP drift **before** a fault is live rather than during one |
+| **1** | **Pre-flight** — `scripts/preflight.sh` | read-only | Exits non-zero on anything unexpected. It found two real defects on its first run |
+| **2** | **Round 8b** — §3 | **yes** | Resolution-sensitive. Give it the device to itself |
+| **3** | **Round 6 + Q1** — §4 and §5.1 | **yes** | Q1 rides along here, **not** with 8b — see §5.1 |
+| **4** | **Telegram** — §6 | no | Independent of everything above |
+
+**The two that matter.**
+
+**Q1 goes with round 6, not round 8b.** 8b samples one command as fast as the
+wire allows to catch a ~150 ms window, and its result rests on how many retry
+cycles it sees at ~520 ms per sample. A competing MCP investigation opening its
+own sessions to the same device degrades exactly that number — **invisibly**,
+producing a slower sampler and a zero that looks like a result. Round 6 holds a
+fault and waits for a human to read; a second session costs it nothing.
+
+**Round 6's second fault does not confound §9**, because §9 measures tool
+*selection*, not whether the answer is right.
+
+---
+
 ## 2. Pre-flight checklist
 
-Run these before touching the lab. All read-only.
+**`scripts/preflight.sh` runs everything in this section.** It exits non-zero on
+anything unexpected, logs to a file, and prints the two known-benign findings by
+name so they do not read as alarms:
+
+```bash
+cd /home/rami/ai-agent-ops/ios-xr-nettools
+./scripts/preflight.sh                 # add --skip-lab to check the repo only
+```
+
+It checks: working tree clean and **pushed** (§6.1 — a local commit is not a
+seal), the four frozen files by blob hash against `6629a2c`, `ruff`, the full
+suite, the offline demo with the credential environment stripped, that
+`fault_lab.py` has option 8 and that `SPARE_IF` is in `SNAPSHOT_SECTIONS`, and
+the fabric's health with the benign findings called out.
+
+**It is not a formality — on its first run it caught a lint failure and a
+duplicate copy of the injector that `make lint` had missed.**
+
+The manual equivalents are below if you want to run them individually. All
+read-only.
 
 ```bash
 cd /home/rami/ai-agent-ops/ios-xr-nettools
@@ -86,7 +132,7 @@ look before starting a round.
 
 ---
 
-## 3. Task A — Round 8b (do this one first)
+## 3. Task A — Round 8b (**second**, after Task 0 and pre-flight)
 
 **What it tests, in two sentences.** Round 8 put an AS mismatch on PE2's
 session to RR1 and confirmed four of five sealed claims, but its socket-state
@@ -181,6 +227,17 @@ payload is *committed*, not when it's written to disk.
 
 ### 3.5 Commit and push, immediately after
 
+**Use `scripts/archive.sh`** — it warns if `.gitignore` would swallow any of the
+payload, then **verifies with `git ls-files` that every file is tracked** before
+reporting success. That check is the whole point: OBS-131 was a procedure where
+every step succeeded and the archive was empty.
+
+```bash
+./scripts/archive.sh round8b evidence-archive/round8b/<stamp>
+# it stages and verifies; the commit message is yours
+```
+
+
 ```bash
 cd /home/rami/ai-agent-ops/ios-xr-nettools
 git add evidence-archive/round8b/<timestamp>/
@@ -199,7 +256,7 @@ above — it does not gate archiving the raw payload.
 
 ---
 
-## 4. Task B — Round 6 (do this one second)
+## 4. Task B — Round 6, with Q1 asked during its window (**third**)
 
 **What it tests, in two sentences.** This is B-440, the reviewer-identified
 trust-loss scenario: a real BGP fault plus an unrelated shut spare port on the
@@ -256,8 +313,13 @@ nettools route PE2 10.255.0.31
 
 ```bash
 cd ~/ai-agent-ops/faultlab
-python fault_lab.py
+python fault_lab.py --max-hold 45
 ```
+
+**`--max-hold 45`, not the default 20.** This window holds an `investigate` run,
+an MCP Q1 exchange, and a careful read of a report whose failure mode is
+*looking plausible*. A watchdog firing mid-read does not give you a wrong
+answer — it gives you no answer and a spent window.
 
 At the menu, choose **`8`** — `bgp_shut_plus_spare_port_down`. Not `5`, which is
 the BGP shutdown alone and would run a different, one-fault round.
@@ -266,7 +328,7 @@ and then blocks:
 
 ```
   FAULT IS LIVE.  Subject to investigate:  RR1 10.255.0.12
-  Auto-revert in 20 minutes if you do not confirm.
+  Auto-revert in 45 minutes if you do not confirm.
 
   Press Enter when the investigation has finished...
 ```
@@ -333,7 +395,7 @@ names.
 
 ---
 
-## 5. Task C — the MCP re-ask
+## 5. Task 0 / Task C — the MCP questions
 
 **Why the last run was void, in two sentences.** The registered prediction
 (`MCP-EXPERIMENT.md` §9) needed the fabric in the same *broken* state as the
@@ -343,12 +405,28 @@ before ever reaching the tool-selection choice the prediction was about. The
 fix costs nothing extra: run the same question **while a real fault is live**,
 which Tasks A and B both already give you for free.
 
-### 5.1 Q1, during Task A or B's fault window
+### 5.1 Q1 — during **round 6's** window, not round 8b's
 
-While round 8b is dense-sampling, or while round 6's fault is held (either
-works — the sampling is a separate process and asking a model a question does
-not perturb it), open a **fresh** LM Studio session against `nettools-mcp` and
-ask, verbatim, exactly this:
+> **Ask this during Task C (round 6). Do not ask it during round 8b.**
+>
+> Round 8b's whole design is resolution-sensitive: it samples one command as
+> fast as the wire allows to catch a ~150 ms `OpenSent` window, and its result
+> rests on an arithmetic argument about how many retry cycles it sees at
+> ~520 ms per sample. **A competing MCP investigation opening its own SSH
+> sessions to the same device degrades exactly the number the round is built
+> on** — and it would degrade it invisibly, producing a slower sampler and a
+> zero that looks like a result.
+>
+> **Round 6 has no such sensitivity.** It holds a fault and waits for a human to
+> read a report; a second session during it costs nothing.
+>
+> **And the second fault does not confound §9**, because §9 measures tool
+> *selection* — which tool the model reaches for, and why its trace says so. It
+> does not measure whether the answer is right. Round 6's fabric is broken in
+> the way the original observation's was, which is the only property §9 needs.
+
+While round 6's fault is held, open a **fresh** LM Studio session against
+`nettools-mcp` and ask, verbatim, exactly this:
 
 > **why is the BGP session on PE2 down?**
 
@@ -367,11 +445,14 @@ This settles §9 properly for the first time — both prior "why" questions in t
 re-test went to `investigate_lab_session` on a healthy fabric; this is the one
 still owed on a genuinely broken one.
 
-### 5.2 Q5/Q6, no lab needed
+### 5.2 Q5/Q6 — **this is Task 0; do it before anything else**
 
-Separately, any time, fabric healthy or not — this needs the MCP server and the
-live fabric reachable, but **not** a fault applied, so it doesn't need to ride
-along with Task A or B at all. In one **fresh** session:
+Moved to the front of the running order. It needs the MCP server and a
+reachable fabric but **no fault**, so it costs no lab window — and doing it
+first means that if the MCP setup has drifted since the last run, you find out
+before a fault is live rather than during one.
+
+In one **fresh** session:
 
 1. Ask, verbatim: **why can't RR1 reach 10.255.0.12?** (this is Q2 — it must
    run first, in this session, so what follows summarises a real five-rung
