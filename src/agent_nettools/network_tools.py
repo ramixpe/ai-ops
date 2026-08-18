@@ -671,26 +671,56 @@ def _attach_parsed_template(
 
 def _run_rendered_command(
     device_name: str,
-    command: str,
     *,
     template_name: str,
     platform: str,
+    params: dict[str, str],
     read_timeout: float | None = None,
     sender: Callable[[dict[str, Any], str], str] | None = None,
 ) -> dict[str, Any]:
-    """Run one already-rendered, already-validated template command.
+    """Render, validate and run one template command.
 
-    Mirrors ``_run_approved_commands``'s ordering invariant, but checks
-    ``is_safe_rendered_command`` instead of the static ``is_approved``
-    allowlist: a rendered template command (it carries a caller-supplied
-    parameter) is never a member of the flat per-platform allowlist, so its
-    authorization comes from ``render_command``'s own layered validation --
-    re-checked here, defense in depth, immediately before credentials are
-    loaded, exactly as ``is_approved`` is re-checked in
-    ``_run_approved_commands`` regardless of what the caller supposedly
-    already filtered.
+    Mirrors ``_run_approved_commands``'s ordering invariant: authorization is
+    re-derived here, immediately before credentials are loaded, regardless of
+    what a caller supposedly already checked.
+
+    **B-489.** This function used to take an already-rendered ``command``
+    string and re-check only ``is_safe_rendered_command`` -- the verb+char
+    gate, not the shape gate ``render_command`` also runs (``_shape_pattern``,
+    layer 4). That was safe only because ``run_template``, its one caller,
+    always called ``render_command`` -- which runs *both* checks -- a few
+    lines above and handed this function the already-shape-checked result. A
+    ``show``-verb, ASCII-clean string that is shaped like a *different*
+    template's output (e.g. something ``show running-config``-shaped, sent
+    under the ``route`` template's name) would have passed this function's own
+    gate; it simply never had a second caller willing to try it. An invariant
+    audit (HOLISTIC, 2026-08-18, B-489) flagged this: the guarantee lived in
+    "there is only one caller today," a structural fact about the codebase,
+    not something this function itself enforced.
+
+    Now this function takes the raw ``params`` instead of a pre-rendered
+    string and calls ``render_command`` itself, so *every* caller gets both of
+    its checks on *every* call -- there is no longer a command string a caller
+    can hand in from outside that bypasses the shape check, because there is
+    no longer a command string a caller hands in at all. Nothing about
+    ``templates.py`` changes or duplicates: this is the same call
+    ``run_template`` used to make, just made here instead, where the result is
+    actually used.
     """
 
+    try:
+        command = render_command(platform, template_name, **params)
+    except TemplateValidationError as exc:
+        return _safe_error("run_template", device_name, str(exc))
+
+    # Belt-and-suspenders: `render_command` already ran this check as part of
+    # `_validate_rendered_command`, but re-checking it here -- on the string
+    # that is actually about to be sent -- costs nothing and matches
+    # `run_templates`'s identical re-check a few functions down, and
+    # `_run_approved_commands`'s re-check of `is_approved` on commands its
+    # caller already filtered. Belt-and-suspenders is not what closes B-489
+    # (the render above does that); this line is the same defense-in-depth
+    # idiom used everywhere else this file talks to a device.
     if not is_safe_rendered_command(command):
         return _safe_error(
             "run_template", device_name, f"Refusing unsafe rendered command: {command!r}"
@@ -794,16 +824,16 @@ def run_template(
         result["data"] = {"template": template_name, "platform": platform}
         return result
 
-    try:
-        command = render_command(platform, template_name, **params)
-    except TemplateValidationError as exc:
-        return _safe_error("run_template", device_name, str(exc))
-
+    # Rendering (and both of its checks) now happens inside
+    # `_run_rendered_command` itself -- see B-489 in its docstring. Calling it
+    # a second time here would only duplicate work and error handling; this
+    # function's job stops at the checks that need no device or template
+    # access at all (platform, template existence, active-probe gate above).
     return _run_rendered_command(
         device_name,
-        command,
         template_name=template_name,
         platform=platform,
+        params=params,
         read_timeout=template.read_timeout,
         sender=sender,
     )

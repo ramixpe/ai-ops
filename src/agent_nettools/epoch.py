@@ -115,6 +115,26 @@ __all__ = [
 #: It is a number with a reason attached, which is the difference between a
 #: bound and a guess — and it is still a calibration, not a proof. See the module
 #: docstring.
+#:
+#: **B-466, the distribution the module docstring asked for.** On the CLI path,
+#: a responsive, healthy fabric runs the ``bgp_session`` epoch at 3.9-4.1s — 13%
+#: of this bound (round 5, probes 00 and 01-07, ``ROUND-5.md`` §7). The CLI path
+#: only approaches the bound when the fabric itself is genuinely mid-transition
+#: (same round, probes 08-11/99: 34.0-38.5s, 113-128%) — and even then B-454
+#: means a stable-but-slow read *qualifies* (``WINDOW_LIMITED``, see
+#: ``Coherence.refuses`` below) rather than being refused; only a re-read that
+#: actually disagrees still returns ``temporally_incoherent``. The MCP path runs
+#: markedly closer to the ceiling on the same healthy flow — 19.0-23.4s, 63-78%
+#: (``MCP-EXPERIMENT.md`` §§10.6, 11, 12) — which §11.4 there attributes to
+#: server/transport overhead rather than epoch behaviour (~84s over MCP against
+#: ~33.5s for the same fan-out called directly).
+#:
+#: Conclusion: the bound stays at 30s. It is derived from a protocol timer, not
+#: fitted to latency, and widening it to make the MCP number look more
+#: comfortable would stop it bounding anything — the module docstring's own
+#: rule. The margin that matters is large on the interface that matters most,
+#: and the interface that runs closest to the ceiling no longer fails closed on
+#: width alone.
 DEFAULT_SKEW_BOUND_SECONDS = 30.0
 
 

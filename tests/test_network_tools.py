@@ -403,6 +403,90 @@ def test_run_template_uses_one_command_per_call_not_a_batched_session(monkeypatc
     assert len(sessions) == 1
 
 
+# B-489: `_run_rendered_command`'s gate used to be verb+char-only (it checked
+# `is_safe_rendered_command` on a `command` string handed in by its caller, and
+# nothing else) -- safe only because `run_template` was its one caller and
+# always rendered via `render_command` (which also runs the shape check) a few
+# lines above. These three call `_run_rendered_command` directly, the way a
+# hypothetical second caller would, to prove the guarantee no longer depends on
+# that being the only caller.
+
+
+def test_run_rendered_command_derives_the_command_itself(monkeypatch):
+    """The command actually sent is always `render_command`'s own output for
+    the given template/platform/params -- never a string trusted from
+    outside."""
+
+    set_device_environment(monkeypatch)
+    seen = []
+
+    def recording_sender(device, command):
+        seen.append(command)
+        return "output"
+
+    result = network_tools._run_rendered_command(
+        "PE1",
+        template_name="route",
+        platform="cisco_xr",
+        params={"prefix": "10.255.0.31/32"},
+        sender=recording_sender,
+    )
+
+    expected = render_command("cisco_xr", "route", prefix="10.255.0.31/32")
+    assert expected == "show route 10.255.0.31/32"
+    assert seen == [expected]
+    assert result["data"]["command"] == expected
+
+
+def test_run_rendered_command_validates_params_even_called_directly(monkeypatch):
+    """Before B-489's fix, parameter validation lived only in `render_command`,
+    called by `run_template` -- a caller that reached `_run_rendered_command`
+    some other way skipped it entirely, since the old gate re-checked only
+    verb+char on whatever string it was handed. Calling it directly with a
+    parameter no `IPv4PrefixParam` accepts must still be refused before the
+    sender runs, on this path too."""
+
+    set_device_environment(monkeypatch)
+
+    def refusing_sender(device, command):
+        raise AssertionError(f"sender must never be called, got {command!r}")
+
+    result = network_tools._run_rendered_command(
+        "PE1",
+        template_name="route",
+        platform="cisco_xr",
+        params={"prefix": "running-config"},
+        sender=refusing_sender,
+    )
+
+    assert result["status"] == "error"
+
+
+def test_run_rendered_command_has_no_raw_command_parameter_to_smuggle_one_through(monkeypatch):
+    """Pins the structural fix directly: there is no parameter left through
+    which a caller could hand `_run_rendered_command` an arbitrary pre-rendered
+    string. Before the fix, this call shape -- a `show`-verb, ASCII-clean
+    string that does not match the `route` template's shape, offered under its
+    name -- would have passed the old gate (verb+char only) and been sent to
+    the device; `is_safe_rendered_command("show running-config")` is `True`.
+    Now it is not even expressible: the parameter it would have been passed
+    through does not exist."""
+
+    set_device_environment(monkeypatch)
+
+    def refusing_sender(device, command):
+        raise AssertionError(f"sender must never be called, got {command!r}")
+
+    with pytest.raises(TypeError):
+        network_tools._run_rendered_command(  # type: ignore[call-arg]
+            "PE1",
+            "show running-config",
+            template_name="route",
+            platform="cisco_xr",
+            sender=refusing_sender,
+        )
+
+
 def test_diff_evidence_reports_changed_intents():
     """No parser is wired for these hand-built sections (no "parse_status"), so
     the comparison falls back to normalized text -- exercised on its own merits
