@@ -50,6 +50,14 @@ dev = [
     "pytest>=8.3.0",
     "ruff>=0.8.0",
 ]
+# The neo4j driver, needed only by graph.write_graph -- the thin half of the
+# topology collector. Never a core dependency: graph.build_graph (the pure
+# half) and every other tool in this package must keep working with no graph
+# database configured, and no import of `neo4j` happens anywhere outside
+# write_graph's own function body (it is imported lazily, in-function).
+graph = [
+    "neo4j>=5.0,<6.0",
+]
 
 [project.scripts]
 nettools = "agent_nettools.cli:main"
