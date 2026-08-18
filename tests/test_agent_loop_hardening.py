@@ -298,6 +298,7 @@ def test_unknown_stop_reason_is_reported_honestly_not_as_end_turn(monkeypatch):
 
 
 def test_cli_agent_exits_warning_on_unknown_stop_and_prints_exploratory_label(monkeypatch, capsys):
+    monkeypatch.setenv("NETTOOLS_ENABLE_AGENT", "1")  # B-488: opt-in, default off.
     monkeypatch.setattr(
         cli,
         "run_agent_loop",
@@ -327,6 +328,7 @@ def test_cli_agent_exits_warning_on_unknown_stop_and_prints_exploratory_label(mo
 
 
 def test_cli_agent_end_turn_still_exits_ok(monkeypatch, capsys):
+    monkeypatch.setenv("NETTOOLS_ENABLE_AGENT", "1")  # B-488: opt-in, default off.
     monkeypatch.setattr(
         cli,
         "run_agent_loop",

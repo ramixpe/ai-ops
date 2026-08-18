@@ -263,7 +263,8 @@ second answer is not a model's opinion.
 **Scope, stated precisely** (external review, `docs/design/peer-review-response.md`
 §4): *the model cannot alter device configuration, and **this one investigation
 path** localises a finding using deterministic predicates.* `nettools agent` is a
-different path — a bounded tool-calling loop where the model chooses what to call.
+different path — a bounded tool-calling loop where the model chooses what to call,
+and disabled by default ("Bounded Agent Loop" below; B-488).
 Both are read-only; only `investigate` is deterministic, and the trust language
 below applies to it alone.
 
@@ -454,7 +455,11 @@ must be structurally impossible.
 echoes / UDP-or-ICMP probes) even though they change no device state, unlike
 every other command in this tool. They are gated by
 `NETTOOLS_ALLOW_ACTIVE_PROBES` (default enabled, since they are table stakes
-for troubleshooting); set it to `0`/`false`/`no`/`off` to disable them.
+for troubleshooting); set it to `0`/`false`/`no`/`off` to disable them. A
+human typing this command has asked for the probe explicitly, so this gate
+defaults open; the MCP surface is a model deciding to probe on its own and
+defaults **closed** behind a second, separate gate -- see
+`mcp_server/README.md`, "Active probes" (B-493).
 
 ```bash
 nettools route PE1 10.255.0.31
@@ -857,6 +862,26 @@ Tune the evidence budget (characters, a cheap proxy for tokens) with
 see `.env.example`.
 
 ## Bounded Agent Loop
+
+**Disabled by default (B-488).** `nettools agent` is a free-form,
+model-driven tool-calling loop -- the one command where the model chooses its
+own tools and writes its own prose answer, which is the opposite of this
+project's central claim that the model only navigates a menu and never
+synthesises a diagnosis. It is also Anthropic-only and, as the next paragraph
+says outright, unreliable on a small local model. As an apparent peer of
+`investigate` it undercut that trust story for anyone who met it before its
+disclaimer, so it is now quarantined behind an explicit opt-in:
+
+```bash
+NETTOOLS_ENABLE_AGENT=true nettools agent "Why is RR1 unhappy right now?"
+```
+
+Without that variable set to a truthy value, the command refuses immediately
+-- before touching a provider or a device -- and explains what it is, why it
+is gated, and points at `nettools investigate` (the deterministic
+alternative) instead. Unlike `NETTOOLS_ALLOW_ACTIVE_PROBES` below, an
+unrecognized value (a typo included) leaves it **off**, not on -- this is a
+gate whose whole purpose is "closed unless asked for".
 
 `nettools agent "QUESTION"` runs a hand-written, bounded tool-calling loop
 (Anthropic only -- OpenAI is not implemented yet, and a 9B local Ollama model

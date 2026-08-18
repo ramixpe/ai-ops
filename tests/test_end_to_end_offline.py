@@ -179,8 +179,8 @@ class ReadsItsPrompt:
                 "claim": f"The descent found {descent['finding']}.",
                 "based_on": list(labels),
             }],
-            "recommendation": {"next_check": "confirm with the operator",
-                               "requires_human": True},
+            # v2: `next_check` is not the model's to write (B-490).
+            "recommendation": {"requires_human": True},
         })
 
 

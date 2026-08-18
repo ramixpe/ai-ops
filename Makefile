@@ -126,6 +126,9 @@ analyze-fabric:
 
 # Phase 6: bounded, read-only tool-calling agent loop. Anthropic only -- see
 # CLAUDE.md, "Bounded agent loop (Phase 6)".
+# Gated since B-488: `nettools agent` is the one command where a model
+# chooses its own tools and writes its own answer, which is the opposite
+# of what the rest of this tool claims. Set NETTOOLS_ENABLE_AGENT=1 to opt in.
 agent:
 	nettools agent "$(QUESTION)"
 

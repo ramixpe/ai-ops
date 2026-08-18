@@ -183,6 +183,16 @@ DEVICE_TEXT_CLOSE = "<<<END-DEVICE-TEXT>>>"
 #: device that logged the same line thousands of times), not the normal one.
 DEFAULT_FREE_TEXT_BUDGET = 8000
 
+#: B-493: kept identical, word for word, to `mcp_server.boundary`'s constant
+#: of the same name -- see the entries below for why.
+_ACTIVE_PROBES_DISABLED_PHRASE = (
+    "active probes are disabled by configuration; set "
+    "NETTOOLS_ALLOW_ACTIVE_PROBES=true to enable them for every caller (it "
+    "already defaults on), or NETTOOLS_MCP_ALLOW_ACTIVE_PROBES=true to "
+    "enable them for an MCP client specifically without changing the CLI "
+    "default"
+)
+
 #: Copied from `mcp_server.boundary.ERROR_KINDS`, not imported -- see
 #: `RAW_TEXT_KEYS` above for why this package cannot depend on `mcp_server`.
 #: **Both tables must change together.** `tests/test_model_egress.py`
@@ -201,7 +211,11 @@ ERROR_KINDS: tuple[tuple[str, str], ...] = (
     ("name or service not known", "the device's name did not resolve"),
     ("refusing unapproved", "the command was refused by the allowlist"),
     ("refusing unsafe rendered", "the rendered command was refused"),
-    ("active probes are disabled", "active probes are disabled by configuration"),
+    # B-493: see mcp_server/boundary.py's matching comment -- two distinct
+    # literal messages both mean "active probes are refused", and only one
+    # used to match here.
+    ("active probes (ping/traceroute) are disabled", _ACTIVE_PROBES_DISABLED_PHRASE),
+    ("active probes are disabled", _ACTIVE_PROBES_DISABLED_PHRASE),
     ("no such template", "no such template for this platform"),
     ("required environment variable", "a credential is not configured"),
     ("is not in the lab inventory", "the device is not in the inventory"),

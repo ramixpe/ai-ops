@@ -60,6 +60,7 @@ from dataclasses import dataclass, field
 from .coverage import Coverage
 from .descent import DescentResult
 from .log_window import ShapedWindow
+from .render import next_check_for
 
 __all__ = [
     "MAX_LOCUS_LENGTH",
@@ -70,6 +71,7 @@ __all__ = [
     "check_absence_coverage",
     "check_chain_coverage",
     "check_identifier_containment",
+    "check_recommendation_closed",
     "check_timeline_citations",
     "claims_present",
     "check_grounding",
@@ -135,6 +137,7 @@ class GroundingResult:
     absence_claims_checked: int = 0
     timeline_entries_checked: int = 0
     identifiers_checked: int = 0
+    recommendations_checked: int = 0
 
     @property
     def ok(self) -> bool:
@@ -156,6 +159,7 @@ class GroundingResult:
             or self.absence_claims_checked
             or self.timeline_entries_checked
             or self.identifiers_checked
+            or self.recommendations_checked
         )
 
     def merge(self, other: GroundingResult) -> GroundingResult:
@@ -172,6 +176,9 @@ class GroundingResult:
                 self.timeline_entries_checked + other.timeline_entries_checked
             ),
             identifiers_checked=self.identifiers_checked + other.identifiers_checked,
+            recommendations_checked=(
+                self.recommendations_checked + other.recommendations_checked
+            ),
         )
 
     def summary(self) -> str:
@@ -185,7 +192,8 @@ class GroundingResult:
                 f"{self.rungs_covered}/{self.rungs_required} rungs cited, "
                 f"{self.absence_claims_checked} absence claims backed, "
                 f"{self.timeline_entries_checked} timeline entries cited, "
-                f"{self.identifiers_checked} identifiers contained"
+                f"{self.identifiers_checked} identifiers contained, "
+                f"{self.recommendations_checked} recommendation(s) closed"
             )
         return f"not grounded ({len(self.failures)} failures): " + "; ".join(
             str(f) for f in self.failures
@@ -435,6 +443,83 @@ def check_identifier_containment(
     )
 
 
+# --- Recommendation closure (B-490) -------------------------------------------
+#
+# `check_grounding` asks whether the recommendation carries `requires_human:
+# true`. It does not ask what the recommendation *says* -- that field is exempt
+# from citation, and "exempt from citation" was read, until now, as "exempt from
+# everything else too". A claim labelled as advice for a human is still free,
+# as far as citation integrity is concerned, to invent whatever advice it
+# likes.
+#
+# Measured live (MCP-EXPERIMENT.md §11.2, 2026-08-18): the authoritative
+# `next_check` for `all_layers_healthy` is "No fault on this dependency path.
+# If a problem is being reported, it is about something this flow does not
+# cover." A 4B paraphrase converted that into "likely an application or
+# configuration problem" and dropped `requires_human` entirely; one turn
+# earlier, the same session had proposed "the service running on 10.255.0.12
+# is down" -- `10.255.0.12` is a router loopback, and there is no service on
+# it. Nothing in that sentence cites an invented key or an invented device, so
+# nothing built for T-029 or B-453 would have caught it. The failure is not
+# that the paraphrase misquoted the descent; it is that it *answered a
+# question the descent declined to answer*, and did so fluently enough to be
+# actionable.
+#
+# So `recommendation.next_check` is a **closed field**: the only string
+# permitted is the descent's own, verbatim, from :func:`render.next_check_for`
+# -- the same lookup `render.render_report` uses to build the authoritative
+# version of this field, so there is exactly one place this text is written
+# down. A paraphrase may carry it forward unchanged or omit it; it may not
+# elaborate on it, soften it, or substitute a diagnosis of its own, however
+# plausible the substitute sounds. "Plausible" is precisely the property that
+# does not help here -- the loophole this closes is the one where every other
+# check in this module was already satisfied.
+
+def check_recommendation_closed(report: dict, descent: DescentResult) -> GroundingResult:
+    """Refuse a `next_check` that differs from the descent's own. B-490.
+
+    Exempt from citation is not exempt from existing: :func:`check_grounding`
+    only requires `requires_human: true`, which checks that the field is
+    labelled, not what it contains. This checks the content, and it is
+    deliberately narrow -- a recommendation that is absent, or present with no
+    `next_check` string, is not this check's business (an absent or malformed
+    recommendation is `check_grounding`'s concern). This fires only when a
+    `next_check` string is present and is not the descent's own, character for
+    character once incidental whitespace is collapsed.
+    """
+
+    if not isinstance(report, dict):
+        return GroundingResult()
+    recommendation = report.get("recommendation")
+    if not isinstance(recommendation, dict):
+        return GroundingResult()
+    next_check = recommendation.get("next_check")
+    if not isinstance(next_check, str) or not next_check.strip():
+        return GroundingResult()
+
+    authoritative = next_check_for(descent.finding)
+    if _locus(next_check) == _locus(authoritative):
+        return GroundingResult(recommendations_checked=1)
+
+    return GroundingResult(
+        recommendations_checked=1,
+        failures=(
+            GroundingFailure(
+                "recommendation_not_closed",
+                "recommendation",
+                # Names the descent's own text, never the model's -- the
+                # authoritative string is fixed vocabulary this module wrote,
+                # so quoting it back is not a prose leak the way quoting the
+                # paraphrase's substitute would be.
+                f"next_check must equal the descent's own recommendation, "
+                f"verbatim: {_locus(authoritative)!r}. It is a closed field; a "
+                f"paraphrase may not supply a different next step, cause, or "
+                f"diagnosis, however plausible it sounds",
+            ),
+        ),
+    )
+
+
 def _sequence(report: object, key: str) -> tuple[list, GroundingFailure | None]:
     """Read a list-valued field from an untrusted report."""
 
@@ -677,12 +762,15 @@ def check_chain_coverage(report: dict, descent: DescentResult) -> GroundingResul
 
 
 def ground_report(report: dict, descent: DescentResult) -> GroundingResult:
-    """The gate. Both checks, over the keys the descent actually read.
+    """The gate. Every check this module has, over the keys the descent read.
 
     **This is the function the emit path calls.** Reaching for
     :func:`check_grounding` alone there passes every internally-consistent
     report, including one that names the cause and drops the four rungs that
     explain it — which is the failure the chain requirement exists to catch.
+    :func:`check_recommendation_closed` (B-490) closes a different gap: citation
+    integrity has no opinion on what an exempt recommendation *says*, so a
+    paraphrase that invents a diagnosis there passes every other check here.
     """
 
     keys = descent_evidence_keys(descent)
@@ -690,6 +778,7 @@ def ground_report(report: dict, descent: DescentResult) -> GroundingResult:
         check_grounding(report, keys)
         .merge(check_chain_coverage(report, descent))
         .merge(check_identifier_containment(report, descent))
+        .merge(check_recommendation_closed(report, descent))
     )
     return _refuse_unmeasured(merged, report, locus="report")
 
@@ -768,6 +857,7 @@ def _refuse_unmeasured(
         rungs_required=result.rungs_required,
         absence_claims_checked=result.absence_claims_checked,
         timeline_entries_checked=result.timeline_entries_checked,
+        recommendations_checked=result.recommendations_checked,
     )
 
 

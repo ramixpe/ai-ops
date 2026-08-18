@@ -4784,3 +4784,48 @@ Only three things can — an external standard, an independent reviewer, or the
 device itself. This project has now been corrected by all three in one week
 (RFC 4271 here; the two-lens holistic review; round 8b's 127 samples), and the
 device was the one that found the error the other two had read past.
+
+## OBS-163 · Backlog wave · Two agents found the defect that made a third agent's fix dangerous
+
+Four agents, disjoint file sets, one working tree. Six items closed, one
+verified-and-left-open, and three findings that were nobody's assignment.
+
+**1. A fix that would have broken the thing it protected.** The B-490 agent
+built the closed-field check correctly — a paraphrase may not supply its own
+`next_check` — and then reported that **its own fix would withhold nearly every
+real report**, because `report.v1.txt` *instructs* the model to invent that
+field and `descent_payload` never supplies the authoritative string. A
+compliant model could not have passed. It could have shipped a green suite and
+a silently broken paraphrase path; instead it named the problem, said the fix
+lived outside its file scope, and stopped. The prompt was the other half of
+B-490 and nobody had noticed: `report.v2.txt` now removes the field and states
+why, with the measurement quoted in the constraint itself.
+
+**2. A declared error kind that had never matched anything.** Wiring B-493's
+gate, the second agent found that `ERROR_KINDS`' existing *"active probes are
+disabled"* entry never fired: the code emits `Active probes (ping/traceroute)
+are disabled: …` and the parenthetical breaks the contiguous substring. Every
+refused probe had been reading as *"an unclassified error"*. **That is the
+second dead ERROR_KINDS entry found in two days** — the first was the
+credential message, found by the MCP re-test. A declared table nothing verifies
+against real messages accumulates entries that describe nothing, and the
+mechanism is always the same: the phrase is written from the *idea* of the
+message rather than from the message.
+
+**3. A bool convention that reopens a gate on a typo.** The same agent
+declined to reuse the existing bool convention for a fail-closed setting,
+because `NETTOOLS_ALLOW_ACTIVE_PROBES` treats *any unrecognised value as
+enabled* — `settings.py`'s own docstring calls that a footgun. A gate whose
+purpose is "off unless asked" cannot inherit a convention that turns on for
+`treu`. It added `unknown_bool_disables` and made the validator's message
+describe the correct direction per setting. **Noticing that a house convention
+is wrong for your case, and saying so, is the behaviour worth recording** —
+the easy path was to follow it and produce a gate that fails open.
+
+**And one about my own review.** I spot-checked the skew figures against
+ROUND-5's prose summary, declared them wrong, "corrected" them, and was wrong
+both times — the agent had sourced the probe table, which is more precise than
+the paragraph I grepped. Reverted. OBS-147 says a verification that finds
+nothing must be asked what it found wrong with itself; the converse also holds:
+**a verification that finds something must be asked whether it read the right
+source.**

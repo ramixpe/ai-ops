@@ -25,6 +25,7 @@ from agent_nettools.checks import BROKEN, HEALTHY, UNEVALUATED, CheckResult
 from agent_nettools.descent import DescentResult, RungOutcome, run_descent
 from agent_nettools.fixtures import fixture_sender, load_fixture_evidence
 from agent_nettools.network_tools import run_template
+from agent_nettools.render import next_check_for
 
 FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures" / "cisco_xr"
 
@@ -82,7 +83,14 @@ def _first_key(outcome) -> str:
 
 def _full_report(descent) -> dict:
     """The report the prompt is meant to produce: one observation per rung, an
-    interpretation naming the cause and citing the whole chain."""
+    interpretation naming the cause and citing the whole chain.
+
+    `recommendation.next_check` is the descent's own text, taken from the same
+    lookup `render.render_report` uses -- not a plausible-sounding one written
+    for the test. Since B-490, anything else fails `check_recommendation_closed`
+    regardless of how reasonable it reads, and a report meant to stand in for
+    "what the prompt is meant to produce" must satisfy the same closed field a
+    real paraphrase now has to."""
 
     observations = [
         {"claim": f"{o.rung} on {o.device} is {o.status}", "evidence_key": _first_key(o)}
@@ -95,7 +103,7 @@ def _full_report(descent) -> dict:
             {"claim": "The admin-down uplinks isolated PE2, which is why the session is Idle.",
              "based_on": list(labels)}
         ],
-        "recommendation": {"next_check": "confirm the shutdown was intended",
+        "recommendation": {"next_check": next_check_for(descent.finding),
                            "requires_human": True},
     }
 
@@ -210,6 +218,141 @@ def test_a_report_with_no_recommendation_is_fine(broken):
 
 
 # --------------------------------------------------------------------------- #
+# check_recommendation_closed -- `next_check` is a closed field (B-490)
+# --------------------------------------------------------------------------- #
+
+
+def _all_layers_healthy_descent() -> DescentResult:
+    """A minimal stand-in for the descent behind the measured MCP §11.2 case:
+    RR1 -> 10.255.0.12, the one rung read is healthy, no cause -- the shape
+    that produced the recommendation a 4B model rewrote into an invented
+    diagnosis of a router loopback."""
+
+    outcome = RungOutcome("bgp_session", "RR1", CheckResult(
+        HEALTHY, reason="Established", subject="10.255.0.12",
+        evidence_keys=("RR1:bgp:10.255.0.12",)))
+    return DescentResult(
+        flow="bgp_session", device="RR1", subject="10.255.0.12",
+        finding=flows.ALL_LAYERS_HEALTHY, outcomes=(outcome,),
+        evidence_keys=("RR1:bgp:10.255.0.12",))
+
+
+def test_the_paraphrase_may_carry_the_closed_recommendation_forward():
+    """The permitted case, stated first: reproducing the descent's own text
+    verbatim is not a violation -- it is the only thing `next_check` is for."""
+
+    descent = _all_layers_healthy_descent()
+    report = {
+        "observations": [{"claim": "Established",
+                          "evidence_key": "RR1:bgp:10.255.0.12"}],
+        "recommendation": {
+            "next_check": next_check_for(descent.finding),
+            "requires_human": True,
+        },
+    }
+
+    result = grounding.ground_report(report, descent)
+
+    assert result.ok, result.summary()
+    assert result.recommendations_checked == 1
+
+
+def test_a_paraphrase_that_answers_what_now_is_refused():
+    """MCP-EXPERIMENT.md §11.2, 2026-08-18 -- the measured failure this check
+    exists for.
+
+    The authoritative `next_check` for `all_layers_healthy` is "No fault on
+    this dependency path. If a problem is being reported, it is about
+    something this flow does not cover." A 4B paraphrase converted that into
+    "the issue is likely related to an application or configuration problem"
+    and dropped `requires_human` -- and, one turn earlier in the same session,
+    proposed "the service running on 10.255.0.12 is down" about a router
+    loopback, which carries no service. Nothing about the sentence below cites
+    an invented key or names an entity outside the fabric, so citation
+    integrity and identifier containment both pass it; only the closed-field
+    check catches it, which is the gap §11.2 measured.
+    """
+
+    descent = _all_layers_healthy_descent()
+    report = {
+        "observations": [{"claim": "Established",
+                          "evidence_key": "RR1:bgp:10.255.0.12"}],
+        "recommendation": {
+            "next_check": (
+                "The network path is fully healthy, so the issue is likely "
+                "related to an application or configuration problem outside "
+                "of the network path itself."
+            ),
+            "requires_human": True,
+        },
+    }
+
+    assert grounding.check_grounding(
+        report, grounding.descent_evidence_keys(descent)
+    ).ok, "flawless by citation integrity alone -- the point of the measurement"
+
+    result = grounding.ground_report(report, descent)
+
+    assert not result.ok
+    assert any(f.kind == "recommendation_not_closed" for f in result.failures)
+
+
+def test_the_closed_field_tolerates_incidental_whitespace_only():
+    """Closed means "the same text", not "the same bytes". A transport that
+    re-wraps the string across different line lengths must not be
+    indistinguishable from one that changed a word -- so whitespace is
+    collapsed on both sides before the comparison, the same normalisation
+    `_locus` already applies for display."""
+
+    descent = _all_layers_healthy_descent()
+    authoritative = next_check_for(descent.finding)
+    respaced = "  ".join(authoritative.split(" "))
+    report = {
+        "observations": [],
+        "recommendation": {"next_check": respaced, "requires_human": True},
+    }
+
+    result = grounding.check_recommendation_closed(report, descent)
+
+    assert result.ok, result.summary()
+
+
+def test_a_recommendation_with_no_next_check_is_not_this_checks_business(broken):
+    """Narrow scope, stated in the docstring and pinned here: this check fires
+    only when `next_check` is present as a string. A missing one is
+    `check_grounding`'s concern (an unflagged or malformed recommendation),
+    not this one's."""
+
+    report = {"observations": [], "recommendation": {"requires_human": True}}
+
+    result = grounding.check_recommendation_closed(report, broken)
+
+    assert result.ok
+    assert result.recommendations_checked == 0
+
+
+def test_the_closed_field_failure_never_carries_the_models_sentence():
+    """OBS-061's rule, applied to this check specifically. The failure names
+    the descent's own text -- safe to quote, because this module wrote it --
+    and must never echo the paraphrase's substitute back into a rejected
+    report, or the rejection becomes the leak it exists to prevent."""
+
+    descent = _all_layers_healthy_descent()
+    invented = "the service running on 10.255.0.12 is down"
+    report = {
+        "observations": [],
+        "recommendation": {"next_check": invented, "requires_human": True},
+    }
+
+    result = grounding.check_recommendation_closed(report, descent)
+
+    assert not result.ok
+    rendered = result.summary()
+    assert invented not in rendered
+    assert "service" not in rendered.lower()
+
+
+# --------------------------------------------------------------------------- #
 # check_chain_coverage -- the requirement citation integrity cannot see
 # --------------------------------------------------------------------------- #
 
@@ -220,10 +363,10 @@ def test_a_report_that_names_the_cause_and_drops_the_chain_is_not_emitted(broken
 
     This report is *flawless* by citation integrity: one observation, a real
     evidence key the descent genuinely read, an interpretation citing it, a
-    flagged recommendation. `check_grounding` passes it. And it is exactly the
-    output `prompts/README.md` rules out -- "BGP is down. Cause:
-    interface_line_down on PE2" -- an assertion where the descent produced an
-    argument.
+    flagged recommendation carrying the descent's own closed `next_check`.
+    `check_grounding` passes it. And it is exactly the output
+    `prompts/README.md` rules out -- "BGP is down. Cause: interface_line_down
+    on PE2" -- an assertion where the descent produced an argument.
 
     The two assertions together are the point: the component passes, the gate
     does not. A runner calling `check_grounding` alone has turned this off.
@@ -236,7 +379,8 @@ def test_a_report_that_names_the_cause_and_drops_the_chain_is_not_emitted(broken
              "evidence_key": _first_key(cause)}
         ],
         "interpretations": [{"claim": "The interface is the cause.", "based_on": ["obs-1"]}],
-        "recommendation": {"next_check": "check with the operator", "requires_human": True},
+        "recommendation": {"next_check": next_check_for(broken.finding),
+                           "requires_human": True},
     }
 
     assert grounding.check_grounding(report, grounding.descent_evidence_keys(broken)).ok
@@ -310,6 +454,92 @@ def test_citing_some_other_rungs_key_is_not_coverage(broken):
     assert sum(f.kind == "uncited_rung" for f in result.failures) == 4
 
 
+def test_a_models_false_claim_of_complete_coverage_is_still_caught(broken):
+    """B-491, MCP §11.3: a 4B model said "my summary did not list every rung
+    individually, but it accurately captured the conclusion of all five
+    rungs" -- and its own accounting, printed in the same message, named only
+    three. Rungs 2 and 3 (`transport`, `route_to_peer`) were the two silently
+    missing, exactly the shape reproduced below.
+
+    Nothing in this module reads that claim. `rungs_covered`/`rungs_required`
+    come from counting citations against the descent's own rungs, so a false
+    claim of completeness sitting right next to the count is caught exactly as
+    if no claim had been made at all -- pinning that this module already does
+    what B-491 asks for, rather than something that merely looks like it.
+    """
+
+    observations = [
+        {"claim": f"{o.rung} on {o.device} is {o.status}", "evidence_key": _first_key(o)}
+        for o in broken.outcomes
+    ]
+    kept = [observations[0], observations[3], observations[4]]  # drops rungs 2, 3
+    labels = grounding.observation_labels(len(kept))
+    report = {
+        "observations": kept,
+        "interpretations": [
+            {"claim": ("My summary did not list every rung individually, but "
+                       "it accurately captured the conclusion of all five "
+                       "rungs."),
+             "based_on": list(labels)},
+        ],
+    }
+
+    result = grounding.ground_report(report, broken)
+
+    assert not result.ok
+    assert result.rungs_covered == 3
+    assert result.rungs_required == 5
+    assert sum(f.kind == "uncited_rung" for f in result.failures) == 2
+
+
+def test_a_true_and_a_false_self_report_grade_identically(broken):
+    """The sharper half of B-491 (MCP §12.5): the true and the false
+    self-report are indistinguishable *at read time* -- a 31B named its own
+    two omissions correctly, a 4B claimed completeness it did not have, and
+    nothing about either sentence's form tells a reader which is which.
+
+    So grounding must not try to read either one. A report whose
+    interpretation *correctly* names its omissions is graded identically to
+    one that says nothing about coverage at all -- same verdict, same
+    `rungs_covered`, same failure kinds -- because the count comes from the
+    citations next to the prose, never from the prose itself. If this module
+    ever starts trusting an accurate self-report, it has no way to tell that
+    case apart from trusting an inaccurate one, which is the whole finding.
+    """
+
+    observations = [
+        {"claim": f"{o.rung} on {o.device} is {o.status}", "evidence_key": _first_key(o)}
+        for o in broken.outcomes
+    ]
+    kept = [observations[0], observations[3], observations[4]]
+    labels = grounding.observation_labels(len(kept))
+
+    silent = {
+        "observations": kept,
+        "interpretations": [{"claim": "c", "based_on": list(labels)}],
+    }
+    honest_self_report = {
+        "observations": kept,
+        "interpretations": [
+            {"claim": ("I omitted the transport and route_to_peer rungs to "
+                       "keep the summary concise."),
+             "based_on": list(labels)},
+        ],
+    }
+
+    silent_result = grounding.ground_report(silent, broken)
+    honest_result = grounding.ground_report(honest_self_report, broken)
+
+    assert not silent_result.ok and not honest_result.ok
+    assert silent_result.rungs_covered == honest_result.rungs_covered == 3
+    assert silent_result.rungs_required == honest_result.rungs_required == 5
+    assert (
+        {f.kind for f in silent_result.failures}
+        == {f.kind for f in honest_result.failures}
+        == {"uncited_rung"}
+    )
+
+
 # --------------------------------------------------------------------------- #
 # The refusal path, and the vacuous case §0.12 requires be visible
 # --------------------------------------------------------------------------- #
@@ -340,7 +570,7 @@ def test_an_unevaluated_rung_with_nothing_to_cite_is_exempt():
                           "evidence_key": "RR1:bgp:10.255.0.12"}],
         "interpretations": [{"claim": "The transport rung could not be read, so no "
                                       "cause can be determined.", "based_on": ["obs-1"]}],
-        "recommendation": {"next_check": "capture the transport rung",
+        "recommendation": {"next_check": next_check_for(descent.finding),
                            "requires_human": True},
     }
 
@@ -961,7 +1191,16 @@ def test_a_genuinely_empty_payload_is_still_a_clean_vacuous_pass():
 
 
 def test_a_report_asserting_nothing_still_passes_but_one_with_claims_does_not():
-    """The same rule on the report gate, in both directions."""
+    """The same rule on the report gate, in both directions.
+
+    `recommendation` deliberately carries no `next_check` -- since B-490 that
+    field is examined for real, so a `next_check` here would be caught by
+    `check_recommendation_closed` instead, which demonstrates a different
+    thing (a specific, named mismatch) than the one this test is for (a claim
+    present that nothing examined at all). `requires_human` alone is still a
+    claim `claims_present` counts, and it is still true that nothing in this
+    module reads what an absent `next_check` might have said.
+    """
 
     descent = DescentResult(
         flow="bgp_session", device="RR1", subject="10.255.0.12",
@@ -972,8 +1211,7 @@ def test_a_report_asserting_nothing_still_passes_but_one_with_claims_does_not():
     assert grounding.ground_report({"observations": []}, descent).ok
 
     recommendation_only = {"observations": [], "interpretations": [],
-                           "recommendation": {"next_check": "look at it",
-                                              "requires_human": True}}
+                           "recommendation": {"requires_human": True}}
     result = grounding.ground_report(recommendation_only, descent)
     assert not result.ok
     assert any(f.kind == "verified_nothing" for f in result.failures)

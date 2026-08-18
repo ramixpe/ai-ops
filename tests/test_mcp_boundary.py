@@ -204,6 +204,12 @@ def test_active_probe_tools_still_lose_a_canary_in_their_commands(monkeypatch):
     if a real device had said it, must not survive the call.
     """
 
+    # B-493: get_lab_ping/get_lab_traceroute are now gated by
+    # NETTOOLS_MCP_ALLOW_ACTIVE_PROBES (default off) before ping_device/
+    # traceroute_device is ever called -- opt in so this test still exercises
+    # the sanitisation boundary it was written for, not the new gate.
+    monkeypatch.setenv("NETTOOLS_MCP_ALLOW_ACTIVE_PROBES", "1")
+
     canary = "CANARY -- a real device would never say this"
 
     def fake_ping_device(device_name, address, **kwargs):
@@ -236,6 +242,135 @@ def test_active_probe_tools_still_lose_a_canary_in_their_commands(monkeypatch):
         assert "_register_sanitized_tool(" in wrapper_source, (
             f"{wrapper_name} must go through the shared boundary, not its own copy"
         )
+
+
+# --------------------------------------------------------------------------- #
+# B-493 -- NETTOOLS_MCP_ALLOW_ACTIVE_PROBES: a second, MCP-only gate on the
+# active-probe tools, default OFF, enforced at registration (not signalling).
+# --------------------------------------------------------------------------- #
+
+
+def test_active_probe_tools_refuse_by_default_with_a_classified_error(monkeypatch):
+    """The default posture (B-493): an MCP client gets NOTHING generated on
+    the fabric until it opts in, and is told exactly why and how -- never a
+    silent no-op, never "an unclassified error"."""
+
+    monkeypatch.delenv("NETTOOLS_MCP_ALLOW_ACTIVE_PROBES", raising=False)
+    called: list[str] = []
+    monkeypatch.setattr(server, "ping_device", lambda *a, **k: called.append("ping") or {})
+    monkeypatch.setattr(server, "traceroute_device", lambda *a, **k: called.append("tr") or {})
+
+    for result in (
+        server.get_lab_ping("PE1", "10.0.0.1"),
+        server.get_lab_traceroute("PE1", "10.0.0.1"),
+    ):
+        assert result["status"] == "error"
+        assert result["device"] == "PE1"
+        [message] = result["errors"]
+        assert "unclassified" not in message
+        assert "active probes are disabled" in message
+        assert "NETTOOLS_MCP_ALLOW_ACTIVE_PROBES" in message
+        assert "NETTOOLS_ALLOW_ACTIVE_PROBES" in message
+
+    assert called == [], "ping_device/traceroute_device must never run while the gate is closed"
+
+
+@pytest.mark.parametrize("value", ["fasle", "", "sure", "2", "no", "false", "off"])
+def test_active_probe_gate_fails_closed_on_falsy_and_unrecognized_values(monkeypatch, value):
+    """Deliberately the OPPOSITE convention from NETTOOLS_ALLOW_ACTIVE_PROBES
+    (network_tools._active_probes_allowed): here, only a recognized truthy
+    spelling opens the gate -- everything else, typo included, stays closed."""
+
+    monkeypatch.setenv("NETTOOLS_MCP_ALLOW_ACTIVE_PROBES", value)
+    called: list[str] = []
+    monkeypatch.setattr(server, "ping_device", lambda *a, **k: called.append("ping") or {})
+
+    result = server.get_lab_ping("PE1", "10.0.0.1")
+
+    assert result["status"] == "error"
+    assert called == []
+
+
+@pytest.mark.parametrize("value", ["1", "true", "True", "yes", "on"])
+def test_active_probe_tools_run_when_explicitly_enabled(monkeypatch, value):
+    monkeypatch.setenv("NETTOOLS_MCP_ALLOW_ACTIVE_PROBES", value)
+    monkeypatch.setattr(
+        server, "ping_device",
+        lambda device_name, address, **k: {
+            "tool": "ping_device", "device": device_name, "status": "success",
+            "data": {"commands": {}}, "errors": [],
+        },
+    )
+
+    result = server.get_lab_ping("PE1", "10.0.0.1")
+
+    assert result["status"] == "success"
+
+
+def test_active_probe_gate_does_not_touch_a_passive_tool(monkeypatch):
+    """The gate is on `_active_probe_tool` registrations specifically -- a
+    passive read must be unaffected regardless of the setting."""
+
+    monkeypatch.delenv("NETTOOLS_MCP_ALLOW_ACTIVE_PROBES", raising=False)
+    monkeypatch.setattr(
+        server, "get_device_facts",
+        lambda device_name: {
+            "tool": "get_device_facts", "device": device_name, "status": "success",
+            "data": {"commands": {}}, "errors": [],
+        },
+    )
+
+    result = server.get_lab_device_facts("PE1")
+
+    assert result["status"] == "success"
+
+
+def test_the_gate_is_the_registration_mechanism_not_a_ping_traceroute_special_case(monkeypatch):
+    """Direct test of the shared mechanism, independent of `get_lab_ping`/
+    `get_lab_traceroute` by name -- the same mechanism `probe_lab` (staged
+    surface, `staged_surface.apply`'s `register_probe = server_module._active_probe_tool`)
+    inherits with no code of its own. Registers a throwaway tool through a
+    fake `mcp.tool()` so this never touches the real server registry (which
+    `tests/test_docs.py` asserts matches the README's tool list)."""
+
+    class _FakeMCP:
+        def tool(self, *a, **k):
+            def register(fn):
+                return fn
+            return register
+
+    monkeypatch.setattr(server, "mcp", _FakeMCP())
+    monkeypatch.delenv("NETTOOLS_MCP_ALLOW_ACTIVE_PROBES", raising=False)
+
+    calls = []
+
+    @server._active_probe_tool()
+    def dummy_probe(device_name, address):
+        calls.append((device_name, address))
+        return {"tool": "dummy_probe", "device": device_name, "status": "success", "data": {}, "errors": []}
+
+    result = dummy_probe("PE1", "10.0.0.1")
+
+    assert calls == [], "the wrapped function must not run while the gate is closed"
+    assert result["status"] == "error"
+    assert "active probes are disabled" in result["errors"][0]
+
+    monkeypatch.setenv("NETTOOLS_MCP_ALLOW_ACTIVE_PROBES", "1")
+    result = dummy_probe("PE1", "10.0.0.1")
+    assert calls == [("PE1", "10.0.0.1")]
+    assert result["status"] == "success"
+
+
+def test_staged_surfaces_probe_lab_is_registered_through_the_gated_wrapper():
+    """`staged_surface.apply()` must keep using `_active_probe_tool` (not
+    `_read_only_tool`) for `probe_lab`, or the staged surface would silently
+    stop inheriting the B-493 gate the classic surface has."""
+
+    from mcp_server import staged_surface
+
+    source = inspect.getsource(staged_surface.apply)
+    assert "register_probe = server_module._active_probe_tool" in source
+    assert "register_probe()(probe_lab)" in source
 
 
 # --------------------------------------------------------------------------- #
@@ -370,6 +505,35 @@ def test_errors_are_rebuilt_from_a_declared_kind_not_truncated():
     for leaked in ("RP/0/RP0/CPU0", "10.255.0.11", "output=", "BGP router identifier"):
         assert leaked not in only, f"{leaked!r} reached a model"
     assert any(phrase in only for _, phrase in ERROR_KINDS)
+
+
+def test_active_probe_refusals_classify_in_both_message_shapes():
+    """B-493: two DIFFERENT literal messages both mean "active probes are
+    refused", and before this only one matched. `run_template`'s single-
+    command path (network_tools.py -- exactly what get_lab_ping/
+    get_lab_traceroute/probe_lab call) writes "Active probes
+    (ping/traceroute) are disabled: ..."; the parenthetical breaks the
+    contiguous substring "active probes are disabled" that the pre-existing
+    entry matched on, so a refused probe fell through to "an unclassified
+    error" -- never a silent no-op, but not a useful reason either. Both
+    shapes must now classify, and the classified text must explain how to
+    enable (both env vars), matching what B-493 requires of the refusal.
+    """
+
+    single_path_message = (
+        "Active probes (ping/traceroute) are disabled: "
+        "NETTOOLS_ALLOW_ACTIVE_PROBES is set to a falsy value. Unset it or "
+        "set it to 1/true to allow ping/traceroute templates."
+    )
+    batch_path_message = "ping: active probes are disabled by NETTOOLS_ALLOW_ACTIVE_PROBES"
+
+    for message in (single_path_message, batch_path_message):
+        clean = sanitize({"errors": [message]})
+        [classified] = clean["errors"]
+        assert "unclassified" not in classified, f"{message!r} was withheld, not classified"
+        assert "active probes are disabled" in classified
+        assert "NETTOOLS_ALLOW_ACTIVE_PROBES" in classified
+        assert "NETTOOLS_MCP_ALLOW_ACTIVE_PROBES" in classified
 
 
 def test_an_unclassified_error_is_withheld_entirely_not_trimmed():

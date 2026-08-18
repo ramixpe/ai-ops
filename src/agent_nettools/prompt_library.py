@@ -105,7 +105,7 @@ PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "prompts"
 #: paragraph naming the quote delimiters `window_json` entries are now
 #: wrapped in -- see `prompts/README.md`'s version history. Superseded
 #: versions stay in the tree as the record of what was reviewed when.
-CURRENT_VERSION: dict[str, int] = {"report": 1, "correlate": 4}
+CURRENT_VERSION: dict[str, int] = {"report": 2, "correlate": 4}
 
 
 class PromptNotFoundError(FileNotFoundError):

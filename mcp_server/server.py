@@ -84,7 +84,77 @@ mcp = FastMCP("IOS-XR Read-Only Network Tools")
 # annotations are hints a client is free to ignore, same as `read_only_hint`
 # always was -- they widen what a client *can* know without inspecting this
 # file, not what the server *allows*.
+#
+# B-493 (2026-08-18, MCP-EXPERIMENT.md 12.3): that gap was not hypothetical.
+# A 31B model followed a clean `investigate_lab_session` descent with an
+# UNPROMPTED `get_lab_ping` -- the first time a model generated traffic on
+# this fabric without being asked. The engineering was sound (the flow it
+# had just run covers the control plane; "reach" can mean the data plane),
+# and nothing on this surface refused it, because `NETTOOLS_ALLOW_ACTIVE_PROBES`
+# defaults to enabled and the annotations above are exactly what this
+# comment already said they are: hints, not a gate. **Initiative scales
+# with capability** -- the model most likely to start probing when told
+# "no fault on this path" during an incident is the capable one.
+#
+# `_mcp_active_probes_allowed`/`NETTOOLS_MCP_ALLOW_ACTIVE_PROBES` below is
+# the enforcement this comment predicted was missing. It is a second,
+# MCP-only gate, deliberately opposite-by-default from the CLI's: a human
+# typing `nettools ping` asked for the probe explicitly; an MCP client is a
+# model deciding to generate traffic on its own. It does not touch
+# `NETTOOLS_ALLOW_ACTIVE_PROBES` (still checked, further down, inside
+# `run_template`) -- both must allow a probe for one to run.
 # --------------------------------------------------------------------------- #
+
+# B-493: NETTOOLS_MCP_ALLOW_ACTIVE_PROBES, default OFF. See settings.py's
+# entry for the full rationale; unlike NETTOOLS_ALLOW_ACTIVE_PROBES this
+# fails CLOSED on an unrecognized value -- a gate whose entire purpose is to
+# keep something off by default must not reopen on a typo (that footgun is
+# exactly what settings.py's own P2-02 finding is about).
+NETTOOLS_MCP_ALLOW_ACTIVE_PROBES_ENV = "NETTOOLS_MCP_ALLOW_ACTIVE_PROBES"
+_MCP_ACTIVE_PROBES_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+def _mcp_active_probes_allowed() -> bool:
+    value = os.getenv(NETTOOLS_MCP_ALLOW_ACTIVE_PROBES_ENV, "0").strip().lower()
+    return value in _MCP_ACTIVE_PROBES_TRUTHY
+
+
+def _active_probes_refused(tool_name: str, call_args: tuple, call_kwargs: dict) -> dict:
+    """The envelope returned in place of calling an active-probe tool.
+
+    Shaped like `network_tools._safe_error`'s own envelopes (`status: "error"`,
+    the reason under `errors`) on purpose: `boundary.sanitize` -> `_classify_errors`
+    walks every `errors` list the same way regardless of which function built
+    it, and the whole point of this refusal is that it is CLASSIFIED, not
+    withheld -- see boundary.ERROR_KINDS' "active probes (ping/traceroute) are
+    disabled" / "active probes are disabled" entries, which this message
+    matches deliberately (never a silent no-op, and never "an unclassified
+    error").
+
+    Every current active-probe tool (`get_lab_ping`, `get_lab_traceroute`,
+    `probe_lab`) takes `device_name` first, positionally or by keyword, so
+    it is read the same way here rather than duplicated per tool.
+    """
+
+    device_name = call_kwargs.get("device_name")
+    if device_name is None and call_args:
+        device_name = call_args[0]
+
+    return {
+        "tool": tool_name,
+        "device": device_name,
+        "status": "error",
+        "data": {},
+        "errors": [
+            f"{tool_name}: Active probes (ping/traceroute) are disabled for "
+            "the MCP surface: NETTOOLS_MCP_ALLOW_ACTIVE_PROBES is not set to "
+            "a truthy value. Set NETTOOLS_MCP_ALLOW_ACTIVE_PROBES=true (or 1) "
+            "to allow an MCP client to generate ping/traceroute traffic; this "
+            "is independent of NETTOOLS_ALLOW_ACTIVE_PROBES, which still "
+            "gates the CLI and every other caller, and defaults to enabled."
+        ],
+    }
+
 
 _TOOL_ACCEPTS_ANNOTATIONS = "annotations" in inspect.signature(FastMCP.tool).parameters
 
@@ -126,7 +196,7 @@ ACTIVE_PROBE_ANNOTATIONS_SUPPORTED = ACTIVE_PROBE_HINT is not None
 
 
 def _register_sanitized_tool(
-    annotations: Any | None, *args: Any, **kwargs: Any
+    annotations: Any | None, *args: Any, active_probe: bool = False, **kwargs: Any
 ) -> Callable[[Callable], Callable]:
     """The shared body of `_read_only_tool` and `_active_probe_tool`.
 
@@ -145,6 +215,14 @@ def _register_sanitized_tool(
 
     Audited 2026-08-17: 14 of 20 tools returned raw device output under
     `data.commands`, up to 37,962 characters. See `boundary.py`.
+
+    **`active_probe=True` (B-493) is the same move applied to enforcement, not
+    just sanitisation.** `_active_probe_tool` passes it; `_read_only_tool` never
+    does. When set, the wrapped function is not called at all unless
+    `_mcp_active_probes_allowed()` says so -- checked here, in the one place
+    every active-probe tool registers, rather than inside each tool body, for
+    the same reason sanitisation lives here: a check a tool author has to
+    remember to add is a check a future tool will ship without.
     """
 
     if annotations is not None:
@@ -154,6 +232,14 @@ def _register_sanitized_tool(
     def decorate(function: Callable) -> Callable:
         @functools.wraps(function)
         def sanitized(*call_args: Any, **call_kwargs: Any) -> Any:
+            if active_probe and not _mcp_active_probes_allowed():
+                # Fails CLOSED, and SAYS SO: `function` (ping_device/
+                # traceroute_device/probe_lab) is never called, so no traffic
+                # is generated -- but the caller gets a classified, structured
+                # reason, not a silent no-op and not an unclassified error.
+                return sanitize(
+                    _active_probes_refused(function.__name__, call_args, call_kwargs)
+                )
             return sanitize(function(*call_args, **call_kwargs))
 
         # Registered under the *wrapped* function, so there is no route to the
@@ -183,15 +269,23 @@ def _read_only_tool(*args: Any, **kwargs: Any) -> Callable[[Callable], Callable]
 def _active_probe_tool(*args: Any, **kwargs: Any) -> Callable[[Callable], Callable]:
     """``_read_only_tool``'s twin for tools that generate network traffic (B-473).
 
-    Used only by `get_lab_ping` and `get_lab_traceroute`. Same registration,
+    Used by `get_lab_ping`/`get_lab_traceroute` (classic surface) and
+    `probe_lab` (staged surface, via `staged_surface.apply`'s
+    `register_probe = server_module._active_probe_tool`). Same registration,
     same sanitisation boundary (`_register_sanitized_tool`) -- annotated with
     `ACTIVE_PROBE_HINT` instead of `READ_ONLY_HINT` so a client reading
-    annotations, not just descriptions, can tell these two apart from the
-    eighteen passive reads. See the module comment above for why this is a
-    hint and not the enforcement mechanism.
+    annotations, not just descriptions, can tell these apart from a passive
+    read. See the module comment above for why the annotation is a hint, not
+    the enforcement mechanism.
+
+    ``active_probe=True`` (B-493) IS the enforcement mechanism: every tool
+    registered through this function is gated by
+    `NETTOOLS_MCP_ALLOW_ACTIVE_PROBES`, by construction -- a tool added here
+    later inherits the gate with no diff to this file, the same guarantee
+    `_register_sanitized_tool` already gives the sanitisation boundary.
     """
 
-    return _register_sanitized_tool(ACTIVE_PROBE_HINT, *args, **kwargs)
+    return _register_sanitized_tool(ACTIVE_PROBE_HINT, *args, active_probe=True, **kwargs)
 
 
 @_read_only_tool()

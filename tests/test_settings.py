@@ -90,6 +90,46 @@ def test_bool_typo_is_flagged_even_though_the_code_would_accept_it(monkeypatch):
     assert "NETTOOLS_ALLOW_ACTIVE_PROBES" in problems[0]
 
 
+def test_bool_typo_on_a_fail_closed_setting_says_the_typo_disables_it(monkeypatch):
+    """B-493: NETTOOLS_MCP_ALLOW_ACTIVE_PROBES/NETTOOLS_ENABLE_AGENT declare
+    unknown_bool_disables=True -- the opposite runtime behavior from
+    NETTOOLS_ALLOW_ACTIVE_PROBES, so the message must say the opposite thing
+    too. A message claiming "this typo turns it on" for a setting that
+    actually stays off on a typo would be actively misleading."""
+
+    _clear_all_settings(monkeypatch)
+    monkeypatch.setenv("NETTOOLS_MCP_ALLOW_ACTIVE_PROBES", "fasle")
+
+    [problem] = settings.validate_environment()
+
+    assert "NETTOOLS_MCP_ALLOW_ACTIVE_PROBES" in problem
+    assert "disabled" in problem and "fails closed" in problem
+    assert "turns the setting *on*" not in problem
+
+
+def test_unknown_bool_disables_settings_actually_fail_closed(monkeypatch):
+    """The declared table's claim is not decorative: for every setting that
+    says unknown_bool_disables=True, the module that actually reads it must
+    treat an unrecognized spelling as OFF. Pins the two current instances
+    against their real parsing functions, not just the declared flag."""
+
+    from agent_nettools import cli
+    from mcp_server import server as mcp_server_module
+
+    unrecognized = "definitely-not-a-recognized-spelling"
+
+    fail_closed_settings = {
+        s.name for s in settings.SETTINGS if s.kind == "bool" and s.unknown_bool_disables
+    }
+    assert fail_closed_settings == {"NETTOOLS_MCP_ALLOW_ACTIVE_PROBES", "NETTOOLS_ENABLE_AGENT"}
+
+    monkeypatch.setenv("NETTOOLS_MCP_ALLOW_ACTIVE_PROBES", unrecognized)
+    assert mcp_server_module._mcp_active_probes_allowed() is False
+
+    monkeypatch.setenv("NETTOOLS_ENABLE_AGENT", unrecognized)
+    assert cli._agent_enabled() is False
+
+
 def test_enum_typo_is_flagged(monkeypatch):
     """NETTOOLS_EVIDENCE_BACKEND='sqlit' -- get_store() silently falls back to
     the file backend for anything other than exactly 'sqlite'."""

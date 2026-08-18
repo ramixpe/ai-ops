@@ -1,6 +1,6 @@
 {
-  "prompt": "report.v1.txt",
-  "note": "Golden cases for the report prompt. Read by tests/test_report_prompt.py -- this file is load-bearing, not documentation. Each case names a scenario built from committed fixtures and the structural properties the descent payload must have before the prompt is rendered. Expected model output is asserted by shape and citation integrity only, never by prose. One case is composed rather than captured; see its `fixture_provenance` for why that is unavoidable rather than convenient.",
+  "prompt": "report.v2.txt",
+  "note": "Golden cases for the report prompt. Read by tests/test_report_prompt.py -- this file is load-bearing, not documentation. Each case names a scenario built from committed fixtures and the structural properties the descent payload must have before the prompt is rendered. Expected model output is asserted by shape and citation integrity only, never by prose. One case is composed rather than captured; see its `fixture_provenance` for why that is unavoidable rather than convenient.  v2 (2026-08-18): `next_check` removed from what the model writes. The descent computes it and the authoritative report already carries it; a paraphrase that supplies one is refused by grounding's `recommendation_not_closed` check. See MCP-EXPERIMENT.md \u00a711.2 for the measurement that forced it.",
   "output_schema": {
     "observations": [
       {
@@ -17,7 +17,6 @@
       }
     ],
     "recommendation": {
-      "next_check": "string",
       "requires_human": true
     }
   },

@@ -109,6 +109,20 @@ RAW_TEXT_KEYS = frozenset({"commands", "unaccounted_lines"})
 #: anything unmatched is dropped rather than trimmed.
 MAX_ERROR_CHARS = 400
 
+#: B-493: the classified text for both active-probe-refused shapes below.
+#: One constant, referenced twice, so the two entries cannot drift apart --
+#: the same reasoning `_FREE_TEXT_FIELD_NAMES` already applies to a shared
+#: table rather than two hand-kept copies. Names both env vars because the
+#: rebuild-from-kind step (`_classify_errors`) discards which one actually
+#: fired; a reader needs "how to enable" regardless of which gate refused.
+_ACTIVE_PROBES_DISABLED_PHRASE = (
+    "active probes are disabled by configuration; set "
+    "NETTOOLS_ALLOW_ACTIVE_PROBES=true to enable them for every caller (it "
+    "already defaults on), or NETTOOLS_MCP_ALLOW_ACTIVE_PROBES=true to "
+    "enable them for an MCP client specifically without changing the CLI "
+    "default"
+)
+
 #: What a transport failure can be, declared rather than pattern-guessed from
 #: the text. Same discipline as `template_parsers.IgnoreRule` and
 #: `log_window.NoiseRule`: a reviewable table, and anything not in it is
@@ -127,7 +141,23 @@ ERROR_KINDS: tuple[tuple[str, str], ...] = (
     ("name or service not known", "the device's name did not resolve"),
     ("refusing unapproved", "the command was refused by the allowlist"),
     ("refusing unsafe rendered", "the rendered command was refused"),
-    ("active probes are disabled", "active probes are disabled by configuration"),
+    # B-493: two DIFFERENT literal messages both mean "active probes are
+    # refused", and only one of them used to match here. `run_template`'s
+    # single-command path (network_tools.py) writes "Active probes
+    # (ping/traceroute) are disabled: ..." -- the parenthetical breaks the
+    # contiguous substring "active probes are disabled", so the entry below
+    # never matched it. That path is exactly what `get_lab_ping`/
+    # `get_lab_traceroute`/`probe_lab` call, i.e. the one the MCP surface
+    # actually reaches; the batch path's "active probes are disabled by
+    # ..." (collect_evidence_and_templates) is not currently exposed as an
+    # MCP tool at all. Measured 2026-08-18 while wiring the new
+    # NETTOOLS_MCP_ALLOW_ACTIVE_PROBES gate: a refused probe was falling
+    # through to "an unclassified error" instead of explaining itself --
+    # the exact failure mode B-493 exists to close. Both message shapes are
+    # declared explicitly rather than relying on one substring to cover
+    # both, matching this table's own "declared, not implicit" rule.
+    ("active probes (ping/traceroute) are disabled", _ACTIVE_PROBES_DISABLED_PHRASE),
+    ("active probes are disabled", _ACTIVE_PROBES_DISABLED_PHRASE),
     ("no such template", "no such template for this platform"),
     ("required environment variable", "a credential is not configured"),
     ("is not in the lab inventory", "the device is not in the inventory"),

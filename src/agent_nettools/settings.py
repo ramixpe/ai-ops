@@ -87,14 +87,34 @@ class Setting:
     maximum: float | None = None
     choices: tuple[str, ...] | None = None
     secret: bool = False
+    # B-493: every "bool" setting up to this point shares one convention --
+    # unrecognized means *enabled* (see _BOOL_SPELLINGS below), which is a
+    # footgun this module exists to surface, not to repeat. A gate that
+    # exists BECAUSE something defaulted open (NETTOOLS_MCP_ALLOW_ACTIVE_PROBES,
+    # NETTOOLS_ENABLE_AGENT) cannot use that convention without recreating the
+    # exact hazard it was added to close: a typo would silently re-open it.
+    # False (default) preserves the existing convention/message for every
+    # setting declared before this field existed; True flips both the
+    # direction _problem() describes AND is asserted (by the owning module's
+    # own parsing) to match the runtime behavior -- see
+    # test_unknown_bool_disables_settings_actually_fail_closed.
+    unknown_bool_disables: bool = False
 
 
-# Recognized boolean spellings, case-insensitive. Every var of kind "bool" in
-# this project follows the same convention as network_tools._active_probes_allowed:
-# anything in the falsy set disables it, and -- this is the footgun -- *every
-# other value, including a typo, is silently treated as enabled*. A value
-# outside both sets is flagged here even though the underlying code would
-# accept it, because "accepted" is exactly the problem.
+# Recognized boolean spellings, case-insensitive. Every var of kind "bool"
+# declared before B-493 follows the same convention as
+# network_tools._active_probes_allowed: anything in the falsy set disables
+# it, and -- this is the footgun -- *every other value, including a typo, is
+# silently treated as enabled*. A value outside both sets is flagged here
+# even though the underlying code would accept it, because "accepted" is
+# exactly the problem.
+#
+# B-493 added the first exception: a setting whose whole reason for existing
+# is to keep something OFF by default (NETTOOLS_MCP_ALLOW_ACTIVE_PROBES,
+# NETTOOLS_ENABLE_AGENT) must not reopen on a typo. Those declare
+# unknown_bool_disables=True on their Setting(), and _problem() below
+# describes the direction that actually applies to each one rather than
+# assuming the footgun universally.
 _BOOL_FALSE = frozenset({"0", "false", "no", "off"})
 _BOOL_TRUE = frozenset({"1", "true", "yes", "on"})
 _BOOL_SPELLINGS = _BOOL_FALSE | _BOOL_TRUE
@@ -210,6 +230,32 @@ SETTINGS: tuple[Setting, ...] = (
         "mcp_server.server",
         choices=("classic", "staged"),
     ),
+    # B-493: MCP-EXPERIMENT.md 12.3 measured a 31B model following a clean
+    # descent with an UNPROMPTED get_lab_ping -- the first time a model
+    # generated lab traffic without being asked. The engineering was sound
+    # (the flow it had just run covers the control plane; "reach" can mean
+    # the data plane) but nothing on this surface refused it:
+    # NETTOOLS_ALLOW_ACTIVE_PROBES defaults to enabled, and B-473's
+    # open_world_hint/title annotations are signalling, not enforcement, by
+    # their own comment in server.py. A human typing `nettools ping` has
+    # asked for the probe explicitly; an MCP client is a model DECIDING to
+    # generate traffic on its own, during whatever it is investigating --
+    # possibly a live incident. That is a different trust boundary from the
+    # CLI's, so it gets its own gate, defaulting to the opposite value.
+    # Deliberately unknown_bool_disables=True: a setting that exists to keep
+    # something off by default must not reopen on a typo the way
+    # NETTOOLS_ALLOW_ACTIVE_PROBES itself does.
+    Setting(
+        "NETTOOLS_MCP_ALLOW_ACTIVE_PROBES", "bool", False,
+        "Whether an MCP client may invoke get_lab_ping/get_lab_traceroute "
+        "(classic surface) or probe_lab (staged surface). Default DISABLED "
+        "-- the opposite of NETTOOLS_ALLOW_ACTIVE_PROBES, which still gates "
+        "the CLI and defaults enabled. A refusal here is a classified, "
+        "structured error (mcp_server/boundary.py ERROR_KINDS), never a "
+        "silent no-op.",
+        "mcp_server.server",
+        unknown_bool_disables=True,
+    ),
     # -- inventory_model.py --
     Setting(
         "NETTOOLS_INVENTORY", "path", None,
@@ -244,6 +290,24 @@ SETTINGS: tuple[Setting, ...] = (
         "Anthropic model id. This repo's own .env may pin an older model on "
         "purpose; the default here only applies when unset.",
         "llm_analysis, agent_loop, fabric_analysis",
+    ),
+    # B-488: `nettools agent` is a free-form, model-driven tool-calling loop
+    # -- philosophically at odds with this project's central claim that the
+    # model only navigates a menu and never synthesises a diagnosis, and it
+    # is Anthropic-only and, per this README, unreliable on local models.
+    # Its existence as an apparent peer of `investigate` undercuts that trust
+    # story for anyone who meets it first. Kept, but opt-in: default
+    # disabled, and unknown_bool_disables=True for the same reason as
+    # NETTOOLS_MCP_ALLOW_ACTIVE_PROBES -- a gate that exists to keep
+    # something off by default must not reopen on a typo.
+    Setting(
+        "NETTOOLS_ENABLE_AGENT", "bool", False,
+        "Opt-in for `nettools agent`. Default DISABLED; the command refuses "
+        "to run and explains what it is, why it is gated, and points at "
+        "`nettools investigate` (the deterministic alternative) until this "
+        "is set to a truthy value.",
+        "cli",
+        unknown_bool_disables=True,
     ),
     Setting(
         "OPENAI_API_KEY", "secret", None,
@@ -410,11 +474,22 @@ def _problem(setting: Setting, raw: str) -> str | None:
 
     if setting.kind == "bool":
         if text.lower() not in _BOOL_SPELLINGS:
+            if setting.unknown_bool_disables:
+                direction = (
+                    "The code treats any unrecognized value as disabled (it "
+                    "fails closed), so this typo silently leaves the setting "
+                    "*off* rather than on"
+                )
+            else:
+                direction = (
+                    "The code treats any unrecognized value as enabled, so "
+                    "this typo silently turns the setting *on* rather than "
+                    "off"
+                )
             return (
                 f"{setting.name}={raw!r} is not a recognized boolean spelling "
-                f"(expected one of {', '.join(sorted(_BOOL_SPELLINGS))}). The "
-                "code treats any unrecognized value as enabled, so this typo "
-                "silently turns the setting *on* rather than off."
+                f"(expected one of {', '.join(sorted(_BOOL_SPELLINGS))}). "
+                f"{direction}."
             )
         return None
 

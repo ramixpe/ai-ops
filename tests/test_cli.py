@@ -646,6 +646,7 @@ def test_demo_unknown_device_exits_critical(capsys):
 
 
 def test_agent_catches_value_error_and_exits_critical(monkeypatch, capsys):
+    monkeypatch.setenv("NETTOOLS_ENABLE_AGENT", "1")
     monkeypatch.setattr(
         cli, "run_agent_loop", lambda question, **kwargs: (_ for _ in ()).throw(ValueError("no key"))
     )
@@ -657,6 +658,7 @@ def test_agent_catches_value_error_and_exits_critical(monkeypatch, capsys):
 
 
 def test_agent_stopped_because_end_turn_exits_ok(monkeypatch):
+    monkeypatch.setenv("NETTOOLS_ENABLE_AGENT", "1")
     monkeypatch.setattr(
         cli,
         "run_agent_loop",
@@ -674,6 +676,7 @@ def test_agent_stopped_because_end_turn_exits_ok(monkeypatch):
 
 
 def test_agent_stopped_because_max_iterations_exits_warning(monkeypatch):
+    monkeypatch.setenv("NETTOOLS_ENABLE_AGENT", "1")
     monkeypatch.setattr(
         cli,
         "run_agent_loop",
@@ -688,6 +691,65 @@ def test_agent_stopped_because_max_iterations_exits_warning(monkeypatch):
     args = parser.parse_args(["agent", "why is PE2 down"])
 
     assert args.func(args) == cli.EXIT_WARNING
+
+
+# --------------------------------------------------------------------------- #
+# B-488: `nettools agent` is quarantined behind NETTOOLS_ENABLE_AGENT,
+# default off. These pin the refusal itself -- separate from the three tests
+# above, which now opt in explicitly so they keep testing the loop wiring
+# rather than the gate.
+# --------------------------------------------------------------------------- #
+
+
+def test_agent_refuses_by_default_without_calling_run_agent_loop(monkeypatch, capsys):
+    monkeypatch.delenv("NETTOOLS_ENABLE_AGENT", raising=False)
+    called = []
+    monkeypatch.setattr(
+        cli, "run_agent_loop", lambda question, **kwargs: called.append(1) or {}
+    )
+    parser = cli.build_parser()
+    args = parser.parse_args(["agent", "why is PE2 down"])
+
+    assert args.func(args) == cli.EXIT_CRITICAL
+    assert called == [], "run_agent_loop must not run while the gate is closed"
+
+    out = capsys.readouterr().out
+    assert "disabled by default" in out
+    assert "WHAT this is" in out
+    assert "WHY it is gated" in out
+    assert "nettools investigate" in out
+    assert "NETTOOLS_ENABLE_AGENT" in out
+
+
+@pytest.mark.parametrize("falsy", ["0", "false", "False", "no", "off", "", "sure", "enabled"])
+def test_agent_stays_refused_for_falsy_or_unrecognized_spellings(monkeypatch, falsy):
+    """Fails CLOSED (settings.py unknown_bool_disables=True): unlike
+    NETTOOLS_ALLOW_ACTIVE_PROBES, a typo here must not silently open the gate."""
+
+    monkeypatch.setenv("NETTOOLS_ENABLE_AGENT", falsy)
+    monkeypatch.setattr(
+        cli, "run_agent_loop", lambda question, **kwargs: {
+            "answer": "x", "iterations": 1, "tool_calls": [], "stopped_because": "end_turn",
+        },
+    )
+    parser = cli.build_parser()
+    args = parser.parse_args(["agent", "why is PE2 down"])
+
+    assert args.func(args) == cli.EXIT_CRITICAL
+
+
+@pytest.mark.parametrize("truthy", ["1", "true", "True", "yes", "on"])
+def test_agent_runs_once_explicitly_enabled(monkeypatch, truthy):
+    monkeypatch.setenv("NETTOOLS_ENABLE_AGENT", truthy)
+    monkeypatch.setattr(
+        cli, "run_agent_loop", lambda question, **kwargs: {
+            "answer": "x", "iterations": 1, "tool_calls": [], "stopped_because": "end_turn",
+        },
+    )
+    parser = cli.build_parser()
+    args = parser.parse_args(["agent", "why is PE2 down"])
+
+    assert args.func(args) == cli.EXIT_OK
 
 
 # --------------------------------------------------------------------------- #

@@ -40,7 +40,9 @@ into a typed object and the command is rendered from that object's own
 canonical form -- never passed through as text. `get_lab_ping` and
 `get_lab_traceroute` are active probes: they generate traffic (unlike every
 other tool listed) even though they change no device state, and are gated by
-the `NETTOOLS_ALLOW_ACTIVE_PROBES` environment variable (default enabled).
+**two** environment variables (`NETTOOLS_ALLOW_ACTIVE_PROBES`, default
+enabled, and `NETTOOLS_MCP_ALLOW_ACTIVE_PROBES`, default **disabled** --
+both must allow a probe for one to run; see below).
 
 A client auto-approving purely on `readOnlyHint` cannot otherwise tell these
 two apart from a passive `show` read (B-473, expert review P1-03): they are
@@ -49,9 +51,35 @@ keeps `read_only_hint=True` (still true -- neither changes device state) but
 also sets `open_world_hint=True` and an annotation `title` of "ACTIVE PROBE —
 generates network traffic", and prefixes both tools' descriptions with
 "ACTIVE PROBE: sends ICMP/UDP traffic to the target." for a client that reads
-only descriptions. **This is signalling, not enforcement** --
-`NETTOOLS_ALLOW_ACTIVE_PROBES` above is what actually refuses the traffic;
-annotations are hints a client is free to ignore.
+only descriptions. **The annotations are signalling, not enforcement** --
+they widen what a client *can* know without inspecting this server's source,
+not what the server *allows*.
+
+**The enforcement (B-493).** Measured 2026-08-18 (`MCP-EXPERIMENT.md` §12.3):
+a 31B model followed a clean `investigate_lab_session` descent with an
+UNPROMPTED `get_lab_ping` -- the first time a model generated traffic on this
+fabric without being asked. `NETTOOLS_ALLOW_ACTIVE_PROBES` alone did not stop
+it, because it defaults to enabled and nothing on this surface actually
+checked it against the *caller being a model*. A human typing `nettools ping`
+has asked for the probe explicitly; an MCP client is a model deciding to
+generate traffic on its own, possibly mid-incident. So there is now a second,
+MCP-only gate:
+
+- `NETTOOLS_MCP_ALLOW_ACTIVE_PROBES` -- default **disabled**. Set it to
+  `1`/`true`/`yes`/`on` to allow `get_lab_ping`/`get_lab_traceroute` (classic
+  surface) or `probe_lab` (staged surface) to run at all. Unlike
+  `NETTOOLS_ALLOW_ACTIVE_PROBES`, an unrecognized value -- a typo included --
+  stays **disabled**, not enabled: a gate whose whole purpose is "off unless
+  asked for" must not reopen on a misspelling.
+- Enforced at **registration**, inside `_register_sanitized_tool`/
+  `_active_probe_tool`, the same place the raw-text boundary is applied --
+  a tool registered through it is gated by construction, so a future
+  active-probe tool inherits the check with no diff to `server.py`.
+- A refusal never silently returns nothing: it is a structured, classified
+  error (`mcp_server/boundary.py`'s `ERROR_KINDS`, the "active probes ...
+  are disabled" entries) naming both environment variables and how to set
+  them -- never "an unclassified error", and never a call that just quietly
+  did nothing.
 
 ### Snapshots, diffing, health, and flap detection (Phase 8)
 

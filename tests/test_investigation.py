@@ -109,8 +109,9 @@ def _good_report(prompt: str) -> str:
             "claim": "The admin-down uplinks isolated PE2.",
             "based_on": list(observation_labels(len(observations))),
         }],
-        "recommendation": {"next_check": "confirm the shutdown was intended",
-                           "requires_human": True},
+        # v2: the model no longer writes `next_check` -- the descent computed it
+        # and grounding refuses a paraphrase that supplies one (B-490).
+        "recommendation": {"requires_human": True},
     })
 
 
@@ -205,7 +206,7 @@ def test_a_report_that_drops_the_chain_is_withheld_and_its_prose_is_gone():
     chain_dropped = json.dumps({
         "observations": [{"claim": invented, "evidence_key": real_key}],
         "interpretations": [{"claim": invented, "based_on": ["obs-1"]}],
-        "recommendation": {"next_check": invented, "requires_human": True},
+        "recommendation": {"requires_human": True},
     })
     result = _run("broken", Scripted(report=chain_dropped, correlate=_FOUND))
 
@@ -243,7 +244,7 @@ def test_a_paraphrase_naming_a_device_this_fabric_does_not_have_is_withheld():
             {"claim": "interface_line_down on PE7",
              "based_on": [f"obs-{i + 1}" for i in range(len(observations))]}
         ],
-        "recommendation": {"next_check": "Check PE7's uplinks", "requires_human": True},
+        "recommendation": {"requires_human": True},
     })
 
     result = _run("broken", Scripted(report=invented, correlate=_FOUND))

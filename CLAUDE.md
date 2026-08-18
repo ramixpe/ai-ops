@@ -24,7 +24,7 @@ Single test: `pytest tests/test_network_tools.py::test_collect_evidence_uses_one
 Runtime targets are thin wrappers over the `nettools` console script and all
 hit live devices: `make facts|interfaces|bgp|lldp|isis|sr [DEVICE=RR1]`,
 `make fabric-bgp`, `make analyze`, `make analyze-fabric`, `make agent
-QUESTION="..."`, `make demo`, `make diff`, `make mcp`, `make inspect`.
+QUESTION="..."` (**opt-in since B-488**: set `NETTOOLS_ENABLE_AGENT=1`; it exits 2 with an explanation otherwise, and points at `investigate`), `make demo`, `make diff`, `make mcp`, `make inspect`.
 `nettools <check> <DEVICE>` works directly too.
 `nettools audit` (fabric consistency), `nettools route-event` (event → flow
 routing), and `nettools config show|check` (settings validation) shipped in

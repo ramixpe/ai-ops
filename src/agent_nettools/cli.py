@@ -17,6 +17,7 @@ Exposed as the ``nettools`` console script. Subcommands:
     nettools analyze [DEVICE] [--show-evidence] [--save]
     nettools analyze --fabric [--show-evidence] [--save]
     nettools agent "QUESTION" [--device DEVICE] [--max-iterations N] [--time-budget SECONDS]
+                         (disabled by default -- B-488; NETTOOLS_ENABLE_AGENT=true to enable)
     nettools demo [DEVICE]
     nettools diff [DEVICE] [--against golden|latest]
     nettools capture [DEVICE ...] [--all] [--label t0] [--out DIR] [--no-scrub] [--templates]
@@ -94,6 +95,7 @@ Python/platform it is running on.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -146,6 +148,27 @@ from .topology import (
 EXIT_OK = 0
 EXIT_WARNING = 1
 EXIT_CRITICAL = 2
+
+# B-488: `nettools agent` is a free-form, model-driven tool-calling loop --
+# philosophically at odds with this project's central claim that the model
+# only navigates a menu and never synthesises a diagnosis, Anthropic-only,
+# and this README says outright it is unreliable on local models. As a
+# first-class peer of `investigate` in --help/the subcommand list, it
+# undercuts that trust story for anyone who meets it before its disclaimer
+# (operator-experience review, HOLISTIC 2026-08-18). Kept, not deleted --
+# quarantined behind an explicit opt-in that defaults OFF.
+#
+# unknown_bool_disables in settings.py: a value outside the recognized
+# truthy set (including a typo) leaves the gate closed, the same fail-closed
+# choice B-493 makes for NETTOOLS_MCP_ALLOW_ACTIVE_PROBES and for the same
+# reason -- a gate whose entire purpose is "off unless asked for" must not
+# reopen on a misspelling.
+NETTOOLS_ENABLE_AGENT_ENV = "NETTOOLS_ENABLE_AGENT"
+_ENABLE_AGENT_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+def _agent_enabled() -> bool:
+    return os.getenv(NETTOOLS_ENABLE_AGENT_ENV, "0").strip().lower() in _ENABLE_AGENT_TRUTHY
 
 
 def _emit(payload: dict, args: argparse.Namespace) -> None:
@@ -371,6 +394,31 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
 
 
 def _cmd_agent(args: argparse.Namespace) -> int:
+    # B-488: quarantined behind an explicit opt-in (default off). Checked
+    # first, before run_agent_loop is even imported-from-called, so a refusal
+    # never touches the LLM provider, never opens a device connection, and
+    # costs nothing. The message states WHAT this command is, WHY it is
+    # gated, and points at the deterministic alternative -- see
+    # NETTOOLS_ENABLE_AGENT_ENV's comment above for the reasoning.
+    if not _agent_enabled():
+        print(
+            "Agent error: `nettools agent` is disabled by default.\n"
+            "\n"
+            "WHAT this is: a free-form, model-driven tool-calling loop "
+            "(Anthropic only) that chooses its own tools and writes its own "
+            "prose answer -- not a deterministic diagnosis.\n"
+            "WHY it is gated: this project's central claim is that the model "
+            "only navigates a menu and never synthesises a diagnosis; this "
+            "command is the one place that is not true, and it is unreliable "
+            "on local models (see the README).\n"
+            "\n"
+            "Prefer `nettools investigate` instead: a deterministic "
+            "dependency descent with no model in the diagnosis path.\n"
+            "\n"
+            "To run this command anyway, set NETTOOLS_ENABLE_AGENT=true (or 1)."
+        )
+        return EXIT_CRITICAL
+
     try:
         result = run_agent_loop(
             args.question,
@@ -1074,9 +1122,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_agent = sub.add_parser(
         "agent",
         help=(
-            "Answer a question with a bounded, tool-calling agent loop (Anthropic only). "
+            "DISABLED BY DEFAULT (NETTOOLS_ENABLE_AGENT=true to enable). Answer a "
+            "question with a bounded, tool-calling agent loop (Anthropic only). "
             "Exploratory: model-selected tools and prose, not the deterministic "
-            "`investigate` path."
+            "`investigate` path -- prefer `nettools investigate` unless you "
+            "specifically need this."
+        ),
+        description=(
+            "B-488: quarantined behind an explicit opt-in, off by default. WHAT this "
+            "is: a free-form, model-driven tool-calling loop (Anthropic only) that "
+            "chooses its own tools and writes its own prose answer. WHY it is gated: "
+            "this project's central claim is that the model only navigates a menu "
+            "and never synthesises a diagnosis -- this command is the one place "
+            "that is not true, and it is unreliable on local models (see the "
+            "README). Prefer `nettools investigate`: a deterministic dependency "
+            "descent with no model in the diagnosis path. Set "
+            "NETTOOLS_ENABLE_AGENT=true (or 1) to run this command anyway."
         ),
     )
     p_agent.add_argument("question", help="The question to investigate and answer.")
