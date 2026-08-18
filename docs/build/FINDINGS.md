@@ -4629,3 +4629,65 @@ is on neither's path, and the RR1↔PE2 path used by §11/§12 shows
 `igp_adjacency@PE2` healthy with 2 adjacencies. **Do not repair it before the
 windows** — changing the fabric now would invalidate a preflight that has
 already passed, and the rounds do not need it.
+
+## OBS-160 · Round 8b · The precondition was verified on the wrong artefact, and the abort that caught it cost forty seconds
+
+Round 8b aborted at its first verdict line, both dry run and real:
+
+```
+neighbor: fsm=Established read=None write=None io=None reported=False
+ABORT — no socket line in the neighbour output.
+```
+
+**The abort is the system working.** Precondition 3 exists because round 8
+printed `samples_socket_armed: 0` over the post-fault window and never counted
+the baseline, where the same zero would have read *"0 of 4 armed on an
+Established session"* and stopped everything. That check was available and
+unmade, and it cost a whole window. Today it cost **forty seconds**.
+
+**The cause, and it is mine.** The device emits the line indented by two
+spaces. The shipped parser iterates lines and strips each one before
+`.match()`. `round8b.py` carries a copy of the pattern and applied it with
+`re.M` to the raw buffer, where `^` lands on a space and never matches.
+
+> A regex's behaviour is the pattern **plus the string it is applied to.** The
+> comment above the copy said *"Verbatim from `template_parsers._BGP_SOCKET`,
+> and it must stay verbatim"* — and it was verbatim. Copying secured half of
+> the behaviour and read as though it secured all of it.
+
+**The part worth keeping is what happened four hours earlier.** Before opening
+the window I checked §6.2's three preconditions, found precondition 1 unmet,
+wrote three tests against the mixed socket line, mutation-verified them with
+the round-8 defect as the mutant, watched 2 of 3 fail under it, added
+`ROUND-8-SOCKET` to the harness, and declared *"precondition 1 now holds; the
+round may start."*
+
+Every step of that was correct. **All of it was performed on the shipped
+parser, and the round does not run the shipped parser.** It runs its own copy,
+which no test touched.
+
+**A precondition verified on the wrong artefact is not a precondition.** This is
+OBS-153's shape — *the test proved the helper, not the wiring* — recurring one
+level up: I proved the library and not the instrument, having just written the
+sentence "the shipped one is correct rested on reading rather than running" in
+the same commit. The guard I was congratulating myself for adding was aimed at
+the wrong file.
+
+**Structural fix, not a patch.** `round8b.py` gains `--self-test`: it parses a
+committed fixture and asserts the six fields the round depends on, touching no
+device. Reintroducing the original defect fails it (exit 1, three FAILs), so it
+is not vacuous. **The rule this earns: an instrument is tested against
+committed text before it is pointed at a device, and the test lives in the
+instrument.** A round is the wrong place to discover that a sampler cannot
+parse.
+
+**And a second disagreement between two tools I wrote.** `round8b.py` defaults
+its output *into* `evidence-archive/` so archiving cannot be forgotten;
+`archive.sh` assumed the run directory was elsewhere and copied it in, so `cp`
+refused a self-copy and the script failed on exactly the payload it exists to
+protect. Made idempotent: when the run is already in place it skips the copy
+and goes to the part that was always the point — the `git ls-files` proof that
+every file is tracked.
+
+Both aborted runs are archived and committed. A run that aborts is evidence:
+it is the record of a precondition doing its job.

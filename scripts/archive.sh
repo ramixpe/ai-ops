@@ -63,11 +63,22 @@ echo
 # --------------------------------------------------------------------------- copy
 mkdir -p "$DEST" || exit 2
 
+# The run may ALREADY be at its destination: `round8b.py` defaults its output
+# straight into evidence-archive/ so that archiving cannot be forgotten. When it
+# does, copying is a self-copy and `cp` refuses -- which made this script fail on
+# exactly the payload it was written to protect (2026-08-18). Detect it and go
+# straight to the part that matters, which was never the copying: the `git
+# ls-files` proof that every file is tracked.
 COPIED=0
-while IFS= read -r -d '' f; do
-  cp -p "$f" "$DEST/" || { echo "  FAIL  could not copy $f" >&2; exit 1; }
-  COPIED=$((COPIED+1))
-done < <(find "$SRC" -maxdepth 1 -type f -print0)
+if [ "$(cd "$SRC" && pwd -P)" = "$(cd "$DEST" 2>/dev/null && pwd -P || echo /nonexistent)" ]; then
+  COPIED=$(find "$SRC" -maxdepth 1 -type f | wc -l)
+  echo "  in place already — $COPIED file(s), no copy needed"
+else
+  while IFS= read -r -d '' f; do
+    cp -p "$f" "$DEST/" || { echo "  FAIL  could not copy $f" >&2; exit 1; }
+    COPIED=$((COPIED+1))
+  done < <(find "$SRC" -maxdepth 1 -type f -print0)
+fi
 
 if [ "$COPIED" -eq 0 ]; then
   echo "  FAIL  $SRC contains no files. Nothing to archive." >&2

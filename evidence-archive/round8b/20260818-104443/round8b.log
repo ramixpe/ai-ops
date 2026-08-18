@@ -1,0 +1,10 @@
+2026-08-18T10:44:43.400Z  round 8b start  device=PE2  peer=10.255.0.31  65000->65001 +ebgp-multihop  dry_run=True
+2026-08-18T10:44:43.400Z  opening sampler session
+2026-08-18T10:44:44.201Z  opening injector session
+2026-08-18T10:44:48.380Z  baseline captured (6 sections)
+2026-08-18T10:44:48.380Z  --- baseline: 4 samples ---
+2026-08-18T10:44:54.674Z    session: {'present': True, 'remote_as': '65000', 'state': 'Established', 'established': True}
+2026-08-18T10:44:54.674Z    neighbor: fsm=Established read=None write=None io=None reported=False
+2026-08-18T10:44:54.674Z    raw: None
+2026-08-18T10:44:54.674Z    bfd: {'present': True, 'state': 'No'}
+2026-08-18T10:44:54.674Z  ABORT — no socket line in the neighbour output. Either the platform stopped emitting it or the regex no longer matches; either way the round cannot test §2a.2. (This also refutes seal claim §2a.3, which round 8 CONFIRMED on 363 samples, so suspect the regex first.)
