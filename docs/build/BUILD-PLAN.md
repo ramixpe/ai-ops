@@ -244,14 +244,54 @@ A tool's report of failure is not evidence of failure. Before acting on either a
 
 The independent check that caught it was a human watching the device console. **Nothing inside the tool would have** — which is the standing argument for a witness outside the thing being verified, and the same reasoning as §0.13's setup face.
 
-### The agent never runs a fault injector
+### The agent and the fault injector — amended 2026-08-18 by the operator
 
-**Binding, and for two independent reasons.** The second is the one that is easy to forget, because it is not a safety rule.
+**The blanket prohibition is lifted. The agent operates the injector on the lab
+fabric.** Authorised explicitly by the operator on 2026-08-18, so that the agent
+watches a round's output as it happens rather than reading it afterwards, and
+can tighten the acceptance criteria from what it sees.
 
-1. **An injector writes to devices.** §0.11 applies unchanged and is not waived by a drill being planned, approved, or reversible.
-2. **Running it would put the fault identity in the agent's context, destroying the blinding the trial depends on.** That is a different kind of prohibition: not *"this action is dangerous"* but **"performing this action makes me a worse witness."**
+**What is NOT changed, and must not be read as changed.** `nettools` still never
+writes to a device. §0.5's frozen files, §0.6's four invariants and §0.11's HALT
+on "anything that would write to, configure, or change the state of a network
+device" all apply to the product, unwaived and unweakened. The injector is a
+*separate script outside this repository*, operated deliberately against a lab
+fabric that exists to be broken. Nothing here licenses a write path in the tool.
 
-The distinction matters because the two failure modes look nothing alike. A §0.11 violation damages the fabric and is visible. This one damages only the *evidence*, and it is **silent** — a contaminated trial produces exactly the same confident agreement a clean one does, and neither the agent nor the reader can tell them apart afterwards. Q-006 is worth something only because OBS-076 was written and committed before OBS-077 existed.
+**What is genuinely given up, stated plainly.** The original rule had a second
+reason that was never about safety:
+
+> Running it puts the fault identity in the agent's context, destroying the
+> blinding the trial depends on — not *"this action is dangerous"* but
+> **"performing this action makes me a worse witness."** That failure is
+> **silent**: a contaminated trial produces exactly the same confident
+> agreement a clean one does, and neither the agent nor the reader can tell
+> them apart afterwards.
+
+That reason still holds, and it is now **scoped rather than deleted**:
+
+* **Mechanism rounds — the agent may run them.** Rounds 8b and 6 measure whether
+  an observable behaves as predicted, and their seals *name the fault in
+  advance* (option 7 byte-identical; option 8 with `--max-hold 45`). The agent
+  has already read those seals. **There is no blinding left to spend**, so
+  running the injector costs the evidence nothing. This is the class the
+  amendment was requested for and it is the class it fits.
+
+* **Blind diagnostic trials — a human or a separate process still applies the
+  fault.** Where the measurement *is* whether the agent identifies a fault it
+  was not told about (the T-033 class that produced Q-006, OBS-076 and OBS-077),
+  an agent-operated injector destroys the only thing being measured, and no
+  amount of care afterwards recovers it. **An agent cannot un-know a fault.**
+  If a future round needs a blind witness, the injector goes back to a human for
+  that round — not as a rule being reinstated, but as the measurement's
+  precondition, stated in its seal like any other.
+
+**Recorded honestly:** §0.13's own table filed this rule as *"a rule of method,
+not a §0.11 safety rule"*, and predicted that a safety framing *"would have been
+waived by sound reasoning"*. It has now been waived — by the operator, on the
+record, for a reason that is sound for mechanism rounds and would not be for
+blind ones. The distinction the table drew is the reason this amendment can be
+narrow instead of total.
 
 Generalised, because it will recur wherever the agent is both actor and assessor:
 

@@ -384,14 +384,22 @@ Stage 2 is `inject → device syslog → Alertmanager → agent wakes → invest
 | 4 | **A holdout fault set, never used for tuning — only for validating fixes** | Otherwise every fix is fitted to the faults that found the bugs, and the corpus stops measuring generalisation. The same reasoning as `evidence-reduction.md`'s "tuning until output looks reasonable" |
 | 5 | **Two-fault combinations** | Currently untested, and the place D6's "lowest broken rung is the root cause" may simply be wrong — see D6's open section and OBS-078 |
 
-## Operating rule — the agent never runs the injector
+## Operating rule — amended 2026-08-18: the agent runs the injector for mechanism rounds
 
-**Two independent reasons, and the second is the one that is easy to forget.**
+**Superseded.** See `BUILD-PLAN.md` §0.11, "The agent and the fault injector".
+The operator lifted the blanket prohibition on 2026-08-18 so the agent watches a
+round live and can tighten acceptance criteria from what it sees.
 
-1. **It writes to devices.** §0.11, unwaived. Nothing about a drill changes that.
-2. **Running it would put the fault identity in the agent's context, which destroys the blinding the trial depends on.** This is a *different* kind of prohibition from §0.11's: not "this action is dangerous" but **"performing this action makes me a worse witness."** The harm is not to the fabric, it is to the evidence — and it is silent, because a contaminated trial produces exactly the same confident agreement a clean one does.
+Two things survive the amendment:
 
-The injector is operated by a human or by a separate process. Recorded in `BUILD-PLAN.md` §0.11 so it is binding rather than advisory.
+1. **`nettools` still never writes to a device.** The injector is a separate
+   script outside this repository. Nothing here changes the product's write
+   boundary, its frozen files, or its invariants.
+2. **Blind diagnostic trials still need a human injector.** Where the
+   measurement is whether the agent identifies a fault nobody told it about, an
+   agent-run injector destroys the only thing being measured, silently. Rounds
+   8b and 6 are not that class — their seals name the fault, so the blinding was
+   already spent before either was run.
 
 ## Sequencing — four manual rounds before any of this is built
 
