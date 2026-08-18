@@ -205,6 +205,7 @@ Read these before changing anything in the investigation layer.
 | [docs/design/chaos-harness.md](docs/design/chaos-harness.md) | Fault injection, framed as the Stage 2 acceptance vehicle. §3.1's operating rule is binding |
 | [docs/design/evidence-epoch.md](docs/design/evidence-epoch.md) | One observation window; why skew is not coherence (B-436) |
 | [docs/design/next-level.md](docs/design/next-level.md) | Proposal: the tiers + the local model; ranked candidates |
+| [docs/design/stage-2-architecture.md](docs/design/stage-2-architecture.md) | **The Stage 2 brainstorm** — MCP hub, the cache+syslog-invalidation layer, the wide/narrow flow-vs-tool dimension. Brainstorm and decision record, for an external eye |
 | [docs/design/peer-review-response.md](docs/design/peer-review-response.md) | Three external reviews and what was accepted, corrected or deferred |
 | [docs/build/BUILD-PLAN.md](docs/build/BUILD-PLAN.md) | The 34-task build plan. **Part 0 is binding** — model roles, escalation ladder, frozen files |
 | [docs/build/TRACKER.md](docs/build/TRACKER.md) | Progress. Authoritative on task status |

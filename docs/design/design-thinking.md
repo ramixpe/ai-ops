@@ -161,6 +161,8 @@ Which gives the rule that follows directly from D2: **the model may compose an i
 
 ## D5. How are flows indexed?
 
+> **Amendment 2026-08-18 (Stage 2 brainstorm).** A dimension was added to the flow/tool distinction: **flows are the WIDE first step of an investigation; tools are the NARROW deep step.** They are not competitors the model weighs — they are different phases, and the menu encodes which is which. This makes the orchestration layer fractal with the descent (collect wide, walk narrow). See [stage-2-architecture.md §1.3](stage-2-architecture.md). This decision refines D5 and D6; the full record is in that document.
+
 **Question.** As the flow library grows, how does the model find the right one? This is the question that nearly derailed the design.
 
 **Options.**
