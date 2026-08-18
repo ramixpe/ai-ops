@@ -4829,3 +4829,42 @@ the paragraph I grepped. Reverted. OBS-147 says a verification that finds
 nothing must be asked what it found wrong with itself; the converse also holds:
 **a verification that finds something must be asked whether it read the right
 source.**
+
+## OBS-164 · D13 · The one decision still marked "open" now has the evidence it was waiting for
+
+`design-thinking.md` D13 — *"passive reads versus active probes"* — is the only
+decision in that document not locked. Its stated reason for staying open:
+
+> *"This is recorded as open rather than decided because it adds machinery
+> before we have evidence the descent needs active probes at all — several of
+> the layer checks have passive equivalents. **Worth deciding when the first
+> descent is built against a real failure.**"*
+
+All three conditions are now met, and none of them were when D13 was written:
+
+1. **The descent exists and has been run against real failures** — rounds 5
+   through 8b, on a live fabric, with committed payloads.
+2. **A model probed unprompted** (§12.3). Given a clean descent showing no
+   fault, a 31B model reached for `get_lab_ping` on its own initiative. Its
+   reasoning was correct — the flow covers the control plane and "reach" may
+   mean the data plane — and nothing refused it.
+3. **D13's proposed machinery is now partly built.** B-493 shipped
+   `NETTOOLS_MCP_ALLOW_ACTIVE_PROBES`, default off, enforced at MCP
+   registration. That is D13's *"separate allowlist class"* in the surface
+   where the risk actually landed.
+
+D13 anticipated the risk as *"at Stage 2 an event storm could have the agent
+probing hundreds of times unprompted"*. What arrived first was quieter and
+sooner: **one capable model, one clean investigation, one unrequested probe** —
+no storm required. The prediction was right about the mechanism and wrong about
+the scale at which it would first appear, which is the second time this week a
+sealed model has been right about *what* and wrong about *how much*
+(cf. OBS-161, where `OpenSent` explained 3% of the separations it predicted).
+
+**What is still undecided, and belongs in the architecture discussion rather
+than here:** whether per-device and per-run rate limits are needed on top of
+the on/off gate; whether the CLI's default should follow the MCP surface's;
+and whether an active probe should carry its own audit line, which D13 proposed
+and nothing yet implements. Recorded as *ready to decide*, deliberately not
+decided — a finding that quietly settles an open design question is how a
+design document stops being the place decisions are made.
