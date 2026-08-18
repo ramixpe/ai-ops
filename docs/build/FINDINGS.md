@@ -4691,3 +4691,54 @@ every file is tracked.
 
 Both aborted runs are archived and committed. A run that aborts is evidence:
 it is the record of a precondition doing its job.
+
+## OBS-161 · Round 8b · The prediction held, its stated mechanism explained 3% of the result, and the round found a defect in the rung it was validating
+
+Round 8b ran to completion 2026-08-18, agent-operated. **§2a.2 holds**: 131
+separation samples of 1,725 at 0.543 s, on an instrument verified 4/4 armed on
+the baseline, with the fault confirmed landed. **B-463 closes as *separable and
+observed*** — the opposite of the sealed fallback, which had prepared for *"not
+separable at any resolution reachable over CLI"*.
+
+**The prediction was right about the wrong state.** The seal modelled the
+separation window as `OpenSent` at ~150 ms and expected ~11 catches.
+
+| separation state | samples |
+|---|---|
+| `Connect` | **127** |
+| `OpenSent` | **4** |
+
+`OpenSent` returned 4 against a predicted ~11 — the right order of magnitude,
+a sound model of the mechanism it described. `Connect` returned 127, and the
+seal never named it. **A prediction can survive while the mechanism it names
+accounts for three per cent of the observations**, and counting the result
+without partitioning it would have recorded a triumphant confirmation of an
+explanation that is mostly wrong.
+
+**And partitioning it is what found the defect.** `checks.py`'s transport rung
+returns healthy on `socket_armed_read` alone. In `Connect`, RFC 4271 has TCP
+*not yet established* — yet the socket line in those 127 samples is
+byte-identical to a healthy session's. So during connect-retry the descent
+reports **"TCP transport to 10.255.0.31 is up"** while it is not. The field
+means *the BGP stack has a socket armed for read events*, not *the transport is
+established*. The four `OpenSent` samples are the honest case, where TCP really
+is up and the separation is the thing rung 2 believes it measures.
+
+B-432's own comment had said the corpus *"contains no fault that separates
+them, which is precisely the gap this change opens"*. Round 8b is that fault.
+It separated them for two reasons, and the rung reads one of them backwards
+(B-497). A filtered TCP 179 cycles Idle→Connect→Idle; sampled in `Connect`, the
+descent clears transport and blames BGP — **a transport fault reported as a
+BGP-layer fault, which is the single failure a dependency descent exists to
+prevent.**
+
+**Four defects, none of them the round's subject.** Precondition 1 verified
+against the wrong artefact (OBS-160); the sampler unable to parse an indented
+line; a verdict that printed *"§2a.2 refuted, B-463 closes"* from the dry run
+where nothing was ever broken; and rung 2's false healthy. Three are instrument
+defects and each would have produced a confident, wrong, publishable number.
+
+**The round's own prediction was the least informative thing it produced**, and
+that is the argument for watching a run rather than reading its verdict. Every
+one of these was visible only in the output as it happened or in the samples
+partitioned afterwards — never in the number the harness printed.

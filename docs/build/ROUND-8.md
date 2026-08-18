@@ -641,3 +641,125 @@ effectively did — fails 2 of the 3. Added to `scripts/mutate_guards.py` as
 **Precondition 1 now holds. The round may start.** Cost: about fifteen minutes,
 before the window rather than inside it — which is what §6.1b is for, and what
 round 5 paid for the other way.
+
+---
+
+## 7. Round 8b — scored. §2a.2 HOLDS, and the way it holds is a defect
+
+Run 2026-08-18T11:54Z, agent-operated (the operator lifted the injector rule
+that morning; §0.11 as amended). Payload committed at
+`evidence-archive/round8b/20260818-115402/`.
+
+### 7.1 The numbers
+
+| | value |
+|---|---|
+| baseline samples / armed for read | **4 / 4** — instrument trustworthy |
+| `fault_landed` | **true** |
+| post-fault samples | **1,725** |
+| mean sample interval | **0.543 s** (predicted ~0.52) |
+| **separation samples** | **131** |
+| `samples_socket_not_reported` | **0** of 1,725 |
+| FSM states seen | Closing, Connect, Established, Idle, OpenSent |
+| reset kinds seen | config_changed, hold_expired, **wrong_as** |
+| restore | verified attempt 1, then re-verified by direct read |
+
+**§2a.2 HOLDS.** The socket read armed for read while the session was not
+Established, 131 times, on a baseline-verified instrument. §2a.1 follows: rungs
+1 and 2 are separate observables, captured rather than composed.
+
+**B-463 closes** — and in the opposite direction from the sealed fallback,
+which contemplated *"not separable at any resolution reachable over CLI"*. It is
+separable, abundantly, at 0.54 s.
+
+**§2a.3 confirmed a second time**: 0 of 1,725 samples missing the socket line.
+**`discriminator_reset_names_as` is true and real this time** — the fault is a
+wrong AS and the device says so — where round 8's dry run reported it from the
+`_NOTIF` regex defect (OBS-134).
+
+### 7.2 The prediction was right about the wrong state
+
+The sealed model expected ~11 catches, from `OpenSent` at ~150 ms per cycle.
+Observed:
+
+| FSM state during separation | samples |
+|---|---|
+| `Connect` | **127** |
+| `OpenSent` | **4** |
+
+**`OpenSent` delivered 4 against a predicted ~11** — the right order, a sound
+model of the mechanism it described. **`Connect` delivered 127, and the model
+never considered it.** The effect is an order of magnitude larger than sealed,
+because most of it lives in a state the seal did not name.
+
+A prediction that survives while its stated mechanism accounts for 3% of the
+observations has been confirmed and not understood, and the difference matters
+here — because of what `Connect` means.
+
+### 7.3 The finding the round was not looking for: rung 2 emits a false healthy
+
+`checks.py`'s transport rung is unconditional on the FSM:
+
+```python
+armed = meta.get("socket_armed_read")
+if armed:
+    return healthy(reason=f"TCP transport to {peer} is up (the socket is armed for read)")
+```
+
+In **`Connect`**, RFC 4271's definition is *waiting for the TCP connection to be
+completed* — **TCP is not established.** The socket line in those 127 samples is
+byte-identical to the healthy baseline:
+`Socket not armed for io, armed for read, armed for write`.
+
+So during connect-retry the descent reports **"TCP transport to 10.255.0.31 is
+up"** while TCP is demonstrably not up. `socket_armed_read` does not mean *the
+transport is established*; it means *the BGP stack has a socket armed for read
+events*, which it does while a connection is still being attempted.
+
+**The `OpenSent` samples are the honest case.** There TCP *is* established (the
+OPEN was sent over it), so armed-plus-not-Established is a true separation and
+rung 2 is right. Four of 131 separations were the thing the rung believes it is
+measuring.
+
+**B-432's own comment predicted exactly this and could not test it:**
+
+> *"That the two agree on this corpus is not evidence they are the same field —
+> the corpus contains no fault that separates them, which is precisely the gap
+> this change opens."*
+
+Round 8b is that fault. The gap opened, and what came through it is that the
+field separates from the session state **for two different reasons**, one of
+which the rung reads backwards.
+
+**Why it matters operationally.** A genuine transport fault — a filtered TCP
+179, an unreachable peer — cycles the session Idle → Connect → Idle. Sampled
+during `Connect`, rung 2 clears transport as healthy and the descent blames the
+rung above it. **A transport fault would be reported as a BGP-layer fault**,
+which is the one failure a dependency descent exists to prevent. Filed as
+**B-497**.
+
+Note what this does *not* invalidate: the fixture-replay demo and every scored
+round used sessions that were **Idle** (socket not armed) or **Established**
+(socket armed, session up). Neither is the ambiguous case. The defect is
+reachable only while a session is actively retrying, which is exactly when
+someone is looking at it.
+
+### 7.4 What this round cost, and what watching it bought
+
+Two defects were found before the window and two inside it, none by the round's
+own prediction:
+
+1. **Precondition 1 was verified on the wrong artefact** — three mutation-tested
+   tests written against the *shipped* parser, while the round runs its own copy
+   (OBS-160). The round aborted in 40 s.
+2. **The sampler could not parse an indented socket line** — pattern copied
+   verbatim, the stripping that makes it work not copied.
+3. **The verdict could refute §2a.2 from a run where nothing broke** — the dry
+   run, fault never applied, printed *"§2a.2 refuted, B-463 closes"*. Fixed with
+   a `fault_landed` guard before the real run.
+4. **Rung 2's false healthy**, above — visible only by reading the separations
+   by FSM state rather than counting them.
+
+Three of the four are instrument defects, and every one of them would have
+produced a confident, wrong, publishable number. **The round's own prediction
+was the least informative thing it produced.**
