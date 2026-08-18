@@ -120,7 +120,7 @@ The LLM holds one MCP client. MCP fans out to (each a docker container):
 |---|---|---|
 | `nettools` | built | the deterministic read/diagnose core |
 | `neo4j` | roadmap | topology as a graph — path and blast-radius queries |
-| inventory (NetBox) | roadmap | the source-of-truth device/interface inventory |
+| inventory (NetBox) | **build now** | source-of-truth inventory, its own docker, fed by a collector script, exposed via a NetBox MCP linked to LM Studio |
 | `n8n` flows | roadmap | declared workflows; wide steps and all side effects |
 | Grafana | roadmap | dashboards / metrics face |
 | Loki + syslog | roadmap | log aggregation and the event stream |
@@ -342,6 +342,12 @@ Every §4 pending item was answered in session:
   new MCP** (the Stage-2 hub surface) which the operator will test through LM
   Studio and share logs for selection scoring.
 - **The three-tier gradient (§5.1) — CONFIRMED.**
+- **NetBox inventory — DECIDED, build now [OPERATOR].** Its own docker. A
+  **simple collector script reads the network and feeds NetBox** (the same
+  derive-don't-author rule as neo4j: NetBox is populated from parsed device
+  evidence, not hand-maintained, so it cannot become a second source of truth
+  that drifts). Then a **NetBox MCP** is added and linked to LM Studio, so the
+  model can query inventory through the same hub. Everything dockerised.
 - **The cache is epoch-aware — DECIDED**, with a forward note: later, some
   further fields may be *qualified as always-cached*; qualification is a
   reviewed decision per field, not a default.

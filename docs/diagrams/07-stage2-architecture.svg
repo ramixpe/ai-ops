@@ -75,13 +75,13 @@
 <text x="717.2" y="568.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.3" font-weight="400" fill="#6f6f6a" text-anchor="start">DERIVED, never authored</text>
 <text x="717.2" y="584.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.3" font-weight="400" fill="#6f6f6a" text-anchor="start">v1: script collects LLDP/CDP/ISIS</text>
 <text x="717.2" y="600.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.3" font-weight="400" fill="#6f6f6a" text-anchor="start">ontology enrichment later (planned)</text>
-<rect x="1030.8" y="522.0" width="313.6" height="108.0" rx="11" fill="#ffffff" stroke="#d8d8d2" stroke-width="1"/>
+<rect x="1030.8" y="522.0" width="313.6" height="108.0" rx="11" fill="#eaf1fd" stroke="#1f5fd0" stroke-width="1"/>
 <text x="1044.8" y="546.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="13" font-weight="700" fill="#17171a" text-anchor="start">NetBox inventory</text>
-<rect x="1280.2" y="533.0" width="52.2" height="17.0" rx="8" fill="#fff" stroke="#9a9a94" stroke-width="1"/>
-<text x="1306.3" y="545.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="9.5" font-weight="700" fill="#9a9a94" text-anchor="middle">ROADMAP</text>
-<text x="1044.8" y="568.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.3" font-weight="400" fill="#6f6f6a" text-anchor="start">source-of-truth inventory</text>
-<text x="1044.8" y="584.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.3" font-weight="400" fill="#6f6f6a" text-anchor="start">replaces/backs inventory.yaml</text>
-<text x="1044.8" y="600.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.3" font-weight="400" fill="#6f6f6a" text-anchor="start">credential-free reads stay the rule</text>
+<rect x="1269.8" y="533.0" width="62.6" height="17.0" rx="8" fill="#1f5fd0" stroke="#1f5fd0" stroke-width="1"/>
+<text x="1301.1" y="545.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="9.5" font-weight="700" fill="#fff" text-anchor="middle">BUILD NOW</text>
+<text x="1044.8" y="568.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.3" font-weight="400" fill="#6f6f6a" text-anchor="start">collector script feeds it from net</text>
+<text x="1044.8" y="584.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.3" font-weight="400" fill="#6f6f6a" text-anchor="start">then a NetBox MCP -&gt; LM Studio</text>
+<text x="1044.8" y="600.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.3" font-weight="400" fill="#6f6f6a" text-anchor="start">derived, not authored — like neo4j</text>
 <rect x="1358.4" y="522.0" width="313.6" height="108.0" rx="11" fill="#eaf1fd" stroke="#1f5fd0" stroke-width="1"/>
 <text x="1372.4" y="546.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="13" font-weight="700" fill="#17171a" text-anchor="start">documentation</text>
 <rect x="1597.4" y="533.0" width="62.6" height="17.0" rx="8" fill="#1f5fd0" stroke="#1f5fd0" stroke-width="1"/>

@@ -84,8 +84,8 @@ BK = [
   ["spin up docker; first flow list next", "wide steps + ALL side-effects", "flows declared, reviewed like code"]),
  ("neo4j", "BUILD NOW", BLUE, BLUEBG,
   ["DERIVED, never authored", "v1: script collects LLDP/CDP/ISIS", "ontology enrichment later (planned)"]),
- ("NetBox inventory", "ROADMAP", FAINT, "#ffffff",
-  ["source-of-truth inventory", "replaces/backs inventory.yaml", "credential-free reads stay the rule"]),
+ ("NetBox inventory", "BUILD NOW", BLUE, BLUEBG,
+  ["collector script feeds it from net", "then a NetBox MCP -> LM Studio", "derived, not authored — like neo4j"]),
  ("documentation", "BUILD NOW", BLUE, BLUEBG,
   ["grep/normal DB now — decided", "vector DB only when measured", "citations must survive retrieval"]),
 ]
