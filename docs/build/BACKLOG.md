@@ -133,7 +133,7 @@ cost of the state a reconciliation cannot express, measured (OBS-140).
 | **B-406** | `DEFERRED` | until Stage 2 — gNMI telemetry. D8 | Stage 2 | OBS-140 |
 | **B-407** | `OPEN` | session memory, multi-turn. D14; MVP-1, and small | MVP-1 | OBS-140 |
 | **B-408** | `DEFERRED` | until Stage 2 — probe budgeting matters under event storms. D13 | Stage 2 | OBS-140 |
-| **B-409** | `OPEN` | scale test. Part 6 — the device-count-independence claim is unmeasured | MVP-1 | OBS-140 |
+| **B-409** | `DONE` | **MEASURED 2026-08-18 — and the instrument was wrong, not the claim.** The item sat open as *"needs a fabric an order of magnitude larger"*, which is the wrong test: that measures throughput. The claim is that **nothing a caller must reason about grows with the fabric**, which is a property of this code and provable against a synthetic 900-device inventory with nothing behind it. `tests/test_scale.py` pins four things: the CLI subcommand count and flow vocabulary are unchanged at 900 devices; the staged MCP surface stays 6; **one evidence collection contacts one device, not the fabric** (mutation-verified — a 5-device fan-out fails it); and `list_devices` is asserted O(n) *deliberately*, as the one place fabric size legitimately appears, so the other three claims stay honest. A throughput test on real hardware remains unrun and is a different question | MVP-1 | OBS-140 |
 | **B-410** | `DEFERRED` | until Stage 2 — a runbook for an unattended agent. D3 | Stage 2 | OBS-140 |
 | **B-411** | `DONE` | OBS-123 | — | OBS-123 |
 | **B-412** | `BLOCKED` | **outside this repository** — `~/ai-agent-ops/faultlab/`, which is not a git repo (OBS-135). Cannot be closed from here | — | OBS-075 · OBS-135 |
