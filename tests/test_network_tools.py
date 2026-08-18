@@ -1612,3 +1612,21 @@ def test_a_partial_batch_isolates_the_failure_to_its_own_intent(monkeypatch):
     bgp = evidence["bgp"]
     assert bgp["status"] == "success", "a sibling's timeout does not contaminate this"
     assert (bgp.get("data") or {}).get("commands"), "its own output survives"
+
+
+def test_list_devices_needs_no_credentials(monkeypatch):
+    """`list_devices` lists names/IPs/platforms, which are not secret, so it
+    must not require DEVICE_USERNAME/PASSWORD — the credential-free layer
+    principle CLAUDE.md pins. Before the 2026-08-18 invariant audit it went
+    through the credentialed join and failed closed with no creds set, while
+    documenting itself as needing none."""
+
+    for var in ("DEVICE_USERNAME", "DEVICE_PASSWORD", "DEVICE_SSH_KEYFILE"):
+        monkeypatch.delenv(var, raising=False)
+
+    result = list_devices()
+
+    assert result["status"] == "success"
+    assert result["data"]["devices"], "the lab inventory is non-empty"
+    for device in result["data"]["devices"]:
+        assert {"name", "hostname", "platform"} <= device.keys()

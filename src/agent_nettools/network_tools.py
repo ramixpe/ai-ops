@@ -18,6 +18,7 @@ from typing import Any, Callable, Iterator
 from . import evidence_store, metrics, parsers, template_parsers
 from .evidence_store import get_store
 from .inventory import InventoryError, get_device, load_inventory
+from .inventory_model import load_inventory_file
 from .lab import platform_for
 from .normalize import normalize_output
 from .platforms import (
@@ -1291,18 +1292,28 @@ def traceroute_device(
 
 
 def list_devices() -> dict[str, Any]:
-    """Return the available devices from inventory."""
+    """Return the available devices from inventory — credential-free.
+
+    Reads the parsed inventory FILE, not the credentialed join: listing device
+    names, mgmt-IPs and platforms needs no secret, and going through
+    `load_inventory()` made this fail when DEVICE_USERNAME/PASSWORD were unset
+    even though the result discards credentials entirely (2026-08-18 invariant
+    audit — it documented itself "no credentials" while requiring them). This
+    keeps `explore_lab()`/`check_lab("fabric")`/the `lab://inventory` resource
+    genuinely credential-free, matching the layer principle CLAUDE.md pins.
+    """
 
     result = _base_result("list_devices", "inventory")
     try:
-        devices = load_inventory()
+        inventory = load_inventory_file()
     except InventoryError as exc:
         return _safe_error("list_devices", "inventory", str(exc))
 
     result["data"] = {
         "devices": [
-            {"name": device["name"], "hostname": device["hostname"], "platform": device["platform"]}
-            for device in devices
+            {"name": device.name, "hostname": device.mgmt_ip,
+             "platform": device.platform or inventory.defaults.platform}
+            for device in inventory.devices
         ]
     }
     return result
