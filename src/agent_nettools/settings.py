@@ -362,6 +362,21 @@ SETTINGS: tuple[Setting, ...] = (
         "exit, so the ledger accumulates nothing across invocations.",
         "ledger",
     ),
+    # -- ticket.py --
+    Setting(
+        "NETTOOLS_TICKET_DIR", "path", "tickets",
+        "Directory holding one append-only markdown ticket per interaction "
+        "(B-446) -- the escalation-grade run bundle docs/OPERATIONS-REVIEW.md "
+        "asks for: question, intent, tool timeline, device interactions, "
+        "evidence provenance, context footprint, and the deterministic "
+        "answer, with an outcome slot that stays 'unknown' until a human "
+        "fills it in. Unlike NETTOOLS_DIAGNOSIS_LEDGER_FILE this has a real "
+        "default rather than opt-in-only -- a ticket is the deliverable, not "
+        "an accumulating corpus. A write failure degrades "
+        "(TicketWriteResult.persisted=False) and never fails the "
+        "investigation that triggered it.",
+        "ticket",
+    ),
     # -- fixtures.py --
     Setting(
         "NETTOOLS_FIXTURE_DIR", "path", "tests/fixtures",

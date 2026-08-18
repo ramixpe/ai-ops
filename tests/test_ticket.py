@@ -1,0 +1,652 @@
+"""Tests for ticket.py (B-446): the append-only markdown flight recorder.
+
+Structured the same way `test_ledger.py` is (ticket.py's closest sibling,
+read closely before writing this file): the open/record/close lifecycle and
+its round trip through `read_ticket`, persistence semantics, degrade-safety
+on an unwritable path (never raise, always report), and the human-verdict
+half kept separate from what the tool records automatically. Two sections
+are specific to this module and have no ledger analogue: the filename/
+directory contract (`<UTC-timestamp>_<subject-slug>.md`, collision
+handling) and the adversarial-narrative parsing guard (`_blockquote`'s
+column-0 protection) -- the mechanism that keeps a pasted question from ever
+being able to forge a fake section when the file is read back.
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+import pytest
+
+from agent_nettools import ticket
+
+
+def _open(tickets_dir, **overrides):
+    kwargs = {
+        "subject": "bgp session PE1 -> RR1",
+        "entry_point": "cli:investigate",
+        "device": "PE1",
+        "flow": "bgp_session",
+    }
+    kwargs.update(overrides)
+    recorder = ticket.TicketRecorder(tickets_dir=str(tickets_dir))
+    return recorder.open(**kwargs)
+
+
+# --------------------------------------------------------------------------- #
+# Opening a ticket -- filename contract, header, run_id
+# --------------------------------------------------------------------------- #
+
+
+def test_open_returns_a_ticket_with_a_run_id_and_a_persisted_header(tmp_path):
+    tk = _open(tmp_path)
+
+    assert tk.run_id
+    assert tk.open_result.persisted is True
+    assert tk.open_result.warning is None
+    assert Path(tk.path).is_file()
+
+
+def test_run_id_is_a_uuid4_hex_string_like_the_ledgers(tmp_path):
+    tk = _open(tmp_path)
+
+    assert re.fullmatch(r"[0-9a-f]{32}", tk.run_id)
+
+
+def test_a_caller_supplied_run_id_is_used_verbatim(tmp_path):
+    """The join key to the ledger: a caller that already minted one id for an
+    interaction must be able to hand it to both records."""
+
+    tk = _open(tmp_path, run_id="deadbeefdeadbeefdeadbeefdeadbeef")
+
+    assert tk.run_id == "deadbeefdeadbeefdeadbeefdeadbeef"
+    assert ticket.read_ticket(tk.path)["run_id"] == "deadbeefdeadbeefdeadbeefdeadbeef"
+
+
+def test_filename_matches_the_utc_timestamp_subject_slug_contract(tmp_path):
+    tk = _open(tmp_path, subject="BGP Session PE1 -> RR1!!")
+
+    name = Path(tk.path).name
+    assert re.fullmatch(r"\d{8}T\d{6}\.\d{6}Z_bgp-session-pe1-rr1\.md", name), name
+
+
+def test_filename_lives_under_the_configured_tickets_directory(tmp_path):
+    tk = _open(tmp_path)
+
+    assert Path(tk.path).parent == tmp_path
+
+
+def test_header_carries_every_declared_identity_field(tmp_path):
+    tk = _open(tmp_path, flow="bgp_session")
+
+    header = ticket.read_ticket(tk.path)["header"]
+    assert header["run_id"] == tk.run_id
+    assert header["entry_point"] == "cli:investigate"
+    assert header["device"] == "PE1"
+    assert header["subject"] == "bgp session PE1 -> RR1"
+    assert header["flow"] == "bgp_session"
+    assert header["schema_version"] == ticket.TICKET_SCHEMA_VERSION
+    assert header["tool_version"]  # non-empty; sourced from agent_nettools.__version__
+    assert header["opened_at_utc"]
+
+
+@pytest.mark.parametrize("field_name,bad_value", [("subject", ""), ("subject", "   ")])
+def test_open_rejects_empty_subject(field_name, bad_value, tmp_path):
+    recorder = ticket.TicketRecorder(tickets_dir=str(tmp_path))
+    with pytest.raises(ValueError):
+        recorder.open(bad_value, entry_point="cli:investigate")
+
+
+def test_open_rejects_empty_entry_point(tmp_path):
+    """entry_point has no default -- see the module docstring's reasoning,
+    the same shape as ledger.py's `source` field."""
+
+    recorder = ticket.TicketRecorder(tickets_dir=str(tmp_path))
+    with pytest.raises(ValueError):
+        recorder.open("subject", entry_point="")
+
+
+def test_entry_point_has_no_default_value():
+    import inspect
+
+    assert (
+        inspect.signature(ticket.TicketRecorder.open).parameters["entry_point"].default
+        is inspect.Parameter.empty
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Directory resolution: env var, explicit override, the real default
+# --------------------------------------------------------------------------- #
+
+
+def test_env_var_selects_the_tickets_directory(tmp_path, monkeypatch):
+    monkeypatch.setenv(ticket.NETTOOLS_TICKET_DIR_ENV, str(tmp_path / "from-env"))
+    recorder = ticket.TicketRecorder()
+
+    tk = recorder.open("subject", entry_point="cli:investigate")
+
+    assert Path(tk.path).parent == tmp_path / "from-env"
+
+
+def test_explicit_dir_wins_over_the_env_var(tmp_path, monkeypatch):
+    monkeypatch.setenv(ticket.NETTOOLS_TICKET_DIR_ENV, str(tmp_path / "from-env"))
+    recorder = ticket.TicketRecorder(tickets_dir=str(tmp_path / "explicit"))
+
+    tk = recorder.open("subject", entry_point="cli:investigate")
+
+    assert Path(tk.path).parent == tmp_path / "explicit"
+
+
+def test_default_directory_constant_is_tickets():
+    """DEFAULT_TICKETS_DIR is what settings.py's NETTOOLS_TICKET_DIR row and
+    .env.example both document -- pinned so the three cannot drift apart."""
+
+    assert ticket.DEFAULT_TICKETS_DIR == "tickets"
+
+
+def test_constructing_a_recorder_does_no_io(tmp_path, monkeypatch):
+    """Lazy load, same rule as metrics._metrics_path/ledger's _load_once:
+    the env var is only read once .open() is actually called."""
+
+    monkeypatch.chdir(tmp_path)
+    ticket.TicketRecorder()  # Must not touch the filesystem.
+    assert list(tmp_path.iterdir()) == []
+
+
+# --------------------------------------------------------------------------- #
+# The full round trip -- every section kind, every field type
+# --------------------------------------------------------------------------- #
+
+
+def test_full_lifecycle_round_trips_through_read_ticket(tmp_path):
+    tk = _open(tmp_path)
+
+    tk.record_question(
+        "Why is the BGP session between PE1 and RR1 down?",
+        device="PE1", subject="10.255.0.31", flow_hint="bgp_session",
+    )
+    tk.record_intent(
+        flow="bgp_session", resolved_subject="10.255.0.31",
+        resolver="inventory_resolver", notes="resolved from lab.yaml",
+    )
+    tk.record_tool_event(
+        "collect_evidence", status="ok", device="PE1",
+        duration_ms=812.4, retries=0, started_at="2026-08-18T15:00:00+00:00",
+    )
+    tk.record_tool_event("collect_evidence", status="ok", device="RR1", duration_ms=640.1)
+    tk.record_device_interaction("PE1", session_count=3, latency_ms=2400.5, retries=1, commands_run=6)
+    tk.record_evidence_source(
+        "bgp_summary", device="PE1", source="live",
+        command="show bgp summary", excerpt="Neighbor 10.255.0.31 ... Idle",
+    )
+    tk.record_context_footprint(
+        chars_sent=1234, chars_withheld=567,
+        per_section_chars={"bgp_summary": 400, "isis": 834},
+        notes="isis adjacency dump truncated",
+    )
+    tk.record_answer(
+        "interface_line_down", trustworthy=True,
+        cause={"rung": "physical_interface", "device": "PE1"},
+        coherence={"skew_s": 2.1, "within_bound": True},
+        report_status="emitted", correlation_status="emitted",
+    )
+    close_result = tk.close()
+
+    assert close_result.persisted is True
+    parsed = ticket.read_ticket(tk.path)
+
+    assert parsed["run_id"] == tk.run_id
+    assert parsed["question"]["question"] == "Why is the BGP session between PE1 and RR1 down?"
+    assert parsed["question"]["subject"] == "10.255.0.31"
+    assert parsed["intent"]["resolver"] == "inventory_resolver"
+    assert len(parsed["timeline"]) == 2
+    assert {e["device"] for e in parsed["timeline"]} == {"PE1", "RR1"}
+    assert parsed["timeline"][0]["duration_ms"] == 812.4
+    assert len(parsed["device_interactions"]) == 1
+    assert parsed["device_interactions"][0]["session_count"] == 3
+    assert len(parsed["evidence"]) == 1
+    assert parsed["evidence"][0]["source"] == "live"
+    assert parsed["context_footprint"]["chars_sent"] == 1234
+    assert parsed["context_footprint"]["per_section_chars"] == {"bgp_summary": 400, "isis": 834}
+    assert parsed["answer"]["finding"] == "interface_line_down"
+    assert parsed["answer"]["trustworthy"] is True
+    assert parsed["answer"]["cause"] == {"rung": "physical_interface", "device": "PE1"}
+    assert parsed["answer"]["coherence"] == {"skew_s": 2.1, "within_bound": True}
+    assert parsed["closed"]["sections_written"] == 8
+    # Every field type JSON supports round-trips exactly: str, int, float,
+    # bool, dict, nested dict -- and None, for a field this test never set.
+    assert parsed["timeline"][0]["command"] is None
+
+
+def test_outcome_defaults_to_unknown_when_never_recorded(tmp_path):
+    tk = _open(tmp_path)
+    tk.record_answer("interface_line_down", trustworthy=True)
+    tk.close()
+
+    outcome = ticket.read_ticket(tk.path)["outcome"]
+
+    assert outcome["outcome"] == ticket.UNKNOWN
+    assert outcome["by"] is None
+    assert outcome["note"] is None
+
+
+def test_outcome_recorded_after_close_resolves_correctly(tmp_path):
+    tk = _open(tmp_path)
+    tk.record_answer("interface_line_down", trustworthy=True)
+    tk.close()
+
+    result = ticket.record_ticket_outcome(
+        tk.path, ticket.CONFIRMED_CORRECT, by="ops@example.com", note="confirmed on console",
+    )
+
+    assert result.persisted is True
+    parsed = ticket.read_ticket(tk.path)
+    assert parsed["outcome"]["outcome"] == ticket.CONFIRMED_CORRECT
+    assert parsed["outcome"]["by"] == "ops@example.com"
+    assert parsed["outcome"]["note"] == "confirmed on console"
+
+
+def test_a_later_outcome_supersedes_an_earlier_one_but_both_remain_in_sections(tmp_path):
+    """Mirrors ledger.diagnoses()'s 'latest verdict wins, every verdict stays
+    in entries()' rule -- FINDINGS.md's own discipline applied to one file."""
+
+    tk = _open(tmp_path)
+    tk.record_answer("interface_line_down", trustworthy=True)
+    tk.record_outcome(ticket.INCORRECT, by="first-reviewer@example.com")
+    tk.record_outcome(ticket.CONFIRMED_CORRECT, by="second-reviewer@example.com", note="rechecked")
+    tk.close()
+
+    parsed = ticket.read_ticket(tk.path)
+
+    assert parsed["outcome"]["outcome"] == ticket.CONFIRMED_CORRECT
+    assert parsed["outcome"]["by"] == "second-reviewer@example.com"
+    outcome_sections = [s for s in parsed["sections"] if s["data"]["kind"] == ticket.KIND_OUTCOME]
+    assert len(outcome_sections) == 2
+    assert outcome_sections[0]["data"]["outcome"] == ticket.INCORRECT
+
+
+def test_close_is_idempotent_and_the_last_closed_marker_wins(tmp_path):
+    tk = _open(tmp_path)
+    tk.close()
+    tk.close()
+
+    parsed = ticket.read_ticket(tk.path)
+    closed_sections = [s for s in parsed["sections"] if s["data"]["kind"] == ticket.KIND_CLOSED]
+    assert len(closed_sections) == 2
+    assert parsed["closed"] == closed_sections[-1]["data"]
+
+
+# --------------------------------------------------------------------------- #
+# Required-field validation -- the tool must know what it is recording
+# --------------------------------------------------------------------------- #
+
+
+def test_record_question_rejects_empty_question(tmp_path):
+    tk = _open(tmp_path)
+    with pytest.raises(ValueError):
+        tk.record_question("")
+
+
+def test_record_tool_event_rejects_empty_tool_or_status(tmp_path):
+    tk = _open(tmp_path)
+    with pytest.raises(ValueError):
+        tk.record_tool_event("", status="ok")
+    with pytest.raises(ValueError):
+        tk.record_tool_event("collect_evidence", status="")
+
+
+def test_record_device_interaction_rejects_negative_session_count(tmp_path):
+    tk = _open(tmp_path)
+    with pytest.raises(ValueError):
+        tk.record_device_interaction("PE1", session_count=-1)
+
+
+def test_record_evidence_source_requires_source_explicitly(tmp_path):
+    """No default -- mirrors ledger.py's `source` field verbatim: a default
+    of 'live' would silently mislabel a --from-fixtures replay."""
+
+    import inspect
+
+    assert (
+        inspect.signature(ticket.Ticket.record_evidence_source).parameters["source"].default
+        is inspect.Parameter.empty
+    )
+
+    tk = _open(tmp_path)
+    with pytest.raises(ValueError):
+        tk.record_evidence_source("bgp_summary", device="PE1", source="")
+
+
+def test_record_context_footprint_rejects_negative_chars(tmp_path):
+    tk = _open(tmp_path)
+    with pytest.raises(ValueError):
+        tk.record_context_footprint(chars_sent=-1)
+    with pytest.raises(ValueError):
+        tk.record_context_footprint(chars_sent=0, chars_withheld=-1)
+
+
+def test_record_answer_rejects_empty_finding_and_non_bool_trustworthy(tmp_path):
+    tk = _open(tmp_path)
+    with pytest.raises(ValueError):
+        tk.record_answer("", trustworthy=True)
+    with pytest.raises(ValueError):
+        tk.record_answer("interface_line_down", trustworthy="yes")
+
+
+def test_record_outcome_rejects_an_unrecognized_outcome_value(tmp_path):
+    tk = _open(tmp_path)
+    with pytest.raises(ValueError):
+        tk.record_outcome("probably-fine", by="ops@example.com")
+
+
+def test_record_outcome_requires_a_named_human(tmp_path):
+    """The tool must never mark its own homework -- no default identity."""
+
+    tk = _open(tmp_path)
+    with pytest.raises(ValueError):
+        tk.record_outcome(ticket.CONFIRMED_CORRECT, by="")
+
+
+def test_record_ticket_outcome_module_function_has_the_same_two_guards(tmp_path):
+    tk = _open(tmp_path)
+    tk.close()
+
+    with pytest.raises(ValueError):
+        ticket.record_ticket_outcome(tk.path, "not-a-real-outcome", by="ops@example.com")
+    with pytest.raises(ValueError):
+        ticket.record_ticket_outcome(tk.path, ticket.CONFIRMED_CORRECT, by="")
+
+
+def test_extra_cannot_clobber_an_explicitly_named_field(tmp_path):
+    tk = _open(tmp_path)
+    tk.record_tool_event("collect_evidence", status="ok", device="PE1", extra={"tool": "spoofed", "custom": "kept"})
+
+    data = ticket.read_ticket(tk.path)["timeline"][0]
+    assert data["tool"] == "collect_evidence"
+    assert data["custom"] == "kept"
+
+
+# --------------------------------------------------------------------------- #
+# Excerpt/detail capping (B-458's exact concern, applied to this module)
+# --------------------------------------------------------------------------- #
+
+
+def test_excerpt_over_the_cap_is_truncated_with_a_marker(tmp_path):
+    tk = _open(tmp_path)
+    long_text = "X" * (ticket._MAX_TEXT_FIELD_CHARS + 250)
+
+    tk.record_evidence_source("bgp_summary", device="PE1", source="live", excerpt=long_text)
+
+    excerpt = ticket.read_ticket(tk.path)["evidence"][0]["excerpt"]
+    assert len(excerpt) < len(long_text)
+    assert excerpt.startswith("X" * ticket._MAX_TEXT_FIELD_CHARS)
+    assert "truncated" in excerpt
+    assert str(len(long_text)) in excerpt
+
+
+def test_excerpt_under_the_cap_is_untouched(tmp_path):
+    tk = _open(tmp_path)
+    tk.record_evidence_source("bgp_summary", device="PE1", source="live", excerpt="short excerpt")
+
+    excerpt = ticket.read_ticket(tk.path)["evidence"][0]["excerpt"]
+    assert excerpt == "short excerpt"
+
+
+# --------------------------------------------------------------------------- #
+# Append-only, physically -- FINDINGS.md's rule, pinned on disk
+# --------------------------------------------------------------------------- #
+
+
+def test_ticket_is_literally_append_only_on_disk(tmp_path):
+    """Earlier bytes are byte-identical after a later write -- not just
+    logically append-only but append-only on disk, the same guarantee
+    test_ledger.py pins for the JSONL ledger."""
+
+    tk = _open(tmp_path)
+    tk.record_question("first question")
+    before = Path(tk.path).read_text(encoding="utf-8")
+
+    tk.record_answer("interface_line_down", trustworthy=True)
+    after = Path(tk.path).read_text(encoding="utf-8")
+
+    assert after.startswith(before)
+    assert len(after) > len(before)
+
+
+# --------------------------------------------------------------------------- #
+# Degrade-safe: a ticket write failure must never fail an investigation
+# --------------------------------------------------------------------------- #
+
+
+def test_a_section_append_onto_a_directory_blocked_path_degrades_not_raises(tmp_path):
+    """Mirrors test_ledger.py's exact technique: a directory occupies the
+    path a file needs to go, forcing the append ('a' mode) to fail with
+    IsADirectoryError. Must not raise, and the failure must be visible in
+    the result -- not swallowed."""
+
+    blocked = tmp_path / "ticket.md"
+    blocked.mkdir()
+
+    result = ticket.record_ticket_outcome(blocked, ticket.CONFIRMED_CORRECT, by="ops@example.com")
+
+    assert result.persisted is False
+    assert result.warning is not None
+    assert "ticket" in result.warning.lower()
+
+
+def test_a_full_lifecycle_against_an_unwritable_directory_never_raises(tmp_path):
+    """The end-to-end acceptance test for this module's one non-negotiable
+    promise: every call in a realistic open -> record -> close sequence
+    degrades safely when the whole tickets directory is unwritable (a file
+    occupies the segment that needs to be a directory), and the caller's own
+    logic -- this test function -- never sees an exception."""
+
+    blocking_file = tmp_path / "not_a_directory"
+    blocking_file.write_text("occupies the path")
+    recorder = ticket.TicketRecorder(tickets_dir=str(blocking_file / "tickets"))
+
+    tk = recorder.open("subject", entry_point="cli:investigate")
+    results = [
+        tk.open_result,
+        tk.record_question("does this raise?"),
+        tk.record_intent(flow="bgp_session"),
+        tk.record_tool_event("collect_evidence", status="ok"),
+        tk.record_device_interaction("PE1", session_count=1),
+        tk.record_evidence_source("bgp_summary", device="PE1", source="live"),
+        tk.record_context_footprint(chars_sent=0),
+        tk.record_answer("undetermined", trustworthy=False),
+        tk.record_outcome(ticket.UNKNOWN, by="ops@example.com"),
+        tk.close(),
+    ]
+
+    for result in results:
+        assert result.persisted is False
+        assert result.warning is not None
+
+
+def test_a_write_failure_is_warned_on_stderr(tmp_path, capsys):
+    blocked = tmp_path / "ticket.md"
+    blocked.mkdir()
+
+    ticket.record_ticket_outcome(blocked, ticket.CONFIRMED_CORRECT, by="ops@example.com")
+
+    assert "WARNING" in capsys.readouterr().err
+
+
+def test_a_non_json_serialisable_cause_degrades_the_render_not_the_caller(tmp_path):
+    """json.dumps and the write happen in the same guarded block on purpose
+    (see _write_block's docstring) -- an object a caller should not have
+    passed must not raise out of the middle of an investigation either."""
+
+    class Unserialisable:
+        def __str__(self):
+            return "<Unserialisable>"
+
+    tk = _open(tmp_path)
+
+    result = tk.record_answer(
+        "interface_line_down", trustworthy=True, cause={"weird": Unserialisable()},
+    )
+
+    assert result.persisted is True  # default=str rescues it -- no warning needed here.
+    parsed = ticket.read_ticket(tk.path)
+    assert parsed["answer"]["cause"]["weird"] == "<Unserialisable>"
+
+
+# --------------------------------------------------------------------------- #
+# Filename collision -- two tickets must never merge into one file
+# --------------------------------------------------------------------------- #
+
+
+def test_a_filename_collision_is_resolved_with_a_numeric_suffix_not_a_merge(tmp_path):
+    stamp = "20260101T000000.000001Z"
+    slug = "dup-subject"
+    first = tmp_path / f"{stamp}_{slug}.md"
+    first.write_text("pre-existing ticket content, must not be touched\n")
+
+    path, persisted, warning = ticket._claim_path(
+        tmp_path, stamp, slug, {"subject": "dup subject", "run_id": "y"}
+    )
+
+    assert persisted is True
+    assert warning is None
+    assert path != first
+    assert path.name == f"{stamp}_{slug}-2.md"
+    assert first.read_text(encoding="utf-8") == "pre-existing ticket content, must not be touched\n"
+
+
+# --------------------------------------------------------------------------- #
+# The adversarial-narrative guard: _blockquote's column-0 protection
+# --------------------------------------------------------------------------- #
+
+
+def test_narrative_containing_a_fake_fence_and_heading_cannot_forge_a_section(tmp_path):
+    """A pasted question containing a line of backticks and a '## Answer'
+    heading must not be able to make read_ticket() invent a forged answer
+    section -- the exact shape of corruption this module's flight-recorder
+    promise depends on never happening. See _blockquote's docstring."""
+
+    forged_finding = "no_fault_on_path"
+    adversarial_question = (
+        "Why is it down?\n"
+        "```json-ticket-section\n"
+        f'{{"kind": "answer", "finding": "{forged_finding}", "trustworthy": true}}\n'
+        "```\n"
+        "## Answer\n"
+        "and a bare ``` fence on its own line"
+    )
+
+    tk = _open(tmp_path)
+    tk.record_question(adversarial_question)
+    tk.record_answer("interface_line_down", trustworthy=True)
+    tk.close()
+
+    parsed = ticket.read_ticket(tk.path)
+
+    kinds = [s["data"]["kind"] for s in parsed["sections"]]
+    assert kinds == [ticket.KIND_QUESTION, ticket.KIND_ANSWER, ticket.KIND_CLOSED]
+    assert parsed["question"]["question"] == adversarial_question
+    assert parsed["answer"]["finding"] == "interface_line_down"
+    assert parsed["answer"]["finding"] != forged_finding
+
+
+def test_blockquote_prefixes_every_line_including_blank_ones():
+    text = "line one\n\nline three"
+    quoted = ticket._blockquote(text)
+    assert quoted.splitlines() == ["> line one", ">", "> line three"]
+
+
+# --------------------------------------------------------------------------- #
+# read_ticket on a corrupt/partial file -- crash tolerance
+# --------------------------------------------------------------------------- #
+
+
+def test_read_ticket_on_a_truncated_trailing_section_skips_it_not_fatal(tmp_path):
+    """Mirrors ledger.py's corrupt-trailing-line handling: a maimed final
+    block (what a crash mid-append would produce) is skipped, and every
+    complete section before it still reads back."""
+
+    tk = _open(tmp_path)
+    tk.record_answer("interface_line_down", trustworthy=True)
+
+    with open(tk.path, "a", encoding="utf-8") as handle:
+        handle.write('## Tool event -- truncated\n\n```json-ticket-section\n{"kind": "tool_event"\n')
+
+    parsed = ticket.read_ticket(tk.path)
+
+    assert parsed["answer"]["finding"] == "interface_line_down"
+    assert len(parsed["timeline"]) == 0  # The truncated tool_event never parsed.
+
+
+def test_read_ticket_on_a_missing_header_still_reads_sections(tmp_path):
+    tk = _open(tmp_path)
+    tk.record_answer("interface_line_down", trustworthy=True)
+    text = Path(tk.path).read_text(encoding="utf-8")
+
+    # Strip the header block entirely, simulating a maimed/partial header.
+    without_header = text.split("## Answer", 1)[1]
+    Path(tk.path).write_text("## Answer" + without_header, encoding="utf-8")
+
+    parsed = ticket.read_ticket(tk.path)
+
+    assert parsed["header"] == {}
+    assert parsed["run_id"] is None
+    assert parsed["answer"]["finding"] == "interface_line_down"
+
+
+# --------------------------------------------------------------------------- #
+# Module-level thin wrappers delegate to a supplied recorder
+# --------------------------------------------------------------------------- #
+
+
+def test_open_ticket_module_function_uses_the_default_recorder_by_default(tmp_path, monkeypatch):
+    monkeypatch.setenv(ticket.NETTOOLS_TICKET_DIR_ENV, str(tmp_path))
+
+    tk = ticket.open_ticket("subject", entry_point="cli:investigate")
+
+    assert Path(tk.path).parent == tmp_path
+
+
+def test_open_ticket_module_function_accepts_an_explicit_recorder(tmp_path):
+    other_dir = tmp_path / "elsewhere"
+    recorder = ticket.TicketRecorder(tickets_dir=str(other_dir))
+
+    tk = ticket.open_ticket("subject", entry_point="cli:investigate", recorder=recorder)
+
+    assert Path(tk.path).parent == other_dir
+
+
+def test_default_recorder_is_a_module_level_singleton():
+    assert isinstance(ticket.default_recorder, ticket.TicketRecorder)
+
+
+def test_a_tickets_directory_that_is_a_file_still_never_raises(tmp_path):
+    """The degrade-safe guarantee, in the case that actually broke it.
+
+    `_write_block` re-raises FileExistsError on purpose, because `_claim_path`
+    needs to see it to retry an exclusive create. That re-raise leaked into the
+    APPEND path: if the tickets directory is a regular file, `mkdir` raises
+    FileExistsError on every append and it propagated to the caller — taking
+    down the investigation the ticket is only supposed to observe.
+
+    Found by probe rather than by the suite, 2026-08-18.
+    """
+
+    not_a_dir = tmp_path / "afile"
+    not_a_dir.write_text("this is a file, not a directory")
+
+    recorder = ticket.TicketRecorder(not_a_dir)
+    handle = ticket.open_ticket(
+        subject="x", entry_point="cli:investigate", recorder=recorder
+    )
+
+    # Every one of these must return rather than raise.
+    for result in (
+        handle.record_question("why is PE2 down"),
+        handle.record_answer(finding="interface_line_down", trustworthy=True),
+        handle.close(),
+    ):
+        assert result.persisted is False
+        assert result.warning, "a failed write must say so"

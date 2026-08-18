@@ -65,6 +65,12 @@ BASELINE_COMMIT = "6629a2c"
 #: that identifies the guard's test. The symbol is what `tests/` is searched for -- never
 #: the module name, never a filename.
 MUTATIONS = [
+    ("TICKET-DEGRADE", "a ticket write failure never fails an investigation",
+     "src/agent_nettools/ticket.py",
+     '        if open_mode == "x":\n            raise\n',
+     '        raise\n',
+     "test_a_tickets_directory_that_is_a_file_still_never_raises"),
+
     ("B-497", "transport healthy requires an FSM state implying established TCP",
      "src/agent_nettools/checks.py",
      "        if armed and fsm in _TCP_UP_STATES:\n",

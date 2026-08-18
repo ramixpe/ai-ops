@@ -5002,3 +5002,40 @@ by `git stash`, another by running the suite three times as the count moved.
 Two agents reported transient "file not found" moments that resolved on retry.
 Nothing was corrupted, and it was still wasteful: **worktree isolation exists
 for exactly this and I did not use it.** Next wave does.
+
+## OBS-169 · M1a · The ticket's degrade-safe guarantee had a hole, and a deliberate re-raise was the cause
+
+The ticket module (B-446, the flight recorder) ships with one guarantee above
+all others: **a ticket write failure never fails an investigation.** The agent
+built it, tested it, and mutation-tested it — mutation #2 removed the broad
+`except Exception` and correctly failed three degrade tests.
+
+**The guarantee still had a hole, and the suite could not see it.**
+`_write_block` contains a deliberate `except FileExistsError: raise` — needed
+because `_claim_path` creates the header with exclusive mode (`"x"`) and must
+*see* that error to retry with a numeric suffix. Correct for the claim. But the
+re-raise was unconditional, so it also applied to every **append**, and
+`_write_block`'s `path.parent.mkdir()` raises `FileExistsError` when the tickets
+directory is a regular file rather than a directory. Result: an unhandled
+exception propagating out of `record_answer()` into the caller — into the
+investigation the ticket exists only to observe.
+
+**Why the tests missed it and a probe caught it.** The degrade tests pointed the
+ticket at a path that was a *directory where a file should be*, producing
+`IsADirectoryError` — which the broad handler catches. Nobody tested the mirror
+case, a *file where a directory should be*, which produces `FileExistsError` —
+the one exception deliberately excluded. The corpus of failure modes was uniform
+in the dimension the guard discriminates on: §0.12's shape, in exception types
+rather than in fixtures.
+
+**The general form, and it is worth keeping.** *A deliberate exception to a
+safety rule is scoped to the case that motivated it, or it silently becomes an
+exception everywhere.* The re-raise was justified for one caller in one mode;
+written without that condition, it disabled the module's headline guarantee for
+every other caller. The fix is one line — `if open_mode == "x": raise` — and it
+is mutation-verified (reverting it fails the new test) and now permanent as
+harness guard `TICKET-DEGRADE`, 23/23 holding.
+
+Found by the orchestrator's own probe during merge review, not by the suite —
+which is the argument for verifying an agent's headline claim by exercising it
+rather than by reading its test list.
