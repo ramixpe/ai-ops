@@ -102,6 +102,16 @@ _NEXT_CHECK: dict[str, str] = {
         "A physical interface on the path is down. Check the port, the optic "
         "and the far end before anything above it."
     ),
+    # B-107. The one finding the isis_adjacency flow can reach that no other
+    # flow produces: the interface underneath is healthy and the adjacency
+    # still has not formed, which puts the cause on the configuration axis this
+    # build deliberately does not read (B-104).
+    "adjacency_not_up": (
+        "The IS-IS adjacency on this interface has not formed, though the "
+        "interface itself is healthy. Check IS-IS configuration on both ends -- "
+        "area, authentication, network type, or whether IS-IS is enabled on "
+        "this interface at all."
+    ),
     flows.CAUSE_NOT_LOCALISED: (
         "Every layer beneath the symptom is healthy, so the cause is not in this "
         "ladder. Check configuration and policy on both ends."

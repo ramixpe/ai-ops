@@ -591,9 +591,103 @@ BGP_SESSION_FLOW = Flow(
 )
 
 
+# --- isis_adjacency (B-107) -------------------------------------------------
+#
+# The second flow, built serially and alone per BACKLOG.md's B-107 row, to
+# prove the bgp_session pattern repeats rather than replicate an
+# unvalidated assumption five times (BACKLOG.md, "After the tracks").
+#
+# **The subject is a local interface name**, not a neighbour system-id or a
+# remote device name -- the other two shapes OBS-057 names as candidates, and
+# the choice is deliberate and reversible (it touches only this Flow and
+# `checks.isis_neighbor_up`; nothing else assumes it):
+#
+# * A **neighbour system-id** reads naturally ("my adjacency to P2") but this
+#   lab's `show isis neighbors` only *displays* a hostname because IOS-XR
+#   resolved it via dynamic-hostname TLV exchange -- the underlying identity is
+#   the NSAP-style NET, which is not guaranteed legible or even present if that
+#   feature is off. It would also have needed a **new** resolution path to
+#   reach the interface a lower rung must read, because neither `isis` nor
+#   `lldp` is keyed by system-id in this parser's output.
+# * A **remote device name** is the same shape as system-id on this fabric
+#   (they print identically here) and inherits the same fragility, plus it is
+#   ambiguous on any device with more than one parallel link to the same
+#   neighbour -- which system-id and interface both are not.
+# * **A local interface name** is what `isis`, `lldp` and `interfaces` are all
+#   *already* keyed by, needs no new resolution mechanism, and is the same
+#   vocabulary `interface_exists` and the `interface` flow already use
+#   (`subject_schema="<interface-name>, as the device spells it"`) -- so
+#   `subject_present` is that function, unmodified. IS-IS adjacencies in this
+#   fabric are point-to-point (`show isis neighbors`' SNPA column reads
+#   `*PtoP*` throughout), so "the adjacency on this interface" is unambiguous:
+#   exactly one neighbour, if any, can be on it.
+#
+# **The ladder is two rungs, not the four-or-five of bgp_session, and that is
+# measured rather than a shortcut.** IS-IS's only genuine dependency this tool
+# can observe is the physical link -- unlike `bgp_session`, there is no TCP
+# socket or RIB lookup between "IS-IS Hello" and "the interface is up" to make
+# a rung out of. LLDP looks like a natural middle rung and is not one: LLDP
+# does not gate IS-IS adjacency formation (two independent protocols sharing a
+# wire), so a rung asserting "IS-IS needs LLDP" would be B-437's forbidden
+# shape -- a rung whose dependency claim is false. LLDP earns its place inside
+# the top rung's *check* instead, as corroborating evidence from a distinct
+# subsystem (see `checks.isis_neighbor_up`), which is a difference in *how a
+# verdict is decided*, not a claim that one protocol depends on the other.
+#
+# Measured on `isis-broken` (device=PE3, subject="Gi0/0/0/0"): rung 1 broken
+# (no IS-IS record for the interface, LLDP shows P2 cabled there), rung 2
+# healthy (the interface itself is up/up). The walk's own `cause_not_localised`
+# rule then applies -- rung 1 is the only broken rung and nothing beneath it
+# explains it -- which is the honest answer this build can give: it confirms
+# the fault is not physical and stops there, because the actual cause (an
+# IS-IS-specific misconfiguration -- area, authentication, network type,
+# metric) lives on the config axis this build does not read (B-104, noted
+# against the fixture itself in B-496).
+
+ISIS_ADJACENCY_FLOW = Flow(
+    object_type="isis_adjacency",
+    subject_schema="<local-interface-name>, as the device spells it (Gi0/0/0/0)",
+    descent=(
+        Rung(
+            name="isis_adjacency",
+            # `interfaces` is not just belt-and-braces here: the check's third
+            # disambiguator reads it (an interface reading down explains why
+            # both isis and lldp are silent), and a rung's `check` must only
+            # read what its own `collect` names -- the coherence re-read
+            # (`epoch._collect_one_rung`) re-collects *exactly* this tuple, not
+            # the whole epoch. Measured: PE2's admin-down `Gi0/0/0/0` (`broken`
+            # fixture) walked to `interface_line_down` correctly, then the
+            # re-read silently dropped `interfaces` and disagreed with itself,
+            # flipping this rung to `unevaluated` and the finding to
+            # `temporally_incoherent` -- caught by running the CLI end to end
+            # against the fixture, not by a unit test of the check alone.
+            collect=(CollectStep("isis"), CollectStep("lldp"), CollectStep("interfaces")),
+            check=_checks.isis_neighbor_up,
+            finding="adjacency_not_up",
+            device_scope=DeviceScope.LOCAL,
+            subject_rule=SubjectRule.AS_IS,
+        ),
+        Rung(
+            name="interface",
+            collect=(
+                CollectStep("interfaces"),
+                CollectStep("interface", parameter="interface", is_template=True),
+            ),
+            check=_checks.interface_state,
+            finding="interface_line_down",
+            device_scope=DeviceScope.LOCAL,
+            subject_rule=SubjectRule.AS_IS,
+        ),
+    ),
+    findings=frozenset({"adjacency_not_up", "interface_line_down"}) | UNIVERSAL_FINDINGS,
+    subject_present=_checks.interface_exists,
+)
+
+
 FLOWS: Mapping[str, Flow] = {
     "bgp_session": BGP_SESSION_FLOW,
     "interface": INTERFACE_FLOW,
+    "isis_adjacency": ISIS_ADJACENCY_FLOW,
 }
 
 

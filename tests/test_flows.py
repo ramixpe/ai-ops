@@ -76,7 +76,7 @@ def test_seven_object_types_are_declared():
 
 @pytest.mark.parametrize(
     "object_type",
-    [t for t in flows.OBJECT_TYPES if t not in ("bgp_session", "interface")],
+    [t for t in flows.OBJECT_TYPES if t not in ("bgp_session", "interface", "isis_adjacency")],
 )
 def test_an_unimplemented_flow_raises_rather_than_returning_none(object_type):
     """`None` would let a caller read "no flow" as "nothing wrong"."""
@@ -92,7 +92,7 @@ def test_an_unknown_object_type_is_a_key_error_not_a_not_implemented():
         flows.flow_for("bgp_sesion")
 
 
-@pytest.mark.parametrize("object_type", ["bgp_session", "interface"])
+@pytest.mark.parametrize("object_type", ["bgp_session", "interface", "isis_adjacency"])
 def test_the_implemented_flows_resolve(object_type):
     flow = flows.flow_for(object_type)
     assert flow.object_type == object_type
@@ -212,6 +212,84 @@ def test_all_five_declared_findings_are_reachable_from_a_rung():
         "interface_line_down",
     }
     assert rung_findings | flows.UNIVERSAL_FINDINGS == flow.findings
+
+
+# --------------------------------------------------------------------------- #
+# isis_adjacency (B-107) -- the second flow
+# --------------------------------------------------------------------------- #
+
+
+def test_the_isis_adjacency_ladder_is_two_rungs_deep():
+    """Order is the contract, same reasoning as the bgp_session test above.
+
+    Shorter than bgp_session's five and deliberately so: this tool can observe
+    exactly one genuine dependency below the adjacency itself (the physical
+    interface) -- see the module comment above `ISIS_ADJACENCY_FLOW` for why
+    LLDP is not a third rung despite carrying real diagnostic weight here.
+    """
+
+    assert [r.name for r in flows.flow_for("isis_adjacency").descent] == [
+        "isis_adjacency",
+        "interface",
+    ]
+
+
+def test_the_isis_adjacency_ladder_never_leaves_the_local_device():
+    """Unlike bgp_session, no rung here needs `DeviceScope.SUBJECT` or a
+    resolver: `isis`, `lldp` and `interfaces` all describe the device that was
+    asked about, not the neighbour on the other end of the link."""
+
+    for rung in flows.flow_for("isis_adjacency").descent:
+        assert rung.device_scope is flows.DeviceScope.LOCAL, rung.name
+        assert rung.subject_rule is flows.SubjectRule.AS_IS, rung.name
+        assert rung.aggregation is None, rung.name
+
+
+def test_isis_adjacency_reuses_interface_exists_for_subject_presence():
+    """The subject vocabulary is a local interface name (OBS-057's gap,
+    resolved) -- the same vocabulary `interface_exists` and the `interface`
+    flow already use, so this flow's `subject_present` is that function,
+    unmodified. Reusing it rather than writing a new one is itself evidence
+    the vocabulary choice fits what the codebase already has."""
+
+    assert flows.flow_for("isis_adjacency").subject_present is checks.interface_exists
+    assert flows.flow_for("isis_adjacency").subject_present is (
+        flows.flow_for("interface").subject_present
+    )
+
+
+def test_the_isis_adjacency_top_rung_reads_isis_lldp_and_interfaces():
+    """The top rung's `collect` must name every section its check reads.
+
+    Not belt-and-braces: `epoch._collect_one_rung` re-collects *exactly* this
+    tuple for the coherence re-read, so a check reading a section its own rung
+    does not declare silently disagrees with itself on re-read -- measured
+    live (see checks.py's `isis_neighbor_up` docstring and the comment on this
+    rung in flows.py).
+    """
+
+    rung = flows.flow_for("isis_adjacency").descent[0]
+    assert rung.name == "isis_adjacency"
+    names = {step.name for step in rung.collect}
+    assert names == {"isis", "lldp", "interfaces"}
+    assert all(not step.is_template for step in rung.collect)
+
+
+def test_all_isis_adjacency_findings_are_reachable_from_a_rung():
+    flow = flows.flow_for("isis_adjacency")
+    rung_findings = {rung.finding for rung in flow.descent}
+
+    assert rung_findings == {"adjacency_not_up", "interface_line_down"}
+    assert rung_findings | flows.UNIVERSAL_FINDINGS == flow.findings
+
+
+def test_isis_adjacency_subject_schema_names_a_local_interface():
+    """Documents the subject-vocabulary decision (OBS-057) at the point a
+    caller would actually read it, and pins the wording against drift."""
+
+    schema = flows.flow_for("isis_adjacency").subject_schema
+    assert "interface" in schema
+    assert "Gi0/0/0/0" in schema
 
 
 def test_flows_module_calls_no_model_and_touches_no_device():

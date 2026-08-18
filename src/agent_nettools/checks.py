@@ -115,6 +115,7 @@ __all__ = [
     "healthy",
     "interface_state",
     "isis_adjacency",
+    "isis_neighbor_up",
     "parsed_records",
     "require_parsed",
     "route_present",
@@ -601,6 +602,159 @@ def isis_adjacency(evidence: dict[str, Any], interface: str | None = None) -> Ch
 
     return unevaluated(
         reason=f"no IS-IS adjacency record for interface {interface!r}", subject=interface
+    )
+
+
+# --------------------------------------------------------------------------- #
+# isis_neighbor_up -- the isis_adjacency flow's top rung (B-107)
+# --------------------------------------------------------------------------- #
+
+
+def isis_neighbor_up(evidence: dict[str, Any], interface: str) -> CheckResult:
+    """Is there an Up IS-IS adjacency on ``interface``?
+
+    Deliberately **not** :func:`isis_adjacency`'s ``interface=`` branch, though
+    it reads the same ``isis`` section the same way when a record for
+    ``interface`` exists. The two diverge on *absence*, and the divergence is
+    the point.
+
+    ``isis_adjacency`` is an intermediate rung embedded in another flow's
+    ladder (``bgp_session``'s ``igp_adjacency``), where the interface it is
+    asked about is derived from a route and may genuinely not be an IS-IS link
+    at all -- absence there is honestly ``unevaluated``. This function is the
+    *top* rung of a flow whose entire premise is "investigate the IS-IS
+    adjacency on this interface", so absence here gets corroborated against
+    two other, independent sources before it is allowed to stay ambiguous --
+    reading it as ``unevaluated`` regardless would report "cannot determine"
+    about cases this build can, in fact, determine, and both are measured
+    against real fixtures rather than assumed:
+
+    1. **LLDP**, a distinct subsystem read from the same device (the same
+       reasoning :func:`bgp_transport` uses the TCP socket for, B-432).
+       Present in ``lldp`` on this interface and absent from ``isis`` is a
+       positive fact -- a real, physically-connected neighbor with no
+       adjacency formed -- exactly as :func:`route_present`'s ``% Network not
+       in table`` is a definite negative rather than silence. Measured on the
+       ``isis-broken`` fixture (B-496): PE3's ``Gi0/0/0/0`` has no IS-IS
+       record while P2 is plainly cabled there, from both ends.
+    2. **The interface's own admin/line state**, checked only once LLDP has
+       *also* stayed silent. A shut interface explains silence in both other
+       protocols at once -- neither can be heard over a link not passing
+       traffic -- and it is a *stronger* corroboration than LLDP's, since an
+       admin-down port cannot run either. Measured on the ``broken`` fixture:
+       PE2's ``Gi0/0/0/0`` is admin-down, and both ``isis`` and ``lldp`` are
+       empty tables. Without this, the walk stopped ``unevaluated`` one rung
+       above a fault the very next rung would have found -- caught by running
+       this check against that fixture, not anticipated in the design.
+
+    Absent from all three stays ``unevaluated``: the interface is up, has no
+    LLDP neighbor and no IS-IS record, which may simply mean it is not an
+    IS-IS-enabled link at all -- the case the module rule protects.
+    """
+
+    section, bail = require_parsed(evidence, "isis", subject=interface)
+    if bail is not None:
+        return bail
+
+    from .interface_kind import same_interface
+
+    device = str(evidence.get("device", "unknown"))
+    isis_key = evidence_key(device, "isis", interface)
+
+    for record in parsed_records(section):
+        if not same_interface(record.get("interface", ""), interface):
+            continue
+        if record.get("state") == "Up":
+            return healthy(
+                subject=interface,
+                evidence_keys=(isis_key,),
+                reason=f"IS-IS adjacency on {interface} to {record.get('system_id')} is Up",
+            )
+        return broken(
+            reason=f"IS-IS adjacency on {interface} is {record.get('state')}, not Up",
+            subject=interface,
+            evidence_keys=(isis_key,),
+        )
+
+    # No IS-IS record for this interface. Corroborate against LLDP before
+    # deciding what that silence means -- see the docstring above.
+    lldp_section, lldp_bail = require_parsed(evidence, "lldp", subject=interface)
+    if lldp_bail is not None:
+        return unevaluated(
+            reason=(
+                f"no IS-IS adjacency record for interface {interface!r}, and LLDP "
+                f"could not be read to confirm whether a neighbor is cabled there "
+                f"({lldp_bail.reason})"
+            ),
+            subject=interface,
+        )
+
+    # LLDP prints the long interface form (`GigabitEthernet0/0/0/0`); `isis`
+    # and `interfaces` print the short one (`Gi0/0/0/0`) -- both read from
+    # this one device, which is exactly the within-device case
+    # `interface_kind.same_interface` exists for (OBS-117).
+    for record in parsed_records(lldp_section):
+        if not same_interface(record.get("local_interface", ""), interface):
+            continue
+        lldp_key = evidence_key(device, "lldp", interface)
+        return broken(
+            reason=(
+                f"no IS-IS adjacency on {interface}, despite LLDP showing "
+                f"{record.get('neighbor')} cabled there on "
+                f"{record.get('neighbor_interface')} -- a real, physically-connected "
+                f"neighbor with no IS-IS adjacency formed"
+            ),
+            subject=interface,
+            evidence_keys=(isis_key, lldp_key),
+        )
+
+    # Neither isis nor lldp says anything about this interface. Before calling
+    # that ambiguous, check whether the interface itself explains the silence
+    # -- see point 2 above. Bulk `interfaces`, not the `interface:<name>`
+    # template: it is always collected, and rung 2 (below this one) reads the
+    # same section for the same reason.
+    interfaces_section, interfaces_bail = require_parsed(
+        evidence, "interfaces", subject=interface
+    )
+    if interfaces_bail is not None:
+        # Could not corroborate either way -- not "reads up", which would claim
+        # a fact never observed. See the module rule this whole function exists
+        # to keep: a check may only answer about a field it actually read.
+        return unevaluated(
+            reason=(
+                f"no IS-IS adjacency record for interface {interface!r}, no LLDP "
+                f"neighbor there, and the interface's own state could not be read "
+                f"either ({interfaces_bail.reason})"
+            ),
+            subject=interface,
+        )
+
+    for record in parsed_records(interfaces_section):
+        if not same_interface(record.get("interface", ""), interface):
+            continue
+        admin_state = record.get("admin_state")
+        line_state = record.get("line_protocol")
+        if admin_state != "up" or line_state != "up":
+            intf_key = evidence_key(device, "interfaces", interface)
+            return broken(
+                reason=(
+                    f"no IS-IS adjacency on {interface}, and no LLDP neighbor "
+                    f"either -- the interface itself is not up "
+                    f"(admin_state={admin_state!r}, line_state={line_state!r}), "
+                    f"which explains both"
+                ),
+                subject=interface,
+                evidence_keys=(isis_key, intf_key),
+            )
+        break
+
+    return unevaluated(
+        reason=(
+            f"no IS-IS adjacency record for interface {interface!r}, no LLDP "
+            f"neighbor there, and the interface itself reads up -- it may simply "
+            f"not be an IS-IS-enabled link"
+        ),
+        subject=interface,
     )
 
 

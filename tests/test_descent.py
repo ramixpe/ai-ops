@@ -169,6 +169,140 @@ def test_acceptance_no_model_was_called(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# B-107 — the second flow, proving the pattern repeats
+#
+# `isis_adjacency` needs no resolver at all: every rung is DeviceScope.LOCAL,
+# unlike bgp_session's rungs 4-5 which cross to the subject's device. That
+# absence is itself part of what this flow demonstrates -- not every ladder
+# needs Q-013's machinery, and a flow author should not reach for a resolver
+# it does not need.
+# --------------------------------------------------------------------------- #
+
+
+def test_acceptance_isis_adjacency_is_cause_not_localised_on_the_naturally_broken_pair():
+    """PE3's `Gi0/0/0/0` on the `isis-broken` label (B-496): LLDP confirms P2
+    is cabled there, from both ends; neither end has the IS-IS adjacency; the
+    interface itself is up. **A real, naturally-occurring fault the healthy
+    corpus has structurally zero coverage of** -- the fixture this flow was
+    built alongside, per B-107's own row in BACKLOG.md.
+
+    The honest answer is `cause_not_localised`, not a guessed IS-IS-specific
+    cause: the interface is ruled healthy, and what remains (area mismatch,
+    authentication, network type) lives on the config axis this build does
+    not read (B-104).
+    """
+
+    result = run_descent(
+        flows.flow_for("isis_adjacency"), "PE3", "Gi0/0/0/0",
+        collector=_collector_for("isis-broken"),
+    )
+
+    assert result.rung_path == ("isis_adjacency", "interface")
+    assert result.finding == "cause_not_localised"
+    assert result.finding in flows.flow_for("isis_adjacency").findings
+
+    assert result.cause is not None
+    assert result.cause.rung == "isis_adjacency"
+    assert result.cause.device == "PE3"
+    assert result.causal_chain == ()
+
+    for outcome in result.outcomes:
+        if outcome.result.is_conclusive:
+            assert outcome.result.evidence_keys, outcome.rung
+    assert result.evidence_keys
+
+
+def test_acceptance_isis_adjacency_is_provable_from_the_other_end_too():
+    """B-496 captured both PE3 and P2 specifically so the asymmetry is
+    provable from either side. Same finding, the other device's evidence."""
+
+    result = run_descent(
+        flows.flow_for("isis_adjacency"), "P2", "Gi0/0/0/4",
+        collector=_collector_for("isis-broken"),
+    )
+
+    assert result.finding == "cause_not_localised"
+    assert result.cause is not None
+    assert result.cause.device == "P2"
+
+
+def test_acceptance_isis_adjacency_is_healthy_on_the_healthy_label():
+    result = run_descent(
+        flows.flow_for("isis_adjacency"), "PE3", "Gi0/0/0/0",
+        collector=_collector_for("healthy"),
+    )
+
+    assert result.finding == "all_layers_healthy"
+    assert len(result.outcomes) == 2
+    assert result.cause is None
+    assert result.causal_chain == ()
+
+
+def test_acceptance_isis_adjacency_localises_to_the_shut_interface_on_broken():
+    """PE2's `Gi0/0/0/0` on `broken`: admin-down explains the silence in both
+    `isis` and `lldp` at once. Unlike the `isis-broken` case above, this one
+    *does* localise, because the interface rung itself is broken -- the
+    causal chain the walk is supposed to produce when it can."""
+
+    result = run_descent(
+        flows.flow_for("isis_adjacency"), "PE2", "Gi0/0/0/0",
+        collector=_collector_for("broken"),
+    )
+
+    assert result.rung_path == ("isis_adjacency", "interface")
+    assert result.finding == "interface_line_down"
+    assert result.cause is not None
+    assert result.cause.rung == "interface"
+    assert result.cause.device == "PE2"
+    assert [o.rung for o in result.causal_chain] == ["isis_adjacency"]
+
+
+def test_acceptance_isis_adjacency_no_model_was_called(monkeypatch):
+    import agent_nettools.llm_analysis as llm
+
+    def explode(*_a, **_k):
+        raise AssertionError("the descent called a model")
+
+    monkeypatch.setattr(llm, "get_provider", explode)
+    monkeypatch.setattr(llm, "analyze_evidence", explode)
+
+    result = run_descent(
+        flows.flow_for("isis_adjacency"), "PE3", "Gi0/0/0/0",
+        collector=_collector_for("isis-broken"),
+    )
+    assert result.finding == "cause_not_localised"
+
+
+def test_acceptance_isis_adjacency_survives_the_coherence_re_read():
+    """Regression pin for a real bug found while building this flow (B-107).
+
+    The first draft of `isis_neighbor_up` read the `interfaces` section
+    without the top rung declaring it in `collect`. The full walk (built from
+    the whole epoch) saw it and correctly localised to `interface_line_down`;
+    the coherence re-read (`epoch._collect_one_rung`, which re-collects only a
+    rung's *own* `collect` tuple) did not, rung 1 flipped from `broken` to
+    `unevaluated` on re-read, and the finding became `temporally_incoherent`
+    instead. Caught by running the CLI end to end against the `broken`
+    fixture, not by a unit test of the check in isolation -- which is why this
+    test goes through `investigate()` and a real epoch rather than
+    `run_descent` with the hand-built, always-complete collector the other
+    tests in this file use (that collector does not gate evidence by
+    `rung.collect` at all, so it could not have caught this).
+    """
+
+    from agent_nettools.fixtures import fixture_sender
+    from agent_nettools.investigation import investigate
+
+    result = investigate(
+        "PE2", "Gi0/0/0/0", flow="isis_adjacency", sender=fixture_sender(label="broken"),
+    )
+
+    assert result.descent.finding == "interface_line_down"
+    assert result.descent.coherence is not None
+    assert result.descent.coherence.status == "coherent"
+
+
+# --------------------------------------------------------------------------- #
 # T-024 — walk semantics
 # --------------------------------------------------------------------------- #
 

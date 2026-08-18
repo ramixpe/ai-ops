@@ -78,11 +78,13 @@ def test_the_descent_predicates_never_touch_the_inventory_or_a_device():
 
 
 def test_every_rung_predicate_runs_with_the_inventory_disabled():
-    """The companion, over all five rather than one.
+    """The companion, over all six rather than one.
 
-    Without this the test above could pass while four of the five predicates
+    Without this the test above could pass while five of the six predicates
     had quietly grown a dependency -- §0.12, applied to a guarantee that is now
-    sampled rather than structural.
+    sampled rather than structural. `isis_neighbor_up` (B-107) joined the
+    original five; leaving it out here would be exactly the shrinking-coverage
+    failure §0.12 exists to catch.
     """
 
     def bomb(*args, **kwargs):  # pragma: no cover
@@ -94,6 +96,7 @@ def test_every_rung_predicate_runs_with_the_inventory_disabled():
         lambda: checks.bgp_transport(empty, "10.255.0.12"),
         lambda: checks.route_present(empty, "10.255.0.12/32"),
         lambda: checks.isis_adjacency(empty, None),
+        lambda: checks.isis_neighbor_up(empty, "Gi0/0/0/0"),
         lambda: checks.interface_state(empty, "Gi0/0/0/0"),
     ]
 
@@ -424,6 +427,133 @@ def test_isis_adjacency_unknown_interface_is_unevaluated_not_broken(monkeypatch)
     evidence = _fixture_evidence(monkeypatch, "PE2", label="healthy")
     result = checks.isis_adjacency(evidence, interface="Gi9/9/9/9")
     assert result.status == checks.UNEVALUATED
+
+
+# --- isis_neighbor_up: the isis_adjacency flow's top rung (B-107) --- #
+#
+# Deliberately not `isis_adjacency`'s `interface=` branch (see the function's
+# own docstring for why): this is a flow's top rung, not an embedded one, so
+# absence of an isis record is corroborated against lldp and then against the
+# interface's own state before it is allowed to stay `unevaluated`. Every case
+# below is measured against a real fixture, not invented -- the two positive
+# corroborations were each found by running the flow end to end, not by
+# writing the check first and asserting what it should do.
+
+
+def test_isis_neighbor_up_adjacency_up_is_healthy(monkeypatch):
+    evidence = _fixture_evidence(monkeypatch, "PE3", label="healthy")
+    result = checks.isis_neighbor_up(evidence, "Gi0/0/0/0")
+    assert result.status == checks.HEALTHY
+    assert "P2" in result.reason
+    assert result.evidence_keys == ("PE3:isis:Gi0/0/0/0",)
+
+
+def test_isis_neighbor_up_adjacency_present_but_not_up_is_broken():
+    """A record for the interface exists and its state is not `Up` -- the one
+    case that needs no corroboration at all, since the device answered
+    directly. Hand-built: no committed fixture catches an adjacency mid-form."""
+
+    evidence = {
+        "device": "PE3",
+        "isis": _section(
+            parsers.PARSE_OK, [{"interface": "Gi0/0/0/0", "system_id": "P2", "state": "Init"}]
+        ),
+    }
+    result = checks.isis_neighbor_up(evidence, "Gi0/0/0/0")
+    assert result.status == checks.BROKEN
+    assert "Init" in result.reason
+    assert result.evidence_keys == ("PE3:isis:Gi0/0/0/0",)
+
+
+def test_isis_neighbor_up_lldp_corroborated_absence_is_broken(monkeypatch):
+    """The measured case the ``isis-broken`` fixture exists for (B-496): PE3's
+    ``Gi0/0/0/0`` has no IS-IS record while LLDP shows P2 cabled there, from
+    both ends. Absence corroborated by a distinct subsystem is a fault, not an
+    unknown."""
+
+    evidence = _fixture_evidence(monkeypatch, "PE3", label="isis-broken")
+    result = checks.isis_neighbor_up(evidence, "Gi0/0/0/0")
+    assert result.status == checks.BROKEN
+    assert "P2" in result.reason
+    assert "LLDP" in result.reason
+    assert result.evidence_keys == ("PE3:isis:Gi0/0/0/0", "PE3:lldp:Gi0/0/0/0")
+
+
+def test_isis_neighbor_up_lldp_corroborated_absence_is_broken_from_the_other_end(monkeypatch):
+    """The same fixture, read from P2's side -- the asymmetry B-496 captured
+    both ends specifically to make provable from either direction."""
+
+    evidence = _fixture_evidence(monkeypatch, "P2", label="isis-broken")
+    result = checks.isis_neighbor_up(evidence, "Gi0/0/0/4")
+    assert result.status == checks.BROKEN
+    assert "PE3" in result.reason
+    assert result.evidence_keys == ("P2:isis:Gi0/0/0/4", "P2:lldp:Gi0/0/0/4")
+
+
+def test_isis_neighbor_up_shut_interface_explains_the_silence_and_is_broken(monkeypatch):
+    """PE2's ``Gi0/0/0/0`` on ``broken``: admin-down, and both `isis` and
+    `lldp` are empty tables device-wide -- neither protocol can be heard over
+    a link not passing traffic. Found by running the flow against this
+    fixture, not anticipated in the first draft of this check (which read
+    this case as `unevaluated`, one rung above a fault the next rung would
+    have found)."""
+
+    evidence = _fixture_evidence(monkeypatch, "PE2", label="broken")
+    result = checks.isis_neighbor_up(evidence, "Gi0/0/0/0")
+    assert result.status == checks.BROKEN
+    assert "admin-down" in result.reason
+    assert result.evidence_keys == ("PE2:isis:Gi0/0/0/0", "PE2:interfaces:Gi0/0/0/0")
+
+
+def test_isis_neighbor_up_absent_from_all_three_is_unevaluated(monkeypatch):
+    """PE2's ``Gi0/0/0/2`` on ``broken`` is up, but LLDP is empty device-wide
+    and IS-IS has no record for it either -- genuinely ambiguous: it may
+    simply not be an IS-IS-enabled link. This is the case the module's
+    absence-is-unevaluated rule protects, and the only one of the three
+    silence cases that should stay unevaluated."""
+
+    evidence = _fixture_evidence(monkeypatch, "PE2", label="broken")
+    result = checks.isis_neighbor_up(evidence, "Gi0/0/0/2")
+    assert result.status == checks.UNEVALUATED
+    assert result.status != checks.BROKEN
+
+
+def test_isis_neighbor_up_failed_isis_parse_is_unevaluated():
+    evidence = {"device": "PE3", "isis": _section(parsers.PARSE_FAILED)}
+    result = checks.isis_neighbor_up(evidence, "Gi0/0/0/0")
+    assert result.status == checks.UNEVALUATED
+
+
+def test_isis_neighbor_up_failed_lldp_parse_says_so():
+    """isis parsed fine and is silent; lldp could not be read at all -- the
+    reason must say *that*, not claim a corroboration that never happened."""
+
+    evidence = {
+        "device": "PE3",
+        "isis": _section(parsers.PARSE_OK, []),
+        "lldp": _section(parsers.PARSE_FAILED),
+    }
+    result = checks.isis_neighbor_up(evidence, "Gi0/0/0/0")
+    assert result.status == checks.UNEVALUATED
+    assert "LLDP could not be read" in result.reason
+
+
+def test_isis_neighbor_up_failed_interfaces_parse_says_so_not_up():
+    """isis and lldp both parsed fine and are silent; `interfaces` could not
+    be read. The reason must not claim the interface "reads up" -- that would
+    assert a fact never observed, the exact failure this module exists to
+    prevent."""
+
+    evidence = {
+        "device": "PE3",
+        "isis": _section(parsers.PARSE_OK, []),
+        "lldp": _section(parsers.PARSE_OK, []),
+        "interfaces": _section(parsers.PARSE_FAILED),
+    }
+    result = checks.isis_neighbor_up(evidence, "Gi0/0/0/0")
+    assert result.status == checks.UNEVALUATED
+    assert "could not be read" in result.reason
+    assert "reads up" not in result.reason
 
 
 # --- interface_state: show interfaces <name>, plus the error-counter rate --- #
