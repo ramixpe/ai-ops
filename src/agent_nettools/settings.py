@@ -354,6 +354,14 @@ SETTINGS: tuple[Setting, ...] = (
         "separate CLI invocations. Unset keeps metrics in-memory only.",
         "metrics",
     ),
+    # -- ledger.py --
+    Setting(
+        "NETTOOLS_DIAGNOSIS_LEDGER_FILE", "path", None,
+        "Opts investigation diagnoses into an on-disk accuracy ledger (B-485). "
+        "Unset means diagnoses are recorded in memory only and lost at process "
+        "exit, so the ledger accumulates nothing across invocations.",
+        "ledger",
+    ),
     # -- fixtures.py --
     Setting(
         "NETTOOLS_FIXTURE_DIR", "path", "tests/fixtures",

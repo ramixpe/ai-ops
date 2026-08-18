@@ -435,3 +435,64 @@ def test_module_level_functions_default_to_the_process_wide_ledger():
         assert ledger.summary()["by_outcome"][ledger.INCORRECT] == 1
     finally:
         ledger.reset()
+
+
+# --------------------------------------------------------------------------- #
+# CLI wiring (B-485). The module's guarantees are tested above; these pin that
+# the command line cannot get around them.
+# --------------------------------------------------------------------------- #
+
+
+def test_investigate_records_a_fixture_replay_as_fixture_not_live(tmp_path, monkeypatch):
+    """The mislabelling this ledger would otherwise quietly accumulate.
+
+    `--from-fixtures` is this project's most-run path. If it recorded as
+    `live`, the accuracy corpus would fill with replays of committed captures
+    and read as field evidence.
+    """
+
+    import sys
+
+    from agent_nettools import cli
+    from agent_nettools import ledger as L
+
+    path = tmp_path / "acc.jsonl"
+    monkeypatch.setenv("NETTOOLS_DIAGNOSIS_LEDGER_FILE", str(path))
+    monkeypatch.setattr(sys, "argv",
+                        ["nettools", "investigate", "RR1", "10.255.0.12",
+                         "--from-fixtures", "--quiet"])
+    cli.main()
+
+    entries = L.DiagnosisLedger(path=path).diagnoses()
+    assert len(entries) == 1
+    assert entries[0]["source"] == L.SOURCE_FIXTURE
+    assert entries[0]["outcome"] == "unknown", "the tool must not judge its own diagnosis"
+
+
+def test_the_cli_offers_no_way_for_the_tool_to_score_itself(tmp_path, monkeypatch):
+    """`ledger verdict` requires a diagnosis id and an outcome chosen by a
+    person. There is deliberately no verb that lets a run mark its own result,
+    and `record_diagnosis` has no `outcome` parameter for one to reach."""
+
+    import inspect
+
+    from agent_nettools import ledger as L
+
+    assert "outcome" not in inspect.signature(L.record_diagnosis).parameters
+
+
+def test_a_ledger_write_failure_never_fails_the_investigation(tmp_path, monkeypatch):
+    """Bookkeeping is not allowed to take down a diagnosis."""
+
+    import sys
+
+    from agent_nettools import cli
+
+    # A directory where a file must go: the append cannot succeed.
+    monkeypatch.setenv("NETTOOLS_DIAGNOSIS_LEDGER_FILE", str(tmp_path))
+    monkeypatch.setattr(sys, "argv",
+                        ["nettools", "investigate", "RR1", "10.255.0.12",
+                         "--from-fixtures", "--quiet"])
+    code = cli.main()
+
+    assert code == 1, "the investigation still reports its own finding, not a ledger error"

@@ -460,6 +460,87 @@ def _cmd_agent(args: argparse.Namespace) -> int:
 
 
 
+def _ledger_for_cli():
+    """The on-disk ledger if one is configured, else an in-memory one.
+
+    `NETTOOLS_DIAGNOSIS_LEDGER_FILE` unset means diagnoses are recorded and
+    then lost at process exit -- which is the honest default for a tool that
+    should not start writing files nobody asked for.
+    """
+
+    from . import ledger as _ledger
+
+    path = os.getenv("NETTOOLS_DIAGNOSIS_LEDGER_FILE")
+    return _ledger.DiagnosisLedger(path=Path(path)) if path else _ledger.default_ledger()
+
+
+def _record_diagnosis_in_ledger(result, args, subject, flow) -> None:
+    """Append this investigation to the accuracy ledger. Never raises."""
+
+    from . import ledger as _ledger
+
+    try:
+        cause = result.descent.cause
+        write = _ledger.record_diagnosis(
+            device=args.device,
+            subject=subject,
+            flow=flow,
+            finding=result.descent.finding,
+            trustworthy=result.trustworthy,
+            # Required, no default: a fixture replay must never be counted as a
+            # live diagnosis in the corpus this ledger exists to build.
+            source=(_ledger.SOURCE_FIXTURE if getattr(args, "from_fixtures", False)
+                    else _ledger.SOURCE_LIVE),
+            cause=({"rung": cause.rung, "device": cause.device,
+                    "reason": cause.result.reason} if cause is not None else None),
+            reason=result.descent.reason,
+            report_status=result.report_status,
+            correlation_status=result.correlation_status,
+            ledger=_ledger_for_cli(),
+        )
+    except Exception as exc:  # noqa: BLE001 -- bookkeeping never fails a diagnosis
+        _note(f"# accuracy ledger not updated: {exc}", args)
+        return
+    if write.warning:
+        _note(f"# {write.warning}", args)
+
+
+def _default_actor() -> str:
+    from .network_tools import _resolve_actor
+
+    return _resolve_actor()
+
+
+def _cmd_ledger(args) -> int:
+    """`nettools ledger summary|verdict` -- read the record, or add a human's
+    verdict to one diagnosis.
+
+    The tool writes diagnoses; a person writes verdicts. `--by` is required in
+    substance (it defaults to the same actor `NETTOOLS_LOG` already records)
+    because an accuracy claim with nobody's name on it is not evidence.
+    """
+
+    from . import ledger as _ledger
+
+    store = _ledger_for_cli()
+    if args.ledger_command == "summary":
+        _emit(_ledger.summary(ledger=store), args)
+        return 0
+
+    result = _ledger.record_verdict(
+        args.diagnosis_id, args.outcome, by=args.by or _default_actor(), note=args.note, ledger=store,
+    )
+    _emit({"tool": "ledger verdict", "id": result.id,
+           "diagnosis_id": args.diagnosis_id, "outcome": args.outcome,
+           "persisted": result.persisted,
+           "diagnosis_found": result.diagnosis_found,
+           "warning": result.warning}, args)
+    if not result.diagnosis_found:
+        _note(f"# no diagnosis {args.diagnosis_id!r} in this ledger -- recorded anyway, "
+              "so a mismatch stays visible rather than being refused away", args)
+    return 0
+
+
 def _cmd_investigate(args: argparse.Namespace) -> int:
     """Run one deterministic investigation and report what it found.
 
@@ -577,6 +658,12 @@ def _cmd_investigate(args: argparse.Namespace) -> int:
         return EXIT_CRITICAL
 
     _emit(result.to_payload(), args)
+
+    # B-485: record WHAT was diagnosed. Never whether it was right -- there is
+    # no parameter for that, and only a named human can add a verdict later.
+    # Bookkeeping must never take down a diagnosis, so a write failure is a
+    # note on stderr and nothing more.
+    _record_diagnosis_in_ledger(result, args, subject, flow)
 
     for repair in result.repairs:
         _note(f"# Repaired a model response: {repair}", args)
@@ -1433,6 +1520,38 @@ def build_parser() -> argparse.ArgumentParser:
         "--quiet", "-q", action="store_true", help="Suppress output; still exits 0."
     )
     p_metrics.set_defaults(func=_cmd_metrics)
+
+    # B-485. Two verbs, deliberately: the tool appends diagnoses on its own and
+    # a human appends verdicts on them. There is no verb that lets the tool
+    # score itself.
+    p_ledger = sub.add_parser(
+        "ledger",
+        help="The diagnosis accuracy ledger: `summary` reports the record "
+             "(including how many diagnoses nobody has judged yet), `verdict` "
+             "records a human's judgement of one diagnosis. Always exits 0.",
+    )
+    ledger_sub = p_ledger.add_subparsers(dest="ledger_command", required=True)
+
+    p_ledger_summary = ledger_sub.add_parser(
+        "summary", help="Counts by outcome; `unknown` is always shown."
+    )
+    p_ledger_verdict = ledger_sub.add_parser(
+        "verdict", help="Record whether one diagnosis was right. Only a human does this."
+    )
+    p_ledger_verdict.add_argument("diagnosis_id", help="The id `investigate` reported.")
+    p_ledger_verdict.add_argument(
+        "outcome", choices=("confirmed_correct", "incorrect", "unknown"),
+        help="Typo-proofed at the shell rather than deep in the module.",
+    )
+    p_ledger_verdict.add_argument(
+        "--by", default=None,
+        help="Who is making this call. Defaults to the same actor NETTOOLS_LOG records.",
+    )
+    p_ledger_verdict.add_argument("--note", default=None, help="Why, in one line.")
+    for _p in (p_ledger_summary, p_ledger_verdict):
+        _p.add_argument("--format", choices=("json", "table", "summary"), default="json")
+        _p.add_argument("--quiet", "-q", action="store_true")
+        _p.set_defaults(func=_cmd_ledger)
 
     p_audit = sub.add_parser(
         "audit",
