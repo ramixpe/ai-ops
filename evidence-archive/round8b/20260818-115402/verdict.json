@@ -1,0 +1,35 @@
+{
+  "instrument": {
+    "baseline_samples": 4,
+    "baseline_socket_armed_read": 4,
+    "baseline_trustworthy": true,
+    "post_established_samples": 12,
+    "post_established_socket_armed_read": 12,
+    "fault_landed": true
+  },
+  "samples_post_fault": 1725,
+  "mean_sample_seconds": 0.543,
+  "SEPARATION_OBSERVED": true,
+  "separation_sample_count": 131,
+  "samples_socket_armed_read": 143,
+  "samples_socket_not_reported": 0,
+  "fsm_states_seen": [
+    "Closing",
+    "Connect",
+    "Established",
+    "Idle",
+    "OpenSent"
+  ],
+  "reset_kinds_seen": [
+    "config_changed",
+    "hold_expired",
+    "wrong_as"
+  ],
+  "bfd_states_seen": [
+    "No"
+  ],
+  "discriminator_tcp_established": true,
+  "discriminator_reset_names_as": true,
+  "discriminator_reset_names_bfd": false,
+  "note": "Socket armed for read while the session was not Established. Rungs 1 and 2 separate, captured rather than composed. \u00a72a.2 holds."
+}
