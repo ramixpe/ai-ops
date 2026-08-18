@@ -275,6 +275,26 @@ nettools investigate <device> <subject> [--flow bgp_session]
                                         [--format json|table|summary] [--quiet]
 ```
 
+### Free-text flow selection (B-112)
+
+`--flow` names the object type directly, but a caller does not have to know
+that vocabulary. Omit `--flow` and hand a sentence as `<subject>` instead:
+
+```
+nettools investigate RR1 "why can't RR1 reach 10.255.0.12?" --from-fixtures
+```
+
+`flow_selection.py` matches the sentence against a **declared table of
+phrases** — never a model — the same shape `event_routing.py` already uses
+for syslog/Alertmanager routing (D5). It picks the flow, resolves the device
+against the live inventory, and re-derives the subject (an IPv4 address or a
+full interface name) by reconstruction; nothing extracted from the sentence
+is ever passed through unvalidated. A sentence naming two devices, matching
+two flows' language, or naming nothing this fabric implements is **refused
+with a reason and a list of what to say instead — never a guess**. `--flow`
+given explicitly, or a `<subject>` with no whitespace, behaves exactly as
+before; this path only ever triggers when both are true.
+
 ### The descent has no model in it
 
 `descent.py` walks a flow's ladder — for `bgp_session`: session, transport, route

@@ -341,6 +341,118 @@ def test_an_unknown_subject_exits_two_rather_than_raising(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# B-112 -- free-text flow selection wired into `investigate`, optionally
+# --------------------------------------------------------------------------- #
+
+
+def test_a_sentence_shaped_subject_reaches_the_same_descent_as_the_direct_call(
+    monkeypatch, capsys
+):
+    """`RR1 10.255.0.12 --flow bgp_session` and the sentence below must land
+    on the identical descent -- this is the whole point of B-112: the human
+    should not need to know `--flow bgp_session` exists."""
+
+    code = _main(
+        ["investigate", "RR1", "why can't RR1 reach 10.255.0.12?",
+         "--from-fixtures", "--label", "broken", "--format", "json"],
+        monkeypatch,
+    )
+    captured = capsys.readouterr()
+
+    assert code == 1
+    assert "interface_line_down" in captured.out
+    assert "Free-text selection" in captured.err
+
+
+def test_an_unmatched_sentence_exits_two_with_actionable_candidates(monkeypatch, capsys):
+    """Unmatched is an answer, not a traceback (flow_selection.py): the CLI
+    must surface the reason and the candidates, and must never hand the raw
+    sentence down to `investigate()` as if it were a real subject."""
+
+    code = _main(
+        ["investigate", "RR1", "why is the sky blue",
+         "--from-fixtures", "--label", "broken", "--format", "json"],
+        monkeypatch,
+    )
+    captured = capsys.readouterr()
+
+    assert code == 2
+    payload = json.loads(captured.out)
+    assert payload["status"] == "error"
+    assert any("did not understand" in e for e in payload["errors"])
+    assert any(e.startswith("try:") for e in payload["errors"])
+
+
+def test_an_explicit_flow_bypasses_free_text_selection_entirely(monkeypatch, capsys):
+    """The optionality requirement, tested directly: with `--flow` given, a
+    sentence-shaped SUBJECT is passed straight through exactly as it always
+    was, and hits the pre-existing "no such subject" failure -- not the new
+    free-text path. If this test needed `Free-text selection` on stderr, the
+    wiring would have broken the "otherwise behave exactly as today" rule."""
+
+    code = _main(
+        ["investigate", "RR1", "why can't RR1 reach 10.255.0.12?",
+         "--flow", "bgp_session", "--from-fixtures", "--label", "broken",
+         "--quiet"],
+        monkeypatch,
+    )
+    assert code == 2  # no answer at all -- the sentence is not a real subject
+
+
+def test_a_device_named_in_the_sentence_never_overrides_the_positional_device(
+    monkeypatch, capsys
+):
+    """The device always comes from the DEVICE argument, never from the
+    sentence -- `flow_selection.select_flow` resolves a device for its own
+    contract, but this CLI wiring only ever adopts the FLOW and SUBJECT from
+    it, exactly as `_cmd_investigate`'s own comment states."""
+
+    captured_call: dict = {}
+
+    def fake_investigate(device, subject, **kwargs):
+        captured_call["device"] = device
+        captured_call["subject"] = subject
+        captured_call["flow"] = kwargs.get("flow")
+        return _result("broken")
+
+    monkeypatch.setattr(cli, "investigate", fake_investigate)
+
+    code = _main(
+        ["investigate", "PE2", "why can't RR1 reach 10.255.0.12?", "--format", "json"],
+        monkeypatch,
+    )
+    err = capsys.readouterr().err
+
+    assert code == 1
+    assert captured_call["device"] == "PE2", "the positional DEVICE argument wins"
+    assert captured_call["subject"] == "10.255.0.12"
+    assert captured_call["flow"] == "bgp_session"
+    assert "sentence named device 'RR1'" in err
+    assert "investigating from 'PE2'" in err
+
+
+def test_flow_defaults_to_bgp_session_exactly_as_before_when_subject_is_not_a_sentence(
+    monkeypatch,
+):
+    """The argparse default changed from the literal string `"bgp_session"`
+    to `None` so the CLI can tell "omitted" apart from "explicitly chosen" --
+    this pins that the *effective* default is unchanged for every subject
+    that is not sentence-shaped, which is every subject `investigate` has
+    ever accepted before B-112."""
+
+    captured_call: dict = {}
+
+    def fake_investigate(device, subject, **kwargs):
+        captured_call["flow"] = kwargs.get("flow")
+        return _result("broken")
+
+    monkeypatch.setattr(cli, "investigate", fake_investigate)
+    _main(["investigate", "RR1", "10.255.0.12", "--quiet"], monkeypatch)
+
+    assert captured_call["flow"] == "bgp_session"
+
+
+# --------------------------------------------------------------------------- #
 # B-422 -- stdout is the payload, stderr is about the run
 # --------------------------------------------------------------------------- #
 

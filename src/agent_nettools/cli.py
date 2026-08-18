@@ -13,6 +13,8 @@ Exposed as the ``nettools`` console script. Subcommands:
     nettools traceroute DEVICE ADDRESS
     nettools investigate DEVICE SUBJECT [--flow bgp_session|interface]
                          [--from-fixtures [--label L]] [--paraphrase] [--notify]
+                         (SUBJECT may be a sentence, e.g. "why can't RR1 reach
+                         10.255.0.12?", when --flow is omitted -- B-112)
     nettools audit [--from-fixtures [--label L]]
     nettools analyze [DEVICE] [--show-evidence] [--save]
     nettools analyze --fabric [--show-evidence] [--save]
@@ -105,6 +107,7 @@ from . import __version__, flows, metrics, output, settings
 from .agent_loop import run_agent_loop
 from .fabric_analysis import analyze_fabric
 from .fixtures import capture_device, load_fixture_evidence
+from .flow_selection import looks_like_sentence, select_flow
 from .health import evaluate_fabric, exit_code_for_severity, severity_rank
 from .inventory import InventoryError, get_default_device_name
 from .inventory_model import resolve_inventory_path
@@ -524,15 +527,53 @@ def _cmd_investigate(args: argparse.Namespace) -> int:
         except (ValueError, LLMAnalysisError) as exc:
             _note(f"# No model configured ({exc}); running the descent alone.", args)
 
+    # B-112: SUBJECT is read as a sentence only when --flow was omitted *and*
+    # it contains whitespace -- a real subject (an IPv4 address or an
+    # interface name) never does, so an existing invocation cannot misfire
+    # into this path (`looks_like_sentence`'s own docstring). DEVICE is never
+    # taken from the sentence: it stays exactly what was passed positionally,
+    # cross-checked against the sentence's own device mention rather than
+    # replaced by it -- this wiring's job is choosing the FLOW (and, once
+    # chosen, the SUBJECT) from prose, not overriding an argument the caller
+    # already gave explicitly.
+    flow = args.flow
+    subject = args.subject
+    if flow is None and looks_like_sentence(args.subject):
+        selection = select_flow(args.subject)
+        if not selection.matched:
+            # Unmatched is an answer, not an exception (flow_selection.py's
+            # module docstring): say what was not understood and what to say
+            # instead, the same shape every other error envelope here uses.
+            _emit({
+                "tool": "investigate", "status": "error", "device": args.device,
+                "subject": args.subject,
+                "errors": [
+                    f"free-text flow selection did not understand the subject: "
+                    f"{selection.reason}",
+                    *(f"try: {candidate}" for candidate in selection.candidates),
+                ],
+            }, args)
+            return EXIT_CRITICAL
+        flow, subject = selection.flow, selection.subject
+        _note(f"# Free-text selection: {selection.reason}", args)
+        if selection.device and selection.device != args.device:
+            _note(
+                f"# Note: the sentence named device {selection.device!r}; "
+                f"investigating from {args.device!r} (the DEVICE argument) instead.",
+                args,
+            )
+    elif flow is None:
+        flow = "bgp_session"  # the pre-B-112 default, unchanged
+
     try:
         result = investigate(
-            args.device, args.subject, flow=args.flow, analyst=analyst, sender=sender
+            args.device, subject, flow=flow, analyst=analyst, sender=sender
         )
     except (ValueError, KeyError) as exc:
         # A flow that does not exist, or a subject no device owns. The run
         # produced no answer at all, which is exit 2 by the rule above.
         _emit({"tool": "investigate", "status": "error", "device": args.device,
-               "subject": args.subject, "errors": [str(exc)]}, args)
+               "subject": subject, "errors": [str(exc)]}, args)
         return EXIT_CRITICAL
 
     _emit(result.to_payload(), args)
@@ -562,7 +603,10 @@ def _cmd_investigate(args: argparse.Namespace) -> int:
         record = _notify(
             report,
             device=args.device,
-            subject=args.subject,
+            # The resolved subject, not the raw sentence (B-112): a
+            # notification about "why can't RR1 reach 10.255.0.12?" should
+            # name "10.255.0.12", same as it would for a normal invocation.
+            subject=subject,
             finding=result.descent.finding,
         )
         if record["error"]:
@@ -1170,14 +1214,31 @@ def build_parser() -> argparse.ArgumentParser:
             "-- undetermined, a withheld report, or a run that could not complete (a "
             "problem with the ANSWER). This matches `nettools diff`. It does NOT match "
             "`nettools health`, where 2 is the worst network outcome; a script calling "
-            "both must not assume one scheme."
+            "both must not assume one scheme.\n\n"
+            "B-112: if --flow is omitted and SUBJECT contains whitespace, it is read "
+            "as a sentence (e.g. \"why can't RR1 reach 10.255.0.12?\") and a declared "
+            "table of phrases -- never a model -- selects the flow and re-derives the "
+            "device and subject from it; an unmatched sentence refuses with a reason "
+            "and never guesses. A SUBJECT with no whitespace behaves exactly as before."
         ),
     )
     p_investigate.add_argument("device", help="Device the investigation starts from.")
-    p_investigate.add_argument("subject", help="The object under investigation, e.g. a peer address.")
     p_investigate.add_argument(
-        "--flow", default="bgp_session", choices=sorted(flows.FLOWS),
-        help="Which dependency ladder to descend (default: bgp_session).",
+        "subject",
+        help=(
+            "The object under investigation, e.g. a peer address -- or, with --flow "
+            "omitted, a sentence naming the flow, e.g. \"why can't RR1 reach "
+            "10.255.0.12?\" (B-112)."
+        ),
+    )
+    p_investigate.add_argument(
+        "--flow", default=None, choices=sorted(flows.FLOWS),
+        help=(
+            "Which dependency ladder to descend (default: bgp_session, unless "
+            "SUBJECT reads as a sentence, in which case B-112 free-text "
+            "selection picks the flow -- see `nettools investigate --help`'s "
+            "description)."
+        ),
     )
     p_investigate.add_argument(
         "--from-fixtures", action="store_true",
