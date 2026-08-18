@@ -420,6 +420,22 @@ SETTINGS: tuple[Setting, ...] = (
         minimum=1,
         maximum=4096,
     ),
+    # -- logs_loki.py (Stage-2 M5): the read-only Loki log adapter --
+    Setting(
+        "NETTOOLS_LOKI_URL", "string", "http://172.20.250.103:3100",
+        "Base URL of the Loki instance `logs_loki.run_named_query` queries. "
+        "The default is the lab's management-network address as measured "
+        "2026-08-15/18 (discovery-loki.md) -- a container IP, not a "
+        "guaranteed-stable service address; override it explicitly in any "
+        "environment where that measurement does not hold.",
+        "logs_loki",
+    ),
+    Setting(
+        "NETTOOLS_LOKI_TIMEOUT_SECONDS", "float", 10.0,
+        "HTTP timeout for a Loki query_range call.",
+        "logs_loki",
+        minimum=0.001,
+    ),
     # -- credential_resolver.py, via inventory/lab.yaml's credential group --
     # These three are the *conventional* names this lab's own inventory.yaml
     # configures (username_env/password_env/ssh_keyfile_env) -- see

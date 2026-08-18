@@ -158,12 +158,31 @@ RAW_TEXT_KEYS = frozenset({"commands", "unaccounted_lines"})
 #: (the mnemonic's trailing segment, e.g. `ADJCHANGE`) rather than prose --
 #: it is still device-chosen text from the same untrusted line `text` came
 #: from, and the budget cost of quoting it is negligible.
+#:
+#: `("logs_for_device", "text")` / `("logs_for_device", "code")` -- added for
+#: `logs_loki.py`'s Stage-2 M5 adapter (the first evidence source that is not
+#: a device). `logs_for_device` is that module's one named Loki query
+#: (`logs_loki.LOKI_QUERIES`), read from `data["intent"]` exactly like a base
+#: intent's context -- `logs_loki._base_envelope`'s own docstring names the
+#: specific trap this closes (a successful envelope that never sets
+#: `data["intent"]`/`data["template"]` cannot be matched by this table at
+#: all). Deliberately reuses `"text"`/`"code"` rather than inventing a new
+#: field name: `mcp_server.boundary.sanitize` matches free text by field name
+#: ALONE, with no context scoping, so a new generic name (`"line"`,
+#: `"message"`) would add a new member to that flat set and start wrapping
+#: any field with that name anywhere on the MCP surface. Reusing these two
+#: names adds nothing to that set -- both are already members from the
+#: `logging` entries above -- because a Loki record's `text`/`code` are the
+#: same concept the `logging` template's are (a syslog record's message body
+#: and its mnemonic's trailing code), not a coincidence of spelling.
 FREE_TEXT_FIELDS: frozenset[tuple[str, str]] = frozenset(
     {
         ("logging", "text"),
         ("logging", "code"),
         ("bgp_neighbor", "last_reset_reason"),
         ("interface", "description"),
+        ("logs_for_device", "text"),
+        ("logs_for_device", "code"),
     }
 )
 
@@ -270,6 +289,22 @@ ERROR_KINDS: tuple[tuple[str, str], ...] = (
     ("unknown mode", "the mode was not recognised; valid: latest_diff, golden_diff, flaps"),
     ("unknown object type", "the flow was not recognised; implemented: bgp_session, interface"),
     ("unknown check", "the check was not recognised; valid: facts, interfaces, bgp, lldp, isis, sr"),
+    # --- logs_loki.py (Stage-2 M5): the Loki adapter's own refusals and
+    # transport failures. `templates.py`-style messages ("expected a
+    # string", "must not be empty", "is not in the lab inventory", "must be
+    # between") already classify through the entries above -- these five are
+    # the ones with no existing analogue: an unknown named query, an
+    # int-typed slot given the wrong type, a transport-level failure talking
+    # to Loki, and the one shape check that can only fire if `LOKI_QUERIES`
+    # itself is written wrong (never from caller input -- see
+    # `run_named_query`'s own comment on that branch).
+    ("unknown loki query", "the query name was not recognised; valid: logs_for_device"),
+    ("expected an integer", "the parameter was refused: wrong type (expected an integer)"),
+    ("loki returned http status", "the log store returned a non-success HTTP status"),
+    ("loki response was not valid json", "the log store's response could not be parsed as JSON"),
+    ("loki query did not return a success status", "the log store rejected the query or reported an internal error"),
+    ("loki response was not the expected", "the log store's response was not in the expected shape"),
+    ("built selector failed the post-build shape check", "an internal query-building check failed; refusing to query the log store"),
 )
 
 

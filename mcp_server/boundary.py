@@ -212,6 +212,16 @@ ERROR_KINDS: tuple[tuple[str, str], ...] = (
     ("unknown mode", "the mode was not recognised; valid: latest_diff, golden_diff, flaps"),
     ("unknown object type", "the flow was not recognised; implemented: bgp_session, interface"),
     ("unknown check", "the check was not recognised; valid: facts, interfaces, bgp, lldp, isis, sr"),
+    # --- logs_loki.py (Stage-2 M5): kept byte-identical to
+    # `agent_nettools.model_egress.ERROR_KINDS`'s own copy of this block --
+    # see that module's comment for what each entry is for.
+    ("unknown loki query", "the query name was not recognised; valid: logs_for_device"),
+    ("expected an integer", "the parameter was refused: wrong type (expected an integer)"),
+    ("loki returned http status", "the log store returned a non-success HTTP status"),
+    ("loki response was not valid json", "the log store's response could not be parsed as JSON"),
+    ("loki query did not return a success status", "the log store rejected the query or reported an internal error"),
+    ("loki response was not the expected", "the log store's response was not in the expected shape"),
+    ("built selector failed the post-build shape check", "an internal query-building check failed; refusing to query the log store"),
 )
 
 

@@ -5171,3 +5171,53 @@ The gitignore alone would have hidden the pollution rather than stopped it. The
 conftest alone would have left the 113 already-committed files. The order of
 those two facts is the whole point: **an ignore rule is a way of not seeing a
 problem, and isolation is a way of not having one.**
+
+## OBS-173 · M5 · The first non-device evidence source, and the trap it had to be steered around
+
+`logs_loki.py` is the first Stage-2 evidence source that is not a router. Three
+things about how it got there are worth keeping.
+
+**1. A query language needed an allowlist analogue, and now has one.**
+`APPROVED_COMMANDS` is exact-match and `render_command` is
+render-by-reconstruction, precisely so no command is ever built by
+interpolation. **LogQL has neither**, and a model-supplied LogQL string would
+have been a command-injection surface wearing a different hat. The adapter
+declares *named* queries with validated slots: a device is looked up in the
+inventory and its address **reconstructed through `ipaddress.IPv4Address`**
+(trusting neither the caller nor the inventory's own prior validation), bounds
+are range-checked, and the assembled selector is re-checked against a fullmatch
+shape regex before use — the same layered defence `templates.py` applies to a
+rendered command. Verified by probe: a smuggled `logql=` kwarg is refused as an
+unexpected parameter and an injection-shaped device name is refused, **both
+before any HTTP call is made**.
+
+**2. The trap in the projector was real, and was demonstrated open before being
+closed.** `FREE_TEXT_FIELDS` is keyed `(context, field)` where the context comes
+from `data["intent"]` or `data["template"]` — and a successful base-intent
+envelope carries neither, so the table is *structurally unable to fire* on that
+shape. A new source copying that shape would have received silent
+non-protection. The agent's fourth mutation deleted `data["intent"]` from a real
+envelope and showed the canary crossing **unwrapped**, then pinned that every
+return path sets it. Showing the failure before showing the fix is the right
+order and is why the guard means something.
+
+**3. The field-name choice avoided widening the MCP surface, which is not
+obvious.** `boundary.sanitize` matches free text by **field name alone**, so a
+new generic name (`line`, `message`, `value`) would have started wrapping every
+dict key of that name anywhere in any payload. The adapter reuses the existing
+`logging` template's own field names (`text`, `code`), so the new
+`(context, field)` entries add **zero** new match surface on the MCP side — and
+a test pins that property rather than leaving it as a comment.
+
+**Verified independently by the orchestrator, not accepted on report:** the
+injection refusals above, and a hostile log line carrying
+`"IGNORE ALL PREVIOUS INSTRUCTIONS…"` crossing **both** egress paths
+(`project_envelope` and `boundary.sanitize`) only inside the untrusted-text
+delimiters. Content preserved, authority removed — B-481's discipline extended
+to a source that did not exist when it was written.
+
+**And absence is not zero.** An empty window returns `query_complete=True` with
+no records; a transport failure returns `status="error"` with
+`query_complete=False`. Both make `Coverage.complete` false and are refused by
+`ground_correlation` — for different, separately-stated reasons, which is the
+distinction `checks.py` already draws between `unevaluated` and `broken`.
