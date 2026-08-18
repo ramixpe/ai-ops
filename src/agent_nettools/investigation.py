@@ -211,6 +211,18 @@ class InvestigationResult:
     #: why, rather than inferring it from the rung's member count.
     origin_unresolved: str | None = None
 
+    #: Per-device SSH session counts for this investigation's evidence epoch,
+    #: plus a total -- `EvidenceEpoch.as_dict()["sessions"]`, unchanged, so this
+    #: field cannot itself drift from what the epoch actually counted. Exactly
+    #: the summary `ticket.Ticket.record_device_interaction`'s `session_count`
+    #: needs (B-446's ticket module takes only already-extracted values and
+    #: holds no reference to `EvidenceEpoch`) -- "how many times did this
+    #: investigation connect to a router." `None` when a caller supplied its
+    #: own `collector` (see `investigate`'s docstring): no epoch was built, so
+    #: there is nothing to summarize -- the same reason `descent.coherence` is
+    #: `None` on that path too.
+    session_summary: dict | None = None
+
     #: Non-semantic fixes applied to a model response, e.g. a stripped fence.
     repairs: tuple[str, ...] = field(default_factory=tuple)
     #: What the model calls cost, when the analyst reports it (B-425). `None`
@@ -331,6 +343,11 @@ class InvestigationResult:
             "coherence": (
                 descent.coherence.as_dict() if descent.coherence is not None else None
             ),
+            # Per-device session counts plus a total, straight from the epoch
+            # that actually did the collecting -- see `session_summary`'s own
+            # docstring. `None` on the `collector=` path, same as `coherence`
+            # just above, for the same reason.
+            "sessions": self.session_summary,
             "usage": self.usage.as_dict() if self.usage is not None else None,
             "coverage": self.coverage.as_dict() if self.coverage is not None else None,
             "repairs": list(self.repairs),
@@ -644,6 +661,11 @@ def investigate(
             device=device, resolver=resolve, sender=sender,
         )
 
+    # Per-device session counts plus a total, straight off the epoch that did
+    # the collecting -- `None` on the `collector=` path, same reason `epoch`
+    # itself is `None` there. See `InvestigationResult.session_summary`.
+    session_summary = epoch.as_dict()["sessions"] if epoch is not None else None
+
     # -- Does the subject exist? Asked before anything is walked (B-459). ----
     #
     # **The input side of the containment boundary.** Everything else in this
@@ -673,6 +695,7 @@ def investigate(
                 # one result whose value is that it is *not* a claim about the
                 # network.
                 report=render_report(refused), report_status=EMITTED,
+                session_summary=session_summary,
             )
 
     descent = run_descent(
@@ -721,7 +744,7 @@ def investigate(
             report=report, report_status=report_status,
             correlation=correlation, correlation_status=correlation_status,
             coverage=coverage, origin_unresolved=origin_unresolved,
-            operator_notes=operator_notes,
+            operator_notes=operator_notes, session_summary=session_summary,
         )
 
     # -- The paraphrase. A model, and nothing downstream may prefer it. ------
@@ -777,6 +800,7 @@ def investigate(
         correlation=correlation, correlation_status=correlation_status,
         correlation_grounding=correlation_grounding, coverage=coverage,
         origin_unresolved=origin_unresolved, operator_notes=operator_notes,
+        session_summary=session_summary,
         paraphrase=paraphrase, paraphrase_status=paraphrase_status,
         paraphrase_grounding=paraphrase_grounding,
         correlation_paraphrase=correlation_paraphrase,

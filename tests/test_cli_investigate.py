@@ -507,3 +507,111 @@ def test_quiet_still_silences_both_streams(monkeypatch, capsys):
     assert code == 1
     assert captured.out == ""
     assert captured.err == ""
+
+
+# --------------------------------------------------------------------------- #
+# The payload carries per-device session counts (B-446 ticket instrumentation)
+# --------------------------------------------------------------------------- #
+
+
+def test_the_investigate_payload_carries_the_session_summary(run):
+    """`bgp_session`'s own documented shape, reaching all the way to the CLI's
+    rendered JSON: RR1 in one session, PE2 (the fan-out device) in two."""
+
+    _, out = run()
+    payload = _payload(out)
+
+    assert payload["sessions"] == {"total": 3, "by_device": {"RR1": 1, "PE2": 2}}
+
+
+# --------------------------------------------------------------------------- #
+# `_ledger_for_cli`'s `default_ledger()` bug (B-485/B-446 build wave)
+#
+# `ledger.default_ledger` is a module-level INSTANCE (`ledger.py`'s own
+# `default_ledger = DiagnosisLedger()`), not a factory. `_ledger_for_cli` used
+# to call it as `_ledger.default_ledger()`, raising `TypeError: 'DiagnosisLedger'
+# object is not callable` on every run with `NETTOOLS_DIAGNOSIS_LEDGER_FILE`
+# unset -- the common case, since that env var has no default
+# (`ledger.py`'s own "No new environment variable" section). Verified by hand
+# before the fix, 2026-08-18: `nettools investigate RR1 10.255.0.12
+# --from-fixtures` printed "# accuracy ledger not updated: 'DiagnosisLedger'
+# object is not callable" on stderr and recorded nothing; `nettools ledger
+# summary` raised the same `TypeError` uncaught, to a full traceback.
+# --------------------------------------------------------------------------- #
+
+
+def test_ledger_for_cli_returns_the_process_wide_default_ledger(monkeypatch):
+    """The direct repro: calling `_ledger_for_cli()` itself must not raise,
+    and with no env var set it must be the real, shared `default_ledger`
+    instance -- not a broken call, not a fresh unrelated ledger."""
+
+    from agent_nettools import ledger
+
+    monkeypatch.delenv("NETTOOLS_DIAGNOSIS_LEDGER_FILE", raising=False)
+
+    assert cli._ledger_for_cli() is ledger.default_ledger
+
+
+def test_investigate_from_fixtures_records_a_diagnosis_in_memory_when_env_is_unset(
+    monkeypatch, capsys,
+):
+    """The exact repro from the build report, end to end through `cli.main()`.
+
+    Before the fix this printed the `TypeError` note on stderr and recorded
+    nothing; after it, the diagnosis actually lands in `ledger.default_ledger`'s
+    in-memory entries -- gone at process exit (no path configured, by
+    design), but real within this run, which is what `nettools ledger
+    summary` immediately afterward (same process) would report.
+    """
+
+    from agent_nettools import ledger
+
+    monkeypatch.delenv("NETTOOLS_DIAGNOSIS_LEDGER_FILE", raising=False)
+    ledger.reset()
+    try:
+        _main(ARGS, monkeypatch)
+        captured = capsys.readouterr()
+
+        assert "not callable" not in captured.err
+        assert "accuracy ledger not updated" not in captured.err
+
+        diagnoses = ledger.diagnoses()
+        assert len(diagnoses) == 1
+        assert diagnoses[0]["device"] == "RR1"
+        assert diagnoses[0]["subject"] == "10.255.0.12"
+        assert diagnoses[0]["flow"] == "bgp_session"
+        # `--from-fixtures` on ARGS: must never be counted as a live diagnosis.
+        assert diagnoses[0]["source"] == ledger.SOURCE_FIXTURE
+    finally:
+        ledger.reset()
+
+
+# --------------------------------------------------------------------------- #
+# The ledger write's id, surfaced (B-446 build wave)
+#
+# `nettools ledger verdict --help` calls its `diagnosis_id` argument "the id
+# `investigate` reported" -- `_record_diagnosis_in_ledger` captured `write.id`
+# and only ever read `.warning` off it, so `investigate` never actually
+# reported it anywhere an operator could see.
+# --------------------------------------------------------------------------- #
+
+
+def test_the_ledger_id_is_surfaced_so_an_operator_can_run_ledger_verdict(
+    monkeypatch, capsys,
+):
+    from agent_nettools import ledger
+
+    monkeypatch.delenv("NETTOOLS_DIAGNOSIS_LEDGER_FILE", raising=False)
+    ledger.reset()
+    try:
+        _main(ARGS, monkeypatch)
+        err = capsys.readouterr().err
+
+        recorded = ledger.diagnoses()
+        assert len(recorded) == 1
+        real_id = recorded[0]["id"]
+
+        assert f"id={real_id}" in err
+        assert f"nettools ledger verdict {real_id}" in err
+    finally:
+        ledger.reset()

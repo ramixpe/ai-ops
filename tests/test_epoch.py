@@ -494,3 +494,125 @@ def test_an_injected_collector_gets_the_pre_epoch_behaviour():
     assert result.descent.coherence is None
     assert result.to_payload()["coherence"] is None
     assert result.descent.finding == "interface_line_down"
+
+
+def test_an_injected_collector_also_gets_no_session_summary():
+    """Same reasoning as `coherence` above, for the session summary: no
+    epoch was built on this path, so there is nothing to count. `None`, not
+    an empty-but-present dict a reader could mistake for "zero sessions"."""
+
+    result = investigation.investigate(
+        "RR1", SUBJECT, resolver=_resolver,
+        collector=lambda d, r, s: investigation._collect_for_rung(
+            d, r, s, sender=fixture_sender(label="broken")
+        ),
+    )
+
+    assert result.session_summary is None
+    assert result.to_payload()["sessions"] is None
+
+
+# --------------------------------------------------------------------------- #
+# Per-device session counts (the ticket's `record_device_interaction` needs
+# exactly this and cannot collect it itself -- see `EvidenceEpoch.session_counts`)
+# --------------------------------------------------------------------------- #
+
+
+def test_session_counts_reflect_the_real_session_cost_per_device():
+    """`bgp_session`'s own documented shape: RR1 in one session, PE2 (the
+    fan-out device, `EACH_PATH_INTERFACE`) in two -- pinned directly against
+    `collect_epoch`'s own inline comment ("RR1 in one session and PE2 in
+    two: 3"), not re-derived from `observations` (see the field's docstring
+    for why that reconstruction would silently undercount PE2)."""
+
+    built = epoch.collect_epoch(
+        _flow(), "RR1", SUBJECT, resolver=_resolver, sender=fixture_sender(label="broken")
+    )
+
+    assert built.session_counts == {"RR1": 1, "PE2": 2}
+
+
+def test_as_dict_sessions_summary_matches_session_counts():
+    """`as_dict()["sessions"]` is the same idea as its existing
+    `"observations": len(...)` field, one level more specific -- surfaced
+    from `session_counts`, not a second, independent count."""
+
+    built = epoch.collect_epoch(
+        _flow(), "RR1", SUBJECT, resolver=_resolver, sender=fixture_sender(label="broken")
+    )
+
+    assert built.as_dict()["sessions"] == {
+        "total": 3, "by_device": {"RR1": 1, "PE2": 2},
+    }
+
+
+def test_investigation_result_carries_the_epochs_session_summary():
+    """The summary reaches `InvestigationResult` unmodified -- straight off
+    `EvidenceEpoch.as_dict()["sessions"]`, so it cannot itself drift from
+    what the epoch actually counted."""
+
+    result = investigation.investigate("RR1", SUBJECT, sender=fixture_sender(label="broken"), resolver=_resolver)
+
+    assert result.session_summary == {"total": 3, "by_device": {"RR1": 1, "PE2": 2}}
+    assert result.to_payload()["sessions"] == result.session_summary
+
+
+# --------------------------------------------------------------------------- #
+# `Observation.collected_at` -- a wall-clock stamp alongside the monotonic
+# `started`/`completed` pair, for cross-process comparability (the future
+# cache/invalidation milestone). Skew itself is untouched -- see the module
+# docstring on `Coherence`/`EvidenceEpoch.skew_seconds` for why that
+# computation stays on `started`/`completed` only.
+# --------------------------------------------------------------------------- #
+
+
+def test_observation_collected_at_is_wall_clock_not_monotonic():
+    """`collected_at` parses as a real UTC wall-clock timestamp -- comparable
+    across processes, which `started`/`completed` (monotonic, an
+    arbitrary per-process epoch) are not."""
+
+    import datetime as _datetime
+
+    built = epoch.collect_epoch(
+        _flow(), "RR1", SUBJECT, resolver=_resolver, sender=fixture_sender(label="broken")
+    )
+
+    assert built.observations, "the epoch actually collected something"
+    for observation in built.observations:
+        assert isinstance(observation.started, float), "monotonic, unchanged"
+        assert isinstance(observation.collected_at, str)
+        # Raises ValueError if this is not a real ISO-8601 stamp -- the
+        # assertion IS that this line does not raise.
+        parsed = _datetime.datetime.fromisoformat(observation.collected_at)
+        assert parsed.tzinfo is not None, "wall clock, UTC, tz-aware"
+
+
+def test_observations_from_the_same_session_share_one_collected_at():
+    """Same rule as `started`/`completed`: every observation from one device's
+    session was really read at the same moment, so they share one wall-clock
+    stamp too -- not a fresh one per key."""
+
+    built = epoch.collect_epoch(
+        _flow(), "RR1", SUBJECT, resolver=_resolver, sender=fixture_sender(label="broken")
+    )
+
+    for device in built.devices:
+        stamps = {o.collected_at for o in built.observations if o.device == device}
+        assert len(stamps) == 1, f"{device} observations disagree on collected_at: {stamps}"
+
+
+def test_skew_computation_is_unaffected_by_collected_at():
+    """The one thing this change must not do: `EvidenceEpoch.skew_seconds`
+    keeps doing its arithmetic on `opened`/`closed` (monotonic), not on
+    anything wall-clock -- pinned by using a `clock` whose monotonic values
+    disagree wildly with real wall-clock time, so a skew computed from the
+    wrong clock would show up immediately."""
+
+    fake_monotonic = iter([100.0, 100.0, 100.0, 130.0, 100.0, 130.0])
+
+    built = epoch.collect_epoch(
+        _flow(), "RR1", SUBJECT, resolver=_resolver, sender=fixture_sender(label="broken"),
+        clock=lambda: next(fake_monotonic),
+    )
+
+    assert built.skew_seconds == pytest.approx(30.0)

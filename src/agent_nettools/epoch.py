@@ -77,7 +77,8 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 from . import flows
@@ -206,6 +207,17 @@ def validate_prewalk_collection(flow: flows.Flow) -> None:
 # --------------------------------------------------------------------------- #
 
 
+def _wall_clock_now() -> str:
+    """UTC ISO-8601, this module's own copy of the one-liner `ticket.py`,
+    `ledger.py` and `network_tools.py` each already define independently
+    (`_timestamp_now`/`_timestamp`) rather than importing one another's --
+    same convention, restated here for the same reason: a private helper this
+    small is cheaper to repeat than to couple two modules that do not
+    otherwise depend on each other."""
+
+    return datetime.now(timezone.utc).isoformat()
+
+
 @dataclass(frozen=True)
 class Observation:
     """One command's result, and when it was read.
@@ -217,6 +229,26 @@ class Observation:
 
     Every intent collected in one session shares one ``started``/``completed``
     pair, because they really were one read.
+
+    ``collected_at`` is a **second, independent** stamp: wall-clock, taken at
+    the same moment as ``started``. It exists because monotonic time has no
+    meaning outside the process that read it -- ``time.monotonic()``'s own
+    clock has an arbitrary, process-specific epoch, so ``started``/``completed``
+    cannot be compared against another run's, which a future cache/invalidation
+    milestone (the shared-evidence layer `stage-2-architecture.md` sketches)
+    will need to do: "is this observation still fresher than that one, read by
+    a different `nettools` invocation." **This does not change what skew
+    means or how it is computed** -- `EvidenceEpoch.skew_seconds` and
+    `Coherence` still do their arithmetic on `started`/`completed` only, on
+    purpose, per the paragraph above; `collected_at` is additional information
+    riding alongside, not a replacement input to that calculation. Reusing
+    ``envelope["timestamp"]`` instead was considered and rejected: it is a
+    per-command stamp taken deep inside whichever transport function built
+    that one envelope, not a per-*Observation* stamp taken at the same
+    architectural point as ``started`` -- for a fan-out device two Observations
+    sharing one ``(started, completed)`` window can carry two different
+    ``envelope["timestamp"]`` values, which would make `collected_at` disagree
+    with the observation it is meant to describe.
     """
 
     key: str
@@ -224,6 +256,7 @@ class Observation:
     started: float
     completed: float
     envelope: dict
+    collected_at: str
 
     @property
     def duration(self) -> float:
@@ -238,6 +271,19 @@ class EvidenceEpoch:
     opened: float = 0.0
     closed: float = 0.0
     bound_seconds: float = DEFAULT_SKEW_BOUND_SECONDS
+    #: How many real sessions each device cost -- ``{"RR1": 1, "PE2": 2}`` for
+    #: `bgp_session`, per `collect_epoch`'s own inline comment ("RR1 in one
+    #: session and PE2 in two"). **Not reconstructable from `observations`
+    #: after the fact**: every Observation for one device shares one
+    #: ``(started, completed)`` window even when that window covered two real
+    #: sessions (a fan-out device's origin pass plus its interface pass), so
+    #: grouping observations by device and timestamp would undercount a
+    #: fan-out device by exactly the case that matters. `collect_epoch` already
+    #: knows the true count at the point it decides ``fans_out``, so it is
+    #: recorded there instead of re-derived. This is the number
+    #: `ticket.Ticket.record_device_interaction`'s `session_count` needs and
+    #: has no other way to get -- see `InvestigationResult.session_summary`.
+    session_counts: dict[str, int] = field(default_factory=dict)
 
     @property
     def skew_seconds(self) -> float:
@@ -276,6 +322,16 @@ class EvidenceEpoch:
             "within_bound": self.within_bound,
             "devices": list(self.devices),
             "observations": len(self.observations),
+            # Same idea as "observations" just above -- a count already sitting
+            # on this object, surfaced rather than rebuilt -- one level more
+            # specific: not how many observations landed, but how many real
+            # sessions it took to collect them, per device. See
+            # `session_counts`'s own docstring for why this has to be recorded
+            # rather than derived from `observations`.
+            "sessions": {
+                "total": sum(self.session_counts.values()),
+                "by_device": dict(self.session_counts),
+            },
         }
 
 
@@ -575,6 +631,11 @@ def collect_epoch(
     validate_prewalk_collection(flow)
 
     observations: list[Observation] = []
+    # Device -> real session count, recorded where it is actually known (just
+    # below, from `fans_out`) rather than reconstructed from `observations`
+    # afterward -- see `EvidenceEpoch.session_counts`'s own docstring for why
+    # that reconstruction would silently undercount a fan-out device.
+    session_counts: dict[str, int] = {}
     opened = clock()
 
     for target, steps in _plan(flow, device, subject, resolver).items():
@@ -597,8 +658,15 @@ def collect_epoch(
         # For `bgp_session` that is RR1 in one session and PE2 in two: 3, down
         # from 4, down from 10 before the epoch.
         fans_out = any(s.parameter in FANOUT_PARAMETERS for s in steps)
+        # `collect_evidence_and_templates` below is always exactly one session;
+        # the `fans_out` branch adds exactly one more (`run_templates_split`,
+        # itself one session via `run_templates`) -- both are one-session-per-
+        # call by their own docstrings, so this is arithmetic on the branch
+        # about to run, not a guess.
+        session_counts[target] = 2 if fans_out else 1
 
         started = clock()
+        wall_started = _wall_clock_now()  # See `Observation.collected_at`.
         if fans_out:
             # **The reverse route rides the probe pass, not a pass of its own.**
             #
@@ -639,11 +707,11 @@ def collect_epoch(
         # sessions on a fan-out device are still one pass in the sense that
         # matters here -- nothing between them was allowed to change the plan.
         observations.extend(
-            Observation(key, target, started, completed, envelope)
+            Observation(key, target, started, completed, envelope, wall_started)
             for key, envelope in evidence.items()
         )
         observations.extend(
-            Observation(key, target, started, completed, envelope)
+            Observation(key, target, started, completed, envelope, wall_started)
             for key, envelope in zip(keys, envelopes, strict=True)
         )
 
@@ -652,6 +720,7 @@ def collect_epoch(
         opened=opened,
         closed=clock(),
         bound_seconds=bound_seconds,
+        session_counts=session_counts,
     )
 
 

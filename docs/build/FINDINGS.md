@@ -5039,3 +5039,56 @@ harness guard `TICKET-DEGRADE`, 23/23 holding.
 Found by the orchestrator's own probe during merge review, not by the suite —
 which is the argument for verifying an agent's headline claim by exercising it
 rather than by reading its test list.
+
+## OBS-170 · M1b · The ledger wiring I shipped had zero test coverage, which is exactly how its bug shipped
+
+Yesterday's ledger wiring (`cli._ledger_for_cli`, `_record_diagnosis_in_ledger`,
+`_cmd_ledger`) went in with a green suite, a mutation-verified module beneath
+it, and **no test touching the wiring itself.** The module was tested; the seam
+was not. So this shipped:
+
+```python
+return _ledger.DiagnosisLedger(path=Path(path)) if path else _ledger.default_ledger()
+```
+
+`default_ledger` is a module-level **instance**, not a factory. With
+`NETTOOLS_DIAGNOSIS_LEDGER_FILE` unset — the default for every user — that line
+raised `TypeError`. Inside `investigate` a broad `except` swallowed it into a
+stderr note, so the ledger silently recorded nothing. **`nettools ledger
+summary` had no such guard and crashed outright with a traceback.**
+
+Two things are worth separating here.
+
+**The bug is ordinary.** Calling an instance is a slip anyone makes.
+
+**Its invisibility is not.** It was reachable by the most common invocation in
+the project, it broke a headline feature completely, and 2,208 tests said
+nothing — because every one of them tested `ledger.py`, and the defect was in
+the twelve lines that call it. This is OBS-153's shape a third time (*the test
+proved the helper, not the wiring*) and OBS-160's second cousin (*a precondition
+verified on the wrong artefact*). The pattern is now frequent enough to name
+plainly:
+
+> **Where a module is well tested and its call site is not, the call site is
+> where the defect will be.** Mutation-testing the module cannot see it, because
+> the module is correct. The only thing that finds it is exercising the seam —
+> running the command, not the function.
+
+It was found by an agent instructed to *verify the bug live before fixing it*,
+which is why it also caught the uncaught-traceback half that the original report
+had not noticed.
+
+**Also landed in the same pass**, all mutation-verified: per-run session counts
+plumbed out of the epoch (`{"total": 3, "by_device": {"RR1": 1, "PE2": 2}}` —
+reproducing exactly the number `collect_epoch`'s own docstring predicted), a
+wall-clock stamp on `Observation` for the future cache **without touching the
+monotonic skew arithmetic**, and per-envelope `source` provenance (`live` /
+`fixture`) so the ticket can report what came from a device versus a replay.
+
+**And one refusal worth recording.** The brief invited a transport-neutral
+refactor of the audit/metrics recording, *if it was clean*. The agent looked,
+found the `source` field lives one layer above `_netmiko_send_commands` and
+needs none of it, and **stopped** — noting that `duration_ms`/`retries`/`bytes`
+are transport-shaped fields and a generic extraction would be speculative for a
+source that does not exist yet. That is the right answer, and refusing
+speculative work when invited to do it is worth as much as doing the work.

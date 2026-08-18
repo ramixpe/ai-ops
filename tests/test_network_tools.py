@@ -1698,6 +1698,159 @@ def test_a_partial_batch_isolates_the_failure_to_its_own_intent(monkeypatch):
     assert (bgp.get("data") or {}).get("commands"), "its own output survives"
 
 
+# --------------------------------------------------------------------------- #
+# `source`: real SSH vs replayed/injected data (the ticket instrumentation
+# wave -- B-446's ticket needs to say "what came from the router vs
+# elsewhere," and everything in this file was implicitly SSH until now).
+# --------------------------------------------------------------------------- #
+
+
+def test_base_result_defaults_to_live_source():
+    """The additive default: every existing caller that never passes
+    `source=` still gets the pre-existing implicit assumption made explicit,
+    not a behaviour change."""
+
+    result = network_tools._base_result("probe", "PE1")
+
+    assert result["source"] == network_tools.SOURCE_LIVE
+
+
+def test_run_intent_reports_live_source_over_real_transport(monkeypatch):
+    """No `sender`: `_netmiko_send_commands` is the transport, so `source`
+    must say `"live"` -- the same spelling `ledger.py`'s own `source` field
+    already uses for a real device read (see `_source_for`'s docstring on why
+    this file does not import that constant from there)."""
+
+    set_device_environment(monkeypatch)
+    install_fake_netmiko(monkeypatch)
+
+    result = run_intent("PE1", "bgp")
+
+    assert result["source"] == network_tools.SOURCE_LIVE
+
+
+def test_run_intent_reports_fixture_source_over_a_sender():
+    """A `sender=` short-circuits the transport -- `fixtures.fixture_sender`
+    here, but the discriminator is the seam itself, not this specific
+    callable."""
+
+    from agent_nettools.fixtures import fixture_sender
+
+    result = run_intent("RR1", "bgp", sender=fixture_sender(label="healthy"))
+
+    assert result["source"] == network_tools.SOURCE_FIXTURE
+
+
+def test_collect_evidence_propagates_source_to_every_intent_including_unsupported():
+    """One collection round, one `source`, for every section it produces --
+    both the sections sliced from the real combined run
+    (`_section_from_combined`) and any this platform cannot answer at all
+    (`_unsupported_result`), neither of which ever sees `sender` itself and
+    so must not silently fall back to the default."""
+
+    from agent_nettools.fixtures import fixture_sender
+
+    evidence = collect_evidence("RR1", sender=fixture_sender(label="healthy"))
+
+    assert set(all_intents()) <= set(evidence), "the intent sections are all present"
+    for intent in all_intents():
+        section = evidence[intent]
+        assert section["source"] == network_tools.SOURCE_FIXTURE, (
+            f"{intent!r} did not carry the fixture source"
+        )
+
+
+def test_collect_evidence_reports_live_source_over_real_transport(monkeypatch):
+    set_device_environment(monkeypatch)
+    install_fake_netmiko(monkeypatch)
+
+    evidence = collect_evidence("PE1")
+
+    assert set(all_intents()) <= set(evidence)
+    for intent in all_intents():
+        section = evidence[intent]
+        assert section["source"] == network_tools.SOURCE_LIVE, (
+            f"{intent!r} did not carry the live source"
+        )
+
+
+def test_run_templates_split_propagates_the_batchs_source_not_a_fresh_default():
+    """`run_templates_split` slices `run_templates`'s one combined batch into
+    one envelope per manifest entry -- each must carry the *batch's* source,
+    read back off it rather than recomputed independently, so the two can
+    never quietly disagree."""
+
+    from agent_nettools.fixtures import fixture_sender
+    from agent_nettools.network_tools import run_templates_split
+
+    envelopes = run_templates_split(
+        "RR1", [("route", {"prefix": "10.255.0.11/32"})],
+        sender=fixture_sender(label="healthy"),
+    )
+
+    assert len(envelopes) == 1
+    assert envelopes[0]["source"] == network_tools.SOURCE_FIXTURE
+
+
+def test_collect_evidence_and_templates_agrees_on_source_across_both_halves():
+    """Intents and rendered templates come out of the same one session over
+    the same `sender` -- both halves of the combined collector must report
+    the same `source`."""
+
+    from agent_nettools.fixtures import fixture_sender
+
+    evidence, envelopes = network_tools.collect_evidence_and_templates(
+        "RR1", [("route", {"prefix": "10.255.0.11/32"})],
+        sender=fixture_sender(label="healthy"),
+    )
+
+    assert evidence["bgp"]["source"] == network_tools.SOURCE_FIXTURE
+    assert envelopes[0]["source"] == network_tools.SOURCE_FIXTURE
+
+
+def test_the_combined_runners_own_refusal_paths_still_carry_source(monkeypatch):
+    """The unapproved-command refusal inside `collect_evidence_and_templates`
+    builds its envelopes directly, not sliced from a `combined` result, so
+    `source` has to be threaded through explicitly there rather than
+    propagated after the fact -- this is that thread."""
+
+    monkeypatch.setattr(network_tools, "intents_for", lambda _p: ("bgp",))
+    monkeypatch.setattr(
+        network_tools, "commands_for", lambda _p, _i: ("configure terminal",)
+    )
+
+    evidence, envelopes = network_tools.collect_evidence_and_templates(
+        "PE1", [("route", {"prefix": "10.255.0.12/32"})],
+        sender=lambda _d, _c: "",
+    )
+
+    assert evidence["bgp"]["source"] == network_tools.SOURCE_FIXTURE
+    assert envelopes[0]["source"] == network_tools.SOURCE_FIXTURE
+
+
+def test_check_fabric_reports_the_source_its_sender_implies(monkeypatch):
+    """The top-level rollup and every nested per-device envelope agree,
+    because both trace back to the same `sender`.
+
+    `set_device_environment` is still needed here even though `sender`
+    bypasses the transport: `check_fabric` resolves the whole inventory
+    through `load_inventory()` (the credentialed join, unlike the
+    credential-free `load_inventory_file()` `list_devices` uses), an existing
+    requirement this test is not exercising and must not be confused with the
+    `source` question it actually asks."""
+
+    set_device_environment(monkeypatch)
+
+    result = check_fabric(sender=lambda device, command: f"ok from {device['name']}")
+
+    assert result["source"] == network_tools.SOURCE_FIXTURE
+    assert result["data"]["devices"], "the lab inventory is non-empty"
+    for name, device_result in result["data"]["devices"].items():
+        assert device_result["source"] == network_tools.SOURCE_FIXTURE, (
+            f"{name!r} did not carry the fixture source"
+        )
+
+
 def test_list_devices_needs_no_credentials(monkeypatch):
     """`list_devices` lists names/IPs/platforms, which are not secret, so it
     must not require DEVICE_USERNAME/PASSWORD — the credential-free layer

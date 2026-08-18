@@ -44,6 +44,40 @@ STATUS_SUCCESS = "success"
 STATUS_ERROR = "error"
 STATUS_UNSUPPORTED = "unsupported"
 
+# Where an envelope's data actually came from -- real SSH against the device,
+# or replayed/injected output over the `sender=` seam (a committed fixture via
+# `fixtures.fixture_sender`, or any other test double; from this layer's own
+# point of view both are simply "not a live read of the device at the moment
+# this ran", which is exactly `ledger.py`'s own definition of `SOURCE_FIXTURE`
+# -- see its module docstring's "What 'source' is for" section). Everything
+# in this file was implicitly SSH before Stage 2's Loki/Prometheus/NetBox
+# sources made that stop being true; this is the minimum discriminator the
+# build report asks for.
+#
+# Deliberately **not** imported from `ledger.py`, even though the spellings
+# are the same on purpose: `ticket.py`'s own docstring ("Ledger sibling, not
+# ledger duplicate") explains why two modules built in the same session avoid
+# a hard import between them, and the same reasoning applies here -- a
+# documented convention, not a runtime coupling.
+SOURCE_LIVE = "live"
+SOURCE_FIXTURE = "fixture"
+
+
+def _source_for(sender: Callable[[dict[str, Any], str], str] | None) -> str:
+    """`SOURCE_FIXTURE` when a caller supplied a `sender=`, `SOURCE_LIVE`
+    otherwise -- the one place this decision is made, so every leaf transport
+    function below computes it the same way instead of five slightly
+    different inline ternaries.
+
+    A brand-new, non-SSH source (Loki, NetBox) does **not** need to touch
+    this function or any of its callers: it would build its own envelope with
+    `_base_result(..., source="loki")` directly, since `source` is a plain
+    string with no enum behind it. This helper exists only for the SSH-vs-
+    injected-sender axis this module's own transport already has.
+    """
+
+    return SOURCE_FIXTURE if sender is not None else SOURCE_LIVE
+
 
 def _float_env(name: str, default: float) -> float:
     """Read a float-valued env var, env-then-default, same pattern as everywhere else."""
@@ -77,32 +111,47 @@ def _timestamp() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _base_result(tool: str, device_name: str) -> dict[str, Any]:
+def _base_result(tool: str, device_name: str, *, source: str = SOURCE_LIVE) -> dict[str, Any]:
+    """The envelope shape every tool in this file returns.
+
+    ``source`` defaults to `SOURCE_LIVE` deliberately: most call sites in this
+    file never touch a `sender`, and a default that instead required every one
+    of them to pass `source=` explicitly would be exactly the kind of change
+    this build must not make (`RULES` #3, additions only). A caller that
+    *does* know better -- every function below that actually branches on
+    `sender is not None` -- passes it explicitly via `_source_for`.
+    """
+
     return {
         "tool": tool,
         "device": device_name,
         "status": STATUS_SUCCESS,
         "timestamp": _timestamp(),
+        "source": source,
         "data": {},
         "errors": [],
     }
 
 
-def _safe_error(tool: str, device_name: str, message: str) -> dict[str, Any]:
-    result = _base_result(tool, device_name)
+def _safe_error(
+    tool: str, device_name: str, message: str, *, source: str = SOURCE_LIVE
+) -> dict[str, Any]:
+    result = _base_result(tool, device_name, source=source)
     result["status"] = STATUS_ERROR
     result["errors"].append(message)
     return result
 
 
-def _unsupported_result(tool: str, device_name: str, intent: str, platform: str) -> dict[str, Any]:
+def _unsupported_result(
+    tool: str, device_name: str, intent: str, platform: str, *, source: str = SOURCE_LIVE
+) -> dict[str, Any]:
     """Return an envelope for an intent this platform cannot answer.
 
     ``errors`` stays empty -- this is not a failure. ``data.commands`` is present
     and empty so every caller that walks commands keeps working unchanged.
     """
 
-    result = _base_result(tool, device_name)
+    result = _base_result(tool, device_name, source=source)
     result["status"] = STATUS_UNSUPPORTED
     result["data"] = {"intent": intent, "platform": platform, "commands": {}}
     return result
@@ -503,7 +552,7 @@ def _run_approved_commands(
         except InventoryError as exc:
             return _safe_error("run_approved_commands", device_name, str(exc))
 
-    result = _base_result("run_approved_commands", device_name)
+    result = _base_result("run_approved_commands", device_name, source=_source_for(sender))
     result["data"] = {"commands": {}}
 
     if sender is not None:
@@ -739,7 +788,7 @@ def _run_rendered_command(
     else:
         device = {"name": device_name, "platform": platform}
 
-    result = _base_result("run_template", device_name)
+    result = _base_result("run_template", device_name, source=_source_for(sender))
     # Output goes under "commands", keyed by the rendered command, matching what
     # run_intent produces. A second shape for the same concept would make every
     # generic consumer -- the MCP client, the LLM prompt builder, anything walking
@@ -879,7 +928,7 @@ def run_templates(
     """
 
     platform = platform or platform_for(device_name)
-    result = _base_result("run_templates", device_name)
+    result = _base_result("run_templates", device_name, source=_source_for(sender))
     result["data"] = {"platform": platform, "templates": []}
 
     if platform not in known_platforms():
@@ -994,16 +1043,21 @@ def run_templates_split(
     batch = run_templates(device_name, manifest, platform=platform, sender=sender)
     outputs = (batch.get("data") or {}).get("commands") or {}
     batch_errors = list(batch.get("errors") or [])
+    # Propagated from `batch`, not re-derived from `sender` -- one envelope per
+    # manifest entry, sliced out of the single collection `run_templates`
+    # already made, so its own `source` is the actual provenance of every
+    # command in `outputs` and must not be recomputed independently here.
+    source = batch.get("source", SOURCE_LIVE)
 
     envelopes: list[dict[str, Any]] = []
     for template_name, params in manifest:
         try:
             command = render_command(platform, template_name, **params)
         except TemplateValidationError as exc:
-            envelopes.append(_safe_error("run_template", device_name, str(exc)))
+            envelopes.append(_safe_error("run_template", device_name, str(exc), source=source))
             continue
 
-        result = _base_result("run_template", device_name)
+        result = _base_result("run_template", device_name, source=source)
         result["data"] = {
             "template": template_name, "platform": platform, "command": command,
             "commands": {command: outputs[command]} if command in outputs else {},
@@ -1069,6 +1123,11 @@ def collect_evidence_and_templates(
     """
 
     platform = platform_for(device_name)
+    # Computed once, from the same `sender` every envelope this call produces
+    # is built from -- every direct `_safe_error`/`_base_result` call below
+    # uses this, and `_section_from_combined` (Phase 3) reads it back off
+    # `combined` instead, since that helper takes no `sender` of its own.
+    source = _source_for(sender)
 
     if platform not in known_platforms():
         message = f"No command definitions for platform: {platform}."
@@ -1076,11 +1135,11 @@ def collect_evidence_and_templates(
             "device": device_name, "platform": platform, "timestamp": _timestamp(),
         }
         for intent in all_intents():
-            section = _safe_error("run_approved_commands", device_name, message)
+            section = _safe_error("run_approved_commands", device_name, message, source=source)
             _attach_parsed(section, platform, intent)
             evidence[intent] = section
         return evidence, [
-            _safe_error("run_template", device_name, message) for _ in manifest
+            _safe_error("run_template", device_name, message, source=source) for _ in manifest
         ]
 
     # ---- Phase 1a: intents, against the static allowlist. -------------------
@@ -1097,6 +1156,7 @@ def collect_evidence_and_templates(
             "run_approved_commands",
             device_name,
             f"Refusing unapproved commands for {platform}: {', '.join(unsafe)}",
+            source=source,
         )
         evidence = {
             "device": device_name, "platform": platform, "timestamp": _timestamp(),
@@ -1106,7 +1166,8 @@ def collect_evidence_and_templates(
             _attach_parsed(section, platform, intent)
             evidence[intent] = section
         return evidence, [
-            _safe_error("run_template", device_name, "batch refused") for _ in manifest
+            _safe_error("run_template", device_name, "batch refused", source=source)
+            for _ in manifest
         ]
 
     # ---- Phase 1b: templates, rendered by reconstruction. -------------------
@@ -1156,7 +1217,7 @@ def collect_evidence_and_templates(
             )
         else:
             section = _unsupported_result(
-                "run_approved_commands", device_name, intent, platform
+                "run_approved_commands", device_name, intent, platform, source=source
             )
         _attach_parsed(section, platform, intent)
         evidence[intent] = section
@@ -1167,12 +1228,12 @@ def collect_evidence_and_templates(
     for entry in rendered:
         if entry is None:
             envelopes.append(
-                _safe_error("run_template", device_name, errors[error_index])
+                _safe_error("run_template", device_name, errors[error_index], source=source)
             )
             error_index += 1
             continue
         template_name, command = entry
-        result = _base_result("run_template", device_name)
+        result = _base_result("run_template", device_name, source=source)
         result["data"] = {
             "template": template_name, "platform": platform, "command": command,
             "commands": {command: outputs[command]} if command in outputs else {},
@@ -1211,7 +1272,8 @@ def _run_approved_commands_and_templates(
 
     if sender is not None:
         device = {"name": device_name, "platform": platform}
-        result = _base_result("run_approved_commands", device_name)
+        # In this branch by construction: `sender is not None`.
+        result = _base_result("run_approved_commands", device_name, source=SOURCE_FIXTURE)
         result["data"] = {"platform": platform, "commands": {}}
         for command in commands:
             try:
@@ -1226,7 +1288,8 @@ def _run_approved_commands_and_templates(
     except InventoryError as exc:
         return _safe_error("run_approved_commands", device_name, str(exc))
 
-    result = _base_result("run_approved_commands", device_name)
+    # `sender is None` on this path by construction -- the real transport.
+    result = _base_result("run_approved_commands", device_name, source=SOURCE_LIVE)
     outputs, errors, retries = _netmiko_send_commands(
         device, commands, read_timeout=read_timeout
     )
@@ -1514,7 +1577,12 @@ def check_fabric(
     except InventoryError as exc:
         return _safe_error("check_fabric", "fabric", str(exc))
 
-    result = _base_result("check_fabric", "fabric")
+    # This top-level envelope is a rollup -- its own informational value is in
+    # `data.devices`, each already carrying its own correct `source` from the
+    # same `sender` (`_iter_check_results` threads it to every per-device
+    # call). Setting it here too keeps every envelope this function returns,
+    # not just the nested ones, honest about the same `sender`.
+    result = _base_result("check_fabric", "fabric", source=_source_for(sender))
     result["data"] = {"check": check, "devices": {}, "unsupported": []}
 
     collected = dict(
@@ -1552,7 +1620,17 @@ def _section_from_combined(
 ) -> dict[str, Any]:
     """Slice one evidence section out of a single combined command run."""
 
-    result = _base_result("run_approved_commands", device_name)
+    # No `sender` of its own -- `combined` is the only place this helper can
+    # learn where its data came from, so its `source` (set by whichever leaf
+    # transport function built it: `_run_approved_commands` or
+    # `_run_approved_commands_and_templates`) is propagated rather than
+    # re-derived. `.get(..., SOURCE_LIVE)` only matters for a `combined` built
+    # before this field existed, which cannot happen outside a test that
+    # constructs one by hand -- kept as the same safe default `_base_result`
+    # itself uses, not as a real code path.
+    result = _base_result(
+        "run_approved_commands", device_name, source=combined.get("source", SOURCE_LIVE)
+    )
     executed = combined["data"].get("commands", {})
     result["data"] = {"commands": {c: executed[c] for c in commands if c in executed}}
 
@@ -1602,7 +1680,9 @@ def collect_evidence(
         for intent in all_intents():
             # A fresh envelope per intent -- not a shared copy -- so attaching
             # parsed data to one intent's "data" dict can never leak into another.
-            section = _safe_error("run_approved_commands", device_name, message)
+            section = _safe_error(
+                "run_approved_commands", device_name, message, source=_source_for(sender)
+            )
             _attach_parsed(section, platform, intent)
             evidence[intent] = section
         return evidence
@@ -1618,8 +1698,13 @@ def collect_evidence(
                 device_name, list(commands_for(platform, intent)), combined
             )
         else:
+            # Propagated from `combined` for the same reason
+            # `_section_from_combined` reads it there instead of from
+            # `sender` directly -- one collection round, one `source` for
+            # every envelope it produces, "supported" or not.
             section = _unsupported_result(
-                "run_approved_commands", device_name, intent, platform
+                "run_approved_commands", device_name, intent, platform,
+                source=combined.get("source", SOURCE_LIVE),
             )
         _attach_parsed(section, platform, intent)
         evidence[intent] = section

@@ -471,7 +471,18 @@ def _ledger_for_cli():
     from . import ledger as _ledger
 
     path = os.getenv("NETTOOLS_DIAGNOSIS_LEDGER_FILE")
-    return _ledger.DiagnosisLedger(path=Path(path)) if path else _ledger.default_ledger()
+    # `default_ledger` is a module-level INSTANCE (ledger.py's own
+    # `default_ledger = DiagnosisLedger()`), not a factory -- calling it as
+    # `default_ledger()` raised `TypeError: 'DiagnosisLedger' object is not
+    # callable`. With the env var unset that hit `_record_diagnosis_in_ledger`'s
+    # broad `except Exception`, so every `nettools investigate` ever recorded
+    # nothing and said so only in a stderr note; `nettools ledger summary`/
+    # `verdict` had no such guard and crashed outright. Verified 2026-08-18:
+    # `nettools investigate RR1 10.255.0.12 --from-fixtures` with the env var
+    # unset printed "# accuracy ledger not updated: 'DiagnosisLedger' object
+    # is not callable" on stderr; `nettools ledger summary` raised the same
+    # TypeError uncaught, to a full traceback.
+    return _ledger.DiagnosisLedger(path=Path(path)) if path else _ledger.default_ledger
 
 
 def _record_diagnosis_in_ledger(result, args, subject, flow) -> None:
@@ -501,6 +512,21 @@ def _record_diagnosis_in_ledger(result, args, subject, flow) -> None:
     except Exception as exc:  # noqa: BLE001 -- bookkeeping never fails a diagnosis
         _note(f"# accuracy ledger not updated: {exc}", args)
         return
+    # `write.id` used to be captured and read only for `.warning` -- never
+    # printed, never returned -- even though `ledger verdict --help` already
+    # called its argument "the id `investigate` reported" (`diagnosis_id`'s
+    # own help text below). Surfaced the same way `write.warning` already is:
+    # a stderr note (B-422 -- commentary about the run, not part of the
+    # descent's own payload, so it does not belong in `to_payload()`, which is
+    # already emitted by the time this runs). Printed even when `write.persisted`
+    # is false, matching `_cmd_ledger`'s own "recorded anyway, so a mismatch
+    # stays visible" stance a few lines below for the read side of this same id.
+    _note(
+        f"# Diagnosis recorded: id={write.id} -- to record a human verdict, run "
+        f"`nettools ledger verdict {write.id} <confirmed_correct|incorrect|unknown> "
+        "--by <name>`",
+        args,
+    )
     if write.warning:
         _note(f"# {write.warning}", args)
 
