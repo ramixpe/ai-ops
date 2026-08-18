@@ -24,8 +24,10 @@ The human talks to an LLM (local via LM Studio, or hosted). The LLM has one
 (NetBox), an observability face (Grafana + Loki/syslog), and a documentation
 store. A **new cache layer** (Redis / SQL / neo4j) sits between the tools and
 the live network so that expensive, slow-changing state is not re-collected on
-every question. Syslog is the cache-invalidation signal. The network fabric is
-the thing being observed. The whole thing is targeted at "first TS agent → MCP
+every question. Syslog is the cache-invalidation signal. The network fabric is the thing
+being observed — and, new as of 2026-08-18, **history is read as evidence too**:
+utilisation, CPU and packet-drop trends from Grafana/InfluxDB and historical
+logs, feeding the wide context step (§2.4a). The whole thing is targeted at "first TS agent → MCP
 → production ready," with a Stage II beyond it.
 
 ---
@@ -193,11 +195,62 @@ LLDP-hostname drift). So:
   scaled onto Loki. Deterministic, no model, already the safest door.
 - **Grafana as SINK** — annotating dashboards with findings is a side effect,
   so by §1.4 it is an n8n flow the agent *selects*, never composes.
-- **Grafana/Loki metrics as EVIDENCE** — *reading* time-series as an input to a
-  diagnosis is a new evidence axis with its own parse-and-trust implications
-  (a metric is device-authored data like any other). If we go there, it goes
-  through the same projection/grounding discipline as device text, not around
-  it.
+- **Metrics and logs as EVIDENCE — confirmed a requirement, 2026-08-18
+  [OPERATOR].** Not just the network's live state: the design reads **history**
+  as an input to diagnosis — utilisation trend, a sudden drop or spike, CPU
+  history, packet-drop history (from Grafana / InfluxDB), and historical logs
+  (from a log store; the operator named one whose exact product is to be
+  confirmed). This is developed in §2.4a because it is a genuinely new axis, not
+  a variation of the existing state reads.
+
+### 2.4a The temporal evidence axis — history as a first-class input [OPERATOR, ANALYSIS]
+
+Everything the descent reads today is **point-in-time**: "is the interface up
+*now*, is the session Established *now*." The operator's requirement adds a
+second axis the build has never had — **history**:
+
+> Utilisation over time (sudden drop, sudden increase), CPU history,
+> packet-drop history — from Grafana/InfluxDB — and historical logs from a log
+> store, read as evidence *for* a diagnosis rather than as dashboards *about*
+> one.
+
+[ANALYSIS] This is important and it changes several things, so it is stated
+carefully rather than absorbed:
+
+1. **It is a new evidence type, with a different trust model.** A time-series is
+   not a device read the tool made — it is a *collector's record* of past reads.
+   We are trusting InfluxDB's history, not the device's answer. That is second-
+   hand evidence, and it inherits the collector's gaps: a metric that stopped
+   being scraped looks identical to a metric that went to zero. **Absence of a
+   sample is not a value of zero**, and the parse/trust layer must distinguish
+   them the same way `checks.py` already distinguishes `unevaluated` from
+   `broken`.
+2. **It naturally feeds the WIDE step, not the narrow one.** "Has utilisation
+   been climbing on this link" is context that *frames* a diagnosis — it belongs
+   in the flow's first sweep, handed to the model as background, not in a rung's
+   verdict. A rung is a yes/no dependency check; a trend is a shape. Keeping
+   trends in the wide step and verdicts in the narrow step preserves the
+   descent's determinism: the narrow rung still compares parsed fields, and the
+   history is context around it, never the thing a verdict turns on.
+3. **It interacts with the cache and the epoch in a way that is actually
+   easier, not harder.** Point-in-time reads have a coherence *skew* problem
+   (two reads from two times). A time-series is *explicitly* timestamped and
+   *deliberately* read across time — so it does not fight the epoch, it sits
+   beside it. The rule: **a historical series is evidence about a window; a
+   descent verdict is evidence about an instant; the report must never let the
+   first masquerade as the second** ("packet drops spiked at 14:32" is a fact
+   about 14:32, not about now).
+4. **It is device-authored-adjacent, so the egress discipline still applies.**
+   A log line from the history store is exactly the free text B-467 governs; a
+   metric label or annotation is attacker-influenceable the same way an
+   interface description is. Historical evidence crosses to a model through the
+   same projector, not around it.
+
+**Where this lands in the tiers (§5.1):** history is a *context* source, so it
+is read by the wide flows and the focused/context tools — the middle and top of
+the gradient — and never by a descent rung. That keeps the one guarantee the
+whole build rests on: no verdict is reached from anything but parsed,
+point-in-time, device fields.
 
 ### 2.5 Documentation store — vector DB or normal DB [OPERATOR: PENDING]
 
@@ -270,9 +323,18 @@ Registered here so nothing is lost; each needs the operator or a measurement.
 - **"RACE vs P.E.N.E"** — a comparison box on the board, not yet transcribed in
   full. Needs the operator to expand what the two are and what the choice
   between them decides.
-- **The "Pending" list (second photo, pink)** — partially legible: *Redis KPI*,
-  *main flows*, *memory*, and more. To be transcribed from the operator rather
-  than guessed.
+- **The pending list (second photo, pink) — clarified by the operator
+  2026-08-18:**
+  - **Memory** — agent/session memory across turns (D14; B-203/204/205/407).
+  - **Measure the context window** — instrument the actual token cost of the
+    surface a model reads, not estimate it. Directly the +86% manifest finding
+    (§10) and B-113; the measurement that tells us whether a 7-backend MCP
+    surface is navigable by a small model at all.
+  - **More nettools** — the adjacency/neighbour expansion (IS-IS *done*, LDP,
+    LLDP, RSVP, OSPF, MP-BGP, CDP, and more), **and a class the operator named
+    explicitly: focused tools that serve BOTH context-gathering AND invoking a
+    specific command for troubleshooting.** See §5.1 — this refines the
+    wide/narrow model.
 - **Cache backend split** — Redis vs SQL vs neo4j each appear in the cache
   layer; which state lives where (hot status in Redis, structured config in
   SQL, topology in neo4j?) is a design task, not yet decided.
@@ -282,7 +344,36 @@ Registered here so nothing is lost; each needs the operator or a measurement.
 
 ---
 
-## 5. What is actually decided coming out of this session
+## 5.1 Refinement — a tool is not always the narrow end [OPERATOR clarification, ANALYSIS]
+
+The operator's "more nettools" note names a class that does not fit a clean
+flow=wide / tool=narrow split: **focused tools that both gather context for a
+domain AND invoke a specific troubleshooting command.** A per-protocol
+adjacency tool is the example — asked broadly it reports the state of every
+IS-IS/OSPF/LDP adjacency (context), and asked narrowly it drives one specific
+check on one neighbour (troubleshooting).
+
+[ANALYSIS] So wide/narrow is a **gradient, not a binary**, and the honest model
+is three tiers rather than two:
+
+1. **Flows — widest.** Whole-fabric or whole-domain first sweep. Frame the
+   problem, gather broadly, present to the model. (`audit`, `analyze --fabric`,
+   `health --all`.)
+2. **Focused/context tools — the middle.** One domain, both readings: "state of
+   all IS-IS adjacencies on this device" (context) and "this specific
+   adjacency's detail" (troubleshoot). This is the class the operator is
+   adding, and it is where most of the protocol expansion lands.
+3. **Descent tools — narrowest.** One subject, one rung, one verdict from
+   parsed fields. (`investigate`, a single rung check.)
+
+The agent still only *selects and fills* across all three. What changes is the
+menu is a **gradient the model walks from wide to narrow**, which is exactly
+the shape the descent itself has — and it means the protocol-expansion tools
+are not just diagnosis leaves, they are also the context-gatherers the wide
+step hands to the model. **This should be confirmed with the operator before
+the menu is designed, because it decides the tool surface's shape.**
+
+## 6. What is actually decided coming out of this session
 
 - **[DECIDED, OPERATOR]** The flow/tool distinction gains the **wide/narrow
   dimension**: flows are the wide first step, tools are the narrow deep step
