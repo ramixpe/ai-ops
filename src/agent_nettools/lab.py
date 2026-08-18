@@ -34,12 +34,65 @@ def all_devices() -> dict[str, str]:
     return {device.name: device.mgmt_ip for device in load_inventory_file().devices}
 
 
-# A frozen snapshot at import time, for the (many) callers that do
-# ``from .lab import DEVICES`` and expect a plain dict rather than a function
-# call. Reflects whatever inventory resolves at import time; call
-# ``all_devices()`` directly for a value that tracks a later
-# ``NETTOOLS_INVENTORY`` change plus ``reset_inventory_cache()``.
-DEVICES = all_devices()
+class _LazyDevices(dict):
+    """``DEVICES``, loaded on first *use* instead of at import.
+
+    The eager ``DEVICES = all_devices()`` this replaces ran at import time —
+    before argparse, before anything. A malformed ``NETTOOLS_INVENTORY``
+    therefore crashed **every** invocation with a raw traceback, including
+    ``nettools --help``, burying the excellent ``InventoryError`` message the
+    validator writes (found by the 2026-08-18 operator walkthrough, stumble 3).
+
+    Laziness moves the failure to first real access, where it surfaces as the
+    same ``InventoryError`` as before — which ``cli.main()``'s handler renders
+    cleanly. **Deliberately not try/except-at-import**: leaving ``DEVICES``
+    silently empty on a bad inventory would be absence-as-health, handing
+    every consumer a plausible empty dict instead of the error.
+    """
+
+    _loaded = False
+
+    def _ensure(self) -> None:
+        if not self._loaded:
+            super().update(all_devices())
+            self._loaded = True
+
+    def __getitem__(self, key):            # noqa: D105
+        self._ensure()
+        return super().__getitem__(key)
+
+    def __iter__(self):                    # noqa: D105
+        self._ensure()
+        return super().__iter__()
+
+    def __len__(self):                     # noqa: D105
+        self._ensure()
+        return super().__len__()
+
+    def __contains__(self, key):           # noqa: D105
+        self._ensure()
+        return super().__contains__(key)
+
+    def keys(self):                        # noqa: D102
+        self._ensure()
+        return super().keys()
+
+    def values(self):                      # noqa: D102
+        self._ensure()
+        return super().values()
+
+    def items(self):                       # noqa: D102
+        self._ensure()
+        return super().items()
+
+    def get(self, key, default=None):      # noqa: D102
+        self._ensure()
+        return super().get(key, default)
+
+
+#: Lazy: populated on first use. Call ``all_devices()`` for a value that
+#: tracks a later ``NETTOOLS_INVENTORY`` change plus ``reset_inventory_cache()``.
+DEVICES = _LazyDevices()
 
 
 def platform_for(device_name: str) -> str:

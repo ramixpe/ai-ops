@@ -42,6 +42,26 @@ from __future__ import annotations
 
 from typing import Any
 
+# mcp_server depends on agent_nettools (never the reverse), so the projector's
+# free-text table and quoter are imported rather than duplicated. The MCP
+# client IS a model consumer, so the same B-467 treatment the model-egress
+# paths got must apply here -- a gap the 2026-08-18 holistic review found: raw
+# `commands` were withheld, but device-authored free text under `parsed`
+# (a syslog line's `text`, a BGP `last_reset_reason`, an interface
+# `description`) reached the client completely unmarked.
+from agent_nettools.model_egress import (
+    FREE_TEXT_FIELDS as _PROJECTOR_FREE_TEXT_FIELDS,
+)
+from agent_nettools.model_egress import (
+    quote_device_text,
+)
+
+#: Free-text field NAMES, drawn from the projector's (context, field) table.
+#: The MCP boundary walks a generic payload and does not know the intent
+#: context, so it matches on field name alone -- the same fallback the
+#: projector documents as acceptable, and here it is the only option.
+_FREE_TEXT_FIELD_NAMES = frozenset(field for _context, field in _PROJECTOR_FREE_TEXT_FIELDS)
+
 __all__ = [
     "ERROR_KINDS",
     "MAX_ERROR_CHARS",
@@ -131,6 +151,18 @@ ERROR_KINDS: tuple[tuple[str, str], ...] = (
     ("not a valid interface name", "the parameter was refused: not a valid interface name"),
     ("must be between", "the parameter was refused: out of range"),
     ("expected a string", "the parameter was refused: wrong type"),
+    # --- Locally-generated selection errors (operator walkthrough 2026-08-18,
+    # stumble 8). These messages are OUR text built from fixed registries --
+    # "unknown intent 'bogus'; one of [...]" -- yet classified to the generic
+    # withheld phrase, so neither a human nor a small navigator model learned
+    # which values were valid. The kind strings below carry the valid sets as
+    # STATIC text (the registries are fixed), so the classify-rebuild pattern
+    # holds: nothing dynamic crosses, and the caller learns what to try next.
+    ("unknown intent", "the intent was not recognised; valid: facts, interfaces, bgp, lldp, isis, sr"),
+    ("unknown kind", "the kind was not recognised; valid: route, bgp_neighbor, interface, logging (probe_lab: ping, traceroute)"),
+    ("unknown mode", "the mode was not recognised; valid: latest_diff, golden_diff, flaps"),
+    ("unknown object type", "the flow was not recognised; implemented: bgp_session, interface"),
+    ("unknown check", "the check was not recognised; valid: facts, interfaces, bgp, lldp, isis, sr"),
 )
 
 
@@ -204,6 +236,12 @@ def sanitize(payload: Any) -> Any:
                 clean[f"{key}_withheld"] = len(value) if isinstance(value, (list, tuple)) else 1
             elif key == "errors" and isinstance(value, list):
                 clean[key] = _classify_errors(value)
+            elif key in _FREE_TEXT_FIELD_NAMES and isinstance(value, str):
+                # Device-authored, attacker-influenceable free text (B-467).
+                # Wrapped in the projector's untrusted-content delimiters so an
+                # MCP client reads it as data, never instruction -- the same
+                # bound the model-egress paths already apply.
+                clean[key] = quote_device_text(value)
             else:
                 clean[key] = sanitize(value)
         return clean

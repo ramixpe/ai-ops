@@ -433,6 +433,13 @@ def _problem(setting: Setting, raw: str) -> str | None:
 
 
 def _range_problem(setting: Setting, value: float) -> str | None:
+    import math
+
+    # NaN/inf slip past every comparison below (both `< min` and `> max` are
+    # False for NaN), which is precisely the "typo becomes an outage nobody
+    # sees" case this validator exists to catch (2026-08-18 review).
+    if not math.isfinite(value):
+        return f"{setting.name}={value!r} is not a finite number."
     if setting.minimum is not None and value < setting.minimum:
         return (
             f"{setting.name}={value!r} is below the minimum allowed value "

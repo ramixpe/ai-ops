@@ -166,3 +166,33 @@ def test_cli_exit_codes_branch_for_an_orchestrator(tmp_path):
 
     p.write_text('{"alerts":[{"status":"resolved","labels":{"alertname":"BgpSessionDown"}}]}')
     assert cli._cmd_route_event(args) == cli.EXIT_WARNING
+
+
+def test_an_alertmanager_subject_carrying_shell_metacharacters_is_refused():
+    """2026-08-18 P0: the Alertmanager subject was never validated (the syslog
+    path is), so `"10.0.0.1; touch /tmp/x #"` flowed into suggested_command.
+    Now validated by reconstruction, same as the syslog path."""
+
+    ds = er.route_alertmanager({"alerts": [{"status": "firing", "labels": {
+        "alertname": "BgpSessionDown", "device": "PE2",
+        "subject": "10.0.0.1; touch /tmp/x #"}}]})
+
+    assert not ds[0].routable
+    assert "not a valid" in ds[0].reason
+    assert ds[0].suggested_command() is None
+
+
+def test_a_valid_alertmanager_subject_still_routes():
+    ds = er.route_alertmanager({"alerts": [{"status": "firing", "labels": {
+        "alertname": "BgpSessionDown", "device": "PE2", "subject": "10.255.0.31"}}]})
+    assert ds[0].routable and ds[0].subject == "10.255.0.31"
+
+
+def test_malformed_alertmanager_json_never_crashes_the_router():
+    """A non-dict alert entry, and a non-string device label, both crashed the
+    CLI with a raw traceback (2026-08-18 P1). Both are now stated refusals."""
+
+    assert not er.route_event('{"alerts":["not-a-dict"]}')[0].routable
+    ds = er.route_alertmanager({"alerts": [{"status": "firing", "labels": {
+        "alertname": "BgpSessionDown", "device": ["PE1"], "subject": "10.0.0.1"}}]})
+    assert not ds[0].routable

@@ -125,6 +125,8 @@ def configured_hostname(evidence: dict[str, Any]) -> str | None:
     device whose `facts` failed must not silently look aligned.
     """
 
+    if not isinstance(evidence, dict):
+        return None
     section = evidence.get("facts")
     if not isinstance(section, dict):
         return None

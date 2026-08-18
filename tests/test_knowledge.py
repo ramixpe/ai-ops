@@ -35,10 +35,21 @@ def test_an_unknown_term_returns_empty_not_an_error():
 
 
 def test_the_query_is_capped_and_escaped():
-    # A regex bomb arrives as a literal; a 10k query is truncated, not looped.
-    result = search_knowledge("(a+)+" + "x" * 10_000)
-    assert isinstance(result["results"], list)
-    assert len(result["query"]) <= K.MAX_QUERY_LENGTH
+    # A regex metacharacter must be matched LITERALLY, not compiled as a
+    # pattern -- the previous version only checked capping, so removing
+    # re.escape passed it identically (2026-08-18 review, vacuous companion).
+    # The glossary contains the literal word "intent"; a query of ".ntent"
+    # (regex: any char + ntent) must NOT match it if the query is escaped.
+    literal = search_knowledge("intent")
+    regexy = search_knowledge(".ntent")
+    assert literal["results"], "the term 'intent' is demonstrably in the docs"
+    assert not any("intent" in r["snippet"].lower() and "ntent" not in r["snippet"].lower()
+                   for r in regexy["results"]), \
+        ".ntent matched 'intent' -- the query was compiled as a regex, not escaped"
+    # And capping still holds.
+    capped = search_knowledge("(a+)+" + "x" * 10_000)
+    assert isinstance(capped["results"], list)
+    assert len(capped["query"]) <= K.MAX_QUERY_LENGTH
 
 
 def test_a_missing_corpus_is_a_stated_fact(monkeypatch):

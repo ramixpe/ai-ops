@@ -47,13 +47,19 @@ STATUS_UNSUPPORTED = "unsupported"
 def _float_env(name: str, default: float) -> float:
     """Read a float-valued env var, env-then-default, same pattern as everywhere else."""
 
+    import math
+
     raw = os.getenv(name, "").strip()
     if not raw:
         return default
     try:
-        return float(raw)
+        value = float(raw)
     except ValueError:
         return default
+    # NaN/inf pass every range check (nan<min and nan>max are both False in
+    # IEEE-754), so a `NETTOOLS_*_SECONDS=nan` typo would sail into netmiko as
+    # a timeout that never fires (2026-08-18 review). Reject non-finite here.
+    return value if math.isfinite(value) else default
 
 
 def _int_env(name: str, default: int) -> int:

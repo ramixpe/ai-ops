@@ -225,6 +225,18 @@ ERROR_KINDS: tuple[tuple[str, str], ...] = (
     ("not a valid interface name", "the parameter was refused: not a valid interface name"),
     ("must be between", "the parameter was refused: out of range"),
     ("expected a string", "the parameter was refused: wrong type"),
+    # --- Locally-generated selection errors (operator walkthrough 2026-08-18,
+    # stumble 8). These messages are OUR text built from fixed registries --
+    # "unknown intent 'bogus'; one of [...]" -- yet classified to the generic
+    # withheld phrase, so neither a human nor a small navigator model learned
+    # which values were valid. The kind strings below carry the valid sets as
+    # STATIC text (the registries are fixed), so the classify-rebuild pattern
+    # holds: nothing dynamic crosses, and the caller learns what to try next.
+    ("unknown intent", "the intent was not recognised; valid: facts, interfaces, bgp, lldp, isis, sr"),
+    ("unknown kind", "the kind was not recognised; valid: route, bgp_neighbor, interface, logging (probe_lab: ping, traceroute)"),
+    ("unknown mode", "the mode was not recognised; valid: latest_diff, golden_diff, flaps"),
+    ("unknown object type", "the flow was not recognised; implemented: bgp_session, interface"),
+    ("unknown check", "the check was not recognised; valid: facts, interfaces, bgp, lldp, isis, sr"),
 )
 
 

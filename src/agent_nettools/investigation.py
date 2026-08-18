@@ -685,8 +685,11 @@ def investigate(
     touched = {device} | {o.device for o in descent.outcomes}
     # CollectStep.name is an intent OR a template name -- both are valid
     # applies_to targets for a note (the lab.yaml notes use both spellings).
+    # casefolded both sides: applies_to is casefolded in _notes_for_devices,
+    # and a future mixed-case CollectStep.name must not silently break matching
+    # (2026-08-18 review — benign today only by lowercase convention).
     intents_read = {
-        step.name for rung in the_flow.descent for step in rung.collect
+        step.name.casefold() for rung in the_flow.descent for step in rung.collect
     }
     operator_notes = _notes_for_devices(touched, intents_read)
 

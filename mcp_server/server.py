@@ -796,6 +796,14 @@ if ACTIVE_SURFACE == "staged":
     from . import staged_surface as _staged
 
     _staged.apply(sys.modules[__name__])
+elif ACTIVE_SURFACE != "classic":
+    # A typo (e.g. `stage`) silently fell back to classic -- inconsistent with
+    # apply()'s own fail-loud philosophy (2026-08-18 review). Warn; do not
+    # crash, since classic is a safe default.
+    logging.getLogger(__name__).warning(
+        "NETTOOLS_MCP_SURFACE=%r is not 'classic' or 'staged'; using classic",
+        ACTIVE_SURFACE,
+    )
 
 
 def main() -> None:

@@ -54,8 +54,16 @@ class AuditRule:
 
 
 def _parsed(evidence: dict[str, Any], intent: str) -> dict[str, Any] | None:
-    """One device's parsed section, or ``None`` unless it reached PARSE_OK."""
+    """One device's parsed section, or ``None`` unless it reached PARSE_OK.
 
+    A non-dict `evidence` (a malformed collection) returns ``None`` -- so that
+    device lands in `unevaluated`, never crashing the whole fabric audit. The
+    module's own resilience discipline, applied to its own input
+    (2026-08-18 review).
+    """
+
+    if not isinstance(evidence, dict):
+        return None
     section = evidence.get(intent)
     if not isinstance(section, dict):
         return None
@@ -174,7 +182,7 @@ def _hostname_inventory_drift(by_device: dict[str, dict[str, Any]]):
 
     findings, unevaluated = [], []
     for name, evidence in by_device.items():
-        hostname = configured_hostname(evidence)
+        hostname = configured_hostname(evidence) if isinstance(evidence, dict) else None
         if hostname is None:
             unevaluated.append(name)
         elif hostname.casefold() != name.casefold():
@@ -203,12 +211,17 @@ def _isolated_but_configured(by_device: dict[str, dict[str, Any]]):
         if not meta.get("router_id"):
             continue  # no BGP process: nothing configured, nothing to audit
         records = p.get("records") or []
-        if records and not any(
-            r.get("session_state") == "Established" for r in records
-        ):
+        # Zero configured sessions is IN scope -- the docstring's clearest
+        # "debris" case -- and the first draft's `if records and ...` silently
+        # excluded exactly it (2026-08-18 review). A router-id with no session
+        # is BGP configured to do nothing.
+        if not any(r.get("session_state") == "Established" for r in records):
+            n = len(records)
+            detail = (f"{n} configured session(s), none Established" if n
+                      else "no configured sessions at all")
             findings.append({
-                "message": f"{name} has an active BGP process and "
-                           f"{len(records)} configured session(s), none Established",
+                "message": f"{name} has an active BGP process ({p.get('meta', {}).get('router_id')}) "
+                           f"but {detail}",
                 "devices": [name],
                 "evidence": "bgp:records.session_state",
             })

@@ -24,11 +24,17 @@ would erase the distinction that wave built).
 Descriptions are the product (OBS-112): each opens with the question it
 answers and says when to prefer another tool — that wording is what a
 4B-parameter navigator measurably selects on.
+
+Enum parameters are ``Literal[...]`` so the generated JSON Schema carries the
+valid values (a validating client refuses a bad value before the call); the
+in-function unknown-value branches stay for non-validating clients — defence
+in depth, and their error text is classified into static valid-value kinds by
+the boundary rather than withheld (walkthrough stumble 8).
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from agent_nettools.health import evaluate_device, evaluate_fabric
 from agent_nettools.inventory_model import load_inventory_file
@@ -88,18 +94,21 @@ def explore_lab(device_name: str | None = None) -> dict:
 
     if not device_name:
         return list_devices()
-    facts = run_intent(device_name, "facts")
     record = _device_record(device_name)
-    verdict = (
-        evaluate_device(collect_evidence(device_name), record)
-        if record is not None
-        else {"error": f"{device_name!r} is not in the inventory"}
-    )
+    if record is None:
+        return {"tool": "explore_lab", "device": device_name,
+                "error": f"{device_name!r} is not in the inventory"}
+    # One collection, not two: `collect_evidence`'s result already carries the
+    # `facts` section, so a separate `run_intent(device, "facts")` doubled the
+    # SSH round-trips on the tool billed as the cheapest opening move
+    # (2026-08-18 review). The house invariant is one login per orientation.
+    evidence = collect_evidence(device_name)
     return {"tool": "explore_lab", "device": device_name,
-            "facts": facts, "health": verdict}
+            "facts": evidence.get("facts"),
+            "health": evaluate_device(evidence, record)}
 
 
-def check_lab(scope: str, intent: str | None = None) -> dict:
+def check_lab(scope: str, intent: Literal["facts", "interfaces", "bgp", "lldp", "isis", "sr"] | None = None) -> dict:
     """Answers: *what is the state of X right now?*
 
     ``scope`` is a device name or the literal ``"fabric"``. With an ``intent``
@@ -133,7 +142,7 @@ def check_lab(scope: str, intent: str | None = None) -> dict:
     return evaluate_device(collect_evidence(scope), record)
 
 
-def lookup_lab(device_name: str, kind: str, value: str) -> dict:
+def lookup_lab(device_name: str, kind: Literal["route", "bgp_neighbor", "interface", "logging"], value: str) -> dict:
     """Answers: *what does this device say about this specific object?*
 
     ``kind``: ``route`` (an IPv4 prefix), ``bgp_neighbor`` (a peer address),
@@ -149,7 +158,7 @@ def lookup_lab(device_name: str, kind: str, value: str) -> dict:
     return fn(device_name, value)
 
 
-def investigate_lab(device_name: str, subject: str, flow: str = "bgp_session") -> dict:
+def investigate_lab(device_name: str, subject: str, flow: Literal["bgp_session", "interface"] = "bgp_session") -> dict:
     """Answers: *why is this broken?* — the one to prefer for any cause question.
 
     Walks the flow's dependency ladder deterministically and reports the
@@ -163,7 +172,7 @@ def investigate_lab(device_name: str, subject: str, flow: str = "bgp_session") -
     return investigate(device_name, subject, flow=flow).to_payload()
 
 
-def history_lab(device_name: str, mode: str = "latest_diff") -> dict:
+def history_lab(device_name: str, mode: Literal["latest_diff", "golden_diff", "flaps"] = "latest_diff") -> dict:
     """Answers: *what changed on this device?*
 
     ``latest_diff`` compares live state against the last snapshot,
@@ -187,7 +196,7 @@ def history_lab(device_name: str, mode: str = "latest_diff") -> dict:
     return diff_evidence(baseline, collect_evidence(device_name))
 
 
-def probe_lab(device_name: str, kind: str, address: str) -> dict:
+def probe_lab(device_name: str, kind: Literal["ping", "traceroute"], address: str) -> dict:
     """ACTIVE PROBE: sends ICMP/UDP traffic to the target. Answers: *can this
     device reach that address right now, and by which path?*
 

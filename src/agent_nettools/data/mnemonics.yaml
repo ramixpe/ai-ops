@@ -25,7 +25,7 @@
   typical_causes:
     - the link went down (look for a LINK-3-UPDOWN seconds earlier)
     - hold time expired (~30s of lost hellos)
-    - MTU mismatch (adjacency forms, then large hellos fail)
+    - MTU mismatch — but note IOS-XR pads IIH hellos to the interface MTU by default, so a mismatch normally PREVENTS the adjacency forming rather than dropping an established one; the drop-after-forming case needs hello-padding disabled
   investigate_with: null   # isis_adjacency flow is B-107, not yet implemented
   severity_note: On this fabric BGP follows within its hold timer when the route is lost — measured 154s in round 1.
 

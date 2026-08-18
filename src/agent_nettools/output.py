@@ -97,6 +97,40 @@ def _health_fabric_map(payload: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def _is_audit_result(payload: dict[str, Any]) -> bool:
+    """The fabric audit shares `severity`+`findings` with a health verdict.
+
+    Without its own check it misrendered as ONE device's verdict — a literal
+    `DEVICE: ?` row swallowing every per-rule, per-device detail (operator
+    walkthrough, 2026-08-18, stumble 6). Duck-typed keys need the most
+    specific shape checked first; the `tool` marker is exactly that.
+    """
+
+    return payload.get("tool") == "audit" and "findings" in payload
+
+
+def _render_audit_table(payload: dict[str, Any]) -> str:
+    rows = [
+        [str(f.get("severity", "?")), str(f.get("rule", "?")),
+         str(f.get("category", "?")), ",".join(f.get("devices") or []),
+         _compact(f.get("message", ""), limit=100)]
+        for f in payload.get("findings") or []
+    ]
+    body = (
+        _format_table(["SEVERITY", "RULE", "CATEGORY", "DEVICES", "MESSAGE"], rows)
+        if rows else "no findings"
+    )
+    footer = (
+        "\nseverity: " + str(payload.get("severity", "?"))
+        + "  devices examined: " + str(len(payload.get("devices_examined") or []))
+    )
+    unevaluated = payload.get("unevaluated") or []
+    if unevaluated:
+        footer += "\nunevaluated: " + "; ".join(
+            u["rule"] + " on " + ",".join(u["devices"]) for u in unevaluated
+        )
+    return body + footer
+
 def _is_single_health_verdict(payload: dict[str, Any]) -> bool:
     return "severity" in payload and "findings" in payload
 
@@ -155,6 +189,9 @@ def render_table(payload: dict[str, Any]) -> str:
     health_map = _health_fabric_map(payload)
     if health_map is not None:
         return _render_health_device_table(health_map)
+
+    if _is_audit_result(payload):
+        return _render_audit_table(payload)
 
     if _is_single_health_verdict(payload):
         return _render_health_device_table({str(payload.get("device", "?")): payload})

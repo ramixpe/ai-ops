@@ -155,6 +155,8 @@ def explain_mnemonic(mnemonic: str) -> dict[str, Any]:
     has written up — parts are cheap, meaning is curated.
     """
 
+    if not isinstance(mnemonic, str):
+        return {"mnemonic": mnemonic, "known": False, "reason": "not a string"}
     cleaned = (mnemonic or "").strip().lstrip("%").upper()
     if not cleaned:
         return {"mnemonic": mnemonic, "known": False, "reason": "empty"}

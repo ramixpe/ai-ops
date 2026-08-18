@@ -101,6 +101,7 @@ class RoutingDecision:
 
 _NEIGHBOR = re.compile(r"neighbor\s+(\S+)\s+(?:Down|Up)", re.IGNORECASE)
 _INTERFACE = re.compile(r"Interface\s+([A-Za-z][A-Za-z0-9_./-]{0,62}),")
+_INTERFACE_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_./-]{0,62}")
 
 
 def _ipv4_subject(text: str) -> str | None:
@@ -160,13 +161,36 @@ def _known_devices() -> set[str]:
         return set()
 
 
+def _validated_subject(value: object) -> str | None:
+    """A subject validated by reconstruction, or ``None`` (2026-08-18 P0).
+
+    The syslog path validates its extracted subject; the Alertmanager path did
+    not, so a `subject` label of `"10.0.0.1; touch /tmp/x #"` flowed straight
+    into `suggested_command`. A subject is a valid IPv4 or a valid interface
+    name and nothing else -- never a string carrying shell metacharacters.
+    Defence in depth: `render_command` re-validates at run time too, but a
+    suggestion an orchestrator might shell-join must not carry an unvalidated
+    value in the first place.
+    """
+
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    try:
+        return str(ipaddress.IPv4Address(text))
+    except ValueError:
+        pass
+    return text if _INTERFACE_NAME.fullmatch(text) else None
+
+
 def _validated_device(name: str | None, *, source_kind: str) -> tuple[str | None, str | None]:
     """``(device, problem)`` — an unknown device is a stated refusal, not a guess."""
 
-    if not name:
+    if not isinstance(name, str) or not name:
         return None, (
-            "no device in the event's metadata; the device never comes from "
-            "message text (see the module docstring), so this event is unroutable"
+            "no usable device in the event's metadata; the device never comes "
+            "from message text (see the module docstring), so this event is "
+            "unroutable"
         )
     if name not in _known_devices():
         return None, f"device {name!r} is not in the inventory"
@@ -249,7 +273,12 @@ def route_alertmanager(payload: dict) -> list[RoutingDecision]:
 
     decisions: list[RoutingDecision] = []
     for alert in alerts:
-        labels = alert.get("labels") or {} if isinstance(alert, dict) else {}
+        if not isinstance(alert, dict):
+            decisions.append(RoutingDecision(
+                routable=False, source_kind="alertmanager",
+                reason="alert entry is not an object"))
+            continue
+        labels = alert.get("labels") if isinstance(alert.get("labels"), dict) else {}
         alertname = labels.get("alertname")
 
         if alert.get("status") == "resolved":
@@ -280,18 +309,21 @@ def route_alertmanager(payload: dict) -> list[RoutingDecision]:
             ))
             continue
 
-        subject = labels.get("subject")
-        if not subject:
+        subject = _validated_subject(labels.get("subject"))
+        if subject is None:
+            raw = labels.get("subject")
+            reason = ("no subject label on the alert — rule-authoring gap, "
+                      "same as the device label (T-005)") if not raw else (
+                      f"subject label {raw!r} is not a valid IPv4 or interface "
+                      "name; refusing to route an unvalidated subject")
             decisions.append(RoutingDecision(
                 routable=False, source_kind="alertmanager", matched=alertname,
-                flow=flow, device=device,
-                reason="no subject label on the alert — rule-authoring gap, "
-                       "same as the device label (T-005)",
+                flow=flow, device=device, reason=reason,
             ))
             continue
 
         decisions.append(RoutingDecision(
-            routable=True, flow=flow, device=device, subject=str(subject),
+            routable=True, flow=flow, device=device, subject=subject,
             source_kind="alertmanager", matched=alertname,
             reason=f"{alertname} routes to the {flow} flow",
         ))

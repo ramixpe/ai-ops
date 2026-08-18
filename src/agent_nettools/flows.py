@@ -605,8 +605,16 @@ def flow_for(object_type: str) -> Flow:
     """
 
     if object_type not in OBJECT_TYPES:
+        # Lead with what is USABLE. The full OBJECT_TYPES vocabulary lists five
+        # declared-but-unimplemented flows, and a caller (or a retrying model)
+        # shown that list will try one of them next and hit NotImplementedError
+        # -- two errors where one suffices (operator walkthrough 2026-08-18,
+        # stumble 9). The implemented set answers the actual question.
+        implemented = sorted(name for name, flow in FLOWS.items() if flow is not None)
         raise KeyError(
-            f"unknown object type {object_type!r}; known types are {list(OBJECT_TYPES)}"
+            f"unknown object type {object_type!r}; implemented flows are "
+            f"{implemented} (declared but not yet implemented: "
+            f"{sorted(set(OBJECT_TYPES) - set(implemented))})"
         )
     flow = FLOWS.get(object_type)
     if flow is None:

@@ -3,23 +3,27 @@
   "nodes": [
     {"parameters": {"path": "nettools-alert", "options": {}}, "name": "Alertmanager Webhook",
      "type": "n8n-nodes-base.webhook", "typeVersion": 1, "position": [240, 300]},
-    {"parameters": {"command": "=echo '{{ JSON.stringify($json.body) }}' | nettools route-event --format json"},
-     "name": "Route Event (nettools decides)", "type": "n8n-nodes-base.executeCommand",
-     "typeVersion": 1, "position": [460, 300]},
+    {"parameters": {"command": "nettools route-event --format json", "executeOnce": false,
+                    "stdin": "={{ JSON.stringify($json.body) }}"},
+     "name": "Route Event (body on STDIN — never interpolated into the shell)",
+     "type": "n8n-nodes-base.executeCommand", "typeVersion": 1, "position": [460, 300]},
     {"parameters": {"conditions": {"number": [{"value1": "={{ JSON.parse($json.stdout).routable_count }}", "operation": "larger", "value2": 0}]}},
      "name": "IF routable", "type": "n8n-nodes-base.if", "typeVersion": 1, "position": [680, 300]},
-    {"parameters": {"command": "={{ JSON.parse($json.stdout).decisions.filter(d => d.routable)[0].suggested_command.join(' ') }} --format json --notify"},
-     "name": "Investigate (deterministic)", "type": "n8n-nodes-base.executeCommand",
-     "typeVersion": 1, "position": [900, 200]},
+    {"parameters": {"functionCode": "// suggested_command is a validated argv ARRAY. We hand its\n// elements to nettools re-checked at run time, but we must NOT\n// shell-join them (that re-opens the quoting surface event_routing's\n// own docstring warns against). The Code node below builds argv for\n// an HTTP/SSH executor that takes an array, or you invoke your own\n// nettools wrapper that accepts JSON argv on stdin. See\n// examples/systemd/nettools-webhook.py for the argv-list pattern.\nconst d = JSON.parse($json.stdout).decisions.find(x => x.routable);\nreturn [{ json: { argv: d.suggested_command } }];"},
+     "name": "Extract argv (array, NOT a shell string)",
+     "type": "n8n-nodes-base.function", "typeVersion": 1, "position": [900, 200]},
+    {"parameters": {}, "name": "Run investigate with argv[] (your executor)",
+     "type": "n8n-nodes-base.noOp", "typeVersion": 1, "position": [1120, 200]},
     {"parameters": {}, "name": "NoOp (unroutable — reason is in decisions[].reason)",
      "type": "n8n-nodes-base.noOp", "typeVersion": 1, "position": [900, 420]}
   ],
   "connections": {
-    "Alertmanager Webhook": {"main": [[{"node": "Route Event (nettools decides)", "type": "main", "index": 0}]]},
-    "Route Event (nettools decides)": {"main": [[{"node": "IF routable", "type": "main", "index": 0}]]},
-    "IF routable": {"main": [[{"node": "Investigate (deterministic)", "type": "main", "index": 0}],
-                              [{"node": "NoOp (unroutable — reason is in decisions[].reason)", "type": "main", "index": 0}]]}
+    "Alertmanager Webhook": {"main": [[{"node": "Route Event (body on STDIN — never interpolated into the shell)", "type": "main", "index": 0}]]},
+    "Route Event (body on STDIN — never interpolated into the shell)": {"main": [[{"node": "IF routable", "type": "main", "index": 0}]]},
+    "IF routable": {"main": [[{"node": "Extract argv (array, NOT a shell string)", "type": "main", "index": 0}],
+                              [{"node": "NoOp (unroutable — reason is in decisions[].reason)", "type": "main", "index": 0}]]},
+    "Extract argv (array, NOT a shell string)": {"main": [[{"node": "Run investigate with argv[] (your executor)", "type": "main", "index": 0}]]}
   },
   "settings": {}, "pinData": {},
-  "meta": {"comment": "n8n v1 workflow-export shape. The workflow holds NO diagnostic logic: nettools route-event decides, nettools investigate answers, --notify delivers. Suggested_command elements are re-validated by nettools at run time."}
+  "meta": {"comment": "n8n v1 export shape. TWO injection defences vs the first draft: (1) the webhook body goes to route-event on STDIN, never interpolated into the command string; (2) suggested_command is kept as an argv ARRAY and never shell-joined. route-event ALSO validates the subject now (2026-08-18 P0). The workflow holds no diagnostic logic."}
 }

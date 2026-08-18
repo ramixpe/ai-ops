@@ -11,6 +11,9 @@ Exposed as the ``nettools`` console script. Subcommands:
     nettools logging DEVICE [--count N]
     nettools ping DEVICE ADDRESS
     nettools traceroute DEVICE ADDRESS
+    nettools investigate DEVICE SUBJECT [--flow bgp_session|interface]
+                         [--from-fixtures [--label L]] [--paraphrase] [--notify]
+    nettools audit [--from-fixtures [--label L]]
     nettools analyze [DEVICE] [--show-evidence] [--save]
     nettools analyze --fabric [--show-evidence] [--save]
     nettools agent "QUESTION" [--device DEVICE] [--max-iterations N] [--time-budget SECONDS]
@@ -27,6 +30,7 @@ Exposed as the ``nettools`` console script. Subcommands:
     nettools metrics [--format json|prometheus] [--quiet]
     nettools config show
     nettools config check [--quiet]
+    nettools route-event [--file PATH] [--device DEVICE]
     nettools inspect [DEVICE]
     nettools version
 
@@ -920,7 +924,22 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
     device = _resolve_device(args.device)
 
     async def run() -> None:
-        params = StdioServerParameters(command=sys.executable, args=["-m", "mcp_server.server"])
+        # The MCP SDK's stdio_client forwards only get_default_environment()
+        # plus an explicit env= -- NOT the caller's os.environ. Without this,
+        # `NETTOOLS_MCP_SURFACE=staged nettools inspect` silently listed the
+        # classic surface: the one smoke test that existed could never test
+        # the surface it was asked for (operator walkthrough, stumble 7).
+        import os as _os
+
+        forwarded = {
+            name: value for name, value in _os.environ.items()
+            if name.startswith("NETTOOLS_") or name in (
+                "DEVICE_USERNAME", "DEVICE_PASSWORD", "DEVICE_SSH_KEYFILE",
+            )
+        }
+        params = StdioServerParameters(
+            command=sys.executable, args=["-m", "mcp_server.server"], env=forwarded
+        )
         async with stdio_client(params) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
@@ -1295,8 +1314,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_audit = sub.add_parser(
         "audit",
-        help="Deterministic fabric audit: duplicate router-IDs, MTU mismatch across "
-             "adjacencies, configured-but-dead BGP. Exit 0 ok/info, 1 warning, 2 critical.",
+        help="Deterministic fabric audit — five rules: duplicate router-IDs, MTU "
+             "mismatch across adjacencies, configured-but-dead BGP, hostname/"
+             "inventory drift, mixed local-AS. Exit 0 ok/info, 1 warning, 2 critical.",
     )
     p_audit.add_argument("--from-fixtures", action="store_true",
                          help="Replay committed captures instead of the live lab.")

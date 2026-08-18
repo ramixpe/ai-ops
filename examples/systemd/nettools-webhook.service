@@ -5,9 +5,17 @@ After=network.target
 
 [Service]
 ExecStart=/usr/bin/python3 /opt/nettools/examples/systemd/nettools-webhook.py
+Environment=NETTOOLS_WEBHOOK_SECRET=change-me-to-a-real-secret
 Restart=on-failure
 User=nettools
 WorkingDirectory=/opt/nettools
+# Sandboxing — a webhook bridge needs almost no host access.
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+MemoryMax=128M
+TasksMax=32
 
 [Install]
 WantedBy=multi-user.target
