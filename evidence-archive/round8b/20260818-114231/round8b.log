@@ -10,3 +10,6 @@
 2026-08-18T11:42:43.228Z    instrument check: socket armed for read on 4 of 4 baseline samples
 2026-08-18T11:42:43.228Z  --- applying: remote-as 65001 + ebgp-multihop 5 ---
 2026-08-18T11:42:43.229Z  applied (push said 'dry-run') — dense sampling for 90s (~3 retry cycles expected)
+2026-08-18T11:43:51.171Z  signal 15 — restoring
+2026-08-18T11:43:51.172Z  RESTORE starting (signal-15)
+2026-08-18T11:43:51.172Z  RESTORE verified (dry-run: nothing written)

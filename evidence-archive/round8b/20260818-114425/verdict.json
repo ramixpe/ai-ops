@@ -1,0 +1,28 @@
+{
+  "instrument": {
+    "baseline_samples": 4,
+    "baseline_socket_armed_read": 4,
+    "baseline_trustworthy": true,
+    "post_established_samples": 194,
+    "post_established_socket_armed_read": 194
+  },
+  "samples_post_fault": 194,
+  "mean_sample_seconds": 0.659,
+  "SEPARATION_OBSERVED": false,
+  "separation_sample_count": 0,
+  "samples_socket_armed_read": 194,
+  "samples_socket_not_reported": 0,
+  "fsm_states_seen": [
+    "Established"
+  ],
+  "reset_kinds_seen": [
+    "hold_expired"
+  ],
+  "bfd_states_seen": [
+    "No"
+  ],
+  "discriminator_tcp_established": true,
+  "discriminator_reset_names_as": false,
+  "discriminator_reset_names_bfd": false,
+  "note": "No separation in 194 samples at ~0.659s resolution, on a baseline-verified instrument. Under the round-8 model (~150ms window, ~23s retry cycle) a zero here is ~2e-5, so this is evidence of ABSENCE rather than of not looking: \u00a72a.2 refuted, and B-463 closes as not separable at any resolution reachable over CLI."
+}

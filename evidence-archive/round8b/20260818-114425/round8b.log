@@ -1,0 +1,32 @@
+2026-08-18T11:44:25.883Z  round 8b start  device=PE2  peer=10.255.0.31  65000->65001 +ebgp-multihop  dry_run=True
+2026-08-18T11:44:25.883Z  opening sampler session
+2026-08-18T11:44:26.749Z  opening injector session
+2026-08-18T11:44:30.948Z  baseline captured (6 sections)
+2026-08-18T11:44:30.948Z  --- baseline: 4 samples ---
+2026-08-18T11:44:37.202Z    session: {'present': True, 'remote_as': '65000', 'state': 'Established', 'established': True}
+2026-08-18T11:44:37.202Z    neighbor: fsm=Established read=True write=True io=False reported=True
+2026-08-18T11:44:37.202Z    raw: Socket not armed for io, armed for read, armed for write
+2026-08-18T11:44:37.202Z    bfd: {'present': True, 'state': 'No'}
+2026-08-18T11:44:37.202Z    instrument check: socket armed for read on 4 of 4 baseline samples
+2026-08-18T11:44:37.203Z  --- applying: remote-as 65001 + ebgp-multihop 5 ---
+2026-08-18T11:44:37.203Z  applied (push said 'dry-run') — dense sampling for 90s (~3 retry cycles expected)
+2026-08-18T11:46:07.240Z  --- dense done, sparse for 60s ---
+2026-08-18T11:47:07.241Z  RESTORE starting (round-complete)
+2026-08-18T11:47:07.241Z  RESTORE verified (dry-run: nothing written)
+2026-08-18T11:47:07.241Z  --- 60s of post-restore sampling ---
+2026-08-18T11:48:07.243Z  --- verdict ---
+2026-08-18T11:48:07.248Z    instrument: {'baseline_samples': 4, 'baseline_socket_armed_read': 4, 'baseline_trustworthy': True, 'post_established_samples': 194, 'post_established_socket_armed_read': 194}
+2026-08-18T11:48:07.248Z    samples_post_fault: 194
+2026-08-18T11:48:07.248Z    mean_sample_seconds: 0.659
+2026-08-18T11:48:07.248Z    SEPARATION_OBSERVED: False
+2026-08-18T11:48:07.248Z    separation_sample_count: 0
+2026-08-18T11:48:07.248Z    samples_socket_armed_read: 194
+2026-08-18T11:48:07.248Z    samples_socket_not_reported: 0
+2026-08-18T11:48:07.248Z    fsm_states_seen: ['Established']
+2026-08-18T11:48:07.249Z    reset_kinds_seen: ['hold_expired']
+2026-08-18T11:48:07.249Z    bfd_states_seen: ['No']
+2026-08-18T11:48:07.249Z    discriminator_tcp_established: True
+2026-08-18T11:48:07.249Z    discriminator_reset_names_as: False
+2026-08-18T11:48:07.249Z    discriminator_reset_names_bfd: False
+2026-08-18T11:48:07.249Z    note: No separation in 194 samples at ~0.659s resolution, on a baseline-verified instrument. Under the round-8 model (~150ms window, ~23s retry cycle) a zero here is ~2e-5, so this is evidence of ABSENCE rather than of not looking: §2a.2 refuted, and B-463 closes as not separable at any resolution reachable over CLI.
+2026-08-18T11:48:07.249Z  round 8b complete

@@ -1,0 +1,12 @@
+2026-08-18T11:54:02.126Z  round 8b start  device=PE2  peer=10.255.0.31  65000->65001 +ebgp-multihop  dry_run=False
+2026-08-18T11:54:02.126Z  opening sampler session
+2026-08-18T11:54:02.921Z  opening injector session
+2026-08-18T11:54:07.131Z  baseline captured (6 sections)
+2026-08-18T11:54:07.132Z  --- baseline: 4 samples ---
+2026-08-18T11:54:13.397Z    session: {'present': True, 'remote_as': '65000', 'state': 'Established', 'established': True}
+2026-08-18T11:54:13.397Z    neighbor: fsm=Established read=True write=True io=False reported=True
+2026-08-18T11:54:13.398Z    raw: Socket not armed for io, armed for read, armed for write
+2026-08-18T11:54:13.398Z    bfd: {'present': True, 'state': 'No'}
+2026-08-18T11:54:13.398Z    instrument check: socket armed for read on 4 of 4 baseline samples
+2026-08-18T11:54:13.398Z  --- applying: remote-as 65001 + ebgp-multihop 5 ---
+2026-08-18T11:54:13.875Z  applied (push said 'sent+committed+exited') — dense sampling for 900s (~39 retry cycles expected)
