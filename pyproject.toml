@@ -80,3 +80,14 @@ exclude = ["evidence-archive"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "B"]
 ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# The diagram generators under docs/diagrams are single-purpose scripts that
+# emit the SVGs sitting beside them. They import a local layout helper with a
+# star import on purpose -- `svgkit` is a drawing vocabulary rather than an
+# API, and spelling out forty names at the top of six scripts would make the
+# layout harder to read, not safer. The one-line "draw, then advance the
+# cursor" idiom is the same argument. Everything else ruff checks still
+# applies here: an undefined name or an unused import in a generator is still
+# a real defect, and this list is deliberately narrow so those stay visible.
+"docs/diagrams/*.py" = ["F403", "F405", "E701", "E702", "E741", "B007"]

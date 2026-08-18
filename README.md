@@ -224,6 +224,17 @@ link claim has to take a side on. It is not right for the reason originally
 given, and the anomaly report still classifies those three as unknown
 neighbours until B-435 lands.
 
+## Diagrams
+
+Six SVGs in [`docs/diagrams/`](docs/diagrams/) describe the whole system as it
+stands: the [layer stack](docs/diagrams/01-repo-anatomy.svg), [one call traced
+end to end](docs/diagrams/02-call-path.svg), [how device text reaches a
+model](docs/diagrams/03-trust-boundary.svg), [every
+capability](docs/diagrams/04-capabilities.svg), [where the build
+is](docs/diagrams/05-current-state.svg), and [how a diagnosis is
+reached](docs/diagrams/06-descent.svg). They are generated from the tree by the
+scripts beside them, so they are regenerated rather than edited.
+
 ## Quick Start
 
 ```bash
