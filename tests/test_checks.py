@@ -671,13 +671,66 @@ def test_the_transport_rung_reads_the_socket_not_the_session_state():
     socket for this peer at all.
     """
 
-    tcp_up_bgp_down = _neighbor_meta(connection_state="Active", socket_armed_read=True)
+    # Corrected 2026-08-18 by round 8b. This test used `connection_state="Active"`
+    # and asserted HEALTHY on the premise "TCP is up". **`Active` is precisely
+    # the state where TCP is NOT up** -- RFC 4271 has it retrying to acquire the
+    # peer -- so the test encoded the same misconception as the code it guarded,
+    # and both passed each other. `OpenSent` is the state the docstring below
+    # actually describes: the OPEN has been sent over an ESTABLISHED TCP session,
+    # so the socket is up and the session is not.
+    #
+    # B-432's point is untouched and is what this still pins: rung 2 reads a
+    # different subsystem from rung 1 and can therefore disagree with it. Only
+    # the spurious half of the disagreement (mid-connect) is gone -- see
+    # `test_a_socket_armed_mid_connect_is_not_evidence_of_transport` below.
+    tcp_up_bgp_down = _neighbor_meta(connection_state="OpenSent", socket_armed_read=True)
     result = checks.bgp_transport(tcp_up_bgp_down, "10.255.0.12")
 
     assert result.status == checks.HEALTHY, (
-        "TCP is up. The BGP session is not, and that is rung 1's business."
+        "TCP is up -- OpenSent means the OPEN went out over an established "
+        "session. The BGP session is not up, and that is rung 1's business."
     )
     assert "socket is armed" in result.reason
+
+
+def test_a_socket_armed_mid_connect_is_not_evidence_of_transport():
+    """B-497, measured by round 8b: 127 separations in `Connect`.
+
+    The socket line during connect-retry is byte-identical to a healthy
+    session's, but RFC 4271's `Connect` is *waiting for the TCP connection to
+    be completed* -- TCP is not established. Read unqualified, this rung said
+    "TCP transport is up" while it was down.
+
+    Why it matters: a filtered TCP 179 cycles Idle -> Connect -> Idle. Sampled
+    in `Connect`, the old rung cleared transport and the descent blamed the rung
+    above -- a transport fault reported as a BGP-layer fault, which is the one
+    failure a dependency descent exists to prevent.
+
+    `unevaluated`, not `broken`: the evidence genuinely cannot tell a transport
+    fault from a BGP-layer one here, and the house rule is that a rung which
+    cannot be judged stops the walk rather than guessing in either direction.
+    """
+
+    for state in ("Connect", "Active", "Idle"):
+        result = checks.bgp_transport(
+            _neighbor_meta(connection_state=state, socket_armed_read=True),
+            "10.255.0.12",
+        )
+        assert result.status == checks.UNEVALUATED, (
+            f"a socket armed in {state} does not establish that TCP is up"
+        )
+        assert "does not imply an established TCP connection" in result.reason
+
+
+def test_an_unarmed_socket_is_still_broken_in_every_state():
+    """B-497 must not turn a real transport failure into 'cannot tell'."""
+
+    for state in ("Connect", "Active", "Idle", "Established"):
+        result = checks.bgp_transport(
+            _neighbor_meta(connection_state=state, socket_armed_read=False),
+            "10.255.0.12",
+        )
+        assert result.status == checks.BROKEN, f"unarmed in {state} is a transport fault"
 
 
 def test_that_is_what_makes_cause_not_localised_reachable():

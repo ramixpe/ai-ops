@@ -363,16 +363,58 @@ def bgp_transport(evidence: dict[str, Any], peer: str) -> CheckResult:
     # sessions, not armed on 2 of 2 Idle ones. That the two agree on this corpus
     # is not evidence they are the same field -- the corpus contains no fault
     # that separates them, which is precisely the gap this change opens.
+    # ROUND 8b, 2026-08-18 -- the gap the comment above predicted, measured.
+    #
+    # 131 samples separated the two fields. **127 of them were in `Connect`**,
+    # which RFC 4271 defines as *waiting for the TCP connection to be
+    # completed* -- TCP is NOT established there -- and the socket line in
+    # those samples is byte-identical to a healthy session's
+    # (`Socket not armed for io, armed for read, armed for write`).
+    #
+    # So `socket_armed_read` does not mean *the transport is established*. It
+    # means *the BGP stack has a socket armed for read events*, which it does
+    # while a connection is still being attempted. Read unqualified, this rung
+    # reported "TCP transport is up" during connect-retry while TCP was down --
+    # and a filtered TCP 179 cycles Idle -> Connect -> Idle, so a genuine
+    # transport fault would be cleared here and blamed on the rung above. That
+    # is the one failure a dependency descent exists to prevent (B-497).
+    #
+    # The other 4 separations were in `OpenSent`, where the OPEN has been sent
+    # over an established TCP session: armed-and-not-Established is then a true
+    # separation and this rung is right. The fix is therefore to qualify the
+    # socket by the state, not to abandon it.
+    #
+    # Only these states guarantee an established TCP session underneath.
+    _TCP_UP_STATES = frozenset({"OpenSent", "OpenConfirm", "Established"})
+
     armed = meta.get("socket_armed_read")
+    fsm = meta.get("connection_state") or meta.get("state")
     if armed is not None:
-        if armed:
+        if armed and fsm in _TCP_UP_STATES:
             return healthy(
                 subject=peer,
                 evidence_keys=(key,),
                 reason=(
-                    f"TCP transport to {peer} is up (the socket is armed for read)"
+                    f"TCP transport to {peer} is up (the socket is armed for read"
+                    f", session state {fsm})"
                     + _state_note(meta)
                 ),
+            )
+        if armed:
+            # Armed, but the FSM is not in a state that implies an established
+            # TCP session -- `Connect`/`Active` are mid-attempt, `Idle` is not
+            # trying. The evidence is genuinely ambiguous: it cannot tell a
+            # transport fault from a BGP-layer fault, so it says so and the
+            # walk stops rather than clearing a layer it did not verify.
+            return unevaluated(
+                reason=(
+                    f"cannot judge TCP transport to {peer}: the socket is armed for "
+                    f"read but the session is in {fsm or 'an unreported state'}, "
+                    "which does not imply an established TCP connection (B-497)"
+                    + _state_note(meta) + _last_reset_note(meta)
+                ),
+                subject=peer,
+                evidence_keys=(key,),
             )
         return broken(
             reason=(

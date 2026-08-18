@@ -65,6 +65,12 @@ BASELINE_COMMIT = "6629a2c"
 #: that identifies the guard's test. The symbol is what `tests/` is searched for -- never
 #: the module name, never a filename.
 MUTATIONS = [
+    ("B-497", "transport healthy requires an FSM state implying established TCP",
+     "src/agent_nettools/checks.py",
+     "        if armed and fsm in _TCP_UP_STATES:\n",
+     "        if armed:\n",
+     "test_a_socket_armed_mid_connect_is_not_evidence_of_transport"),
+
     ("ROUND-8-SOCKET", "the BGP socket line is read positionally, not by first match",
      "src/agent_nettools/template_parsers.py",
      '            meta["socket_armed_read"] = match["read"] == "armed"\n',

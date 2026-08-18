@@ -4742,3 +4742,45 @@ defects and each would have produced a confident, wrong, publishable number.
 that is the argument for watching a run rather than reading its verdict. Every
 one of these was visible only in the output as it happened or in the samples
 partitioned afterwards — never in the number the harness printed.
+
+## OBS-162 · B-497 · The guard test and the code shared a misconception, so each confirmed the other
+
+Fixing round 8b's false healthy took four lines. Finding out that its *test*
+was wrong took the round.
+
+`tests/test_checks.py::test_the_transport_rung_reads_the_socket_not_the_session_state`
+is B-432's guard — the test that pins "rung 2 reads a different subsystem from
+rung 1". It asserted:
+
+```python
+tcp_up_bgp_down = _neighbor_meta(connection_state="Active", socket_armed_read=True)
+assert result.status == checks.HEALTHY, "TCP is up. The BGP session is not…"
+```
+
+**`Active` is the state in which TCP is not up.** RFC 4271 has it retrying to
+acquire the peer. The test asserted a network fact that is false, the code
+implemented the same false fact, and the test passed — **not because the code
+was right, but because both were wrong in the same direction.** A guard written
+from the same premise as the thing it guards confirms the premise, which is
+§0.13's tests face stated exactly, and this is the cleanest instance the build
+has produced: the premise was a claim about BGP, checkable against a public
+standard, and neither the code nor its test was ever checked against it.
+
+What survives: B-432's actual point, that rung 2 must read a *different
+subsystem* so the two rungs can disagree and `cause_not_localised` stays
+reachable. It does — in `OpenSent`/`OpenConfirm`, where the OPEN has gone out
+over an established TCP session, the socket is up and the session is not. Only
+the spurious half of the disagreement is gone. The test now uses `OpenSent`,
+which is the state its own docstring described all along.
+
+Two new guards pin the corrected behaviour: armed-in-`Connect`/`Active`/`Idle`
+is `unevaluated`, and an unarmed socket is still `broken` in every state — so
+the fix cannot drift into turning real transport failures into "cannot tell".
+Mutation-verified; 22/22 hold.
+
+**The general form, and it is not comfortable:** a test derived from the
+implementer's own understanding cannot detect an error in that understanding.
+Only three things can — an external standard, an independent reviewer, or the
+device itself. This project has now been corrected by all three in one week
+(RFC 4271 here; the two-lens holistic review; round 8b's 127 samples), and the
+device was the one that found the error the other two had read past.
