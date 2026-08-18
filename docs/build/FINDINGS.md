@@ -4530,3 +4530,52 @@ no `ERROR_KINDS` entry matched — **the commonest production failure produced t
 least useful message the system can emit**. The withholding rationale does not
 even apply: a connection that never opened has no device output to embed. Five
 connect-failure kinds added to both copies, pinned by a test.
+
+## OBS-158 · Paired model arms · The bigger model answered better, and every bit of the difference was in the part that is switched off by default
+
+`gemma-4-31b-it` ran §11's three questions on the same healthy fabric, in a
+genuinely fresh session. It beat the 4B on every dimension a human would
+notice, and the shape of *where* it beat it is the finding.
+
+**It rejected the false premise.** Asked *"why can't RR1 reach 10.255.0.12?"*
+when RR1 demonstrably can, the 4B answered inside the premise and speculated
+about an application fault on a **router loopback**. The 31B said the premise
+was wrong and showed why. No model had done that before.
+
+**It fired an active probe, unprompted — a first here.** After a clean descent
+it ran `get_lab_ping` on its own initiative, reasoning that the flow covers the
+control plane and "reach" might mean the data plane. Correct engineering. Also:
+`NETTOOLS_ALLOW_ACTIVE_PROBES` defaults to `True` and B-473's annotations are
+signalling, not enforcement, so nothing stood in the way. **Initiative scales
+with capability**, and the model most likely to start generating packets when
+told "no fault on this path" is the capable one, during an incident. B-473 was
+built on that argument with no evidence; this is the evidence, arriving from
+exactly the predicted direction (B-493).
+
+**It refuted my own finding from four hours earlier.** OBS-157 concluded that a
+model's completeness claims *"carry no information"*. Asked whether its summary
+covered every rung, the 31B answered *"No — I omitted the transport and
+physical interface rungs"*, which is exactly right. So the claim was too broad:
+self-report is capability-dependent, not structurally broken.
+
+**The correction is worth more than the original claim.** The 4B's false
+completeness claim and the 31B's true one are *indistinguishable at read time*
+— both fluent, both specific, both confident. The reason to replace a
+self-report with a code-side diff is therefore not that models cannot do it;
+it is that **a reader cannot tell a correct self-report from a confident wrong
+one**, so the answer's form carries no evidence either way. Same fix, better
+reason, and the better reason is only visible because two sizes were run.
+
+**And the result the thesis actually rests on.** Both models selected the same
+tool, got the same authoritative report, and reached the same verdict about the
+network. **Every difference between the arms lived in narration** — the layer
+this build already declares non-authoritative, grades separately, and ships
+switched off. Capability bought better prose, better initiative and a caught
+false premise; it bought nothing whatsoever in the diagnosis, because the
+diagnosis was never the model's to make.
+
+The caveat that belongs beside it: a CLI user reads the authoritative report,
+but **an MCP user reads the model's narration of it** — the paraphrase path
+with no flag to leave off. The model-size floor that does not apply to
+`nettools investigate` does apply to the MCP surface, and an invented service
+on a loopback is what that floor looks like from underneath.

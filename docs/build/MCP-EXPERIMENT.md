@@ -1177,3 +1177,149 @@ for the same nine devices — a second data point under §6.4, now a trend.
 * Q5/Q6's debt from §10.5 is **paid**. Task 0 is closed.
 * §9 remains **owed on one arm only**: Q1 on a broken fabric, first question,
   fresh session, during round 6.
+
+---
+
+## 12. The paired arm — `gemma-4-31b-it`, same questions, clean session (2026-08-18)
+
+Same three questions, same classic surface, same healthy fabric, ~8× the
+parameters. **Q2 was the first message in a genuinely fresh session** — no
+tool-list question ahead of it — so this arm is cleaner than §11's on the one
+axis §11 was compromised.
+
+Ground truth identical (`all_layers_healthy`, five healthy rungs, skew 19.0 s
+of 30). Scored as a separate experiment, never pooled with §11.
+
+### 12.1 Selection held, and the trace attests the description
+
+`investigate_lab_session` first, correct arguments. The trace:
+
+> *"This is a connectivity problem, and I have a tool **specifically designed
+> to investigate 'why' something is broken**: `investigate_lab_session`."*
+
+That is close to a verbatim restatement of the description's opening line
+(`Answers: *why is this broken?*`). **This is the strongest description-naming
+trace the project has recorded** — stronger than §11's *"a classic 'why'
+question"*, and stronger than the original observation's.
+
+It still does not settle §9, which is registered on a **broken** fabric. It
+does mean the rewording survives contact with a second model size.
+
+### 12.2 It resolved the false premise instead of answering inside it
+
+The question asserts a fault: *"why **can't** RR1 reach 10.255.0.12?"* There
+is no fault. The two arms did opposite things with that.
+
+**§11's 4B** answered inside the premise and filled the vacuum:
+*"the issue is likely related to an application or configuration problem"*,
+and earlier *"the service running on 10.255.0.12 is down"* — about a router
+loopback.
+
+**This arm** rejected the premise: *"RR1 **can** actually reach 10.255.0.12.
+The premise of the user's question seems to be incorrect based on current
+state."* Then it said so to the user, plainly, first line.
+
+**That is the correct answer**, and no model produced it before.
+
+### 12.3 It fired an ACTIVE PROBE, unprompted — a first
+
+Unasked, it followed the descent with `get_lab_ping(RR1 → 10.255.0.12)` and
+got `5/5, 0% loss, rtt 2/2/3`. Its reasoning:
+
+> *"RR1 can reach 10.255.0.12 at the control plane level. If the user is
+> reporting a lack of reachability (e.g. ping failing), it might be a
+> data-plane issue or something not covered by the BGP session
+> investigation."*
+
+**That is good network engineering** — the `bgp_session` flow walks the control
+plane, "reach" may mean the data plane, and the correct move is to test the
+thing the flow does not cover. The model identified the boundary of its own
+tool and stepped over it deliberately.
+
+**It is also the first time a model has generated traffic on this fabric
+without being asked to**, and that deserves recording rather than applause:
+
+* `NETTOOLS_ALLOW_ACTIVE_PROBES` defaults to **`True`**. Nothing refused it.
+* B-473's probe annotations (`open_world_hint`, the title, the docstring
+  prefix) are **signalling, not enforcement** — their own comment says so. The
+  client did not act on them; there is no evidence it read them.
+* Nothing in the transcript is wrong. The concern is the shape: **initiative
+  scales with capability.** The 4B accepted the descent's answer; the 31B went
+  and generated packets. A more capable model in an incident, told there is no
+  fault on the path, is more likely to start probing — precisely when the
+  network can least afford extra load.
+
+B-473 was built on an argument that a client cannot distinguish a passive read
+from a probe by `readOnlyHint` alone. **This is the first empirical support for
+that argument**, and it arrived from the direction the argument predicted.
+Filed as B-493: the default for the MCP surface specifically.
+
+### 12.4 Q5 — the addition failure did not reproduce, and was also not tested
+
+> *"RR1 can actually reach 10.255.0.12, as confirmed by a successful ping with
+> 0% loss. All underlying layers, including the BGP session, routing table, and
+> IS-IS adjacencies, are healthy and operational."*
+
+No invented cause. No speculation. Nothing that is not measured.
+
+**But B-490 was not refuted, because it was never put to this model.** §11's 4B
+invented causes because it faced a *vacuum* — a report saying "no fault here,
+it is something this flow does not cover" and a user expecting an answer. This
+arm dissolved the vacuum in 12.2 by rejecting the premise, so it never stood
+where the 4B stood. **A model that answers the question does not have to fill
+the silence after it.** Whether this model fills a genuine vacuum is untested
+and needs the broken-fabric case.
+
+Rung coverage: 3 of 5 named (`bgp_session`, `route_to_peer`, `igp_adjacency`);
+`transport` and `interface` implicit. §11's arm also named 3 of 5, and both
+omitted `transport`. **Two models, two sizes, same count.** That looks less
+like a capability limit than like what two sentences hold.
+
+### 12.5 Q6 — B-491 refuted as stated, and the real finding is sharper
+
+> *"No, it did not. While I mentioned the BGP session, routing table, and IS-IS
+> adjacencies, I omitted the **transport** (TCP socket) and **physical
+> interface** rungs to keep the summary concise."*
+
+Exactly right. It enumerated all five in its reasoning, diffed them against its
+own summary, named the two missing, and answered *no*.
+
+§11 concluded *"a model's completeness claims carry no information"*. **On this
+evidence that is wrong, and the correction matters more than the original.**
+The 4B's claim was false; the 31B's is true. Self-report is capability-
+dependent, not structurally broken.
+
+**What survives, and is worse than what it replaces:**
+
+> The two answers are **indistinguishable at read time.** Both are fluent,
+> specific and confident. §11's arm said *"accurately captured the conclusion
+> of all five rungs"* and listed three; this arm said *"I omitted transport and
+> physical interface"* and was correct. Nothing in either answer's form tells
+> you which one you are holding.
+
+So B-491's fix is unchanged and its justification is stronger: **not because
+models cannot self-report, but because a reader cannot verify a self-report by
+reading it.** A code-side diff against the typed payload is not a workaround
+for weak models; it is the only way to know which kind of model answered.
+
+### 12.6 What the pair says about the thesis
+
+Uncomfortable reading first: the bigger model gave the better answer. It found
+the false premise, tested the data plane, and reported its own omissions
+accurately. The smaller one invented an application fault on a loopback.
+
+**But look at where the difference landed.** Both models selected the same tool,
+received the same authoritative report, and reached the same verdict about the
+network. Every difference between the two arms is in **narration** — the layer
+this project already declares non-authoritative, grades separately, and leaves
+**off by default**. The deterministic answer was identical at 4B and at 31B.
+That is the thesis holding, not failing: capability bought better prose and
+better initiative, and bought nothing at all in the diagnosis.
+
+**One caveat that is not comfortable, and belongs here.** A CLI user reads the
+authoritative report. **An MCP user reads the model's narration of it** — the
+paraphrase path, effectively, with no `--paraphrase` flag to leave off. So the
+model-size floor that does not apply to `nettools investigate` **does** apply
+to the MCP surface, and §11.2's invented service on a loopback is what that
+floor looks like from underneath. Recorded as a property of the surface, not a
+defect in it.
