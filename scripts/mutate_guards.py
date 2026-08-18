@@ -65,6 +65,18 @@ BASELINE_COMMIT = "6629a2c"
 #: that identifies the guard's test. The symbol is what `tests/` is searched for -- never
 #: the module name, never a filename.
 MUTATIONS = [
+    ("B-467-MCP", "the MCP boundary quotes device free text (holistic review)",
+     "mcp_server/boundary.py",
+     "            elif key in _FREE_TEXT_FIELD_NAMES and isinstance(value, str):\n",
+     "            elif key in _FREE_TEXT_FIELD_NAMES and isinstance(value, str) and False:\n",
+     "test_device_free_text_in_parsed_records_is_quoted_not_left_bare"),
+
+    ("P0-ALERTMANAGER-SUBJECT", "an alertmanager subject is validated before routing",
+     "src/agent_nettools/event_routing.py",
+     "    return text if _INTERFACE_NAME.fullmatch(text) else None\n",
+     "    return text\n",
+     "test_an_alertmanager_subject_carrying_shell_metacharacters_is_refused"),
+
     ("SAFETY-ALLOWLIST", "the allowlist check itself",
      "src/agent_nettools/network_tools.py",
      "    unsafe_commands = [command for command in commands if not is_approved(platform, command)]\n",

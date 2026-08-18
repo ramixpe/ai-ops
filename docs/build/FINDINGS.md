@@ -4432,3 +4432,53 @@ Anything logged with `Needs human review: yes` is mirrored here so the review ha
 ---
 
 Task status lives in `TRACKER.md`, not here. This file records *what was learned*; the tracker records *what was done*.
+
+## OBS-156 · Holistic review · Two independent lenses converged on the same two defects, both in solo-built code
+
+The 2026-08-18 holistic review ran four read-only reviewer lenses (adversarial
+new-code, invariants-by-probe, docs-drift, operator-experience) plus the
+orchestrator's own pass. Two of the four found, **independently and without
+seeing each other's work, the same two most-serious defects** — and both live
+in the OPS wave, the one wave built solo after its four agents were lost to a
+spend limit (OBS-155).
+
+**1. The MCP boundary never got B-467's free-text treatment.** `sanitize()`
+withheld raw `commands` buffers but passed device-authored free text under
+`parsed.records` — a syslog line's `text`, a BGP `last_reset_reason`, an
+interface `description` — to the MCP client **completely unmarked**. The MCP
+client is a model consumer; this is the exact "an unauthenticated attacker
+writes it into device output" threat model B-467/B-470 exist to close, on a
+path B-467's scope never listed. Both the adversarial lens (by canary through
+the registered tools) and the invariant lens (by canary sweep over every
+egress path) reproduced it on both surfaces. The projector shipped for the
+`llm_analysis`/`evidence_budget`/`prompt_library`/`agent_loop` paths; the MCP
+boundary was a *fifth* path to a model and inherited nothing — the same
+"an invariant that holds for every internal caller is a convention that has
+not met a new consumer" lesson CLAUDE.md already records for invariant 4,
+recurring one consumer later.
+
+**2. The P0 shell-injection path.** `route_alertmanager` never validated its
+`subject` (the syslog path does), and the shipped n8n example *joined*
+`suggested_command` into a shell string and echo-piped the webhook body — the
+exact anti-pattern `RoutingDecision.suggested_command()`'s own docstring warns
+against and the sibling systemd example got right. The same PR got the pattern
+right in one artefact and wrong in another.
+
+**The meta-lesson.** Solo-built code, held to the same specs and the same
+merge gate (OBS-155), still carried a defect class that neither line-by-line
+review nor the test suite caught but that adversarial probing and invariant
+canaries did — and the *convergence of two independent lenses on the same two
+issues* is what raised them from "plausible" to "fix now". A single reviewer
+finding one of these is a report; two reviewers finding both, separately, is a
+measurement. The gate that was missing was not more careful reading — it was a
+second, differently-motivated pair of eyes probing for what the builder
+assumed. That is the argument for the review being multi-lens rather than
+deeper-single-lens, stated as evidence rather than as principle.
+
+Both fixed the same day, each with a regression test, and both tests
+mutation-verified (20/20 guards hold) so they cannot themselves become the
+vacuous companions OBS-153 warned about. Every other lens finding was verified
+by the orchestrator's own probe before acceptance — the walkthrough's
+import-time `--help` crash, the audit-table misrender, the NaN-through-range-
+check, the dead ERROR_KINDS entry, the credential-requiring "credential-free"
+`list_devices` — none inherited on the reviewer's word.

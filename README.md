@@ -229,14 +229,19 @@ neighbours until B-435 lands.
 ```bash
 make setup
 source .venv/bin/activate
-make test
-make inventory
-make facts
+make test                                    # offline: no lab, no credentials, no API key
+make inventory                               # offline: lists the nine devices
+nettools investigate RR1 10.255.0.12 --from-fixtures --format table   # offline: the flagship demo
+# --- everything below needs a reachable lab + DEVICE_USERNAME/DEVICE_PASSWORD ---
+make facts                                   # LIVE: contacts PE1 over SSH
 ```
 
-`make inventory` lists the nine devices without showing credentials.
-`make facts` contacts PE1 using only `show running-config hostname` and
-`show version`.
+The first three commands need nothing but a checkout — no lab, no credentials,
+no API key. `make facts` is the first command that reaches a **live device**:
+it contacts PE1 over SSH (using only `show running-config hostname` and
+`show version`) and needs `DEVICE_USERNAME`/`DEVICE_PASSWORD` set. The base
+checks (`facts`/`bgp`/`interfaces`/`lldp`/`isis`/`sr`/`fabric`) are all live;
+`investigate`/`health`/`audit`/`learn-topology` also take `--from-fixtures`.
 
 ## The investigation layer
 
@@ -292,10 +297,19 @@ it actually read; absence is `unevaluated`, and an unread rung ends the walk wit
 
 ### What the model is for, and what it is not
 
-The descent already found the cause. The model does the three things a
-deterministic walk cannot: **render** the chain as something absorbed in ten
-seconds, **correlate** it against the log timeline, and **say "I cannot determine
-this"** when the evidence does not support a conclusion.
+**No model runs by default.** The descent finds the cause, and `investigate`
+prints the deterministic chain with no model call at all — *"No model produced
+that"*, exactly as the demo above says (B-439). A model is invoked only when you
+pass **`--paraphrase`**; the `report:`/`correlation:` lines you see under other
+formats read *"rendered from the descent"* until you do, and even with
+`--paraphrase` the model never *reaches* the answer.
+
+What that optional model does are the three things a deterministic walk cannot:
+**render** the already-found chain as prose absorbed in ten seconds,
+**correlate** it against the log timeline, and **say "I cannot determine this"**
+when the evidence does not support a conclusion. It restates and contextualises
+a conclusion the code already reached and grounding already checked; it does
+not diagnose.
 
 Prompts live in `prompts/` as versioned files (`report.v1.txt`,
 `correlate.v3.txt`), reviewed like code, each with golden cases in

@@ -354,6 +354,12 @@ def _render_investigation_table(payload: dict[str, Any]) -> str:
 
     table = _format_table(["RUNG", "DEVICE", "STATUS", "REASON", ""], rows)
 
+    # A clipped REASON in the table is load-bearing text (the cause rung's
+    # reason names the reset reason and timing). Tell the reader where the
+    # full text is rather than clip it silently (2026-08-18 walkthrough).
+    clipped = any(len(str(rung.get("reason") or "")) > 80
+                  for rung in payload.get("rungs") or [])
+
     lines = [
         f"{payload.get('flow', '?')}: {payload.get('device', '?')} -> "
         f"{payload.get('subject', '?')}",
@@ -376,6 +382,10 @@ def _render_investigation_table(payload: dict[str, Any]) -> str:
                 f"  - {entry.get('rung', '?')} on {entry.get('device', '?')}: "
                 f"{_compact(str(entry.get('reason') or ''))}"
             )
+
+    if clipped:
+        lines.append("")
+        lines.append("(REASON clipped to 80 chars — run with --format json for the full text)")
 
     report = payload.get("report") or {}
     correlation = payload.get("correlation") or {}
