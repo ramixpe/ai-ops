@@ -39,3 +39,10 @@ htmlcov/
 
 # Agent worktrees and session scratch (never committed)
 .claude/
+
+# Flight-recorder tickets (B-446). A ticket is a RUN ARTEFACT, like the evidence
+# store and unlike evidence-archive/: it records one interaction that already
+# happened, and committing them would put every test run's output in history.
+# 113 of them were swept into a01b70d by `git add -A` before this line existed
+# (OBS-150's mistake, second occurrence).
+tickets/

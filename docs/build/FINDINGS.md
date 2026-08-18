@@ -5133,3 +5133,41 @@ author of the previous one, in the next commit. The lesson is not that people
 forget it; it is that **test-the-module is the natural thing to do and
 test-the-seam is not**, so it has to be a deliberate step in the gate rather
 than something remembered.
+
+## OBS-172 · M1 wiring · I committed 113 test-generated tickets, and an agent found it while doing something else
+
+`git add -A` in commit `a01b70d` swept **113 flight-recorder tickets** into the
+repository. They were produced by the test suite: `nettools investigate` now
+opens a ticket, tests run the real CLI, and the default location is `tickets/`
+beside the repo. Nothing was gitignored, nothing failed, and `git status` was
+clean afterwards precisely *because* they had been committed.
+
+**This is OBS-150 for the second time** — the finding that records `git add -A`
+sweeping an unread 745-line file into an unrelated commit. The lesson was
+recorded and did not change my behaviour, which is worth saying plainly: a
+finding is not a fix.
+
+**It was found by an agent that was not looking for it.** The M7 agent, working
+on a flow in a separate worktree, noted at the end of its report that `tickets/`
+had accumulated ~224 untracked files in *its* tree, said it looked pre-existing
+rather than caused by its own change, and flagged it as out of scope rather than
+cleaning it up. All three of those judgements were right, and the report was the
+only reason I looked. **An agent reporting an anomaly outside its remit is worth
+more than one that tidies it away** — a cleanup would have hidden the cause.
+
+**Three fixes, at three layers, because one would not have been enough:**
+
+1. The 113 files are removed from the index and the disk.
+2. `tickets/` is gitignored — a ticket is a *run artefact*, like the evidence
+   store and unlike `evidence-archive/`. It records an interaction that already
+   happened; committing them would put every test run's output in history.
+3. **The one that actually matters:** `tests/conftest.py` gains an autouse
+   fixture pointing `NETTOOLS_TICKET_DIR` at `tmp_path` for **every** test.
+   Unconditional and opt-out, so a test that never thinks about tickets still
+   cannot leave one behind. Verified: the suite now writes zero files into the
+   working tree.
+
+The gitignore alone would have hidden the pollution rather than stopped it. The
+conftest alone would have left the 113 already-committed files. The order of
+those two facts is the whole point: **an ignore rule is a way of not seeing a
+problem, and isolation is a way of not having one.**

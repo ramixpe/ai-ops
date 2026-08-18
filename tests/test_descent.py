@@ -19,6 +19,7 @@ from agent_nettools import checks, flows
 from agent_nettools.descent import run_descent
 from agent_nettools.fixtures import fixture_sender, load_fixture_evidence
 from agent_nettools.flows import Aggregation, CollectStep, DeviceScope, Flow, Rung, SubjectRule
+from agent_nettools.investigation import investigate
 from agent_nettools.network_tools import run_template
 
 # The inventory arithmetic that maps a BGP subject to the device that owns it.
@@ -300,6 +301,85 @@ def test_acceptance_isis_adjacency_survives_the_coherence_re_read():
     assert result.descent.finding == "interface_line_down"
     assert result.descent.coherence is not None
     assert result.descent.coherence.status == "coherent"
+
+
+# --------------------------------------------------------------------------- #
+# B-109 fallback — `isis_adjacency` through `investigate()`, every label
+#
+# B-109 asked for a third flow, `ldp_session`. There is no LDP command in
+# `platforms.APPROVED_COMMANDS` and no LDP fixture under `tests/fixtures/` --
+# `platforms.py` is additions-only and adding a command is a safety-boundary
+# change needing explicit sign-off, so B-109 could not be built and this is
+# the fallback the task brief names instead.
+#
+# OBS-167 is explicit about why this is worth doing on its own merits, not
+# just as a consolation: the hand-built `_collector_for` used everywhere else
+# in this file does not gate a rung's evidence by its declared `collect`
+# tuple, so it cannot catch an undeclared dependency -- only the real
+# `EvidenceEpoch` behind `investigate()` does, via the coherence re-read.
+# Every test above this point that calls `run_descent(..., collector=
+# _collector_for(...))` would have passed against the exact defect B-107
+# shipped and then found (a check reading `interfaces` evidence its rung had
+# not declared). Only `test_acceptance_isis_adjacency_survives_the_coherence
+# _re_read` above runs the real path, and only for one label. These pin the
+# other four labels the same way, so the whole fixture corpus for this flow
+# is exercised through the path that can actually detect that class of bug,
+# and the measured finding for each label cannot drift silently.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("device", "subject", "label", "expected_finding"),
+    [
+        # PE3's Gi0/0/0/0 carries a real IS-IS adjacency to P2 in every label
+        # this fabric captured with no fault injected: `healthy`, and the two
+        # real lab captures `t0`/`t1` taken ~90s apart (CLAUDE.md).
+        ("PE3", "Gi0/0/0/0", "healthy", "all_layers_healthy"),
+        ("PE3", "Gi0/0/0/0", "t0", "all_layers_healthy"),
+        ("PE3", "Gi0/0/0/0", "t1", "all_layers_healthy"),
+        # PE2's Gi0/0/0/0 is admin-down on `broken` -- the interface rung
+        # explains the isis_adjacency rung's silence, so the walk localises.
+        ("PE2", "Gi0/0/0/0", "broken", "interface_line_down"),
+        # `isis-broken` (B-496): a real, naturally-occurring fault with no
+        # interface fault to explain it. LLDP confirms the P2<->PE3 cabling
+        # from both ends while neither end has formed the IS-IS adjacency,
+        # so the honest answer is `cause_not_localised`, not a guessed
+        # IS-IS-specific cause -- provable from either side of the link.
+        ("PE3", "Gi0/0/0/0", "isis-broken", "cause_not_localised"),
+        ("P2", "Gi0/0/0/4", "isis-broken", "cause_not_localised"),
+    ],
+)
+def test_acceptance_isis_adjacency_through_investigate_pins_every_label(
+    device, subject, label, expected_finding
+):
+    """Measured, not predicted: every value here came from running
+    `investigate()` against the named fixture label and reading the result,
+    the same way `test_acceptance_isis_adjacency_survives_the_coherence_re_read`
+    above measured `broken`. See the section comment for why this needs the
+    real path rather than `_collector_for`.
+    """
+
+    result = investigate(
+        device, subject, flow="isis_adjacency", sender=fixture_sender(label=label),
+    )
+
+    assert result.descent.finding == expected_finding
+    assert result.descent.finding in flows.flow_for("isis_adjacency").findings
+
+    # Both of this flow's rungs were walked on every label, fault or not --
+    # the ladder is only two rungs deep and nothing short-circuits it early.
+    assert result.descent.rung_path == ("isis_adjacency", "interface")
+
+    # No collector was injected, so this ran through a real EvidenceEpoch and
+    # its coherence re-read agreed with the first read on every label.
+    assert result.descent.coherence is not None
+    assert result.descent.coherence.status == "coherent"
+
+    # Every conclusive rung cites the evidence it read.
+    for outcome in result.descent.outcomes:
+        if outcome.result.is_conclusive:
+            assert outcome.result.evidence_keys, outcome.rung
+    assert result.descent.evidence_keys
 
 
 # --------------------------------------------------------------------------- #
