@@ -1,6 +1,6 @@
 # Orchestrator examples
 
-**The boundary rule, before anything else** (`docs/build/OPS-WAVE-PLAN.md`):
+**The boundary rule, before anything else** (`docs/archive/OPS-WAVE-PLAN.md`):
 
 > An orchestrator — n8n, cron, systemd, Alertmanager — may **trigger** `nettools`
 > and **route its structured output**. It may never touch a device, build a
@@ -17,7 +17,7 @@ into an LLM node has left the safety boundary, whatever this directory says.
 |---|---|
 | `nettools route-event` | Alertmanager webhook JSON or a raw IOS-XR syslog line → a typed routing decision with the exact `investigate` argv. Table lookup; unroutable is a stated answer, not an error. Exit 0 routable / 1 not / 2 unreadable |
 | `nettools investigate` | The deterministic answer |
-| `nettools audit` | The scheduled fabric audit (ships in the same wave; see `docs/build/OPS-WAVE-PLAN.md`) |
+| `nettools audit` | The scheduled fabric audit (ships in the same wave; see `docs/archive/OPS-WAVE-PLAN.md`) |
 | Telegram relay | Built in: `--notify` (T-035) — the orchestrator does not need its own delivery step for Telegram |
 
 ## Recipe 1 — alert → investigation (n8n)

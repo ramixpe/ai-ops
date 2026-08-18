@@ -41,15 +41,15 @@ without destroying evidence.
 
 | File | Lines | Status |
 |---|---|---|
-| `docs/REVIEW.md` | 312 | The 2026-07-28 review, at **32 tests**. Historically the first external eye; superseded by five later reviews. Cited 18×. |
-| `docs/build/PLAN-V2.md` | 215 | The plan Gate Zero reconciled against. Complete. |
-| `docs/build/BACKLOG-COMPLETION-PLAN.md` | 402 | Completed. |
-| `docs/build/FIX-PLAN.md` | 49 | Completed — the six-agent wave it planned is landed. |
-| `docs/build/OPS-WAVE-PLAN.md` | 135 | Completed — the OPS wave shipped (B-477…B-480). |
-| `docs/build/BACKLOG-STATUS.md` | 418 | A point-in-time verification of 98 items; the backlog has moved to 129 rows. Superseded by `BACKLOG.md` itself. |
-| `docs/build/VERIFICATION.md` | 257 | Same shape — a point-in-time claim audit, now superseded. |
-| `docs/build/PEER-REVIEW-BRIEF.md` | 148 | Its review happened; the findings are in `HOLISTIC-REVIEW.md` and FINDINGS. |
-| `docs/build/REPO-INVENTORY.md` | 210 | A pre-publication inventory; the tree has changed under it. |
+| `docs/archive/REVIEW.md` | 312 | The 2026-07-28 review, at **32 tests**. Historically the first external eye; superseded by five later reviews. Cited 18×. |
+| `docs/archive/PLAN-V2.md` | 215 | The plan Gate Zero reconciled against. Complete. |
+| `docs/archive/BACKLOG-COMPLETION-PLAN.md` | 402 | Completed. |
+| `docs/archive/FIX-PLAN.md` | 49 | Completed — the six-agent wave it planned is landed. |
+| `docs/archive/OPS-WAVE-PLAN.md` | 135 | Completed — the OPS wave shipped (B-477…B-480). |
+| `docs/archive/BACKLOG-STATUS.md` | 418 | A point-in-time verification of 98 items; the backlog has moved to 129 rows. Superseded by `BACKLOG.md` itself. |
+| `docs/archive/VERIFICATION.md` | 257 | Same shape — a point-in-time claim audit, now superseded. |
+| `docs/archive/PEER-REVIEW-BRIEF.md` | 148 | Its review happened; the findings are in `HOLISTIC-REVIEW.md` and FINDINGS. |
+| `docs/archive/REPO-INVENTORY.md` | 210 | A pre-publication inventory; the tree has changed under it. |
 
 **Also review at sign-off:** `docs/build/MCP-RETEST-PROTOCOL.md` (131) — Task 0
 is complete and scored in `MCP-EXPERIMENT.md` §11/§12, but Q1 is **still owed**

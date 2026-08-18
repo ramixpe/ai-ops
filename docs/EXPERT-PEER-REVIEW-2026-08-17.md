@@ -74,7 +74,7 @@ free-text answer is also not grounded by `ground_report()`.
 | Fresh bytecode cache (`PYTHONPYCACHEPREFIX=/tmp/... .venv/bin/pytest -q`) | **1,813 passed, 24 skipped** |
 | Python dependency consistency (`python -m pip check`) | **Pass** |
 | Git patch whitespace (`git diff --check`) | **Pass** |
-| Git worktree before this report | Untracked `docs/build/BACKLOG-STATUS.md`; preserved unchanged |
+| Git worktree before this report | Untracked `docs/archive/BACKLOG-STATUS.md`; preserved unchanged |
 
 The initial test failure is important. `descent.py` contains
 `Aggregation.ANY_HEALTHY`, but the local interpreter loaded stale bytecode containing
@@ -574,7 +574,7 @@ not erase the evidence history that makes the project credible.
 
 ### Phase 0 — Recover a trustworthy local runtime (immediate)
 
-1. Commit or deliberately discard the untracked `docs/build/BACKLOG-STATUS.md` after human
+1. Commit or deliberately discard the untracked `docs/archive/BACKLOG-STATUS.md` after human
    review; do not let cleanup remove it accidentally.
 2. Recreate `.venv` instead of trying to surgically repair its cache.
 3. Remove repository-local `__pycache__`, `.pyc`, `.pytest_cache`, `.ruff_cache`, `build/`,

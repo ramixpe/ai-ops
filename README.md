@@ -958,7 +958,7 @@ docs/                              Design, the build record, and three external 
 
 ## Audit, event routing, and configuration
 
-Three operational commands (2026-08-18 wave; `docs/build/OPS-WAVE-PLAN.md` has the
+Three operational commands (2026-08-18 wave; `docs/archive/OPS-WAVE-PLAN.md` has the
 design judgement behind them):
 
 ```bash

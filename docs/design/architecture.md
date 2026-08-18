@@ -772,7 +772,7 @@ substitute.
 wiring, exit codes, and error handling -- `tests/test_cli.py` now drives
 `build_parser()`/every `_cmd_*` (monkeypatching the specific `cli`-module-bound
 function each one calls, never the network) and `main()` itself, including
-the exact regression `docs/REVIEW.md` records (`analyze`/`demo` not catching
+the exact regression `docs/archive/REVIEW.md` records (`analyze`/`demo` not catching
 the `ValueError` `get_provider()` raises on misconfiguration) and the
 top-level `InventoryError` → exit-2 handler. A live-lab integration tier
 (`tests/test_live_lab.py`, marker `live_lab` registered in `pyproject.toml`)

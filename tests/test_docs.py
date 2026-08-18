@@ -116,9 +116,20 @@ def _registered_tool_names() -> set[str]:
     }
 
 
-def test_devices_doc_matches_rendered_inventory():
-    """docs/devices.md is generated, not hand-maintained -- so it cannot drift
-    from the inventory it describes."""
+def test_the_devices_doc_generator_still_renders_from_the_inventory():
+    """`docs/devices.md` was deleted at M0 (2026-08-18, operator sign-off): a
+    generated file committed beside its generator is a second copy that can
+    drift, and the inventory is the source of truth.
 
-    committed = (REPO_ROOT / "docs" / "devices.md").read_text(encoding="utf-8")
-    assert committed == render_devices_doc()
+    The drift test that used to live here compared the committed file against
+    `render_devices_doc()`. With no committed file there is nothing to drift,
+    so this asserts the weaker, still-true thing: the generator works and reads
+    the inventory. `render_devices_doc` stays exported so a caller can render
+    the table on demand; if nothing ever calls it, it is a fair candidate for
+    removal in a later pass."""
+
+    rendered = render_devices_doc()
+
+    assert rendered.strip(), "the generator produces a document"
+    for device in ("PE1", "PE2", "RR1"):
+        assert device in rendered, f"{device} is in the inventory and must be rendered"
