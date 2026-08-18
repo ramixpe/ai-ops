@@ -205,6 +205,25 @@ ERROR_KINDS: tuple[tuple[str, str], ...] = (
     ("no such template", "no such template for this platform"),
     ("required environment variable", "a credential is not configured"),
     ("is not in the lab inventory", "the device is not in the inventory"),
+    # --- Connection-establishment failures (2026-08-18 MCP re-test). -------
+    #
+    # netmiko's most common real failure is `NetmikoTimeoutException("TCP
+    # connection to device failed.")`, and NOTHING in this table matched it --
+    # so the single most likely thing to go wrong in production produced the
+    # least useful message the system can emit. The operator hit it three
+    # times in one session and learned only "an unclassified error".
+    #
+    # These are safe to name for a reason stronger than "the phrase looks
+    # tool-authored": a connection-ESTABLISHMENT failure happens before any
+    # session exists, so there is no device output yet that could be embedded
+    # in it. The withholding rationale in this module's docstring -- that a
+    # transport exception can interpolate `output=...` -- applies to reads on
+    # an open channel, not to a refused or unanswered connect.
+    ("tcp connection to device failed", "the device did not answer a TCP connection (unreachable, filtered, or wrong port)"),
+    ("ssh negotiation", "the SSH negotiation failed before login"),
+    ("connection reset", "the device reset the connection"),
+    ("unable to connect", "the connection could not be opened"),
+    ("host key", "the device's SSH host key was rejected"),
     # --- Parameter-validation refusals (added after wave 2-B). ------------
     #
     # These phrases originate in the FROZEN validators (`templates.py`) --

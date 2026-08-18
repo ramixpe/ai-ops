@@ -4482,3 +4482,51 @@ by the orchestrator's own probe before acceptance — the walkthrough's
 import-time `--help` crash, the audit-table misrender, the NaN-through-range-
 check, the dead ERROR_KINDS entry, the credential-requiring "credential-free"
 `list_devices` — none inherited on the reviewer's word.
+
+## OBS-157 · MCP re-test · A model's completeness claims carry no information — measured three times in one session
+
+Task 0 (2026-08-18, `gemma-4-e4b`) closed the Q5/Q6 debt §10.5 recorded, and
+produced a sharper version of both findings it was sent to test.
+
+**§6.2 recurs with the opposite shape to the one predicted.** The restatement's
+sin was not omission — two of five rungs survived only inside "fully healthy",
+which in two sentences is fair. It was **addition**: the authoritative report
+says *"no fault on this dependency path; if a problem is being reported it is
+about something this flow does not cover"* and marks `requires_human: true`.
+The paraphrase turned that into *"likely an application or configuration
+problem"* and dropped the caveat; a turn earlier the same model offered *"the
+service running on 10.255.0.12 is down"* about a **router loopback**. The
+descent's entire value is declining to name a cause it cannot evidence, and the
+restatement handed that discipline back. B-439 is built against a model
+dropping what the descent found; B-490 is the half where it supplies what the
+descent refused.
+
+**§6.1 confirmed, and generalised past its original claim.** Asked whether its
+summary covered every rung, the model answered that it *"accurately captured
+the conclusion of all five rungs"* — then, in the same message, accounted for
+rungs 1, 4 and 5 only. Not a model misremembering an earlier turn: a
+completeness claim contradicted by the enumeration printed directly beneath it.
+And unprompted, earlier in the same session, it listed **22 of 23** tools as
+the complete set. Three enumerations, two incomplete, three claims of
+completeness. **The finding is not that models omit things. It is that asking
+one whether it omitted something returns no information at all** — so every
+place the design reads back a self-report must become a code-side comparison
+against the typed payload (B-491).
+
+**And a hypothesis of mine that measurement killed.** Three of nine parallel
+MCP calls failed to connect, and I predicted the unbounded fan-out was the
+cause — nine concurrent logins, no pool. Measured: sequential 16/16 clean,
+library-unbounded-9 zero failures, library-pooled-4 one failure. Concurrency
+is associated with failure; **the worker count does not predict it**, so the
+stated hypothesis is refuted and only the weaker claim survives. Left in the
+record with the wrong version visible, because OBS-147's rule cuts both ways:
+a check that only ever confirms has not checked anything, and that includes
+checks on my own reasoning.
+
+**One real defect, fixed the same hour.** Those three failures each read *"an
+unclassified error; its detail is withheld because a transport exception can
+embed device output"*. netmiko had said `TCP connection to device failed.` and
+no `ERROR_KINDS` entry matched — **the commonest production failure produced the
+least useful message the system can emit**. The withholding rationale does not
+even apply: a connection that never opened has no device output to embed. Five
+connect-failure kinds added to both copies, pinned by a test.

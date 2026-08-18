@@ -1038,3 +1038,142 @@ inside one epoch would push a healthy fabric into `temporally_incoherent` and ex
 refusal caused by *the tool's own latency*, on a fabric with nothing wrong with it.
 
 Filed as **B-466**, and it is the highest-value item this run produced.
+
+---
+
+## 11. Task 0 re-ask — Q5/Q6 against a real five-rung payload (2026-08-18)
+
+`gemma-4-e4b`, LM Studio 0.4.21+2, classic 23-tool surface, live fabric, no
+fault applied. §10.5 said Q5/Q6 were owed because the previous attempt asked
+them after **Q4's refusal** — a summary of nothing. This is the re-ask.
+
+**Ground truth**, captured by CLI minutes before the session and again inside
+it: `all_layers_healthy`, `trustworthy: true`, **no cause**, five rungs, all
+healthy — `bgp_session`/`transport`/`route_to_peer` on RR1, `igp_adjacency`/
+`interface` on PE2. `skew_seconds: 23.4` of a 30 s bound.
+
+### 11.1 Q2 — selection held, but the session was not clean
+
+`investigate_lab_session` was called **first**, with correct arguments
+(`device=RR1, subject=10.255.0.12`, flow defaulted). The trace reads: *"This is
+a classic 'why' question about connectivity, which strongly suggests using the
+`investigate_lab_session` tool."*
+
+**Weaker evidence than the original observation, and worth saying so.** The
+original finding was a trace *naming the tool's description* as its reason.
+This trace names the question's shape. Selection is right; the mechanism is
+less directly attested.
+
+**And the session carried a confound of its own.** Two questions preceded Q2 in
+the same session, the second being *"give me the list of tools available to
+you"* — so the model restated the entire manifest, in its own words, one turn
+before choosing from it. That is not the condition §9 registered. It does not
+damage Task 0 (whose object was Q5/Q6 against a real payload, which it
+delivered), but **Q1 during round 6 must be the first question in a genuinely
+fresh session** or it inherits the same problem.
+
+### 11.2 Q5 — §6.2 recurs, and its shape is the opposite of what was predicted
+
+> *"The network path between RR1 and 10.255.0.12 is fully healthy; the BGP
+> session is established, and all underlying layers (IGP, interfaces) are up.
+> Since the diagnostic flow found no connectivity fault, the issue is likely
+> related to an application or configuration problem outside of the network
+> path itself."*
+
+**Omission, as predicted, but minor.** Three of five rungs are named
+(`bgp_session`, `igp_adjacency`, `interface`); `transport` and `route_to_peer`
+survive only inside "fully healthy". In two sentences that is defensible.
+**No device was misattributed** — the PE2 rungs were not credited to RR1.
+
+**Addition, which was not predicted, and is worse.** The authoritative report's
+recommendation is exact:
+
+> *"No fault on this dependency path. If a problem is being reported, it is
+> about something this flow does not cover."* — with `requires_human: true`.
+
+The restatement converts *"something this flow does not cover"* into *"likely
+an application or configuration problem"*, and drops `requires_human`
+entirely. In the turn before, the same model was more specific still:
+*"the service running on 10.255.0.12 is down"* — **`10.255.0.12` is a router
+loopback; there is no service on it.** A network engineer would not write that
+sentence, and it is exactly the plausible-sounding, evidence-free next step an
+operator under pressure might act on.
+
+**This sharpens B-439's target.** The failure mode to design against is not
+only *the restatement drops something the descent found*; it is **the
+restatement supplies something the descent deliberately declined to supply.**
+A grounding check that verifies every claim traces to evidence catches the
+first. Catching the second needs the recommendation treated as a closed field —
+the descent's `next_check` string is the only permitted answer to "what now",
+and a paraphrase that adds candidate causes has failed regardless of how
+reasonable they sound.
+
+### 11.3 Q6 — §6.1 confirmed, on a harder case, and self-contradicting inside one message
+
+> *"No, my summary did not list every rung individually, but it accurately
+> captured the **conclusion of all five rungs**."*
+
+It then accounts for its own coverage: *"'all underlying layers (IGP,
+interfaces) are up' … is the collective finding of Rungs 4 and 5. It also
+mentioned 'the BGP session is established,' which covers Rung 1."*
+
+**Rungs 2 and 3 are absent from its own accounting**, in the same message that
+claims all five were captured. §10.5 recorded §6.1 as *untested* because the
+prior case had no rungs to recall. It is now tested and it **fails** — and more
+sharply than before: this is not a model misremembering an earlier turn, it is
+a completeness claim contradicted by the enumeration printed directly beneath
+it.
+
+**A third instance of the same shape, unprompted.** Asked to list its tools
+earlier in the session, the model produced **22 of 23** — `check_lab_fabric` is
+missing — and presented the list as complete. Three enumerations in one
+session; two incomplete; all three asserted complete. **The reliable signal is
+not that a model omits things — it is that its own completeness claims carry no
+information.** Any design that asks a model to confirm its own coverage is
+building on that.
+
+### 11.4 Two findings the protocol did not ask for
+
+**(a) The commonest real failure produced the least useful message.** Nine
+parallel `get_lab_device_facts` calls returned three connection failures, each
+reading: *"an unclassified error; its detail is withheld because a transport
+exception can embed device output."* netmiko had raised
+`NetmikoTimeoutException("TCP connection to device failed.")` and **no
+`ERROR_KINDS` entry matched it**.
+
+The withholding rationale does not hold for this class, and that is the fix:
+a connection-*establishment* failure happens before a session exists, so there
+is no device output that could be embedded in it. Five connect-failure kinds
+added to both copies of the table, with a test. An operator now reads *"the
+device did not answer a TCP connection (unreachable, filtered, or wrong port)"*.
+
+**(b) Intermittent SSH refusals — and a hypothesis of mine that measurement
+killed.** I predicted the fan-out caused the failures: nine concurrent logins
+with no pool, against XRd nodes. Measured instead:
+
+| condition | result |
+|---|---|
+| MCP, 9 concurrent tool calls | 3 failures (P3, PE2, RR1), 2 silent retries, ~84 s |
+| library, 9 concurrent, unbounded | **0 failures**, 1 retry, 33.5 s |
+| library, pooled at 4 | **1 failure** (PE2), 1 retry, 47.7 s |
+| sequential, 4 devices × 4 attempts | **0 failures** (16/16) |
+
+Sequential never failed; every concurrent condition sometimes did; **but the
+failure count does not track the worker count**, so "the fan-out overloads it"
+is refuted as stated. What is supported: these XRd nodes intermittently refuse
+concurrent SSH setup, the retry layer masks some of it, and *any* parallel
+collector will see it. Recorded as a lab characteristic, not a product defect —
+and recorded with the wrong hypothesis left visible, because a measurement that
+only ever confirms is the thing this project keeps finding.
+
+The MCP path also took **~84 s** where the direct library fan-out took **33.5 s**
+for the same nine devices — a second data point under §6.4, now a trend.
+
+### 11.5 What this changes
+
+* §6.2 **recurs**, with a failure mode B-439 was not designed for → B-490.
+* §6.1 **confirmed** on a real case, and generalised: model completeness
+  claims are uninformative → B-491.
+* Q5/Q6's debt from §10.5 is **paid**. Task 0 is closed.
+* §9 remains **owed on one arm only**: Q1 on a broken fabric, first question,
+  fresh session, during round 6.

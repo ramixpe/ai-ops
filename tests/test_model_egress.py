@@ -345,3 +345,23 @@ def test_raw_text_keys_matches_the_mcp_boundary_copy():
     from mcp_server.boundary import RAW_TEXT_KEYS as boundary_raw_text_keys
 
     assert model_egress.RAW_TEXT_KEYS == boundary_raw_text_keys
+
+
+def test_a_tcp_connect_failure_is_named_not_withheld():
+    """netmiko's commonest failure must not classify as "unclassified".
+
+    `NetmikoTimeoutException` carries "TCP connection to device failed." and
+    nothing in ERROR_KINDS matched it, so the most likely production failure
+    produced the least useful message the system can emit — hit three times in
+    one MCP session on 2026-08-18. Safe to name because a connection that was
+    never established cannot have device output to embed.
+    """
+
+    from agent_nettools.model_egress import _classify_errors
+
+    out = _classify_errors(["connection to 10.0.0.1 failed: TCP connection to device failed."])[0]
+
+    assert "unclassified" not in out
+    assert "did not answer a TCP connection" in out
+    # and the address the CALLER supplied is still there — it is not device text
+    assert "10.0.0.1" in out

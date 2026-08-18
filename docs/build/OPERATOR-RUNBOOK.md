@@ -38,7 +38,7 @@ reasons cost a window if you get them wrong.
 
 | # | Task | Lab? | Why here |
 |---|---|---|---|
-| **0** | **Q5/Q6** — §5.2 | no fault | Costs no window. Doing it first surfaces any MCP drift **before** a fault is live rather than during one |
+| ~~**0**~~ | ~~**Q5/Q6** — §5.2~~ | ~~no fault~~ | **DONE 2026-08-18** — scored in `MCP-EXPERIMENT.md` §11. §6.2 recurred (as addition, not omission → B-490); §6.1 confirmed (→ B-491); one real defect found and fixed (connect failures classified as "unclassified") |
 | **1** | **Pre-flight** — `scripts/preflight.sh` | read-only | Exits non-zero on anything unexpected. It found two real defects on its first run |
 | **2** | **Round 8b** — §3 | **yes** | Resolution-sensitive. Give it the device to itself |
 | **3** | **Round 6 + Q1** — §4 and §5.1 | **yes** | Q1 rides along here, **not** with 8b — see §5.1 |
@@ -445,7 +445,16 @@ This settles §9 properly for the first time — both prior "why" questions in t
 re-test went to `investigate_lab_session` on a healthy fabric; this is the one
 still owed on a genuinely broken one.
 
-### 5.2 Q5/Q6 — **this is Task 0; do it before anything else**
+### 5.2 Q5/Q6 — **DONE 2026-08-18, scored in `MCP-EXPERIMENT.md` §11**
+
+> **Closed.** Kept below as written because the sequencing argument still
+> applies to the Q1 re-ask. One lesson to carry into it: the session used for
+> this run had two questions before Q2 — including *"list your tools"*, which
+> made the model restate the whole manifest one turn before selecting from it.
+> **Q1 must be the first question in a genuinely fresh session**, or it
+> inherits that confound and is void for a second time.
+
+### 5.2 (as originally written) Q5/Q6 — **this is Task 0; do it before anything else**
 
 Moved to the front of the running order. It needs the MCP server and a
 reachable fabric but **no fault**, so it costs no lab window — and doing it
