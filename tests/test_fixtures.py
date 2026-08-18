@@ -448,3 +448,48 @@ def test_captured_template_files_replay_through_the_existing_sender(monkeypatch,
 
     assert replayed["status"] == "success"
     assert "show bgp neighbor 10.255.0.12" in replayed["data"]["commands"]
+
+
+def test_the_isis_broken_label_holds_a_case_the_healthy_corpus_cannot(fixture_dir=None):
+    """B-496 — a naturally-occurring IS-IS break, captured 2026-08-18.
+
+    Found by preflight, off the derived floor: PE3's adjacency count was BELOW
+    its baseline, which surfaced only because B-465 made drift direction-aware.
+
+    What makes it worth committing is the shape. Both ends of PE3<->P2 are
+    up/up with matching MTU, LLDP is forming across it, and NEITHER end has the
+    IS-IS adjacency. B-107's own backlog entry insists a flow's broken state
+    must be designed alongside the flow, because a healthy-only corpus has
+    *structurally zero* coverage of the broken case rather than weak coverage.
+    This is that case, arriving for free, and it is unrecoverable once the lab
+    is rebuilt.
+
+    It is also the first concrete demand for B-104: every remaining explanation
+    is configuration, which this build reads none of — correctly.
+
+    Do not delete this label to tidy the corpus. It is the only asymmetry in it.
+    """
+
+    from agent_nettools.fixtures import load_fixture_evidence
+
+    def adjacency_ids(device):
+        parsed = ((load_fixture_evidence(device, label="isis-broken").get("isis") or {})
+                  .get("data") or {}).get("parsed") or {}
+        return {r.get("system_id") for r in parsed.get("records") or []}
+
+    def lldp_neighbours(device):
+        parsed = ((load_fixture_evidence(device, label="isis-broken").get("lldp") or {})
+                  .get("data") or {}).get("parsed") or {}
+        return {r.get("neighbor") for r in parsed.get("records") or []}
+
+    # The link exists physically, from both ends.
+    assert "P2" in lldp_neighbours("PE3")
+    assert "PE3" in lldp_neighbours("P2")
+
+    # And neither end has the adjacency over it.
+    assert "P2" not in adjacency_ids("PE3"), "PE3 must NOT see P2 in IS-IS"
+    assert "PE3" not in adjacency_ids("P2"), "P2 must NOT see PE3 in IS-IS"
+
+    # The control: the adjacency PE3 does have is still there, so this is an
+    # asymmetry in the fixture and not an empty parse.
+    assert "P4" in adjacency_ids("PE3")
