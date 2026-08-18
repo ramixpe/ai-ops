@@ -13,8 +13,14 @@ after this header went 35 commits stale showing 1786).
 > systemd examples, the knowledge surface (search + curated mnemonics + `operator_notes`
 > in every investigate payload), and the staged MCP surface behind `NETTOOLS_MCP_SURFACE`.
 >
-> **A holistic four-lens review ran 2026-08-18** (adversarial code, invariants, docs
-> drift, operator experience) — results in `docs/build/HOLISTIC-REVIEW.md` once merged.
+> **A holistic five-perspective review ran 2026-08-18** (adversarial code, invariants,
+> docs drift, operator experience, orchestrator) — results in
+> [`docs/build/HOLISTIC-REVIEW.md`](HOLISTIC-REVIEW.md). Two serious defects, both in
+> the OPS wave, both found independently by two lenses (OBS-156), both fixed with
+> mutation-verified tests: the MCP boundary never got B-467's free-text quoting (B-481);
+> the P0 Alertmanager-subject injection + example hardening (B-482). Eighteen cheaper
+> correctness/UX fixes applied; B-483..B-489 filed for capability-level work. Suite
+> 1963 passed, 20/20 mutation guards hold, four frozen files byte-identical.
 >
 > **Backlog counts are derived, not maintained** — see BACKLOG.md's one-liner; two
 > hand-maintained totals drifted and were removed.
