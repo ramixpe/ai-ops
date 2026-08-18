@@ -5092,3 +5092,44 @@ needs none of it, and **stopped** — noting that `duration_ms`/`retries`/`bytes
 are transport-shaped fields and a generic extraction would be speculative for a
 source that does not exist yet. That is the right answer, and refusing
 speculative work when invited to do it is worth as much as doing the work.
+
+## OBS-171 · M1 wiring · I made OBS-170's mistake one commit after writing OBS-170
+
+OBS-170 named the rule: *where a module is well tested and its call site is not,
+the call site is where the defect will be.* I then wired the ticket into
+`cli.py` and did exactly that.
+
+`ticket.Ticket.record_device_interaction` takes `session_count=`. My wiring
+passed `sessions=`. The call raised `TypeError` — and my own helper's broad
+`except Exception` (correct, and required: bookkeeping must never fail an
+investigation) converted it into a stderr note, which `--quiet` then suppressed.
+The result was a ticket that opened, closed, and silently recorded no device
+interactions at all. The suite stayed green because nothing exercised the seam.
+
+**The uncomfortable part is that the safety mechanism did the hiding.** The
+broad catch is there for a real reason and I would write it again — but
+`BUILD-PLAN.md` §0.11 already warns about exactly this: *never wrap your own
+logic in the broad `except` used at the device boundary; widened by one line
+past it, it converts your own bugs into false reports.* I wrapped my own
+argument construction in the bookkeeping catch, so a programming error became a
+suppressed note.
+
+**Two fixes, and only the second one generalises.** The kwarg is corrected. And
+the seam now has a test that runs the actual command and asserts the ticket
+carries the epoch's real per-device session counts (`RR1: 1, PE2: 2` — the
+numbers `collect_epoch`'s docstring predicts). Mutation-verified: restoring the
+wrong kwarg fails it.
+
+The rule to carry forward, sharper than OBS-170's version:
+
+> **A broad catch around bookkeeping must still be exercised by a test that
+> asserts the bookkeeping happened.** Otherwise the catch is indistinguishable
+> from the feature not working, and "it never crashes" is satisfied by code that
+> never runs.
+
+Three instances in three days (OBS-153, OBS-170, this) all say the same thing
+from different angles, and this one has the distinction of being made by the
+author of the previous one, in the next commit. The lesson is not that people
+forget it; it is that **test-the-module is the natural thing to do and
+test-the-seam is not**, so it has to be a deliberate step in the gate rather
+than something remembered.

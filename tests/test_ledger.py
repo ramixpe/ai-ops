@@ -496,3 +496,40 @@ def test_a_ledger_write_failure_never_fails_the_investigation(tmp_path, monkeypa
     code = cli.main()
 
     assert code == 1, "the investigation still reports its own finding, not a ledger error"
+
+
+def test_investigate_writes_a_ticket_carrying_the_session_counts(tmp_path, monkeypatch):
+    """The wiring, not the module — OBS-170's lesson applied to this seam.
+
+    `ticket.py` is well tested and was correct; the twelve lines in `cli.py`
+    that call it were not tested, and the first version passed
+    `sessions=` where the API takes `session_count=`. The broad
+    bookkeeping-never-fails-a-run catch turned that TypeError into a stderr
+    note, which `--quiet` then suppressed: a silently empty ticket.
+
+    So this test exercises the SEAM. It asserts the ticket actually carries the
+    per-device session counts the epoch computed, which no test of ticket.py
+    alone could ever catch.
+    """
+
+    import sys
+
+    from agent_nettools import cli, ticket
+
+    tickets = tmp_path / "tickets"
+    monkeypatch.setenv("NETTOOLS_TICKET_DIR", str(tickets))
+    monkeypatch.setattr(sys, "argv", ["nettools", "investigate", "RR1", "10.255.0.12",
+                                      "--from-fixtures", "--quiet"])
+    cli.main()
+
+    written = sorted(tickets.glob("*.md"))
+    assert len(written) == 1, "one interaction, one ticket"
+
+    data = ticket.read_ticket(written[0])
+    interactions = {d["device"]: d["session_count"] for d in data["device_interactions"]}
+
+    # collect_epoch's own docstring predicts this shape: RR1 in one session,
+    # PE2 in two (it fans out), total 3.
+    assert interactions == {"RR1": 1, "PE2": 2}, (
+        f"the ticket must carry the epoch's real session counts, got {interactions}"
+    )

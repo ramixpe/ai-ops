@@ -485,7 +485,63 @@ def _ledger_for_cli():
     return _ledger.DiagnosisLedger(path=Path(path)) if path else _ledger.default_ledger
 
 
-def _record_diagnosis_in_ledger(result, args, subject, flow) -> None:
+def _open_ticket_for(args, subject, flow, entry_point):
+    """Open a flight-recorder ticket, or return None. Never raises.
+
+    The ticket observes an investigation; it must never be able to fail one.
+    `ticket.py` degrades internally too, so this catch is the belt to its
+    braces -- an import error or a bad argument here still cannot reach the
+    caller (OBS-169: the one guarantee this file must not undermine).
+    """
+
+    try:
+        from . import ticket as _ticket
+
+        return _ticket.open_ticket(
+            subject=subject, entry_point=entry_point,
+            device=getattr(args, "device", None), flow=flow,
+        )
+    except Exception as exc:  # noqa: BLE001 -- bookkeeping never fails a run
+        _note(f"# ticket not opened: {exc}", args)
+        return None
+
+
+def _record_in_ticket(handle, args, result, subject, flow, question=None) -> None:
+    """Fill a ticket from an InvestigationResult. Never raises.
+
+    Everything written here is CODE-OBSERVED: the finding and cause come from
+    the descent, the session counts from the evidence epoch, the coherence from
+    the epoch's own re-read. Nothing is taken from a model's account of itself
+    (OBS-165 -- a true and a false self-report read identically).
+    """
+
+    if handle is None:
+        return
+    try:
+        if question is not None:
+            handle.record_question(question, device=getattr(args, "device", None),
+                                   subject=subject, flow_hint=flow)
+        sessions = getattr(result, "session_summary", None)
+        if sessions:
+            for device, count in (sessions.get("by_device") or {}).items():
+                handle.record_device_interaction(device, session_count=count)
+        cause = result.descent.cause
+        coherence = result.descent.coherence
+        handle.record_answer(
+            finding=result.descent.finding,
+            trustworthy=result.trustworthy,
+            cause=({"rung": cause.rung, "device": cause.device,
+                    "reason": cause.result.reason} if cause is not None else None),
+            coherence=(coherence.as_dict() if coherence is not None else None),
+            report_status=result.report_status,
+            correlation_status=result.correlation_status,
+        )
+        handle.close()
+    except Exception as exc:  # noqa: BLE001 -- bookkeeping never fails a run
+        _note(f"# ticket incomplete: {exc}", args)
+
+
+def _record_diagnosis_in_ledger(result, args, subject, flow, run_id=None) -> None:
     """Append this investigation to the accuracy ledger. Never raises."""
 
     from . import ledger as _ledger
@@ -645,6 +701,11 @@ def _cmd_investigate(args: argparse.Namespace) -> int:
     # already gave explicitly.
     flow = args.flow
     subject = args.subject
+    # The question AS ASKED, before free-text selection resolves it into a
+    # typed subject. Without this the sentence a human actually typed is lost
+    # (it is overwritten below), and the ticket's whole purpose is to record
+    # what was asked, not only what was answered.
+    raw_subject = args.subject
     if flow is None and looks_like_sentence(args.subject):
         selection = select_flow(args.subject)
         if not selection.matched:
@@ -690,6 +751,16 @@ def _cmd_investigate(args: argparse.Namespace) -> int:
     # Bookkeeping must never take down a diagnosis, so a write failure is a
     # note on stderr and nothing more.
     _record_diagnosis_in_ledger(result, args, subject, flow)
+
+    # B-446: the flight recorder. One markdown file per interaction, every
+    # field code-observed. Opened here rather than at the top of the command so
+    # the resolved flow/subject are known -- the ticket records what was
+    # actually investigated, not what was typed.
+    _record_in_ticket(
+        _open_ticket_for(args, subject, flow, entry_point="cli:investigate"),
+        args, result, subject, flow,
+        question=(raw_subject if raw_subject != subject else None),
+    )
 
     for repair in result.repairs:
         _note(f"# Repaired a model response: {repair}", args)
