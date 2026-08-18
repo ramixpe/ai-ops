@@ -314,35 +314,46 @@ records, and that the MCP boundary re-taught at B-481).
 
 ---
 
-## 4. Pending / undecided — carried forward, not resolved [PENDING]
+## 4. Answered 2026-08-18 — the operator's decisions [DECIDED]
 
-Registered here so nothing is lost; each needs the operator or a measurement.
+Every §4 pending item was answered in session:
 
-- **Documentation store: vector DB vs normal DB** — decide on the real corpus
-  size (§2.5).
-- **"RACE vs P.E.N.E"** — a comparison box on the board, not yet transcribed in
-  full. Needs the operator to expand what the two are and what the choice
-  between them decides.
-- **The pending list (second photo, pink) — clarified by the operator
-  2026-08-18:**
-  - **Memory** — agent/session memory across turns (D14; B-203/204/205/407).
-  - **Measure the context window** — instrument the actual token cost of the
-    surface a model reads, not estimate it. Directly the +86% manifest finding
-    (§10) and B-113; the measurement that tells us whether a 7-backend MCP
-    surface is navigable by a small model at all.
-  - **More nettools** — the adjacency/neighbour expansion (IS-IS *done*, LDP,
-    LLDP, RSVP, OSPF, MP-BGP, CDP, and more), **and a class the operator named
-    explicitly: focused tools that serve BOTH context-gathering AND invoking a
-    specific command for troubleshooting.** See §5.1 — this refines the
-    wide/narrow model.
-- **Cache backend split** — Redis vs SQL vs neo4j each appear in the cache
-  layer; which state lives where (hot status in Redis, structured config in
-  SQL, topology in neo4j?) is a design task, not yet decided.
-- **The orchestration decision itself (§1)** — recommended as Option C split by
-  wide/narrow, but explicitly *proposed*, to be settled by the B-494/B-479
-  measurement.
-
----
+- **"RACE vs P.E.N.E" → resolved: GRACE won.** The prompt-discipline comparison
+  is closed, and GRACE is what `prompts/` already implements (Grounding, Role,
+  Anchors, Constraints, Expected output). No action; registered as closed.
+- **The log and telemetry stack EXISTS and access is acquired.** Discovery
+  2026-08-18, verified with live queries, dual-homed on the lab mgmt subnet:
+  - `syslog-ng` 4.5.0 (172.20.250.101, 514/udp) → **Loki** 2.9.8
+    (172.20.250.103:3100). **All nine routers are logging** — verified via
+    `/loki/api/v1/label/host/values`; labels: host/job/severity/source_ip.
+  - gNMI → `telegraf` 1.30 (`gnmic` container) → **Prometheus** v2.51.2
+    (172.20.250.102:9090) → **Grafana** 10.4.3 (172.20.250.104). **337
+    non-internal metrics live today**, including `Cisco_IOS_XR_clns_isis_oper`
+    neighbour state (holdtime, uptime, adjacency SIDs) and
+    `infra_statsd_oper` interface generic counters — the packet-drop and
+    utilisation history of §2.4a is already being collected.
+  - **Alertmanager** v0.27.0 (172.20.250.105:9093) — `route_alertmanager`
+    (B-480) has a live counterpart on the host.
+  - **Postgres 16** runs on the same host — a candidate for the cache layer's
+    SQL role rather than a new container.
+- **Orchestration: Option C, wide→narrow, side-effects behind flows — DECIDED.**
+  Execution directives attached: **spin up an n8n docker** and start building
+  flows on it; **draft the initial flow list** worth testing first; **build a
+  new MCP** (the Stage-2 hub surface) which the operator will test through LM
+  Studio and share logs for selection scoring.
+- **The three-tier gradient (§5.1) — CONFIRMED.**
+- **The cache is epoch-aware — DECIDED**, with a forward note: later, some
+  further fields may be *qualified as always-cached*; qualification is a
+  reviewed decision per field, not a default.
+- **neo4j is derived — DECIDED.** First implementation: a simple script that
+  collects LLDP/CDP/IS-IS and builds the graph. Later: an **ontology layer to
+  enrich context** — explicitly on the plan, not in v1.
+- **Sequencing: measure-first — DECIDED.** Seal a prediction and score the
+  wide/narrow menu with B-494's harness before committing the surface.
+- **Process: push to GitHub at every major milestone**, and **retire documents
+  that are no longer related** — the cleanup executes as milestone 0 of the
+  Stage-2 plan with an explicit reviewed list (evidence-class documents —
+  FINDINGS, rounds, reviews, archives — are records, not clutter, and stay).
 
 ## 5.1 Refinement — a tool is not always the narrow end [OPERATOR clarification, ANALYSIS]
 
