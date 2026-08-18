@@ -4579,3 +4579,53 @@ but **an MCP user reads the model's narration of it** — the paraphrase path
 with no flag to leave off. The model-size floor that does not apply to
 `nettools investigate` does apply to the MCP surface, and an invented service
 on a loopback is what that floor looks like from underneath.
+
+## OBS-159 · Preflight · The one new finding is a live instance of the flow that is not built yet
+
+Preflight (2026-08-18T10:26Z) **passed**: tree clean and in sync, four frozen
+blobs identical to `6629a2c`, ruff clean, 1964 passed, offline demo exits 1 on
+the fixture fault, fault option 8 and `SPARE_IF` both present.
+
+**Round 6's off-path precondition holds**, checked by hand because the script
+deliberately refuses to check it: `PE2 → 10.255.0.31` egresses
+`Gi0/0/0/0` (Protected, metric 20) and `Gi0/0/0/1` (Backup Local-LFA, metric
+30). **Neither is `Gi0/0/0/2`**, so the spare port is genuinely off-path and
+the round is not void as sealed.
+
+**Two warnings. One is known** (faultlab is still not a git repository,
+OBS-135; `round8b.py` already defaults into `evidence-archive/`).
+
+**The other is new and worth the paragraph.** `isis_adjacency_count_drift` on
+**PE3**, off this fabric's derived floor. Traced:
+
+* PE3 has **two** LLDP neighbours — P2 on `Gi0/0/0/0`, P4 on `Gi0/0/0/1`.
+* PE3 has **one** IS-IS adjacency — P4 only.
+* P2's four adjacencies are P1, P4, P3, PE1. **PE3 is not among them.**
+* Both ends of the PE3↔P2 link are `up/up`, MTU 1514 on each, ARPA.
+
+So: physical up, LLDP forming, MTU matched, and **neither end sees the other in
+IS-IS**. The direction matters and B-465's fix is why this surfaced at all — it
+is *below* baseline, a warning, where PE2/PE4's floor entries are *above* and
+merely informational.
+
+**And here is the useful part: the tool cannot say why, and that is correct
+rather than a defect.** Every remaining candidate — the interface not being in
+the IS-IS instance, a level or authentication mismatch, a missing address — is
+**configuration**, and this build reads operational state only. `show
+running-config` beyond `hostname` is not in the allowlist and will not be. This
+is the config axis, B-104, arriving as a concrete need rather than a planned
+feature: the fabric produced a question MVP-0 is structurally unable to answer.
+
+It is also a **naturally occurring broken case for `isis_adjacency`** — B-107,
+the flow that runs first and alone once B-428 lands, and the one whose backlog
+entry insists its broken state must be *designed alongside the flow rather than
+captured afterwards*. A real one has now appeared on its own. Worth capturing
+as a labelled fixture before the lab is rebuilt, because this exact shape —
+link up, LLDP up, adjacency absent — is the case a healthy-only corpus can
+never contain.
+
+**No impact on the sealed rounds.** Round 8b and round 6 both act on PE2; PE3
+is on neither's path, and the RR1↔PE2 path used by §11/§12 shows
+`igp_adjacency@PE2` healthy with 2 adjacencies. **Do not repair it before the
+windows** — changing the fabric now would invalidate a preflight that has
+already passed, and the rounds do not need it.
