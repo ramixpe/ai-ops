@@ -65,6 +65,12 @@ BASELINE_COMMIT = "6629a2c"
 #: that identifies the guard's test. The symbol is what `tests/` is searched for -- never
 #: the module name, never a filename.
 MUTATIONS = [
+    ("ROUND-8-SOCKET", "the BGP socket line is read positionally, not by first match",
+     "src/agent_nettools/template_parsers.py",
+     '            meta["socket_armed_read"] = match["read"] == "armed"\n',
+     '            meta["socket_armed_read"] = match["io"] == "armed"\n',
+     "test_the_socket_line_is_read_positionally_not_by_first_match"),
+
     ("B-467-MCP", "the MCP boundary quotes device free text (holistic review)",
      "mcp_server/boundary.py",
      "            elif key in _FREE_TEXT_FIELD_NAMES and isinstance(value, str):\n",

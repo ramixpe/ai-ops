@@ -1641,3 +1641,77 @@ def test_an_isolated_device_reports_no_route_to_the_route_reflector():
     assert status is tp.PARSE_OK
     assert parsed["meta"]["found"] is False
     assert parsed["records"] == []
+
+
+# --------------------------------------------------------------------------- #
+# The BGP socket line — ROUND-8 §6.2 precondition 1.
+#
+# Round 8's sampler used a FIRST-MATCH search over this line, which hit the
+# `io` field and reported read=not-armed on every Established session. That
+# single defect voided §2a.2 and cost a whole lab window. The shipped parser is
+# anchored and positional and was never wrong -- but nothing tested it against
+# the one line shape that discriminates, so "the shipped one is correct" rested
+# on reading it rather than on running it.
+#
+# The committed corpus cannot close this: read == write in all 16 fixtures
+# (14 armed/armed, 2 not-armed/not-armed), so a parser that SWAPPED the two
+# would pass the entire suite. That is §0.12's shape -- a corpus uniform in the
+# dimension the test discriminates on -- and it needs synthetic input, not a
+# new capture.
+# --------------------------------------------------------------------------- #
+
+_SOCKET_NEIGHBOR = """BGP neighbor is 10.255.0.31
+ Remote AS 65000, local AS 65000, internal link
+ BGP state = {state}
+ Socket {io} for io, {read} for read, {write} for write
+"""
+
+
+def _socket_meta(*, io, read, write, state="Established"):
+    parsed = tp.parse_xr_bgp_neighbor(
+        _SOCKET_NEIGHBOR.format(io=io, read=read, write=write, state=state)
+    )
+    return parsed["meta"]
+
+
+def test_the_socket_line_is_read_positionally_not_by_first_match():
+    """The exact line an Established session prints, and the exact defect.
+
+    `Socket not armed for io, armed for read, armed for write` is what a
+    HEALTHY session emits -- io is legitimately not armed. A first-match
+    search for "armed" or "not armed" lands on io and concludes the session
+    has no read socket, which is precisely backwards.
+    """
+
+    meta = _socket_meta(io="not armed", read="armed", write="armed")
+
+    assert meta["socket_armed_read"] is True, (
+        "read was misread from the io field -- this is the round-8 sampler defect"
+    )
+    assert meta["socket_armed_write"] is True
+
+
+def test_read_and_write_are_not_interchangeable():
+    """A parser that swapped read and write would pass every committed fixture.
+
+    All 16 corpus fixtures have read == write, so only synthetic input can tell
+    the two apart. Nothing reads `socket_armed_write` today; this is latent, and
+    the point is that it stays impossible rather than merely unused.
+    """
+
+    mixed = _socket_meta(io="not armed", read="armed", write="not armed")
+    assert mixed["socket_armed_read"] is True
+    assert mixed["socket_armed_write"] is False
+
+    swapped = _socket_meta(io="not armed", read="not armed", write="armed")
+    assert swapped["socket_armed_read"] is False
+    assert swapped["socket_armed_write"] is True
+
+
+def test_a_fully_unarmed_socket_reads_as_unarmed():
+    """The Idle case -- 2 of 2 Idle fixtures print this shape."""
+
+    meta = _socket_meta(io="not armed", read="not armed", write="not armed", state="Idle")
+
+    assert meta["socket_armed_read"] is False
+    assert meta["socket_armed_write"] is False

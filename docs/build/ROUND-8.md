@@ -603,3 +603,41 @@ run, stated in advance, is the amendment §6.1b exists to permit.
 §2a.3, §2a.4, §2a.5 and §2a.6 are scored in §5 and do not need the window.
 8b tests §2a.2 and, through it, §2a.1 — nothing else. If the operator has one
 lab window, this is the only claim it needs to buy.
+
+### 6.5 Precondition 1, checked before the window — it did not hold
+
+Checked 2026-08-18, immediately before opening round 8b's window. §6.2 lists
+three preconditions and says *"the round does not start until all three hold"*.
+**Preconditions 2 and 3 held in `round8b.py`** (`socket_line_raw` is stored per
+sample; `baseline_socket_armed_read` and `baseline_trustworthy` are computed
+and abort the round at its first verdict line).
+
+**Precondition 1 did not.** It asks for *"a unit test asserting `Socket not
+armed for io, armed for read, armed for write` yields `read=armed`"*. No such
+test existed. `tests/test_checks.py` passes `socket_armed_read` in as a
+**constructed** value to `_neighbor_meta(...)` — it never runs the parser
+against the line — and its corpus-wide assertion cannot close the gap either,
+because **read == write in all 16 committed fixtures** (14 armed/armed, 2 not
+armed/not armed). A parser that swapped the two fields would pass the entire
+suite. That is §0.12's shape exactly: a corpus uniform in the dimension the
+test discriminates on.
+
+The shipped regex was correct all along — anchored and positional, and §5
+already established that by reading it. **The gap was that "the shipped one is
+correct" rested on reading rather than on running**, which is the distinction
+this whole build keeps re-learning.
+
+Three tests added to `tests/test_template_parsers.py`, driving the real
+`parse_xr_bgp_neighbor` path rather than the regex in isolation: the healthy
+mixed line yields `read=armed`; read and write are shown non-interchangeable
+against synthetic input the corpus cannot supply; the all-unarmed Idle shape
+still reads as unarmed.
+
+**Mutation-verified, with the actual round-8 defect as the mutant.** Replacing
+`match["read"]` with `match["io"]` — which is what a first-match search
+effectively did — fails 2 of the 3. Added to `scripts/mutate_guards.py` as
+`ROUND-8-SOCKET`; **21/21 guards hold.**
+
+**Precondition 1 now holds. The round may start.** Cost: about fifteen minutes,
+before the window rather than inside it — which is what §6.1b is for, and what
+round 5 paid for the other way.
