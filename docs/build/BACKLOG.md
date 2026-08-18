@@ -10,6 +10,22 @@ Work beyond MVP-0, staged. Nothing here is scheduled — this is the ordered lis
 
 ---
 
+## State vocabulary
+
+`DONE` shipped and verified · `OPEN` real work, not started · `DEFERRED`
+examined and postponed, **carrying its unblocking condition** · `BLOCKED`
+cannot proceed (hardware, another repo, an unlanded dependency) ·
+**`OUT-OF-SCOPE`** decided against.
+
+`OUT-OF-SCOPE` was added 2026-08-18 for the same reason `DEFERRED` was added at
+Gate Zero: the vocabulary was one state short and items were being labelled
+with the nearest wrong word. `BLOCKED` says *circumstance prevents this*;
+`OUT-OF-SCOPE` says *we chose not to*. Junos was filed `BLOCKED` on "no Junos
+device", which reads as "waiting for hardware" — it is not waiting for
+anything. **A state that misdescribes why an item is not moving is how a
+backlog drifts from the repository**, which is the failure Gate Zero exists to
+correct.
+
 ## The governing rule
 
 > Over-engineering is building *N* of something before validating one.
@@ -125,7 +141,7 @@ cost of the state a reconciliation cannot express, measured (OBS-140).
 | **B-305** | `DEFERRED` | until B-304 | B-304 (DEFERRED) | OBS-140 |
 | **B-306** | `DEFERRED` | until B-305 | B-305 (DEFERRED) | OBS-140 |
 | **B-307** | `DEFERRED` | until B-305 | B-305 (DEFERRED) | OBS-140 |
-| **B-401** | `BLOCKED` | no Junos device | **a Junos device** | OBS-086 |
+| **B-401** | `OUT-OF-SCOPE` | **OUT OF SCOPE 2026-08-18, by operator decision.** Junos support is not being pursued. This is a decision, not a blocker: it does not wait on a device arriving, and it reverses by decision rather than by circumstance. **The `juniper_junos` entry in `platforms.py` STAYS** — the file is frozen additions-only, deletion is not an addition, and the per-platform allowlist is a structural claim that three vendors demonstrate better than two. Scope changed; the safety surface did not. Prior note: no Junos device | **a Junos device** | OBS-086 |
 | **B-402** | `DONE` | OBS-103 | — | OBS-103 |
 | **B-403** | `DONE` | OBS-123 | B-107 (OPEN) | OBS-123 |
 | **B-404** | `DONE` | OBS-123 | MVP-0 | OBS-123 |
@@ -172,7 +188,7 @@ cost of the state a reconciliation cannot express, measured (OBS-140).
 | **B-445** | `DEFERRED` | until escalation-grade output; B-430 (DONE) already surfaces the far end's stated reason | — | review §5 · B |
 | **B-446** | `DEFERRED` | until workflow adoption | — | review §5 · B |
 | **B-447** | `DEFERRED` | until either the EVPN or the SR flow is designed | — | review §5 · A |
-| **B-448** | `BLOCKED` | hardware — parked with B-401. *The payoff test is unvalidated, not passed* | B-401 (BLOCKED) | review §5 · A |
+| **B-448** | `OUT-OF-SCOPE` | **OUT OF SCOPE 2026-08-18**, with B-401. The payoff test remains unvalidated rather than passed, and that stays true and stated — a scope decision does not convert an unmeasured claim into a measured one. Prior note: hardware — parked with B-401. *The payoff test is unvalidated, not passed* | B-401 (BLOCKED) | review §5 · A |
 | **B-449** | `DEFERRED` | until any L3VPN or EVPN claim is made | — | review §5 · A |
 | **B-450** | `DEFERRED` | until a characterised failure envelope exists | — | review §5 · C |
 | **B-451** | `DONE` | f6ea6ec | B-436 (DONE) | OBS-109 |
