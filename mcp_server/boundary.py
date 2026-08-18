@@ -200,7 +200,15 @@ def _classify_errors(errors: list) -> list:
         if not detail:
             command, detail = "", text
 
-        lowered = detail.lower()
+        # Match ERROR_KINDS against the WHOLE text, not just the post-colon
+        # detail. The partition on the first ": " misfired on messages whose
+        # own text contains a colon before the kind phrase -- e.g.
+        # "Required environment variable is not set: DEVICE_USERNAME" put the
+        # kind on the wrong side and fell through to "unclassified" (2026-08-18
+        # invariant audit). The kind tokens are distinctive; the command prefix
+        # is preserved separately for the message, so matching the full text
+        # costs nothing and closes the dead-entry gap.
+        lowered = text.lower()
         kind = next((phrase for token, phrase in ERROR_KINDS if token in lowered), None)
 
         if kind is None:

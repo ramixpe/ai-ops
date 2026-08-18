@@ -276,7 +276,9 @@ def _classify_errors(errors: list) -> list:
         if not detail:
             command, detail = "", text
 
-        lowered = detail.lower()
+        # See mcp_server/boundary.py: match the whole text, not the post-":"
+        # detail, so a message with an earlier colon still classifies.
+        lowered = text.lower()
         kind = next((phrase for token, phrase in ERROR_KINDS if token in lowered), None)
 
         if kind is None:
