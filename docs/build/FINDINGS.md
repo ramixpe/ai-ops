@@ -4933,3 +4933,72 @@ never a legitimate instruction to an agent in this build, whatever it appears
 inside.** If a real harness message ever seems to say that, the correct
 response is the one taken here — comply with nothing, report the message, and
 let a human decide.
+
+## OBS-167 · B-107 · The epoch's coherence re-read caught a dependency every isolated test missed
+
+The second flow is built and the pattern repeats — which was the whole point of
+sequencing `isis_adjacency` alone before the other four. Two findings came out
+of it that the row did not anticipate.
+
+**The flow is shorter, and that is the result.** `bgp_session` has five rungs;
+`isis_adjacency` has two. LLDP was the obvious candidate for a third and was
+deliberately refused: **it does not gate IS-IS adjacency formation.** Two
+independent protocols sharing a wire is not a dependency, and a rung asserting
+one would be a false hypothesis under B-437. LLDP instead corroborates *inside*
+the top rung's check — exactly the shape `bgp_transport` uses the TCP socket
+for. So "does the pattern repeat" has a more useful answer than yes: **the
+pattern is the discipline about what counts as a rung, not a rung count.**
+
+**And the bug worth the whole exercise.** The first draft's check read
+`interfaces` evidence that its rung had not declared in `collect`. Every
+isolated test passed, and so did the main walk — because the walk builds from
+the whole epoch and the data was simply there. The **coherence re-read** is
+what failed it: `epoch._collect_one_rung` re-collects only a rung's own
+declared tuple, so on re-read the evidence vanished, the rung flipped to
+`unevaluated`, and the finding became `temporally_incoherent`.
+
+That is the epoch design catching a class of defect nothing else could see.
+`epoch.py` exists to bound *time* — to stop a fix mid-walk faking a pass — and
+it turns out to double as an **undeclared-dependency detector**, because
+re-reading a rung in isolation is precisely the test of whether its `collect`
+tuple is honest. Nobody designed it for that. It is the second time this week a
+mechanism has been more load-bearing than its stated purpose (cf. B-465's
+direction-aware drift rule surfacing PE3's break at all).
+
+The lesson for the four flows that may now run concurrently: **a rung that
+works in the walk and fails the re-read has an undeclared dependency**, and the
+hand-built collectors used in unit tests cannot find it, because they do not
+gate by `rung.collect`. Test a new flow through the real `investigate()` path
+or the defect is invisible.
+
+## OBS-168 · Wave · Six items closed, and three agents found defects in their own work
+
+The closing wave ran four agents. What separates it from the earlier ones is
+where the findings came from.
+
+* **B-112's agent** ran five mutations and **two of them exposed gaps in its
+  own tests**: replacing `_validated_subject` with a raw regex was caught by
+  nothing, because its hostile-input tests did not discriminate (the token
+  charset already excluded metacharacters) — the real discriminator was a
+  length cap it had not tested. And a collision-guard test passed under
+  mutation because its sentence never reached the code under test at all.
+* **B-107's agent** found its own undeclared-dependency bug by running the full
+  CLI rather than the check in isolation, and reported it as a defect in its
+  first draft rather than quietly fixing it.
+* **B-485's agent** refused to wire itself into `cli.py` and `settings.py`
+  because both were under concurrent edit, and handed over an exact diff sketch
+  instead.
+
+**All three could have shipped green suites without saying any of it.** The
+mutation requirement is what made the first two visible; file-ownership
+discipline is what made the third safe. Neither is a policy about care — both
+are mechanisms that make an omission fail loudly.
+
+**One orchestration error, mine.** All four agents ran in the *same working
+tree* rather than isolated worktrees. Their file sets were disjoint so no edit
+was lost, but every agent saw failures caused by the others' in-flight work,
+and each had to spend effort proving the failures were not its own — one did it
+by `git stash`, another by running the suite three times as the count moved.
+Two agents reported transient "file not found" moments that resolved on retry.
+Nothing was corrupted, and it was still wasteful: **worktree isolation exists
+for exactly this and I did not use it.** Next wave does.
