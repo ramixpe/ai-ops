@@ -1,20 +1,23 @@
 # Session Handover
 
-**2026-08-17.** Branch `feat/investigation-layer`. Tree green: **1786 pass, 24 skipped**, lint clean, four frozen files byte-identical against `6629a2c`.
+**2026-08-18.** Branch `feat/investigation-layer`. Tree green — the exact test count
+moves as the build grows; CI is authoritative (the pattern CLAUDE.md uses, adopted here
+after this header went 35 commits stale showing 1786).
 
 > ## Where things stand
 >
-> **Publication work is done.** `CLAUDE.md` split (941 → 216 lines) with the architecture reference at `docs/design/architecture.md`; `docs/README.md` regenerated from the tree with a reader's path; `CONTRIBUTING.md` written; `evidence-archive/README.md` written; the README's phase-numbered headings renamed and CI's `offline-demo` claim finally documented.
+> **Both review waves and the OPS wave are shipped.** FIX-PLAN closed B-467–B-476
+> (egress projector over every model path, agent trust labels + real deadline, atomic
+> persistence, probe annotations, settings validator, SECURITY.md). OPS-WAVE closed
+> B-477–B-480 plus B-202 and B-210: `nettools audit`, `nettools route-event` with n8n/
+> systemd examples, the knowledge surface (search + curated mnemonics + `operator_notes`
+> in every investigate payload), and the staged MCP surface behind `NETTOOLS_MCP_SURFACE`.
 >
-> **The H2 claims audit found ten cross-file contradictions**, all fixed (OBS-137). Two were substantive: `MVP0-REVIEW.md` used the fabricated timestamp as evidence *the grounding gate works* when the correlation path had no gate at all, and `glossary.md` plus the LLD still taught the pre-Q-017 walk rule.
+> **A holistic four-lens review ran 2026-08-18** (adversarial code, invariants, docs
+> drift, operator experience) — results in `docs/build/HOLISTIC-REVIEW.md` once merged.
 >
-> **Round 8 is scored** (`ROUND-8.md` §5). Four claims confirmed; §2a.2 is **void rather than refuted** — the sampler's socket regex read `False` in all 195 Established samples, so the falsifier fired on an instrument that could not fail it (OBS-133). Round 8b is re-sealed in §6 and needs a lab window.
->
-> **B-453 shipped.** Identifier containment is wired into `ground_report`.
-
-**Shipped 2026-08-17 after the MCP re-test:** **T-035** (Telegram relay, `--notify`, 18 tests — needs `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.env` before it delivers); **B-465 half** (an adjacency count *above* baseline is `info`, not `warning` — the rule was reporting the fabric's repair as drift); **B-453 pinned through `investigate()`** rather than only at the unit level.
-
-**`docs/build/OPERATOR-RUNBOOK.md`** is the step-by-step for everything below.
+> **Backlog counts are derived, not maintained** — see BACKLOG.md's one-liner; two
+> hand-maintained totals drifted and were removed.
 
 ## What is waiting on the operator
 

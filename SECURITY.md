@@ -61,18 +61,18 @@ else below is honesty about the much narrower guarantee that leaves.
   *sent*; it grants nothing, because there is no inbound path to grant
   anything on. If this module ever grows one, that allowlist must not be
   mistaken for the thing guarding it (`notifier.TelegramNotifier`).
-- **Prompt injection via device free text is mitigated output-side only.**
-  `mcp_server/boundary.sanitize()` withholds *unparsed* text but leaves
-  `data.parsed` intact, and parsed records still carry verbatim device-authored
-  prose in fields like a syslog line's `text` — 17,916 characters of it in one
-  measured probe, and syslog is written by an unauthenticated network peer, not
-  just the device. Nothing today validates the *content* of that text before it
-  reaches a prompt. What contains the damage is that outputs are gated —
-  `ground_correlation` requires every timeline entry to cite a real timestamp
-  and matching mnemonic, and non-authoritative prose is withheld on failure —
-  so an injected log line can steer wording but cannot fabricate a cited
-  finding. This is an open item, tracked as B-467
-  (`docs/DEEP-REVIEW-2026-08-17.md` §2.1), not a solved one.
+- **Prompt injection via device free text is bounded, not eliminated.**
+  Every model path now routes through one egress projector
+  (`src/agent_nettools/model_egress.py`, B-470): raw command output is
+  withheld with a counted record, and device-authored free text (a syslog
+  line's `text`, a BGP reset reason) is wrapped in explicit untrusted-content
+  delimiters with a per-prompt budget (B-467). The projector bounds *where*
+  device text can appear and *how much*; it does not validate its meaning —
+  an injected log line can still steer non-authoritative prose. What stops it
+  mattering is output-side: grounded timelines, identifier containment
+  (B-453), and non-authoritative labelling mean an injected line cannot
+  fabricate a **cited** finding. Delimiters are a mitigation for prompt
+  steering, not a proof against it — the projector's own docstring says so.
 
 ## Unsupported deployment modes
 

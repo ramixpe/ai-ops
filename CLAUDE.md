@@ -26,6 +26,9 @@ hit live devices: `make facts|interfaces|bgp|lldp|isis|sr [DEVICE=RR1]`,
 `make fabric-bgp`, `make analyze`, `make analyze-fabric`, `make agent
 QUESTION="..."`, `make demo`, `make diff`, `make mcp`, `make inspect`.
 `nettools <check> <DEVICE>` works directly too.
+`nettools audit` (fabric consistency), `nettools route-event` (event → flow
+routing), and `nettools config show|check` (settings validation) shipped in
+the 2026-08-18 OPS wave — `make audit|route-event|config-check` wrap them.
 `make route|bgp-neighbor|interface|logging|ping|traceroute` (Phase 5,
 validated parameterized templates) take an additional value
 (`PREFIX`/`ADDRESS`/`NAME`/`COUNT`), e.g. `nettools route PE1 10.255.0.31`.
@@ -200,6 +203,8 @@ Read these before changing anything in the investigation layer.
 | [docs/design/interfaces.md](docs/design/interfaces.md) | How humans interact with the agent, staged. Read before T-035 |
 | [docs/design/evidence-reduction.md](docs/design/evidence-reduction.md) | How large evidence sources are made model-readable **without a model reading them** |
 | [docs/design/chaos-harness.md](docs/design/chaos-harness.md) | Fault injection, framed as the Stage 2 acceptance vehicle. §3.1's operating rule is binding |
+| [docs/design/evidence-epoch.md](docs/design/evidence-epoch.md) | One observation window; why skew is not coherence (B-436) |
+| [docs/design/next-level.md](docs/design/next-level.md) | Proposal: the tiers + the local model; ranked candidates |
 | [docs/design/peer-review-response.md](docs/design/peer-review-response.md) | Three external reviews and what was accepted, corrected or deferred |
 | [docs/build/BUILD-PLAN.md](docs/build/BUILD-PLAN.md) | The 34-task build plan. **Part 0 is binding** — model roles, escalation ladder, frozen files |
 | [docs/build/TRACKER.md](docs/build/TRACKER.md) | Progress. Authoritative on task status |

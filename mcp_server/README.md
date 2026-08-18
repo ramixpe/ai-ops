@@ -84,7 +84,7 @@ symptom. Every verdict is code comparing parsed fields; **no model is involved
 and none is called**, and the report is rendered from the descent's own typed
 fields rather than written by one.
 
-It exists because the other twenty tools answer *what is the state of X*, and
+It exists because the other tools (22 at last count — the list above is authoritative) answer *what is the state of X*, and
 the question an operator actually has is *why is this broken*. Answering that by
 calling six tools and reasoning over the results is exactly where a model
 invents a plausible chain; this returns one that was derived.

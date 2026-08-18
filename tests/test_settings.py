@@ -416,3 +416,26 @@ def test_main_prints_no_config_warning_on_a_clean_environment(monkeypatch, capsy
     cli.main()
 
     assert "config warning" not in capsys.readouterr().err
+
+
+def test_every_declared_setting_appears_in_env_example():
+    """The sync the drift sweep found missing: settings.py declared 38 vars
+    and .env.example carried 36. Without this, the template rots var by var
+    -- and the template is the only place a new operator learns the surface.
+
+    Secrets are included too: the template documents their NAMES (never
+    values), which is exactly what an operator needs.
+    """
+
+    from pathlib import Path
+
+    from agent_nettools.settings import SETTINGS
+
+    root = Path(__file__).resolve().parent.parent
+    template = (root / ".env.example").read_text()
+
+    missing = [s.name for s in SETTINGS if s.name not in template]
+    assert not missing, (
+        f".env.example does not mention: {missing} — every declared setting "
+        "must appear (commented is fine); the template is the operator's map"
+    )

@@ -67,7 +67,8 @@ ios-xr-nettools/
 │   │   ├── discovery-loki.md           T-004 — log pipeline, label scheme, mnemonics
 │   │   ├── discovery-alerting.md       T-005 — Alertmanager routing, Prometheus surface
 │   │   ├── discovery-l3vpn.md          T-006 — VRF/RT map, CE attachment, subject naming
-│   │   └── FIX-PLAN.md                 Both reviews' findings, reconciled into one wave plan
+│   │   ├── FIX-PLAN.md                 Both reviews' findings, reconciled into one wave plan
+│   │   └── OPS-WAVE-PLAN.md            n8n/knowledge/MCP judged, then built (B-477–480)
 │   ├── devices.md                      Generated from inventory — do not hand-edit
 │   ├── REVIEW.md                       Code review
 │   ├── ARCHITECTURE-REVIEW.md          External review A
@@ -76,6 +77,8 @@ ios-xr-nettools/
 │   ├── EXPERT-PEER-REVIEW-2026-08-17.md  External review: architecture, safety, security, roadmap (P0-P3)
 │   ├── DEEP-REVIEW-2026-08-17.md       Verifies the review above at source; B-467, the sanitisation gap
 │   └── architecture.drawio             Diagram source
+├── examples/                           Orchestrator wiring (n8n, systemd) — plumbing only,
+│                                       never logic; the boundary rule is stated inside
 ├── prompts/README.md                   Versioned prompt artifacts (GRACE) and their rules
 ├── evidence-archive/                   Committed round payloads. See its own README
 ├── scripts/                            Probes and round samplers

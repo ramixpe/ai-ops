@@ -15,7 +15,7 @@ This is a read-only IOS-XR inspection tool with a deterministic dependency
 descent underneath it: point it at a device and a subject, and it walks a fixed
 ladder of rungs (`bgp_session → transport → route_to_peer → igp_adjacency →
 interface`) reporting the *lowest broken one* as the cause, with no model in the
-loop for the diagnosis itself. MVP-0 shipped and is scored — 1813 tests pass,
+loop for the diagnosis itself. MVP-0 shipped and is scored — the full suite passes (the exact count moves; CI is authoritative),
 lint is clean, and four fault-injection rounds have run against the real
 9-device lab, each with a prediction sealed and pushed before the fault landed.
 
@@ -94,7 +94,7 @@ git status -sb
 # 2. Tests and lint, from the venv.
 source .venv/bin/activate
 make test
-#   -> 1813 passed, 24 skipped, no network and no credentials needed for this.
+#   -> all passed (count moves as the build grows; CI is authoritative), no network, no credentials.
 #      A LOWER number, or a failure, means something changed under you --
 #      stop and find out what before you touch the lab.
 make lint

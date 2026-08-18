@@ -191,3 +191,17 @@ docker-build:
 clean:
 	rm -rf .pytest_cache .ruff_cache build *.egg-info src/*.egg-info
 	find . -path ./.venv -prune -o -name __pycache__ -type d -print0 | xargs -0 rm -rf
+
+# --- OPS wave (B-477/B-480/B-476) -------------------------------------------
+audit:  ## Deterministic fabric audit (exit 0 ok/info, 1 warning, 2 critical)
+	nettools audit
+
+audit-fixtures:  ## The same audit against committed captures (no lab needed)
+	nettools audit --from-fixtures --label healthy
+
+config-check:  ## Validate every NETTOOLS_*/provider env var; exit 1 on problems
+	nettools config check
+
+route-event:  ## Route an event from stdin (pipe an Alertmanager JSON or syslog line in)
+	nettools route-event
+

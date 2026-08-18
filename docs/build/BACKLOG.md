@@ -54,17 +54,13 @@ labelled unexamined (OBS-136).
 
 ### Gate Zero completed — 2026-08-17
 
-All 33 `unverified` items were read and given a real state. **Counts, 98 items** (B-465 and
-B-466 filed 2026-08-17 from the MCP re-test)**:**
+All 33 `unverified` items were read and given a real state. **Counts are derived, not
+maintained — run the one-liner below; a hand-maintained total here has drifted twice.**
 
-| | |
-|---|---|
-| `DONE` | **36** |
-| `DEFERRED` | **25** — examined, unscheduled, each carrying its unblocking condition |
-| `OPEN` | **20** — valid and startable when its phase begins |
-| `BLOCKED` | **16** — cannot proceed |
-| `CLOSED-AS-MEASURED` | **1** |
-| `unverified` | **0** |
+```
+python3 -c "import re,collections,pathlib; t=pathlib.Path('docs/build/BACKLOG.md').read_text(); s=t.index('| Item | State'); e=t.index(chr(10)+'## ',s); print(collections.Counter(m.group(1) for m in re.finditer(r'\| .[*][*]B-\S+[*][*] \| .([A-Za-z-]+). \|', t[s:e])))"
+```
+B-466 filed 2026-08-17 from the MCP re-test)**:**
 
 **96, not 95.** B-464 had been filed *into the reconciliation table in the main table's
 format* — item, title, description — so it carried no state, no dependency and no
@@ -120,7 +116,7 @@ cost of the state a reconciliation cannot express, measured (OBS-140).
 | **B-206** | `BLOCKED` | platform work B-206a/b | B-206 (BLOCKED), B-206 (BLOCKED) | OBS-124 |
 | **B-207** | `DEFERRED` | until Stage 2, and **before it ships, not after** — the item says so | B-201 (DEFERRED) | OBS-140 |
 | **B-208** | `DEFERRED` | until Stage 2 — this is the gate on the transition | B-201 (DEFERRED) | OBS-140 |
-| **B-209** | `BLOCKED` | **Q-007 resolved 2026-08-17 — Telegram.** Now blocked only on T-035 itself: no relay exists to harden until one is built | T-035 (TODO) | OBS-140 · OBS-141 |
+| **B-209** | `BLOCKED` | **Q-007 resolved 2026-08-17 — Telegram.** Now blocked only on T-035 itself: no relay exists to harden until one is built | T-035 (**DONE**) — and with T-035 shipped, B-209 is genuinely OPEN work, not blocked; left BLOCKED pending a decision to schedule | OBS-140 · OBS-141 |
 | **B-210** | `DONE` | `operator_notes` in every investigate payload — notes surface where the walk touches their device and flow. Payload only; prompts need B-467's egress review first, stated in the field docstring | B-402 (DONE) | OPS-WAVE · N-2 |
 | **B-301** | `DEFERRED` | until Stage 3. **Nothing else in Stage 3 starts without this** | — | OBS-140 |
 | **B-302** | `DEFERRED` | until B-301 | B-301 (DEFERRED) | OBS-140 |
@@ -144,10 +140,10 @@ cost of the state a reconciliation cannot express, measured (OBS-140).
 | **B-413** | `DONE` | OBS-059 | — | OBS-059 |
 | **B-414** | `CLOSED-AS-MEASURED` | OBS-127 — 28 kept records; aggregation carries nothing | B-206 (BLOCKED) | OBS-124 |
 | **B-415** | `BLOCKED` | OBS-124 | B-206 (BLOCKED) | OBS-124 |
-| **B-416** | `BLOCKED` | OBS-124 | B-414 (BLOCKED) | OBS-124 |
+| **B-416** | `BLOCKED` | OBS-124 | B-414 (CLOSED-AS-MEASURED) | OBS-124 |
 | **B-417** | `BLOCKED` | OBS-124 | B-107 (OPEN) | OBS-124 |
-| **B-418** | `BLOCKED` | OBS-124 | B-414 (BLOCKED) | OBS-124 |
-| **B-419** | `BLOCKED` | OBS-124 | B-101 (OPEN), B-414 (BLOCKED) | OBS-124 |
+| **B-418** | `BLOCKED` | OBS-124 | B-414 (CLOSED-AS-MEASURED) | OBS-124 |
+| **B-419** | `BLOCKED` | OBS-124 | B-101 (OPEN), B-414 (CLOSED-AS-MEASURED) | OBS-124 |
 | **B-420** | `DONE` | T-029a; verified OBS-124 | — | OBS-124 |
 | **B-421** | `DONE` | OBS-102 | T-031 | OBS-102 |
 | **B-422** | `DONE` | `_note` writes to stderr, stdout carries the payload. **Independently re-verified 2026-08-17**: a `test_notifier.py` assertion against stdout failed because the note was on stderr | — | VERIFICATION §6 |
@@ -187,7 +183,7 @@ cost of the state a reconciliation cannot express, measured (OBS-140).
 | **B-456** | `DONE` | 503b2ac | B-437 (DONE), B-431 (DONE) | OBS-121 |
 | **B-457** | `DONE` | OBS-126 | B-439 (DONE) | — |
 | **B-458** | `DONE` | OBS-126 | — | OBS-113 |
-| **B-459** | `DONE` | ee733a2 | B-453 (OPEN) | OBS-122 |
+| **B-459** | `DONE` | ee733a2 | B-453 (DONE) | OBS-122 |
 | **B-460** | `DONE` | OBS-120 | — | OBS-120 |
 | **B-461** | `DONE` | numbered rungs, 61af0d0 | B-439 (DONE) | OBS-117 |
 | **B-462** | `DONE` | OBS-129 — round 7, 99 down-port samples, 0 persisting | B-456 (DONE) | OBS-121 |
@@ -204,7 +200,7 @@ cost of the state a reconciliation cannot express, measured (OBS-140).
 | **B-473** | `DONE` | `_active_probe_tool`: same sanitisation boundary via shared `_register_sanitized_tool`, distinct annotations (`open_world_hint` + ACTIVE PROBE title), docstring prefix. Signalling, not enforcement — stated | — | FIX-PLAN · wave 1-D |
 | **B-474** | `DONE` | `_atomic_write_text` (tmp+fsync+replace), one-transaction golden + partial unique index with MAX(id) dedup migration, guarded reads with loud warnings, `snapshots_skipped` in `detect_flaps`, device-name validation both backends. **35 tests** | — | FIX-PLAN · wave 1-C |
 | **B-475** | `DONE` (scoped) | both serial paths pooled (`assess_lab_fabric_health` wave 1-D, agent `_assess_health` + parallel tool blocks wave 2-B). The full cross-surface scheduler stays deliberately future — filed thinking, not deferred accident | — | FIX-PLAN |
-| **B-476** | `DONE` | `settings.py`, 37 vars, two-direction cross-check test, `nettools config show/check`, startup warnings. Found `NETTOOLS_FIXTURE_DIR` undocumented and two live typo-swallows (`fasle` enables probes; `sqlit` selects files). Rewiring call sites is named future work | — | FIX-PLAN · wave 1-E |
+| **B-476** | `DONE` | `settings.py` (38 vars — `NETTOOLS_MCP_SURFACE` added by B-479 after this row was written), two-direction cross-check test, `nettools config show/check`, startup warnings. Found `NETTOOLS_FIXTURE_DIR` undocumented and two live typo-swallows (`fasle` enables probes; `sqlit` selects files). Rewiring call sites is named future work | — | FIX-PLAN · wave 1-E |
 | **B-477** | `DONE` | `audit.py`: 5 rules table-driven, fixture behaviour measured-then-pinned (healthy clean, broken=PE2, t0=the three renames). Two rules named absent rather than faked. The MTU rule's first draft failed its own synthetic test on the two-spelling join — fixed via `interface_kind.canonical` | — | OPS-WAVE · N-1 |
 | **B-478** | `DONE` | `knowledge.py` grep search with path:line citations (notes outrank prose); 12-entry curated mnemonic table with a drift test against event_routing; 2 MCP tools | — | OPS-WAVE · N-2 |
 | **B-479** | `DONE` | `staged_surface.py` behind `NETTOOLS_MCP_SURFACE` (default classic). Staged manifest asserted under HALF classic's. apply() fails loudly on an unknown SDK. B-113's consolidation now exists without destroying the A/B | B-113 (OPEN) | OPS-WAVE · N-3 |
@@ -229,7 +225,7 @@ cost of the state a reconciliation cannot express, measured (OBS-140).
 | **B-110** | **Flow: `l3vpn_service`** | The one object type whose identity is not obvious — needs the naming scheme first **Its broken state is designed alongside the flow, not captured afterwards** — a healthy-only corpus has structurally zero coverage of the broken case, not weak coverage. The `broken` label caught three separate classes of defect the healthy fixtures could not reach: four parser gaps, the walk-semantics bug (Q-017), and the subject-vocabulary gap. See OBS-050, OBS-055, OBS-057. **Sequenced, then parallelisable — amended 2026-08-16.** The five do not start until **B-428 lands**. Then `isis_adjacency` runs **serially and alone**, to prove the pattern repeats on a second flow; only after it does do the remaining four run concurrently, one agent per flow, Opus 5 judging acceptance for all of them. Running five in parallel off a pattern demonstrated once would be five instances of the same unvalidated assumption, which is §0.13's data face at project scale. Contrast Part 4's T-029–T-032, which are a contract chain: running those concurrently means two agents guessing at a shape neither has settled, the same silent-disagreement failure as the T-024 subject vocabularies (OBS-057). | T-006 finding | M | D5 |
 | **B-111** | **Flow: `topology`** | Multi-device; the fabric's LLDP data is self-contradictory, so this one must report disagreement rather than assert links **Its broken state is designed alongside the flow, not captured afterwards** — a healthy-only corpus has structurally zero coverage of the broken case, not weak coverage. The `broken` label caught three separate classes of defect the healthy fixtures could not reach: four parser gaps, the walk-semantics bug (Q-017), and the subject-vocabulary gap. See OBS-050, OBS-055, OBS-057. **Sequenced, then parallelisable — amended 2026-08-16.** The five do not start until **B-428 lands**. Then `isis_adjacency` runs **serially and alone**, to prove the pattern repeats on a second flow; only after it does do the remaining four run concurrently, one agent per flow, Opus 5 judging acceptance for all of them. Running five in parallel off a pattern demonstrated once would be five instances of the same unvalidated assumption, which is §0.13's data face at project scale. Contrast Part 4's T-029–T-032, which are a contract chain: running those concurrently means two agents guessing at a shape neither has settled, the same silent-disagreement failure as the T-024 subject vocabularies (OBS-057). | T-006 | M | D5 |
 | **B-112** | **Free-text flow selection** | Lets a human ask "why is BGP down on PE2" instead of naming the flow | B-101 | S | D5 |
-| **B-113** | **MCP tool consolidation** — ~22 tools to five stage-shaped ones | The manifest currently grows with the catalogue; this is D10/D11's failure mode live in the repo. **Reframed 2026-08-17 by measurement (OBS-112): less urgent than assumed, and the urgency moved.** `gemma-4-e4b` selected `investigate_lab_session` correctly from a 21-tool surface, and its reasoning trace named the *description* as the reason. Twenty tools say "collect read-only X"; one says what it achieves and when to prefer it. **So the count was not the binding constraint — the wording was.** Consolidation still has value (a smaller manifest is cheaper and easier to reason about), but the work that actually changes selection is writing every surviving description in terms of *what question it answers and when to prefer it*, and that work is worth doing **whether or not** consolidation happens. Do the wording first: it is cheaper, it is measurable the same way, and consolidating badly-worded tools into fewer badly-worded tools would have been credited with a fix it did not make | MVP-0 complete | M | D10, D11, D12 · OBS-112  **REWORDING DONE 2026-08-17** — all 21 descriptions now open `Answers: *<question>*` and say when to prefer the tool, pinned by a registry-driven test so a new tool inherits the form. Baseline captured verbatim in `MCP-EXPERIMENT.md` Appendix A; prediction pre-registered in §9 and pushed before the first edit. **CONSOLIDATION IS STILL OPEN, and its justification changed.** It was filed on D10/D11's manifest-growth argument and then reframed as less urgent than the wording. The rewording produced a better ground than either: **descriptions grew 5,961 → 11,107 chars, +86%**, and that is sent on every tool-list call, so the manifest a model reads before doing anything roughly doubled. **Five well-worded tools cost less context than 21 well-worded ones — and that argument needs no measurement at all.** It is arithmetic, it is available now, and it does not wait on the controlled comparison. Lead with it. The selection measurement remains worth running, but it is no longer what the case for consolidation rests on. |
+| **B-113** | **MCP tool consolidation** — ~22 tools to five stage-shaped ones | The manifest currently grows with the catalogue; this is D10/D11's failure mode live in the repo. **Reframed 2026-08-17 by measurement (OBS-112): less urgent than assumed, and the urgency moved.** `gemma-4-e4b` selected `investigate_lab_session` correctly from a 23-tool surface (21 at measurement time; +2 knowledge tools, B-478), and its reasoning trace named the *description* as the reason. Twenty tools say "collect read-only X"; one says what it achieves and when to prefer it. **So the count was not the binding constraint — the wording was.** Consolidation still has value (a smaller manifest is cheaper and easier to reason about), but the work that actually changes selection is writing every surviving description in terms of *what question it answers and when to prefer it*, and that work is worth doing **whether or not** consolidation happens. Do the wording first: it is cheaper, it is measurable the same way, and consolidating badly-worded tools into fewer badly-worded tools would have been credited with a fix it did not make | MVP-0 complete | M | D10, D11, D12 · OBS-112  **REWORDING DONE 2026-08-17** — all 21 descriptions now open `Answers: *<question>*` and say when to prefer the tool, pinned by a registry-driven test so a new tool inherits the form. Baseline captured verbatim in `MCP-EXPERIMENT.md` Appendix A; prediction pre-registered in §9 and pushed before the first edit. **CONSOLIDATION IS STILL OPEN, and its justification changed.** It was filed on D10/D11's manifest-growth argument and then reframed as less urgent than the wording. The rewording produced a better ground than either: **descriptions grew 5,961 → 11,107 chars, +86%**, and that is sent on every tool-list call, so the manifest a model reads before doing anything roughly doubled. **Five well-worded tools cost less context than 21 well-worded ones — and that argument needs no measurement at all.** It is arithmetic, it is available now, and it does not wait on the controlled comparison. Lead with it. The selection measurement remains worth running, but it is no longer what the case for consolidation rests on. |
 | **B-114** | **Gate model evaluation** — can a local model emit the typed decision reliably? | Decides whether the reasoning path can be fully local. Grammar-constrained decoding is the fallback | B-101 | M | D7 |
 | **B-115** | **Comprehensive health-check pipeline** | Breadth-first collect, no diagnostic question, summarise. The safest possible use of a model — pure summarisation of validated evidence | MVP-0 complete | M | Part 7 open item 4 |
 

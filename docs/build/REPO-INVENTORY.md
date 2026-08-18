@@ -195,3 +195,16 @@ exactly the reach you would expect.
 - **"Last commit" is not "last verified".** `Dockerfile` was last touched 2026-07-28 and has
   never been built in CI. `platforms.py` was last touched 2026-07-29 and is verified on
   every single run, because it is frozen and hash-compared.
+
+---
+
+## Addendum — 2026-08-18: what the pinned snapshot no longer covers
+
+The counts above are pinned at `098da8f` and correct for that commit. Since then
+(FIX-PLAN + OPS-WAVE, ~32 commits): tracked files 740 → **772**; `src/agent_nettools/`
+gained **`model_egress.py`, `settings.py`, `notifier.py`†, `audit.py`, `event_routing.py`,
+`knowledge.py`** (+ `data/mnemonics.yaml`); `mcp_server/` gained **`staged_surface.py`**;
+new top-level **`examples/`**; `docs/` grew to 45 files. († `notifier.py` predates the pin
+by hours but was in flight when the tables were drawn.) Regenerate the tables before
+relying on any count here — this addendum exists so the pin cannot read as current.
+

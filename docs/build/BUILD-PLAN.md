@@ -1500,7 +1500,7 @@ Update `README.md` (new CLI surface, GRACE, the prompts directory), `CLAUDE.md` 
 
 ---
 
-## T-035 · Report relay — outbound only `[OPTIONAL FAST-FOLLOW]` `[STATUS: TODO]`
+## T-035 · Report relay — outbound only `[OPTIONAL FAST-FOLLOW]` `[STATUS: DONE — see TRACKER; Telegram, per Q-007]`
 
 **Goal.** Get investigation output in front of the team without building a chat interface.
 

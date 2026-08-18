@@ -886,6 +886,28 @@ docs/                              Design, the build record, and three external 
 
 ---
 
+## Audit, event routing, and configuration
+
+Three operational commands (2026-08-18 wave; `docs/build/OPS-WAVE-PLAN.md` has the
+design judgement behind them):
+
+```bash
+nettools audit [--from-fixtures [--label L]]   # the fabric judged against itself:
+                                               # duplicate router-IDs, MTU mismatch
+                                               # across adjacencies, configured-but-
+                                               # dead BGP. Exit 0 ok/info, 1 warn, 2 crit
+echo "$EVENT" | nettools route-event [--device D]
+                                               # Alertmanager JSON or a raw syslog line
+                                               # -> which flow/device/subject to
+                                               # investigate, or why not. Table lookup,
+                                               # no model. Exit 0 routable / 1 not
+nettools config show|check                     # every env var's effective value and
+                                               # any malformed setting, secrets redacted
+```
+
+`examples/` wires these into n8n or systemd — plumbing only; the boundary rule inside
+that directory's README is part of the design, not a suggestion.
+
 ## Licence and contributing
 
 MIT — see [LICENSE](LICENSE).
