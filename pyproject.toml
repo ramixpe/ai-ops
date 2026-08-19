@@ -58,6 +58,16 @@ dev = [
 graph = [
     "neo4j>=5.0,<6.0",
 ]
+# The pynetbox client, needed only by netbox.write_records -- the thin half
+# of the NetBox inventory collector (Stage-2 M3b). Never a core dependency:
+# netbox.build_records/describe_writes/format_plan (the pure half) and every
+# other tool in this package must keep working with no NetBox configured,
+# and no import of `pynetbox` happens anywhere outside write_records' own
+# function body (it is imported lazily, in-function) -- same discipline as
+# the `graph` extra above.
+netbox = [
+    "pynetbox>=7.0,<8.0",
+]
 
 [project.scripts]
 nettools = "agent_nettools.cli:main"

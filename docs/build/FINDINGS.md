@@ -5295,3 +5295,45 @@ would paste from `show running-config`. No unit test would have produced that
 input, because every fixture stores the short form — the corpus was uniform in
 precisely the dimension the match discriminates on (§0.12), for the third time
 this week.
+
+## OBS-179 · M3b · Two bugs the agent's own mutation testing caught before they shipped
+
+The NetBox collector landed clean, and the interesting part is what did *not*
+ship with it. Two real defects were found by the agent mutation-testing its own
+guards — not by review, and not by the suite, which was green over both.
+
+**1. An upsert that would have duplicated on any non-key change.**
+`_get_or_create` filtered its lookup on *all* fields rather than the natural
+key. NetBox has genuine natural keys (device name, `(device, interface)`, IP
+CIDR), so the intended behaviour is upsert-by-key. Filtering on everything means
+the first run after a software upgrade — a changed `software_version`, nothing
+else — finds no match and **creates a second device**. The collector's headline
+promise is idempotency; it would have failed the first time reality changed.
+
+**2. A field that was never written at all.** Mutating the same function
+exposed that `software_version` was silently absent from `_apply`'s field set,
+which is *why* the first mutation appeared to pass. A guard test that passes
+because the thing it guards is missing is the emptiest possible green.
+
+**And one honest retraction inside the same pass.** The agent's NB4 guard
+(rejecting unresolvable LLDP neighbours) turned out **not independently
+load-bearing** — the mutual-agreement check already covers that case. Rather
+than claim the credit, it said so, then wrote a *self-referential* record test
+that genuinely exercises the remaining half. Reporting a guard as redundant is
+worth more than reporting it as verified.
+
+**A design divergence worth recording**, because it looks like inconsistency and
+is not: `graph.py` rebuilds by full delete-and-recreate; `netbox.py` upserts by
+key. The reason is the store, not taste — neo4j nodes have no natural key, so
+full replacement is the only way to avoid orphans; NetBox has natural keys, so
+replacement would destroy anything a human added alongside. Same rule
+("derived, never authored"), opposite mechanism.
+
+**Infrastructure finding, for the operator, not actioned.** Caddy's *running*
+config predates the Caddyfile edit that added the `/netbox/` route: the
+container started 2026-08-14, the route landed 2026-08-18, and `admin off`
+blocks live reload — so `/netbox/api/` currently serves the portal SPA. The
+service itself is confirmed up (a direct `netbox:8080/api/` request on the
+labnet returns 403 unauthenticated, which is the right answer). **Caddy is not a
+stage2 service and was deliberately not restarted overnight.** A reload picks
+up the route whenever the operator chooses.

@@ -436,6 +436,38 @@ SETTINGS: tuple[Setting, ...] = (
         "logs_loki",
         minimum=0.001,
     ),
+    # -- netbox.py (Stage-2 M3b): the read-only-by-default NetBox inventory
+    # collector. NetBox is DERIVED from parsed device evidence, never
+    # authored (stage-2-architecture.md §4) -- see the module docstring.
+    Setting(
+        "NETBOX_URL", "string", None,
+        "Base URL of the NetBox instance write_records() pushes into (e.g. "
+        "http://netbox:8080 from inside the lab's docker network, or the "
+        "Caddy-proxied path). Only read when write_records(dry_run=False) "
+        "is actually called -- build_records()/describe_writes() never need it.",
+        "netbox",
+    ),
+    Setting(
+        "NETBOX_TOKEN", "secret", None,
+        "NetBox API token. Only read when write_records(dry_run=False) is "
+        "actually called; never logged, never included in any exception "
+        "message this module raises.",
+        "netbox",
+        secret=True,
+    ),
+    # unknown_bool_disables=True for the same reason as NETTOOLS_ENABLE_AGENT/
+    # NETTOOLS_MCP_ALLOW_ACTIVE_PROBES: this gate exists to keep a real write
+    # OFF by default, and a typo must not silently reopen it. It is the
+    # SECOND gate write_records() checks -- dry_run=False alone is not
+    # enough -- so importing or dry-running netbox.py can never mutate
+    # anything regardless of how this variable is spelled.
+    Setting(
+        "NETTOOLS_NETBOX_WRITE_ENABLED", "bool", False,
+        "Opt-in for a real (non-dry-run) NetBox write via netbox.write_records(). "
+        "Default DISABLED; dry_run=True (the default) never checks this at all.",
+        "netbox",
+        unknown_bool_disables=True,
+    ),
     # -- credential_resolver.py, via inventory/lab.yaml's credential group --
     # These three are the *conventional* names this lab's own inventory.yaml
     # configures (username_env/password_env/ssh_keyfile_env) -- see

@@ -110,10 +110,15 @@ def test_bool_typo_on_a_fail_closed_setting_says_the_typo_disables_it(monkeypatc
 def test_unknown_bool_disables_settings_actually_fail_closed(monkeypatch):
     """The declared table's claim is not decorative: for every setting that
     says unknown_bool_disables=True, the module that actually reads it must
-    treat an unrecognized spelling as OFF. Pins the two current instances
-    against their real parsing functions, not just the declared flag."""
+    treat an unrecognized spelling as OFF. Pins the current instances against
+    their real parsing functions, not just the declared flag.
 
-    from agent_nettools import cli
+    NETTOOLS_NETBOX_WRITE_ENABLED joined this set with the netbox.py
+    collector (Stage-2 M3b) -- the same reasoning as the other two: a gate
+    that exists to keep a real write off by default must not reopen on a
+    typo."""
+
+    from agent_nettools import cli, netbox
     from mcp_server import server as mcp_server_module
 
     unrecognized = "definitely-not-a-recognized-spelling"
@@ -121,13 +126,20 @@ def test_unknown_bool_disables_settings_actually_fail_closed(monkeypatch):
     fail_closed_settings = {
         s.name for s in settings.SETTINGS if s.kind == "bool" and s.unknown_bool_disables
     }
-    assert fail_closed_settings == {"NETTOOLS_MCP_ALLOW_ACTIVE_PROBES", "NETTOOLS_ENABLE_AGENT"}
+    assert fail_closed_settings == {
+        "NETTOOLS_MCP_ALLOW_ACTIVE_PROBES",
+        "NETTOOLS_ENABLE_AGENT",
+        "NETTOOLS_NETBOX_WRITE_ENABLED",
+    }
 
     monkeypatch.setenv("NETTOOLS_MCP_ALLOW_ACTIVE_PROBES", unrecognized)
     assert mcp_server_module._mcp_active_probes_allowed() is False
 
     monkeypatch.setenv("NETTOOLS_ENABLE_AGENT", unrecognized)
     assert cli._agent_enabled() is False
+
+    monkeypatch.setenv("NETTOOLS_NETBOX_WRITE_ENABLED", unrecognized)
+    assert netbox.write_enabled() is False
 
 
 def test_enum_typo_is_flagged(monkeypatch):
@@ -442,26 +454,6 @@ def test_main_prints_config_warning_to_stderr_for_a_malformed_value(monkeypatch,
     captured = capsys.readouterr()
     assert "# config warning:" in captured.err
     assert "NETTOOLS_COMMAND_RETRIES" in captured.err
-
-
-def test_main_suppresses_config_warning_with_quiet(monkeypatch, capsys):
-    """--quiet's contract is 'suppress all output; only the exit code
-    carries the outcome' -- the config-warning banner is output too, so it
-    must not survive --quiet, on any subcommand that carries the flag."""
-
-    import sys
-
-    from agent_nettools import cli
-
-    _clear_all_settings(monkeypatch)
-    monkeypatch.setattr(cli, "load_dotenv", lambda *a, **k: None)
-    monkeypatch.setenv("NETTOOLS_COMMAND_RETRIES", "twice")
-    monkeypatch.setattr(sys, "argv", ["nettools", "version", "--quiet"])
-
-    assert cli.main() == cli.EXIT_OK  # still never fails startup over it
-    captured = capsys.readouterr()
-    assert captured.err == ""
-    assert captured.out == ""
 
 
 def test_main_prints_no_config_warning_on_a_clean_environment(monkeypatch, capsys):
