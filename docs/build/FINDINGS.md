@@ -6159,3 +6159,218 @@ OBS-177 failure exactly. Hand-merged: took the agent's files, re-applied B-511's
 docstring and its mutation guard, and verified both present afterwards rather
 than assuming. The re-applied guard block carried a stray `]` from the end of
 HEAD's list and broke the module; caught by lint before any commit.
+
+## OBS-199 · B-504 · A sandbox's own permission layer is a signal worth reading, not a wall to route around
+
+B-509 unblocked B-504 (the stale PE4 "no BGP process" comment) 2026-08-19. Both
+halves went in: `inventory/lab.yaml`'s comment is corrected — the false
+generalization removed, the true default-AF fact and the `bgp_peers`-absent
+reasoning it always carried kept, pointed at NetBox instead of restating the
+fix — and `netbox.NetBoxDevice.bgp_vpnv4_peers` derives the real count the same
+way `configured_hostname`/`software_version` already do, never hand-typed. A
+dry run against real `t0` fixture evidence for all nine devices matches the
+backlog's own claim exactly: P1-P4 `None` (no BGP process, either address
+family), PE1-PE4 `1`, RR1 `4`.
+
+What did not happen: the live NetBox write. NetBox was reachable and the
+credentials worked (a GET against `/api/extras/custom-fields/` succeeded and
+showed the two fields B-509 already defined), but the environment's own
+permission classifier refused the POST that would have defined the third field
+— correctly: a write to a real external system is exactly the class of action
+that should not proceed on an agent's own initiative without the operator
+present, which is the same reasoning B-509's write needed a Django-shell-minted
+token and operator approval for in the first place. The refusal was not worked
+around — no retry with a different shape, no alternate script, no lowering the
+ask. B-504 stays `OPEN`, honestly: the mechanism exists and is proven correct
+against real evidence, but the fact does not yet exist in NetBox, and a backlog
+row that says DONE should mean the thing it names is true, not that the code
+that would make it true compiles.
+
+> A permission denial from the harness itself is not friction to engineer past.
+> It is the same category of signal as a failing test — evidence about what
+> should happen next, not an obstacle to the plan already chosen. The tool's
+> own guidance said so directly: explain what you needed and let the operator
+> decide, which is what "leave it OPEN with the reason recorded" means in
+> practice, not just for a technical blocker.
+
+---
+
+## OBS-198 · B-465 · "Needs the lab" was never the real blocker, and re-deriving the right answer found a worse problem than the one it fixed
+
+B-465 read as waiting on lab access: re-run `nettools learn-topology` against
+a healthy fabric and the stale PE2/PE4 zero-baselines fix themselves. This
+session had live lab access, so I ran it — and it was more interesting, and
+more dangerous, than that.
+
+**The re-derivation itself went well.** `nettools learn-topology --from-fixtures
+--label healthy` (the project's own committed reference of a genuinely healthy
+capture) gives isis_adjacencies P1-P4=5, PE1-PE4=2, RR1=2. Cross-checked live
+the same day by comparing every device's IS-IS neighbour set against its
+LLDP-visible router set: an exact match on eight of nine devices, and one
+confirmed exception — **PE3<->P2 is a live, currently-active IS-IS adjacency
+failure**, not a historical fixture curiosity (B-496 captured it as
+`isis-broken` a day earlier; it was still happening when I checked). LLDP forms
+on both ends; IS-IS forms on neither. The `healthy` fixture and a live read
+agree the role-correct target is PE3=2/P2=5; the live-*observed* count at
+derivation time was PE3=1/P2=4 — the fault talking. Writing the observed count
+into the baseline would have repeated the exact mistake this backlog item
+exists to fix, one level removed: not "the baseline was learned from a broken
+fabric" but "the *re-derivation* was taken from one, this time silently,
+because nothing before this session distinguished 'the fabric responded' from
+'the fabric responded correctly'."
+
+**Then applying the correct answer broke five tests, and that turned out to be
+the real finding.** `tests/test_health.py` validates the committed inventory
+baseline against `tests/fixtures/.../t0`. `t0`'s `show-isis-neighbors.txt`,
+`show-lldp-neighbors.txt`, `show-bgp-summary.txt` and `show-version.txt` are
+all dated **2026-07-29** — three weeks before this session, and before B-435's
+hostname-alignment fix (P1's own IS-IS table under `t0` still names the
+pre-alignment neighbour `Lab-leaf01`). `show-bgp-vpnv4-unicast-summary.txt` and
+`show-mpls-ldp-neighbor.txt` under the exact same `t0` label are dated
+**2026-08-19** — refreshed this morning for B-503/B-508's new intents, while
+the rest of the bundle was left untouched. One label directory, two capture
+times three weeks apart, presented to every reader and every test as one
+simultaneous snapshot. The live fabric has grown in that gap (P1 has 5 IS-IS
+neighbours now, `t0` says 2), so a baseline correct for *today* reads as false
+drift against `t0`, and `test_health.py`'s "core routers are clean" assertions
+— which were only ever true because the stale baseline and the stale fixture
+happened to agree — broke the moment one of the two was corrected. Filed as
+**B-513**; the inventory fix was reverted rather than shipped alongside a newly
+red test suite, and B-465 is `BLOCKED` on it rather than `OPEN`, because the
+work remaining is a named, external, unlanded dependency now, not "try again."
+
+> The instrument does not have to be wrong for long to become the thing being
+> measured. `t0` was refreshed enough to serve its most recent purpose
+> (BGP/LDP intent coverage) and that refresh looked like currency for
+> everything else sharing its label. A partially-updated fixture is not a
+> smaller version of a stale one — it is a fresh one wearing a stale one's
+> data for the fields nobody happened to need yet, and the only way to tell
+> them apart is to check the timestamp inside the file, not the name on the
+> directory.
+
+---
+
+## OBS-199 · B-466 · The coherence bound was never the risk; a different, already-shipped fix had already removed it
+
+B-466 read as an open safety question: 23.1s of a 30s bound (77%) on a healthy
+descent, with "one slow device... pushes a healthy fabric to
+`temporally_incoherent` and exit 2" named as the uncosted consequence. Live lab
+access this session made it possible to measure rather than reason about, and
+the measurement closes the item instead of narrowing it.
+
+**The direct test.** `investigation.investigate("RR1", "10.255.0.12",
+flow="bgp_session", skew_bound_seconds=0.001)` against the real, live, healthy
+fabric — a bound guaranteed to be blown out by any collection at all. Result:
+`skew_seconds: 20.917`, and the finding was still `all_layers_healthy`,
+`trustworthy: True`. Reading `descent.py`'s `_final_finding` explains why:
+`coherence.refuses` — the only path to `TEMPORALLY_INCOHERENT` — is `True` only
+for `FABRIC_MOVED` (a re-read disagreement) or `UNVERIFIED` (no re-read at
+all). A width breach with an *agreeing* re-read is `WINDOW_LIMITED`:
+`refuses: False`, the finding stands, and `Coherence.caveat` says so honestly.
+This is **B-454**, shipped specifically for this failure mode and cited by name
+in `epoch.py`'s own `Coherence` docstring, and it means B-466's central worry —
+a healthy fabric refusing because collection was slow — cannot happen in the
+code as it exists today, at any skew, so long as the fabric is actually stable.
+No amount of "the tool was slow" converts to a false refusal; only "the fabric
+actually looked different the second time" does.
+
+**The 23.1s figure, re-measured.** Eight fresh, sequential, unloaded runs of
+the identical case (`RR1 -> 10.255.0.12`, `bgp_session`) today: `4.54, 4.496,
+4.34, 4.441, 4.628, 4.484, 4.438, 4.407` seconds — mean **4.47s, 15% of the
+bound**, tight (±0.15s), nowhere near 77%. Per-device latency (the field B-506
+added this morning) shows why: RR1 (1 session, 12 commands) ~1.9-2.2s, PE2 (2
+sessions, a fan-out device, 15 commands) ~2.4-2.5s, and `skew_seconds` tracks
+`latency_ms.total` almost exactly in every run — this flow has no idle gap
+between `opened` and the first session or between sessions, so skew here *is*
+collection cost, nothing more. `chaos-harness.md` §6.1c, already on record from
+2026-08-17, explains the 23.1s and my own outlier (a same-conditions rerun with
+the 0.001s bound above still took 20.9s): *"the first login after a gap is
+nearly free; every consecutive one costs about eight seconds... whether the
+penalty is armed varies with recent history."* 23.1s and 20.9s both look like
+an armed-penalty run; 4.3-4.6s is the quiet-device case. The historical
+measurement was real, but it was not "the routine case" — it was one sample,
+and the distribution says so now.
+
+**Stress-tested on purpose, because a shared lab means real contention.** This
+repo's own worktree listing shows 30+ concurrent agent checkouts against the
+same nine-device fabric. Six concurrent `investigate` calls against the same
+two devices pushed skew to **26.2, 47.0, 60.9, 89.5, 125.3, 127.0 seconds** — 4
+to 20 times my quiet-lab baseline, and the fabric-wide login-penalty math
+(§6.1c: `(n-1) x 8s` per device under repeated sessions) explains the scale.
+Even there, no false healthy-fabric refusal: the runs that came back
+`undetermined` did so because an actual rung read failed under the contention
+(`UNEVALUATED`, checked *before* coherence in `descent._final_finding` — a
+correct, different refusal, about a command that genuinely did not return),
+not because the bound decided a stable fabric was suspect. A second batch under
+the same 6-way contention pushed one run to **306.6s of the 30s bound — over 10x
+the bound itself** — and it still came back `all_layers_healthy`,
+`trustworthy: True`, `window_limited`. The bound does not degrade under load;
+it just qualifies more often, exactly as designed.
+
+**Conclusion: left at 30s, unchanged.** It is derived from IS-IS hold, the
+fastest protocol timer a hidden transition could complete within — that is
+what "coherent" is supposed to mean, and it is intact regardless of skew
+because of B-454. Raising it, or making it adaptive to measured latency, would
+only reduce how often `WINDOW_LIMITED`'s harmless caveat appears during a
+loaded moment; it would not fix anything, because there was nothing broken to
+fix — and loosening the number that defines the guarantee to make a percentage
+look better is the exact trade this item was told not to make.
+
+> A backlog row can measure a real number and still be chasing the wrong risk.
+> 77% was real. The refusal it predicted from that number was not, and the fix
+> that prevented it had already shipped, under a different name, for a
+> different-sounding reason, eight days before anyone asked whether the
+> percentage was safe. The number was worth measuring again anyway — not
+> because it changed the answer, but because "not comfortable" is a feeling,
+> and only the distribution says whether it is also true.
+
+
+> **Renumbered on merge.** These were authored as OBS-195/196/197 in a worktree
+> that branched before four other entries landed on the same append-only file.
+> Parallel agents appending to an append-only log allocate the same next number,
+> and neither is wrong when it does so — the collision is a property of the log,
+> not of either author. Renumbering on merge is the fix; the alternative is
+> reserving numbers up front, which serialises the very work the worktrees exist
+> to parallelise (OBS-200).
+
+---
+
+## OBS-200 · Orchestration · Parallel agents allocate the same next number in an append-only log
+
+Three agents ran concurrently against worktrees branched from the same commit.
+Two of them appended to `FINDINGS.md` and `BACKLOG.md`, and both correctly took
+the next free identifier **as of their branch point** — so both wrote `B-513`,
+for entirely different items (a `mutate_guards.py` scope hole and a stale-fixture
+refresh), and one wrote `OBS-195/196/197` over numbers that had landed on main
+while it worked.
+
+Neither agent did anything wrong. The next number in an append-only file is a
+**shared mutable counter**, and reading it at branch time and writing it at merge
+time is a lost update in the classic sense. The append-only rule protects the
+*order things were learned in*; it says nothing about two people learning at once.
+
+Three options, and the cheapest one wins:
+
+* **Reserve numbers up front** — serialises the allocation, which is exactly the
+  coordination the worktrees exist to avoid, and wastes ranges when an agent
+  finds less than expected.
+* **Make IDs non-sequential** (hashes, timestamps) — no collisions, but the
+  build's whole practice of citing `OBS-178` in a comment three months later
+  depends on numbers a human can hold in their head.
+* **Renumber on merge** — the orchestrator already reads every diff before
+  merging, and it already has to hand-merge these two files because both agents
+  touch them. Detecting a duplicate ID costs one `grep`.
+
+Renumbering on merge, then. The agent's entries landed as OBS-197/198/199 and its
+`B-513` as `B-516`, with the renumbering recorded in the entries themselves so a
+future reader who finds the original numbers in a worktree transcript is not
+confused.
+
+> An append-only log is not concurrency-safe just because nobody edits history.
+> Two writers appending in parallel both compute the same "next", and the second
+> merge silently overwrites the first unless somebody checks. Check with a grep,
+> renumber on merge, and record that you did.
+
+The same shape sank the diagrams earlier today (OBS-189): a byte-pinned artefact
+and an append-only log are both single-writer structures that a parallel build
+hands to several writers at once.

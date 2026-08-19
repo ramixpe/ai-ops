@@ -150,6 +150,32 @@ def test_pe2_isolated_at_t0_is_a_device_and_ip_with_no_cables(monkeypatch):
     assert touching_pe2 == []
 
 
+def test_bgp_vpnv4_peers_corrects_the_stale_pe4_no_bgp_claim(monkeypatch):
+    """B-504: ``inventory/lab.yaml`` carried a stale comment claiming PE4 has
+    "no BGP process configured at all". Cross-checked against the raw fixture
+    text: PE4/t0's `show-bgp-vpnv4-unicast-summary.txt` shows neighbor
+    10.255.0.31 (RR1) Established with 2 prefixes, up 5d07h; RR1/t0's own file
+    shows the mirror image -- neighbor 10.255.0.14 (PE4) Established, 2
+    prefixes, up 5d07h. Confirmed from both ends, same as the backlog row.
+
+    PE4's *default* address family really is inactive ("% BGP instance
+    'default' not active", like every P-router) -- that half of the old
+    comment was true. What was false is generalizing that into "no BGP
+    process at all": VPNv4 is a second, separate process, and PE4 runs it.
+    P1 (a P-router) has neither AF active, so it gets ``None`` on both; PE4
+    gets ``None`` on the default AF's ``bgp_peers`` (inventory/lab.yaml, by
+    design) and a real, non-``None`` count here."""
+
+    evidence = _evidence_by_device(monkeypatch, label="t0")
+
+    records = build_records(evidence)
+
+    by_name = {d.name: d for d in records.devices}
+    assert by_name["PE4"].bgp_vpnv4_peers == 1  # Established to RR1 alone.
+    assert by_name["RR1"].bgp_vpnv4_peers == 4  # Established to all four PEs.
+    assert by_name["P1"].bgp_vpnv4_peers is None  # No BGP process, either AF.
+
+
 def test_isis_broken_pe3_p2_cable_matches_graphs_lldp_edge(monkeypatch):
     """B-496's fixture (same pair graph.py's acceptance test uses). P2 and
     PE3 are cabled and mutually confirm each other in LLDP even though
@@ -174,12 +200,25 @@ def test_isis_broken_pe3_p2_cable_matches_graphs_lldp_edge(monkeypatch):
 # --------------------------------------------------------------------------- #
 
 
-def _fabricated(lldp_by_device=None, interfaces_by_device=None, bgp_by_device=None, hostnames=None):
+def _fabricated(
+    lldp_by_device=None,
+    interfaces_by_device=None,
+    bgp_by_device=None,
+    hostnames=None,
+    bgp_vpnv4_by_device=None,
+):
     lldp_by_device = lldp_by_device or {}
     interfaces_by_device = interfaces_by_device or {}
     bgp_by_device = bgp_by_device or {}
     hostnames = hostnames or {}
-    names = set(lldp_by_device) | set(interfaces_by_device) | set(bgp_by_device) | set(hostnames)
+    bgp_vpnv4_by_device = bgp_vpnv4_by_device or {}
+    names = (
+        set(lldp_by_device)
+        | set(interfaces_by_device)
+        | set(bgp_by_device)
+        | set(hostnames)
+        | set(bgp_vpnv4_by_device)
+    )
     out = {}
     for name in names:
         out[name] = {
@@ -206,6 +245,12 @@ def _fabricated(lldp_by_device=None, interfaces_by_device=None, bgp_by_device=No
                 "data": {
                     "parse_status": parsers.PARSE_OK,
                     "parsed": {"meta": bgp_by_device.get(name, {}), "records": []},
+                }
+            },
+            "bgp_vpnv4": {
+                "data": {
+                    "parse_status": parsers.PARSE_OK,
+                    "parsed": bgp_vpnv4_by_device.get(name, {"meta": {}, "records": []}),
                 }
             },
         }
@@ -247,6 +292,46 @@ def test_nb2b_a_well_formed_router_id_does_produce_one():
     records = build_records(evidence)
 
     assert records.ip_addresses == (NetBoxIPAddress(device="A", address="10.0.0.1/32"),)
+
+
+def test_bgp_vpnv4_peers_is_none_when_the_af_is_not_active():
+    """Mirrors NB2's malformed-input guard, for B-504's field: a device whose
+    VPNv4 AF reports IOS-XR's "% BGP instance 'default' not active" (``meta
+    ["active"] is False``) gets ``None``, never ``0`` -- the absent/zero
+    distinction ``topology.derive_device_expected`` already applies to the
+    default AF, applied here to VPNv4 instead."""
+
+    evidence = _fabricated(bgp_vpnv4_by_device={"A": {"meta": {"active": False}, "records": []}})
+
+    records = build_records(evidence)
+
+    assert len(records.devices) == 1
+    assert records.devices[0].name == "A"
+    assert records.devices[0].bgp_vpnv4_peers is None
+
+
+def test_bgp_vpnv4_peers_counts_established_neighbors_only():
+    """The vacuity companion: a stub that always returns ``None`` would also
+    pass the test above alone. Two neighbours, one Established with a real
+    prefix count and one still Idle -- only the Established one counts."""
+
+    evidence = _fabricated(
+        bgp_vpnv4_by_device={
+            "A": {
+                "meta": {"router_id": "10.0.0.1", "local_as": "65000"},
+                "records": [
+                    {"neighbor": "10.0.0.2", "session_state": "Established", "prefixes_received": 2},
+                    {"neighbor": "10.0.0.3", "session_state": "Idle"},
+                ],
+            }
+        }
+    )
+
+    records = build_records(evidence)
+
+    assert len(records.devices) == 1
+    assert records.devices[0].name == "A"
+    assert records.devices[0].bgp_vpnv4_peers == 1
 
 
 def test_nb3_an_interface_row_with_no_name_is_skipped():

@@ -56,10 +56,15 @@ The standard per-device evidence bundle (``facts``/``interfaces``/``bgp``/
 second one for NetBox to drift against. Inside that bundle:
 
 - **Devices**: name (the evidence dict's own key), ``platform``, the
-  configured hostname (``topology.configured_hostname``), and a
+  configured hostname (``topology.configured_hostname``), a
   ``device_type``/``software_version`` pair read from ``facts``' own parsed
   meta (the ``hardware``/``version``/``flavor`` fields ``parsers.parse_xr_facts``
-  already extracts from ``show version`` -- no new command, no new parser).
+  already extracts from ``show version`` -- no new command, no new parser),
+  and ``bgp_vpnv4_peers`` -- a count of ``Established`` VPNv4 neighbours from
+  the ``bgp_vpnv4`` intent, ``None`` when that address family has no BGP
+  process. This closes B-504 (see :class:`NetBoxDevice`'s docstring): the
+  correction the operator asked to live in NetBox, derived the same way
+  every other device fact here is, never hand-typed.
 - **Interfaces**: one record per row of ``show interfaces brief`` (the
   ``interfaces`` intent), classified by :mod:`interface_kind` -- the same
   table ``descent.py``/``investigation.py``/``fixtures.py`` already use for
@@ -139,6 +144,23 @@ class NetBoxDevice:
     own parsed meta (``show version``'s hardware line and version string) --
     real per-device evidence, not a guess. Either may be ``None`` when
     ``facts`` did not parse cleanly or the device did not report that field.
+
+    ``bgp_vpnv4_peers`` closes B-504: ``inventory/lab.yaml`` carried a stale
+    comment claiming PE4 has "no BGP process configured at all", derived from
+    the *default* address family alone (``show bgp summary`` -- genuinely
+    "% BGP instance 'default' not active" on every PE in this fabric, because
+    none of them peer in IPv4 unicast). The VPNv4 address family
+    (``show bgp vpnv4 unicast summary``, the ``bgp_vpnv4`` intent) is a
+    *different* BGP process on the same device and was never checked by that
+    claim -- PE4 runs it, with an Established session to RR1. Rather than
+    hand-typing the correction into NetBox (which would make NetBox a second
+    authored source exactly like the stale note it replaces), this field
+    derives the same way ``configured_hostname``/``software_version`` do: a
+    count of ``Established`` VPNv4 neighbours, read straight from evidence.
+    ``None`` means the same thing it means throughout this codebase --
+    "no VPNv4 BGP process observed here" (``meta["active"] is False``), not
+    zero; a P-router (P1/P2/P3) is ``None`` on both address families, a PE is
+    not. See :func:`_bgp_vpnv4_peers`.
     """
 
     name: str
@@ -146,6 +168,7 @@ class NetBoxDevice:
     configured_hostname: str | None = None
     device_type: str | None = None
     software_version: str | None = None
+    bgp_vpnv4_peers: int | None = None
 
 
 @dataclass(frozen=True)
@@ -310,6 +333,30 @@ def _device_ip_address(name: str, evidence: dict[str, Any]) -> NetBoxIPAddress |
     return NetBoxIPAddress(device=name, address=f"{router_id}/32", source="bgp_router_id")
 
 
+def _bgp_vpnv4_peers(evidence: dict[str, Any]) -> int | None:
+    """Count of ``Established`` VPNv4 neighbours from the ``bgp_vpnv4`` intent.
+
+    Mirrors ``topology.derive_device_expected``'s treatment of the *default*
+    AF's ``bgp`` intent (``meta["active"] is False`` means "absent, not
+    zero"), applied to the VPNv4 AF instead -- the two are separate BGP
+    processes on IOS-XR and this fabric's PEs run only the second one (B-504).
+    A clean parse with ``active`` unset (the normal, running case) but zero
+    ``Established`` rows is a real ``0``, not ``None`` -- a configured peer
+    that has not come up is a fact worth keeping, not the same as no process.
+    """
+
+    meta = _clean_meta(evidence, "bgp_vpnv4")
+    if not meta:
+        return None  # NB1: no clean parse at all -- nothing safe to derive.
+    if not meta.get("active", True):
+        return None  # "% BGP instance 'default' not active" -- no VPNv4 process here.
+    return sum(
+        1
+        for record in _clean_records(evidence, "bgp_vpnv4")
+        if record.get("session_state") == "Established"
+    )
+
+
 def _lldp_cables(evidence_by_device: dict[str, dict[str, Any]]) -> tuple[NetBoxCable, ...]:
     """Every LLDP link both ends mutually agree on, keyed by the canonical pair.
 
@@ -402,6 +449,7 @@ def build_records(evidence_by_device: dict[str, dict[str, Any]]) -> NetBoxRecord
                 configured_hostname=topology.configured_hostname(evidence),
                 device_type=device_type,
                 software_version=software_version,
+                bgp_vpnv4_peers=_bgp_vpnv4_peers(evidence),
             )
         )
         interfaces.extend(_device_interfaces(name, evidence))
@@ -463,6 +511,7 @@ def describe_writes(records: NetBoxRecords) -> tuple[NetBoxOperation, ...]:
                     "configured_hostname": device.configured_hostname,
                     "device_type": device.device_type,
                     "software_version": device.software_version,
+                    "bgp_vpnv4_peers": device.bgp_vpnv4_peers,
                 },
             )
         )
@@ -737,6 +786,7 @@ def _apply(client: Any, records: NetBoxRecords) -> dict[str, int]:
                 "custom_fields": {
                     "configured_hostname": device.configured_hostname,
                     "software_version": device.software_version,
+                    "bgp_vpnv4_peers": device.bgp_vpnv4_peers,
                 },
             },
         )

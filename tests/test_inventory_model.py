@@ -239,6 +239,67 @@ def test_the_lab_carries_the_facts_this_build_had_to_rediscover():
     ), "bgp_no_prefixes is normal here, and every device should say so"
 
 
+def test_pe4_bgp_process_claim_is_not_contradicted_by_derived_evidence(monkeypatch):
+    """B-504 regression: a comment above PE4's entry once read "No BGP process
+    configured at all", which was false -- PE4 runs a separate MP-BGP VPNv4
+    process with an Established session to RR1, confirmed from both ends.
+
+    The false claim was never a structured :class:`Note` -- it was a bare
+    ``#`` comment, which ``load_inventory_file()`` cannot see at all (PyYAML
+    discards comments), which is *how* it survived unnoticed. So this checks
+    two things: the DERIVED fact, read from the same real captured evidence
+    ``netbox.build_records`` would (not a hardcoded belief about PE4), and
+    the raw committed file's text -- both the structured notes and any prose
+    around PE4's entry.
+    """
+
+    import re
+
+    from helpers import set_device_environment
+
+    from agent_nettools.fixtures import load_fixture_evidence
+    from agent_nettools.inventory_model import load_inventory_file, resolve_inventory_path
+    from agent_nettools.netbox import build_records
+
+    # 1. The derived fact, from real fixture-captured evidence -- not assumed.
+    set_device_environment(monkeypatch)
+    pe4_evidence = load_fixture_evidence("PE4", label="t0")
+    pe4_record = build_records({"PE4": pe4_evidence}).devices[0]
+    assert pe4_record.bgp_vpnv4_peers is not None and pe4_record.bgp_vpnv4_peers > 0, (
+        "this regression test only means something if PE4's own captured evidence "
+        "shows an active BGP process -- if this fails, the fixture changed, not the claim"
+    )
+
+    no_bgp_pattern = re.compile(r"no\s+bgp\s+process", re.IGNORECASE)
+
+    # 2. Structured notes -- what load_inventory_file() actually parses.
+    pe4 = next(d for d in load_inventory_file().devices if d.name == "PE4")
+    for note in pe4.notes:
+        assert not no_bgp_pattern.search(note.note), (
+            f"PE4 note (applies_to={note.applies_to!r}) claims no BGP process, "
+            "contradicting the device's own captured evidence"
+        )
+
+    # 3. Raw text -- comments are invisible to (2) above, which is exactly how
+    # the original false claim went unread. Scoped to PE4's own block: any
+    # comment lines directly above "  - name: PE4" (its own preceding
+    # comment, never some earlier device's), plus PE4's own YAML up to the
+    # next top-level device entry -- so this cannot be satisfied by some
+    # OTHER device legitimately saying it has no BGP process (the P-routers
+    # genuinely do not, on either address family).
+    raw = resolve_inventory_path().read_text()
+    comment_match = re.search(r"(?:^  #.*\n)+(?=  - name: PE4\n)", raw, re.MULTILINE)
+    comment_block = comment_match.group(0) if comment_match else ""
+    start = raw.index("  - name: PE4")
+    next_device = raw.find("\n  - name:", start)
+    device_block = raw[start:] if next_device == -1 else raw[start:next_device]
+    pe4_block = comment_block + device_block
+    assert not no_bgp_pattern.search(pe4_block), (
+        "inventory/lab.yaml's PE4 entry (or a comment above it) claims no BGP process, "
+        "which PE4's own captured evidence contradicts (B-504)"
+    )
+
+
 def test_every_note_says_who_wrote_it_and_when():
     """Provenance, not authorisation. A note about a lab that has since been
     rebuilt is worth less than a fresh one, and a reader cannot tell without

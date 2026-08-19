@@ -192,9 +192,20 @@ devices:
         recorded: "2026-08-16"
         revisit_when: >-
           the lab starts advertising real prefixes
-  # No BGP process configured at all ("% BGP instance 'default' not active"),
-  # like the P-routers. bgp_peers is absent rather than zero: zero would claim a
-  # BGP process that produced no peers, which is not what this device reports.
+  # PE4's DEFAULT address family reports "% BGP instance 'default' not active",
+  # like the P-routers -- that part is real device output. An earlier version
+  # of this comment wrongly generalized that single-AF fact into a blanket
+  # denial that BGP runs here at all (B-504, corrected 2026-08-19): PE4 runs a
+  # separate MP-BGP VPNv4 process, with an Established session to RR1 (2
+  # prefixes, confirmed from both ends). Filed rather than silently edited,
+  # per OBS-139 (an operator note has twice held an answer nobody read). Per
+  # operator decision the correction now lives in NetBox (`netbox.py`'s
+  # derived `bgp_vpnv4_peers` custom field, B-509), not here, so it cannot
+  # drift out of sync with a second hand-typed copy. `bgp_peers` below stays
+  # absent rather than zero for the reason this comment always gave:
+  # `expected` is derived from the DEFAULT address family only, and zero
+  # would claim a process that produced no peers, which is not what this
+  # device reports on that AF.
   - name: PE4
     mgmt_ip: 172.20.250.24
     role: edge
