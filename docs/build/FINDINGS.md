@@ -5337,3 +5337,37 @@ service itself is confirmed up (a direct `netbox:8080/api/` request on the
 labnet returns 403 unauthenticated, which is the right answer). **Caddy is not a
 stage2 service and was deliberately not restarted overnight.** A reload picks
 up the route whenever the operator chooses.
+
+## OBS-180 · Merge · OBS-177's damage was wider than OBS-177 said
+
+Writing up the merge-by-diff mistake, I listed what it had reverted: the
+`_heading_safe()` security fix, its tests, the `TICKET-FORGERY` guard, a
+discriminating Loki test, and an uncommitted renderer fix. That list was
+incomplete. It also silently reverted **`docs/build/BACKLOG.md`**, taking with
+it the `B-498` row filed by the cache spike an hour earlier.
+
+I only noticed because a later edit anchored on `| **B-498** |` and could not
+find it. `git log -S B-498` shows it added in `c2f6739` and removed in
+`e47d787` — the merge commit whose own message describes this exact failure.
+
+**The correction that matters is about the write-up, not the merge.** When I
+found the reverted code I checked the files I *remembered* touching, wrote the
+finding from that list, and moved on. The right response to "I reverted work by
+copying too broadly" is not to recall what was lost — it is to **ask git**:
+
+```
+git diff <merge-commit>^ <merge-commit> --stat
+```
+one command, complete answer, no memory involved. I used memory where a tool
+was available, which is the same class of error as the merge itself.
+
+So OBS-177's rule stands and gains a second clause:
+
+> Merge by ownership, never by diff — **and when a bad merge is discovered,
+> enumerate its damage with `git diff --stat` rather than from recollection.**
+> An incident write-up assembled from memory under-reports by exactly the
+> things you have forgotten, which are the things most likely to stay broken.
+
+Nothing else was lost: the same `git diff` over `e47d787` confirms BACKLOG.md
+was the only remaining casualty. B-498 is restored verbatim from the commit
+that created it.
