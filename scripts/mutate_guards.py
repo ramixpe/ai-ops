@@ -511,6 +511,37 @@ MUTATIONS = [
      '                "peer_state": metric.get("detailed_information_peer_state"),\n'
      '                "capabilities": metric.get("detailed_information_capabilities_received_description"),\n',
      "test_an_unnamed_hostile_label_never_reaches_the_ldp_shaped_record"),
+
+    # ---- OBS-165 follow-up: the ticket now records the model exchange
+    # (system prompt, payload, and the model's own raw response) --
+    # model-generated text reaching a ticket for the first time. The
+    # TICKET-FORGERY entry above already mutation-tests `_heading_safe` (the
+    # guard for a caller string reaching a HEADING); nothing yet
+    # mutation-tested `_blockquote` itself (the guard for a caller string
+    # reaching a NARRATIVE body, which is the path `record_model_exchange`'s
+    # `response_text` uses). `_parse_ticket_text`'s own docstring names this
+    # property load-bearing. Counted before adding this entry (OBS-191): the
+    # anchor string below occurs exactly once in ticket.py (`grep -c`
+    # against the line, confirmed before this entry was added), and
+    # `_blockquote` is called from exactly one call site (`_write`), so
+    # mutating it here disables the "> " prefix for every narrative field in
+    # the module -- record_question/record_intent/record_outcome's included,
+    # not only record_model_exchange's -- which is why the symbol below
+    # (a test in test_ticket.py, found by `resolve_guard_tests` the same way
+    # every other entry's is, never guessed) is sufficient to catch it.
+    # Mutated to join the raw lines unprefixed -- still returns a string (so
+    # nothing upstream raises), but a narrative line that started with
+    # `## ` or a bare ```` ``` ```` fence now reaches the file at column 0,
+    # the exact shape the OBS-191 subject-forgery incident was measured
+    # from, this time from a MODEL's own response rather than a caller
+    # string. ----
+
+    ("OBS-165-MODEL-FORGERY", "a model's raw response cannot forge a ticket "
+     "section heading or an outcome verdict via its blockquoted narrative",
+     "src/agent_nettools/ticket.py",
+     '    return "\\n".join((f"> {line}" if line else ">") for line in lines) + "\\n"\n',
+     '    return "\\n".join(lines) + "\\n"\n',
+     "test_a_model_response_disguised_as_a_ticket_section_cannot_forge_one")
 ]
 
 
@@ -610,30 +641,39 @@ def _restore_on_signal() -> None:
 
 
 def assert_no_leftover_mutation() -> None:
-    """Refuse to start if a mutation target already differs from HEAD.
+    """Refuse to start only if a file actually holds one of OUR mutations.
 
-    Belt to the signal handler's braces: if a previous run was killed in a way
-    no handler could catch (SIGKILL, power loss), the tree still holds its
-    mutation. Starting a fresh run on top of that would mutate an already
-    mutated file and restore it to the *wrong* original.
+    The first version of this check refused whenever a mutation target differed
+    from HEAD at all. That is wrong in the common case: this repo almost always
+    has legitimate uncommitted work in exactly those files, so the check blocked
+    every ordinary run and taught its user to ignore it -- a guard nobody can
+    satisfy is a guard that gets deleted.
+
+    The precise question is not "is this file modified" but "does this file
+    currently contain the mutated form where the original should be". That is
+    directly checkable: every entry carries both strings. A leftover mutation
+    means `new` is present and `old` is absent -- which is exactly the state a
+    killed run leaves behind (OBS-300), and is not a state ordinary editing
+    produces by accident.
     """
 
-    targets = sorted({m[2] for m in MUTATIONS})
-    dirty = []
-    for rel in targets:
-        proc = subprocess.run(["git", "diff", "--quiet", "HEAD", "--", rel],
-                              cwd=REPO, capture_output=True)
-        if proc.returncode == 1:
-            dirty.append(rel)
-    if dirty:
+    leftovers = []
+    for ident, _what, rel, old, new, _symbol in MUTATIONS:
+        path = REPO / rel
+        if not path.exists():
+            continue
+        text = path.read_text()
+        if new and new in text and old not in text:
+            leftovers.append(f"{rel}  (guard {ident})")
+    if leftovers:
         raise SystemExit(
-            "REFUSING TO START: these mutation targets differ from HEAD:\n  "
-            + "\n  ".join(dirty)
-            + "\n\nIf you have uncommitted work in them, commit or stash it first.\n"
-            "If a previous run was killed mid-mutation, `git diff` them -- a\n"
-            "leftover mutation is usually a single line reverting a guard\n"
-            "(OBS-300). Restore before running, or this run will mutate an\n"
-            "already-mutated file and restore it to the wrong original."
+            "REFUSING TO START: these files hold a leftover mutation --\n"
+            "the mutated form is present and the original is absent:\n  "
+            + "\n  ".join(sorted(set(leftovers)))
+            + "\n\nA previous run was almost certainly killed between mutating and\n"
+            "restoring (OBS-300: `finally` does not unwind on a signal). Restore\n"
+            "with `git checkout HEAD -- <path>` before running, or this run will\n"
+            "mutate an already-mutated file and restore it to the wrong original."
         )
 
 

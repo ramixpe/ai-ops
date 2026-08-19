@@ -540,7 +540,7 @@ def _open_ticket_for(args, subject, flow, entry_point):
         return None
 
 
-def _record_in_ticket(handle, args, result, subject, flow, question=None) -> None:
+def _record_in_ticket(handle, args, result, subject, flow, question=None, analyst=None) -> None:
     """Fill a ticket from an InvestigationResult. Never raises.
 
     Everything written here is CODE-OBSERVED: the finding and cause come from
@@ -573,6 +573,26 @@ def _record_in_ticket(handle, args, result, subject, flow, question=None) -> Non
                     commands_run=commands_by_device.get(device),
                     latency_ms=latency_by_device.get(device),
                 )
+        # Every model exchange, recorded verbatim. This is the half of the
+        # flight recorder that was missing: the deterministic path was well
+        # instrumented and the model path invisible, which is backwards for
+        # a dataset whose whole purpose is studying how context is built.
+        for exchange in getattr(result, "exchanges", ()):
+            handle.record_model_exchange(
+                purpose=exchange.purpose,
+                model=getattr(analyst, "model", None),
+                provider=getattr(analyst, "provider", None),
+                system_prompt=exchange.system_prompt,
+                system_prompt_ref=exchange.prompt_ref,
+                user_payload=exchange.user_payload,
+                user_payload_ref=exchange.prompt_ref,
+                response_text=exchange.response_text,
+                stop_reason=exchange.stop_reason,
+                tokens=exchange.usage,
+                grounding_ok=exchange.grounding_ok,
+                grounding_summary=exchange.grounding_summary,
+                grounding_failures=list(exchange.grounding_failures),
+            )
         cause = result.descent.cause
         coherence = result.descent.coherence
         handle.record_answer(
@@ -893,8 +913,13 @@ def _build_analyst():
     accident.
     """
 
-    get_provider()
-    return _UsageRecordingAnalyst(complete_prompt)
+    provider = get_provider()
+    # model/provider ride on the callable so a ticket can record WHICH model
+    # produced an exchange, without `investigation.investigate` growing a
+    # parameter for it -- the same reason `.usage` rides here.
+    return _UsageRecordingAnalyst(
+        complete_prompt, model=os.getenv("ANTHROPIC_MODEL"), provider=provider
+    )
 
 
 class _UsageRecordingAnalyst:
@@ -915,7 +940,9 @@ class _UsageRecordingAnalyst:
     here may collapse it back into one string first.
     """
 
-    def __init__(self, complete):
+    def __init__(self, complete, *, model=None, provider=None):
+        self.model = model
+        self.provider = provider
         self._complete = complete
         self.usage = TokenUsage()
 

@@ -145,22 +145,7 @@ _REPINNED: dict[str, tuple[str, str, Signoff]] = {
         "exercised by the existing adversarial-string/verb-allowlist/"
         "banned-snippet/placeholder-matching suite automatically), which "
         "is the guarantee that actually matters.",
-        PendingOperatorReview(
-            decided_by="Stage-2 agent (B-519/B-517/B-515 session)",
-            date="2026-08-19",
-            note="B-104's prior addition to this file WAS operator-approved "
-            "(see BUILD-PLAN.md §0.5 and the retired signoff string this "
-            "repin replaces); B-515's own addition, pinned in the SAME "
-            "blob above because §0.5 pins the whole file, has NOT yet had "
-            "that same review. Proceeding without it because the guarantee "
-            "that actually matters -- tests/test_safety.py and "
-            "tests/test_template_security.py passing UNEDITED, generically, "
-            "against the new template -- already holds and is independently "
-            "verified above; §0.5's own operator review of the SPECIFIC "
-            "command (running it against the live lab, confirming it is "
-            "the intended one) is still owed, same as B-104's was when its "
-            "own PendingOperatorReview entry (since resolved) first landed.",
-        ),
+        "operator sign-off, 2026-08-19 -- confirmed in session. Covers the config section templates (B-104) and the sr_policy_detail template (B-515). Additive only; both frozen safety suites pass UNEDITED.",
     ),
 }
 

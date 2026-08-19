@@ -313,6 +313,14 @@ def _build_tools() -> list[dict[str, Any]]:
 
 TOOLS: list[dict[str, Any]] = _build_tools()
 
+#: The tool manifest, serialised once at import time -- 30k+ chars and
+#: growing (see `run_agent_loop`'s docstring and `ticket.Ticket.
+#: record_model_exchange`'s size reasoning). Computed here, not per call,
+#: for the same reason `TOOLS` itself is computed once: it does not change
+#: within a process, so there is nothing to gain from re-serialising it on
+#: every turn or every ticket-recording call.
+_TOOLS_JSON: str = json.dumps(TOOLS, sort_keys=True)
+
 
 def _device_from_inventory(name: str):
     for device in load_inventory_file().devices:
@@ -473,14 +481,29 @@ def _extract_text(message: Any) -> str:
     return "\n".join(block.text for block in message.content if getattr(block, "text", None))
 
 
+_USAGE_FIELDS = (
+    "input_tokens",
+    "output_tokens",
+    "cache_read_input_tokens",
+    "cache_creation_input_tokens",
+)
+
+
 def _accumulate_usage(totals: dict[str, int], usage: Any) -> None:
-    for field in (
-        "input_tokens",
-        "output_tokens",
-        "cache_read_input_tokens",
-        "cache_creation_input_tokens",
-    ):
+    for field in _USAGE_FIELDS:
         totals[field] = totals.get(field, 0) + (getattr(usage, field, None) or 0)
+
+
+def _usage_turn_delta(before: dict[str, int], after: dict[str, int]) -> dict[str, int]:
+    """What one turn's model call cost, from a before/after snapshot of the
+    running `usage_totals` dict -- the per-turn instrumentation
+    `ticket.Ticket.record_model_exchange`'s `tokens` field expects, computed
+    the same "snapshot, don't guess" way `investigation._usage_delta` does
+    for the report/correlate path, adapted to this module's plain-dict usage
+    shape (`_accumulate_usage` never built a `TokenUsage`, so there is
+    nothing to duck-type against here)."""
+
+    return {field: after.get(field, 0) - before.get(field, 0) for field in _USAGE_FIELDS}
 
 
 def _system_blocks() -> list[dict[str, Any]]:
@@ -516,7 +539,9 @@ def run_agent_loop(
     unreliable loop.
 
     Returns ``{"answer", "iterations", "tool_calls", "stopped_because",
-    "complete", "trust_class", "usage", "elapsed_s", "overran_budget"}``.
+    "complete", "trust_class", "usage", "elapsed_s", "overran_budget",
+    "model", "provider", "system_prompt", "tools_offered", "tools_manifest",
+    "exchanges"}``.
     ``stopped_because`` is ``"end_turn"``, ``"max_iterations"``,
     ``"time_budget"``, ``"truncated"``, or (B-471/P0-03) ``f"unknown_stop:
     {reason}"`` for any ``stop_reason`` this loop does not otherwise
@@ -530,6 +555,21 @@ def run_agent_loop(
     report actual wall-clock spend against ``time_budget_s`` -- see the
     module docstring's bounds section for exactly what is and is not
     guaranteed about that budget.
+
+    ``model``/``provider``/``system_prompt``/``tools_offered``/
+    ``tools_manifest``/``exchanges`` (OBS-165 follow-up) are the ticket
+    instrumentation this loop had no way to report before: the resolved
+    model and provider, the full system prompt and full tool-schema JSON
+    (this function has no size concern of its own about returning them in
+    full -- ``ticket.Ticket.record_model_exchange`` is what content-addresses
+    them so a ticket does not duplicate 30k+ chars of tool schema on every
+    call), the tool names alone (cheap, human-scannable), and one dict per
+    model turn actually made -- ``{"purpose": "agent_turn", "iteration",
+    "response_text", "stop_reason", "usage", "tool_calls_requested"}``
+    (the last key present only on a ``tool_use`` turn). This function still
+    does not import ``ticket.py`` and does not decide whether or when a
+    ticket is opened -- it only returns enough to make that call possible,
+    the same posture ``investigation.py``'s ``ModelExchange`` field takes.
     """
 
     provider = get_provider()
@@ -570,6 +610,13 @@ def run_agent_loop(
     ]
 
     tool_calls: list[dict[str, Any]] = []
+    #: One entry per model turn -- the ticket-recording instrumentation
+    #: `run_agent_loop`'s own docstring names (OBS-165 follow-up). Plain
+    #: dicts, matching this function's existing return shape, not a new
+    #: dataclass: `ticket.Ticket.record_model_exchange` takes plain values
+    #: either way, and this module never asks a caller to import a type from
+    #: it to read its own output.
+    exchanges: list[dict[str, Any]] = []
     usage_totals: dict[str, int] = {}
     answer = ""
     stopped_because = "end_turn"
@@ -593,6 +640,7 @@ def run_agent_loop(
             break
 
         iteration += 1
+        usage_before_turn = dict(usage_totals)
         message = _call_anthropic_or_raise(
             client,
             model=model,
@@ -603,6 +651,23 @@ def run_agent_loop(
         )
         _accumulate_usage(usage_totals, message.usage)
         final_message = message
+
+        # OBS-165 follow-up: one instrumented record of this turn's model
+        # call, appended as it happens rather than reconstructed afterward
+        # from `messages` -- `response_text` is whatever text this message
+        # carried (empty on a pure tool_use turn with no accompanying prose,
+        # which is itself a real, honest fact about the turn, not an
+        # omission). `tool_calls_requested` is filled in below, only for a
+        # `tool_use` turn -- every other turn made no request to fill it
+        # with.
+        current_exchange: dict[str, Any] = {
+            "purpose": "agent_turn",
+            "iteration": iteration,
+            "response_text": _extract_text(message),
+            "stop_reason": message.stop_reason,
+            "usage": _usage_turn_delta(usage_before_turn, usage_totals),
+        }
+        exchanges.append(current_exchange)
 
         if message.stop_reason == "refusal":
             details = getattr(message, "stop_details", None)
@@ -625,6 +690,15 @@ def run_agent_loop(
         if message.stop_reason == "tool_use":
             messages.append({"role": "assistant", "content": message.content})
             tool_use_blocks = [block for block in message.content if block.type == "tool_use"]
+            # The model's raw response for this turn IS a set of tool calls
+            # it requested -- part of "the model's raw response, including
+            # any tool calls it requested", recorded on the same exchange
+            # entry rather than only in the separate `tool_calls` audit list
+            # below (which carries the RESULT of each call; this carries the
+            # REQUEST, as the model made it, before dispatch or projection).
+            current_exchange["tool_calls_requested"] = [
+                {"tool": block.name, "input": block.input} for block in tool_use_blocks
+            ]
 
             # B-475/P1-08: independent tool_use blocks in one response used to
             # run one at a time even though this module's docstring already
@@ -705,4 +779,23 @@ def run_agent_loop(
         # see the module docstring for what is and is not guaranteed.
         "elapsed_s": elapsed_s,
         "overran_budget": elapsed_s > time_budget_s,
+        # OBS-165 follow-up: everything a caller needs to feed
+        # `ticket.Ticket.record_model_exchange` for this run, without this
+        # module importing ticket.py itself (see `investigation.py`'s
+        # `ModelExchange` docstring for why that dependency runs one way
+        # only). `model`/`provider` are already resolved locally above.
+        # `system_prompt` and `tools_manifest` are returned in FULL here --
+        # this function has no size concern of its own; `record_model_
+        # exchange` is what content-addresses them so they are written to
+        # disk once, not once per ticket. `tools_offered` is the cheap,
+        # human-scannable summary of `tools_manifest` (names only), and
+        # `exchanges` is one entry per turn actually made, in turn order,
+        # each carrying its own response text, stop reason, usage delta and
+        # (on a tool_use turn) the tool calls the model requested.
+        "model": model,
+        "provider": provider,
+        "system_prompt": AGENT_SYSTEM_PROMPT,
+        "tools_offered": [t["name"] for t in TOOLS],
+        "tools_manifest": _TOOLS_JSON,
+        "exchanges": exchanges,
     }

@@ -739,3 +739,123 @@ def test_operator_notes_surface_on_the_devices_the_walk_touched():
     assert all(n["note"] for n in result.operator_notes)
     payload = result.to_payload()
     assert payload["operator_notes"] == list(result.operator_notes)
+
+
+# --------------------------------------------------------------------------- #
+# The model exchange (OBS-165 follow-up): what ticket.py's
+# record_model_exchange needs, captured here rather than reconstructed later
+# -- the rendered prompt's two halves, the RAW response (before `_decode`
+# touches it), the grounding verdict, and a per-call usage delta.
+# --------------------------------------------------------------------------- #
+
+
+def test_an_exchange_is_recorded_per_model_call_with_the_rendered_prompt_and_raw_response():
+    from agent_nettools.prompt_library import CURRENT_VERSION
+
+    analyst = Scripted(report=_good_report, correlate=_FOUND)
+    result = _run("broken", analyst)
+
+    assert len(result.exchanges) == 2, "one report call, one correlate call"
+    report_exchange, correlate_exchange = result.exchanges
+
+    assert report_exchange.purpose == "report_paraphrase"
+    assert report_exchange.prompt_ref == f"report.v{CURRENT_VERSION['report']}"
+    assert report_exchange.system_prompt, "the static half must not be empty"
+    assert report_exchange.user_payload, "the volatile half must not be empty"
+    # The raw text `analyst` returned, verbatim -- not the decoded dict, and
+    # not a re-serialisation of it.
+    assert report_exchange.response_text == _good_report("ignored")
+    assert report_exchange.grounding_ok is True
+    assert "grounded" in report_exchange.grounding_summary
+
+    assert correlate_exchange.purpose == "correlate_paraphrase"
+    assert correlate_exchange.prompt_ref == f"correlate.v{CURRENT_VERSION['correlate']}"
+    assert correlate_exchange.response_text == _FOUND
+    assert correlate_exchange.grounding_ok is True
+    # LOG WINDOW only appears in the correlate prompt, never the report one --
+    # confirms the two exchanges actually carry two DIFFERENT prompts, not
+    # the same text recorded twice.
+    assert "LOG WINDOW" in correlate_exchange.user_payload
+    assert "LOG WINDOW" not in report_exchange.user_payload
+
+
+def test_a_withheld_reports_exchange_still_captures_the_raw_response_and_why():
+    """The exchange is recorded from what was ASKED and what came BACK --
+    unconditionally, whether or not grounding went on to accept it. A
+    withheld paraphrase disappears from `result.paraphrase`; it must not
+    also disappear from the instrumentation, or a reader could never tell a
+    withheld call from one that never happened."""
+
+    invented = "the interface is down and somebody should look at it"
+    real_key = _BROKEN_DESCENT.cause.result.evidence_keys[0]
+    chain_dropped = json.dumps({
+        "observations": [{"claim": invented, "evidence_key": real_key}],
+        "interpretations": [{"claim": invented, "based_on": ["obs-1"]}],
+        "recommendation": {"requires_human": True},
+    })
+    result = _run("broken", Scripted(report=chain_dropped, correlate=_FOUND))
+
+    report_exchange = result.exchanges[0]
+    assert result.paraphrase is None, "the prose itself is gone from the result"
+    assert report_exchange.response_text == chain_dropped, (
+        "but the instrumentation still has the raw call that was made"
+    )
+    assert report_exchange.grounding_ok is False
+    assert report_exchange.grounding_failures
+    assert "uncited_rung" in " ".join(report_exchange.grounding_failures)
+
+
+def test_a_healthy_descent_records_exactly_one_exchange():
+    analyst = Scripted(report="{}", correlate=_FOUND)
+    result = _run("healthy", analyst)
+
+    assert len(result.exchanges) == 1
+    assert result.exchanges[0].purpose == "report_paraphrase"
+
+
+def test_a_run_with_no_model_has_no_exchanges():
+    assert _run("broken").exchanges == ()
+
+
+def test_exchange_usage_is_a_per_call_delta_not_the_running_cumulative_total():
+    """`CountingAnalyst` costs a different amount per call (proportional to
+    that call's own prompt length) -- if the exchange recorded the running
+    total instead of a delta, the second exchange's usage would include the
+    first call's cost too."""
+
+    analyst = CountingAnalyst(report=_good_report, correlate=_FOUND)
+    result = _run("broken", analyst)
+
+    report_exchange, correlate_exchange = result.exchanges
+    expected_report_input = (
+        len(report_exchange.system_prompt) + 2 + len(report_exchange.user_payload)
+    ) // 4
+    expected_correlate_input = (
+        len(correlate_exchange.system_prompt) + 2 + len(correlate_exchange.user_payload)
+    ) // 4
+
+    assert report_exchange.usage == {
+        "input_tokens": expected_report_input, "output_tokens": 64,
+        "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0,
+        "total_tokens": expected_report_input + 64, "calls": 1, "reported": True,
+    }
+    assert correlate_exchange.usage["calls"] == 1, "not the cumulative call count (2)"
+    assert correlate_exchange.usage["input_tokens"] == expected_correlate_input
+    # The two calls' prompts are different lengths (a correlate prompt carries
+    # a log window; a report prompt does not), so a genuine delta -- not a
+    # copy of the same number twice -- is directly observable here.
+    assert expected_report_input != expected_correlate_input
+    assert report_exchange.usage["input_tokens"] != correlate_exchange.usage["input_tokens"]
+
+
+def test_exchanges_are_not_serialized_into_the_printed_payload():
+    """`to_payload()` is what a CLI/MCP caller prints on every run; a full
+    system prompt or tool manifest does not belong there just because a
+    ticket wants it once. The data still exists -- on `result.exchanges` --
+    for a caller that specifically wants it."""
+
+    analyst = Scripted(report=_good_report, correlate=_FOUND)
+    result = _run("broken", analyst)
+
+    assert "exchanges" not in result.to_payload()
+    assert len(result.exchanges) == 2

@@ -69,7 +69,12 @@ from .grounding import GroundingResult, ground_correlation, ground_report
 from .log_window import ShapedWindow, coverage_from_logging, shape_window
 from .metrics import record_paraphrase
 from .network_tools import collect_evidence, run_template
-from .prompt_library import RenderedPrompt, build_correlate_prompt, build_report_prompt
+from .prompt_library import (
+    CURRENT_VERSION,
+    RenderedPrompt,
+    build_correlate_prompt,
+    build_report_prompt,
+)
 from .render import render_correlation, render_report, report_grounding_note
 from .template_parsers import PARSE_OK, parse_template_output
 
@@ -77,6 +82,7 @@ __all__ = [
     "COVERAGE_LIMITED",
     "EMITTED",
     "InvestigationResult",
+    "ModelExchange",
     "NOT_ATTEMPTED",
     "WITHHELD",
     "Analyst",
@@ -157,6 +163,76 @@ def _decode(text: str) -> tuple[Any, tuple[str, ...]]:
         return None, (*repairs, "the response was not valid JSON")
 
 
+def _usage_delta(before: object | None, after: object | None) -> dict | None:
+    """What one model call cost, read from a before/after `.usage` snapshot.
+
+    Duck-typed on purpose, the same way `InvestigationResult.usage` already
+    is (`usage=getattr(analyst, "usage", None)`) -- this module does not
+    import `llm_analysis.TokenUsage` and does not need to: `before`/`after`
+    only have to support `.as_dict()`, which is `TokenUsage`'s own stable
+    contract, not a type this function has to know about. `None` when either
+    snapshot is missing or lacks that method (a plain scripted test analyst
+    has no `.usage` at all) -- "not measured", never a zeroed dict standing
+    in for a measurement nobody took (the same rule `TokenUsage.reported`
+    exists to enforce one level up).
+    """
+
+    if before is None or after is None:
+        return None
+    if not (hasattr(before, "as_dict") and hasattr(after, "as_dict")):
+        return None
+    b, a = before.as_dict(), after.as_dict()
+    keys = ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+    delta = {k: a[k] - b[k] for k in keys}
+    delta["total_tokens"] = delta["input_tokens"] + delta["output_tokens"]
+    delta["calls"] = a["calls"] - b["calls"]
+    # This call's own reported flag, not a merge of before/after -- `after`
+    # already reflects whether THIS call's usage was reported, and `before`
+    # says nothing about it.
+    delta["reported"] = a["reported"]
+    return delta
+
+
+@dataclass(frozen=True)
+class ModelExchange:
+    """One model call this investigation made, instrumented rather than
+    narrated (OBS-165): what it was asked, what it said back, what it cost,
+    and whether grounding accepted it.
+
+    Every field here is either a value this function already held before or
+    immediately after calling `analyst` -- the rendered prompt's own two
+    halves, the raw text `analyst` returned, the descent-derived grounding
+    verdict computed on the very next line -- or a duck-typed read off the
+    analyst's own `.usage` attribute (`_usage_delta`). None of it is a
+    model's account of itself. `ticket.Ticket.record_model_exchange` takes
+    exactly these fields, unpacked as keyword arguments, so this dataclass is
+    the contract between the two modules without either importing the
+    other's types (this module does not import `ticket.py` -- see that
+    module's own "what this module does not do" section for why the
+    dependency runs the other way, plain values in, never a project type
+    out).
+
+    `stop_reason` is always `None` on this path: `Analyst` is
+    `Callable[[RenderedPrompt], str]` by design (see the type alias's own
+    docstring and `cli.py`'s `_UsageRecordingAnalyst`, which deliberately
+    keeps a scripted test analyst able to stay a plain function) and a
+    provider's `stop_reason` lives on the `Completion`/message object that
+    boundary does not pass through. `agent_loop.py`'s exchanges (a different
+    call shape, with the raw message in hand) do carry it.
+    """
+
+    purpose: str
+    prompt_ref: str | None
+    system_prompt: str
+    user_payload: str
+    response_text: str
+    stop_reason: str | None
+    usage: dict | None
+    grounding_ok: bool
+    grounding_summary: str
+    grounding_failures: tuple[str, ...] = field(default_factory=tuple)
+
+
 @dataclass(frozen=True)
 class InvestigationResult:
     """One investigation. The descent always; the model's work only if grounded."""
@@ -232,6 +308,16 @@ class InvestigationResult:
     #: for a `--no-model` run and for any analyst that carries no `.usage` --
     #: which is different from zero, and says so.
     usage: object | None = None
+    #: One `ModelExchange` per model call this investigation made -- empty
+    #: when `analyst` is `None` (the same "no model configured is a mode, not
+    #: a failure" case every other model-shaped field already has). This is
+    #: the data a caller's ticket-recording feeds into
+    #: `ticket.Ticket.record_model_exchange`, one call each; see that
+    #: method's docstring for the size and injection reasoning. Deliberately
+    #: not in `to_payload()` -- the printed/API-facing payload is not the
+    #: ticket, and a full system prompt or tool manifest does not belong in
+    #: every CLI/MCP JSON emission just because a ticket wants it once.
+    exchanges: tuple[ModelExchange, ...] = field(default_factory=tuple)
 
     @property
     def finding(self) -> str:
@@ -756,8 +842,13 @@ def investigate(
     # consumer that wants the finding reads `report`; a consumer that wants a
     # readable sentence reads `paraphrase` and knows it is not authoritative.
     repairs: list[str] = []
+    exchanges: list[ModelExchange] = []
 
-    decoded, fixes = _decode(analyst(build_report_prompt(descent)))
+    report_prompt = build_report_prompt(descent)
+    usage_before = getattr(analyst, "usage", None)
+    raw_response = analyst(report_prompt)
+    usage_after = getattr(analyst, "usage", None)
+    decoded, fixes = _decode(raw_response)
     repairs.extend(fixes)
     paraphrase_grounding = ground_report(decoded, descent)
     paraphrase = decoded if paraphrase_grounding.ok else None
@@ -768,13 +859,34 @@ def investigate(
     # aggregates is not detection, and the failure this guards against is a
     # change in the *rate* rather than any one run.
     record_paraphrase(paraphrase_status)
+    # OBS-165 follow-up: the exchange this call actually was -- the rendered
+    # prompt's own two halves, the raw text `analyst` returned (before
+    # `_decode` touches it), and the grounding verdict computed above. See
+    # `ModelExchange`'s own docstring for why every field here is
+    # instrumented rather than narrated.
+    exchanges.append(ModelExchange(
+        purpose="report_paraphrase",
+        prompt_ref=f"report.v{CURRENT_VERSION['report']}",
+        system_prompt=report_prompt.system,
+        user_payload=report_prompt.user,
+        response_text=raw_response,
+        stop_reason=None,
+        usage=_usage_delta(usage_before, usage_after),
+        grounding_ok=paraphrase_grounding.ok,
+        grounding_summary=paraphrase_grounding.summary(),
+        grounding_failures=tuple(str(f) for f in paraphrase_grounding.failures),
+    ))
 
     correlation_paraphrase: dict | None = None
     correlation_paraphrase_status = NOT_ATTEMPTED
     correlation_grounding = GroundingResult()
 
     if cause is not None and shaped is not None:
-        decoded, fixes = _decode(analyst(build_correlate_prompt(descent, shaped)))
+        correlate_prompt = build_correlate_prompt(descent, shaped)
+        usage_before = getattr(analyst, "usage", None)
+        raw_response = analyst(correlate_prompt)
+        usage_after = getattr(analyst, "usage", None)
+        decoded, fixes = _decode(raw_response)
         repairs.extend(fixes)
         correlation_grounding = ground_correlation(decoded, coverage, shaped)
 
@@ -796,6 +908,18 @@ def investigate(
         if isinstance(correlation_paraphrase, dict):
             correlation_paraphrase["authoritative"] = False
         record_paraphrase(correlation_paraphrase_status)
+        exchanges.append(ModelExchange(
+            purpose="correlate_paraphrase",
+            prompt_ref=f"correlate.v{CURRENT_VERSION['correlate']}",
+            system_prompt=correlate_prompt.system,
+            user_payload=correlate_prompt.user,
+            response_text=raw_response,
+            stop_reason=None,
+            usage=_usage_delta(usage_before, usage_after),
+            grounding_ok=correlation_grounding.ok,
+            grounding_summary=correlation_grounding.summary(),
+            grounding_failures=tuple(str(f) for f in correlation_grounding.failures),
+        ))
 
     return InvestigationResult(
         device=device, subject=subject, flow=flow, descent=descent,
@@ -811,4 +935,5 @@ def investigate(
         repairs=tuple(repairs),
         # Duck-typed: an analyst that does not record usage simply has none.
         usage=getattr(analyst, "usage", None),
+        exchanges=tuple(exchanges),
     )

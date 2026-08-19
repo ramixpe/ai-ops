@@ -9,6 +9,7 @@ every other test in this suite that exercises ``run_intent``/``check_fabric``.
 
 from __future__ import annotations
 
+import json
 import sys
 import types
 
@@ -419,3 +420,80 @@ def test_cache_prefix_is_byte_identical_across_different_questions(monkeypatch):
     assert captured[0]["system"] == captured[1]["system"]
     assert captured[0]["system"][-1]["cache_control"] == {"type": "ephemeral"}
     assert captured[0]["messages"] != captured[1]["messages"]
+
+
+# --------------------------------------------------------------------------- #
+# Model-exchange instrumentation (OBS-165 follow-up): everything a caller
+# needs to feed `ticket.Ticket.record_model_exchange`, without this module
+# importing ticket.py or deciding when a ticket is opened.
+# --------------------------------------------------------------------------- #
+
+
+def test_the_returned_dict_carries_model_provider_and_prompt_identity(monkeypatch):
+    from agent_nettools import agent_loop
+
+    install_scripted_anthropic(monkeypatch, [lambda **kw: _text_message("All good.")])
+
+    result = run_agent_loop("Is PE1 healthy?")
+
+    assert result["model"] == "claude-sonnet-4-5"
+    assert result["provider"] == "anthropic"
+    assert result["system_prompt"] == agent_loop.AGENT_SYSTEM_PROMPT
+    assert result["tools_offered"] == [t["name"] for t in agent_loop.TOOLS]
+    # The full tool-schema JSON -- the 30k+-char manifest
+    # `ticket.Ticket.record_model_exchange` is the one responsible for
+    # content-addressing, not this function's job to shrink.
+    assert json.loads(result["tools_manifest"]) == agent_loop.TOOLS
+
+
+def test_each_turn_produces_one_instrumented_exchange(monkeypatch):
+    """Two turns -- a tool_use turn, then an end_turn -- produce two
+    `exchanges` entries, each carrying only ITS OWN turn's usage (a delta,
+    not the running cumulative total) and stop reason, and the tool_use turn
+    alone carries the tool call the model actually requested."""
+
+    install_scripted_anthropic(
+        monkeypatch,
+        [
+            lambda **kw: _tool_use_message(
+                {"id": "toolu_1", "name": "list_lab_devices", "input": {}}
+            ),
+            lambda **kw: _text_message("PE1 and PE2 are both up."),
+        ],
+    )
+    set_device_environment(monkeypatch)
+
+    result = run_agent_loop("Is the fabric healthy?")
+
+    exchanges = result["exchanges"]
+    assert len(exchanges) == 2
+
+    first, second = exchanges
+    assert first["purpose"] == "agent_turn"
+    assert first["iteration"] == 1
+    assert first["stop_reason"] == "tool_use"
+    # A pure tool_use turn carries no accompanying prose in this fixture --
+    # an honest empty string, not an omitted field.
+    assert first["response_text"] == ""
+    assert first["tool_calls_requested"] == [
+        {"tool": "list_lab_devices", "input": {}}
+    ]
+    # `_usage()` costs 5 input / 5 output tokens per call in this harness --
+    # each turn's delta must show that turn's own cost, not the running total.
+    assert first["usage"]["input_tokens"] == 5
+    assert first["usage"]["output_tokens"] == 5
+
+    assert second["iteration"] == 2
+    assert second["stop_reason"] == "end_turn"
+    assert second["response_text"] == "PE1 and PE2 are both up."
+    assert "tool_calls_requested" not in second, (
+        "a turn that made no tool call has nothing to report there"
+    )
+    assert second["usage"]["input_tokens"] == 5, (
+        "the second turn's delta must not include the first turn's cost"
+    )
+
+    # The running total in `usage` (unchanged, existing field) IS cumulative --
+    # confirms the per-exchange numbers above are genuinely a different,
+    # non-cumulative view, not just a copy of the same dict.
+    assert result["usage"]["input_tokens"] == 10

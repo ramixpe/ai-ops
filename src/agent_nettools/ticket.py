@@ -168,6 +168,7 @@ ledger's.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -199,6 +200,14 @@ KIND_TOOL_EVENT = "tool_event"
 KIND_DEVICE_INTERACTION = "device_interaction"
 KIND_EVIDENCE_SOURCE = "evidence_source"
 KIND_CONTEXT_FOOTPRINT = "context_footprint"
+#: One model call this ticket recorded (OBS-165 follow-up): the system
+#: prompt/tools offered, the volatile payload, the model's raw response, its
+#: cost, and whether grounding accepted it -- see
+#: `Ticket.record_model_exchange`'s docstring for the size and injection
+#: reasoning. Distinct from `KIND_ANSWER` (the descent's own, code-rendered
+#: answer -- never a model's) and `KIND_TOOL_EVENT` (a device/tool call, not
+#: a call to the model itself).
+KIND_MODEL_EXCHANGE = "model_exchange"
 KIND_ANSWER = "answer"
 KIND_OUTCOME = "outcome"
 KIND_CLOSED = "closed"
@@ -220,6 +229,26 @@ DEFAULT_TICKETS_DIR = "tickets"
 #: store. This caps one call's contribution; it does not enforce a
 #: file-wide budget -- see the accompanying build report.
 _MAX_TEXT_FIELD_CHARS = 400
+
+#: Bound on a model's raw response text specifically -- deliberately larger
+#: than, and separately named from, `_MAX_TEXT_FIELD_CHARS`. That bound
+#: exists to catch an *accidental* device-output leak into a status/detail
+#: field a caller never meant to be big; this one exists because a model's
+#: raw response is the thing `record_model_exchange` was built to capture,
+#: so truncating it as aggressively as an incidental status string would
+#: defeat the feature it protects. Still bounded: an unbounded field is
+#: exactly how a ticket becomes "unreadable and the directory enormous" (the
+#: operator's own stated size risk) the moment one model call emits a long
+#: answer, and this is what stops a pathological or adversarial response
+#: from making a single ticket unboundedly large.
+_MAX_MODEL_RESPONSE_CHARS = 6000
+
+#: Sub-directory, under the tickets directory, that holds content-addressed
+#: prompt/tool-manifest text. See `Ticket.record_model_exchange`'s docstring
+#: for the size decision this implements: a system prompt or a tool manifest
+#: is written here once per distinct value (by sha256) instead of once per
+#: ticket, however many tickets share it.
+_PROMPT_SIDECAR_DIRNAME = "_prompts"
 
 #: How many filename suffixes `_claim_path` will try before giving up and
 #: degrading. See `_claim_path`'s own docstring.
@@ -255,6 +284,96 @@ def _cap_text(value: str | None, limit: int = _MAX_TEXT_FIELD_CHARS) -> str | No
     if len(text) <= limit:
         return text
     return text[:limit] + f"... [truncated, {len(text)} chars total]"
+
+
+def _coerce_text(value: Any) -> str:
+    return value if isinstance(value, str) else str(value)
+
+
+def _safe_scrub(value: Any) -> str:
+    """Run the project's one credential/serial scrubber over free text bound
+    for a ticket, and fail closed.
+
+    `fixtures.scrub_output` is imported lazily, inside this function, on
+    purpose -- it pulls in `network_tools`/`inventory` (credential-loading
+    code), and this module keeps that weight out of its own top-level
+    imports for the same reason its docstring gives for not importing
+    `ledger.py`: a side-channel logger should not carry a hard dependency on
+    modules actively changing underfoot, and should not need the credential
+    loader merely to write a markdown file.
+
+    If scrubbing itself raises -- a type this module did not anticipate --
+    the text is replaced with a withheld marker rather than written
+    unscrubbed. Silently falling back to the raw value would turn a
+    defensive measure into a single point of failure for the property it
+    exists to guarantee; "leave the field out" (this module's own rule, in
+    its top docstring, for a value with no instrumented source) applies here
+    too, to a scrubber that broke instead of a measurement that was never
+    taken.
+    """
+
+    text = _coerce_text(value)
+    try:
+        from .fixtures import scrub_output
+
+        return scrub_output(text)
+    except Exception:  # noqa: BLE001 -- fail closed, never write unscrubbed text.
+        return "[SCRUB FAILED -- text withheld]"
+
+
+def _sha256_hex(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _write_sidecar_once(directory: Path, text: str) -> tuple[str, int, str | None]:
+    """Content-address ``text`` under ``directory / _PROMPT_SIDECAR_DIRNAME``.
+
+    Returns ``(sha256_hex, char_count, warning)``. The hash and length are
+    always computed and returned -- they cost nothing and are the whole
+    point of the size decision (see `Ticket.record_model_exchange`'s
+    docstring) -- even when the disk write itself fails, which degrades to a
+    warning exactly like every other write in this module, never a raised
+    exception.
+
+    A plain "write if it does not already exist" rather than an exclusive
+    create: two processes racing to write the *same* hash are, by
+    construction, writing identical bytes (that is what content-addressing
+    means), so the race has no bad outcome to guard against -- unlike
+    `_claim_path`, which exists precisely because two *different* tickets
+    must never collide on one filename.
+    """
+
+    digest = _sha256_hex(text)
+    path = directory / _PROMPT_SIDECAR_DIRNAME / f"{digest}.txt"
+    try:
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+        return digest, len(text), None
+    except Exception as exc:  # noqa: BLE001 -- a sidecar write failure never fails the caller.
+        warning = f"prompt sidecar write failed ({path}): {exc}"
+        print(f"WARNING: {warning}", file=sys.stderr)
+        return digest, len(text), warning
+
+
+def read_prompt_sidecar(
+    directory: str | os.PathLike[str], sha256_hex: str
+) -> str | None:
+    """Read back one sidecar's full text by its hash.
+
+    This is what keeps "prompt A vs prompt B produced different behaviour"
+    answerable despite the ticket itself only ever carrying a hash: resolve
+    each ticket's `system_prompt_sha256`/`user_payload_sha256` through this
+    function and diff the two results. ``None`` when no sidecar with this
+    hash exists -- never written, or the write degraded -- so a caller does
+    not mistake a missing sidecar for an empty prompt.
+    """
+
+    path = Path(directory) / _PROMPT_SIDECAR_DIRNAME / f"{sha256_hex}.txt"
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return None
 
 
 def _merge_extra(fields: dict[str, Any], extra: dict[str, Any] | None) -> dict[str, Any]:
@@ -703,6 +822,181 @@ class Ticket:
         )
         return self._write(KIND_CONTEXT_FOOTPRINT, fields, title="Context footprint", narrative=notes)
 
+    # -- the model exchange (OBS-165 follow-up) --------------------------------
+
+    def record_model_exchange(
+        self,
+        *,
+        purpose: str,
+        model: str | None = None,
+        provider: str | None = None,
+        system_prompt: str | None = None,
+        system_prompt_ref: str | None = None,
+        tools_offered: list[str] | None = None,
+        tools_manifest: str | None = None,
+        user_payload: str | None = None,
+        user_payload_ref: str | None = None,
+        response_text: str | None = None,
+        stop_reason: str | None = None,
+        tokens: dict[str, Any] | None = None,
+        grounding_ok: bool | None = None,
+        grounding_summary: str | None = None,
+        grounding_failures: list[str] | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> TicketWriteResult:
+        """One model call: what it was asked, what it said back, what it
+        cost, and whether grounding accepted it. This is the field this
+        module could not previously write at all -- OBS-165/MCP-EXPERIMENT.md
+        §12.5 measured that a model's own account of what it did is
+        indistinguishable, at read time, from a fabrication of the same
+        shape, and a ticket that recorded a model's summary of itself would
+        inherit that failure on the one artifact meant to be trusted without
+        re-deriving it. So nothing here is the model's account of what it
+        did -- it is what the caller already had in hand before or
+        immediately after the call: the prompt this module was given to
+        send, and the text that came back. `grounding_ok`/`grounding_summary`
+        are the one place this module records a verdict *about* the
+        response, and that verdict is `grounding.py`'s, computed the same way
+        for every caller, never the model's own.
+
+        **Size.** A rendered prompt's static half (`system_prompt`) and a
+        tool-calling loop's tool manifest (`tools_manifest`, 30k+ chars in
+        this project and growing) are identical across every call that
+        shares a prompt version or a tool set -- writing either into every
+        ticket that uses it would make tickets "unreadable and the directory
+        enormous" (the operator's own framing) for no benefit, since the
+        text itself never differs. Both are therefore content-addressed:
+        scrubbed, hashed, and written once under `_prompts/<sha256>.txt`
+        next to the ticket file (`_write_sidecar_once`); the ticket itself
+        keeps only the hash, the character count, and (for the prompt) an
+        optional human-readable `_ref` label such as `"report.v2"`.
+        `user_payload` (the volatile half -- the descent JSON, or a shaped
+        log window) gets the same treatment for the same reason: it can be
+        large (a log window can carry up to 200 records) and, unlike a
+        model's response, carries no information this feature exists to
+        study -- it is an input, not the thing under evaluation.
+
+        `response_text` is the deliberate exception: capped
+        (`_MAX_MODEL_RESPONSE_CHARS`) but kept **inline**, never hashed and
+        sidecarred. A model's response is different on every single call by
+        construction, so hashing it buys no deduplication and would only add
+        a resolve-the-hash step to the one field the operator's stated
+        purpose -- "study what could be enhanced and optimized" -- actually
+        needs to read directly, across many tickets, without indirection.
+        This is the trade the operator's tension #1 asks for explicitly:
+        record in full where full is cheap and valuable (the response), and
+        record a hash where full would be expensive and redundant (the
+        static system prompt / tool manifest / payload).
+
+        **Injection.** `response_text` is model-generated text reaching a
+        ticket for the first time, so it gets the same treatment device text
+        and caller-supplied strings already have: it is passed as
+        ``narrative`` (blockquoted -- see `_blockquote`) for a human reader
+        AND as a JSON field (`json.dumps`-quoted for the parser) for the
+        machine round trip -- never interpolated into a heading (the
+        heading is built from `purpose`, which goes through
+        `_write`/`_heading_safe` exactly like every other title in this
+        module). A response containing a line that reads
+        ``## Outcome update`` followed by a ` ```json-ticket-section ` fence
+        and a forged verdict cannot become one: the blockquoted copy cannot
+        start a line at column 0, and the JSON copy is string-escaped so no
+        character in it can ever surface as a raw newline in the file (see
+        the module docstring's "header format" section). Mutation-tested by
+        `scripts/mutate_guards.py`'s ``OBS-165-MODEL-FORGERY`` entry and
+        exercised adversarially by
+        ``test_a_model_response_disguised_as_a_ticket_section_cannot_forge_one``.
+
+        **Scrubbing.** `system_prompt`, `tools_manifest`, `user_payload`, and
+        `response_text` all pass through `fixtures.scrub_output`
+        (fail-closed -- see `_safe_scrub`) before anything is capped, hashed,
+        or written, including into a sidecar. This is defense in depth, not
+        the primary guarantee: `prompt_library.py`'s Invariant 4 already
+        keeps unparsed device text out of the report/correlate system
+        prompts structurally, and `model_egress.py` already projects every
+        tool result before a model (and therefore this ticket) ever sees it.
+        `scrub_output` does not redact a `key-string <value>` line (a
+        documented gap -- `tests/test_config_section.py`); checked, and it
+        does not matter on this path: no tool this project currently offers
+        a model returns a `show running-config` section at all (the six
+        `agent_loop.py` tools and every `investigate` flow read operational
+        state, never config), so there is no route by which that shape of
+        secret could reach a field this method scrubs today. A future tool
+        that exposes config text to a model would reopen this gap here too,
+        and would need `scrub_output` extended before it shipped.
+
+        **Instrumented, never narrated (OBS-165).** `grounding_ok`/
+        `grounding_summary`/`grounding_failures` are all optional and `None`
+        for a caller (e.g. `agent_loop.py`'s exploratory loop) whose model
+        call was never graded at all -- recording `False` there would
+        misrepresent "never checked" as "checked and failed", the same class
+        of collapse `llm_analysis.TokenUsage.reported` exists to prevent for
+        token counts. `tokens` is passed straight through, unmodified,
+        already-extracted values only (typically
+        `TokenUsage.as_dict()` or the same shape by hand): `None` means no
+        usage was measured for this call, which is a different fact from a
+        `tokens` dict whose counts are all zero.
+        """
+
+        purpose = _require_nonempty_str("purpose", purpose)
+        directory = self.path.parent
+
+        fields: dict[str, Any] = {
+            "purpose": purpose,
+            "model": model,
+            "provider": provider,
+            "stop_reason": stop_reason,
+            "tokens": tokens,
+            "grounding_ok": grounding_ok,
+            "grounding_summary": _cap_text(grounding_summary),
+            # `is not None`, not truthiness: an empty list means "graded, zero
+            # failures" (a real, meaningful result) and must not collapse into
+            # the same `None` a caller who never graded at all produces --
+            # exactly the None-vs-empty distinction `grounding_ok`/`tokens`
+            # already have to preserve for the same reason.
+            "grounding_failures": (
+                [_cap_text(f) for f in grounding_failures]
+                if grounding_failures is not None else None
+            ),
+            "tools_offered": list(tools_offered) if tools_offered is not None else None,
+        }
+
+        if system_prompt is not None:
+            digest, chars, warning = _write_sidecar_once(directory, _safe_scrub(system_prompt))
+            fields["system_prompt_sha256"] = digest
+            fields["system_prompt_chars"] = chars
+            fields["system_prompt_ref"] = system_prompt_ref
+            if warning:
+                fields["system_prompt_sidecar_warning"] = warning
+
+        if tools_manifest is not None:
+            digest, chars, warning = _write_sidecar_once(directory, _safe_scrub(tools_manifest))
+            fields["tools_manifest_sha256"] = digest
+            fields["tools_manifest_chars"] = chars
+            if warning:
+                fields["tools_manifest_sidecar_warning"] = warning
+
+        if user_payload is not None:
+            digest, chars, warning = _write_sidecar_once(directory, _safe_scrub(user_payload))
+            fields["user_payload_sha256"] = digest
+            fields["user_payload_chars"] = chars
+            fields["user_payload_ref"] = user_payload_ref
+            if warning:
+                fields["user_payload_sidecar_warning"] = warning
+
+        narrative = None
+        if response_text is not None:
+            scrubbed = _safe_scrub(response_text)
+            fields["response_chars"] = len(scrubbed)
+            capped = _cap_text(scrubbed, limit=_MAX_MODEL_RESPONSE_CHARS)
+            fields["response_text"] = capped
+            narrative = capped
+
+        fields = _merge_extra(fields, extra)
+        return self._write(
+            KIND_MODEL_EXCHANGE, fields, title=f"Model exchange -- {purpose}",
+            narrative=narrative,
+        )
+
     # -- the answer -----------------------------------------------------------
 
     def record_answer(
@@ -1014,6 +1308,7 @@ def read_ticket(path: str | os.PathLike[str]) -> dict[str, Any]:
         "device_interactions": all_of(KIND_DEVICE_INTERACTION),
         "evidence": all_of(KIND_EVIDENCE_SOURCE),
         "context_footprint": latest(KIND_CONTEXT_FOOTPRINT),
+        "model_exchanges": all_of(KIND_MODEL_EXCHANGE),
         "answer": latest(KIND_ANSWER),
         "outcome": outcome,
         "closed": latest(KIND_CLOSED),
