@@ -1,5 +1,7 @@
 # LM Studio run — 2026-08-19
 
+<!-- knowledge-search:exclude -- evaluation material (B-511) -->
+
 **Two models, fresh session each, same nine questions in order.** A fresh session
 matters more than usual today: the MCP tool description changed overnight
 (`investigate_lab_session` now advertises four flows where it advertised two),

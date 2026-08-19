@@ -1,5 +1,7 @@
 # Round 5 — invoke *during* propagation
 
+<!-- knowledge-search:exclude -- evaluation material (B-511) -->
+
 **Item 4 of the peer review's order of work. The test that proves item 3.**
 
 Rounds 1–4 all invoked the agent **after** the fabric had converged. Every one of

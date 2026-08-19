@@ -1,5 +1,7 @@
 # MCP re-test — the question set, and what to capture
 
+<!-- knowledge-search:exclude -- evaluation material (B-511) -->
+
 **Purpose: settle §9's pre-registered prediction** in `MCP-EXPERIMENT.md`. All 21 tool
 descriptions were rewritten in the form *what question this answers, when to prefer it*
 (commit `6637368`). The prediction says `investigate_lab_session` is still selected for

@@ -1,5 +1,7 @@
 # Round 6 — the trust-loss scenario, and whether B-456 already prevents it
 
+<!-- knowledge-search:exclude -- evaluation material (B-511) -->
+
 **B-440.** Reviewer B, §3.3. The most operationally useful paragraph in any of the three
 reviews, and it describes this fabric:
 

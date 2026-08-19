@@ -1,5 +1,7 @@
 # The MCP Experiment
 
+<!-- knowledge-search:exclude -- evaluation material (B-511) -->
+
 **2026-08-17.** A local model, connected to this project's MCP server, asked to
 diagnose a real fabric.
 

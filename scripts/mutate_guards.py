@@ -244,6 +244,16 @@ MUTATIONS = [
      "src/agent_nettools/network_tools.py",
      '    "bgp_vpnv4": check_bgp_vpnv4_neighbors,\n', "",
      "test_every_cisco_xr_intent_has_a_check_tool"),
+
+    ("B-511", "a document carrying the evaluation-material marker is never "
+     "returned by search_knowledge -- the corpus must not hold its own "
+     "answer key (OBS-194: a model under test searched MCP-RETEST-PROTOCOL.md "
+     "and read back the expected answer to the fabrication question it was "
+     "just asked)",
+     "src/agent_nettools/knowledge.py",
+     "            if _is_evaluation_material(lines):\n                continue\n",
+     "",
+     "test_evaluation_material_is_never_returned_by_search"),
 ]
 
 

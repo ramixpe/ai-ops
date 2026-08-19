@@ -43,6 +43,40 @@ MAX_QUERY_LENGTH = 200
 #: expose through an MCP tool.
 _SEARCH_ROOTS = ("docs", "README.md", "CONTRIBUTING.md", "SECURITY.md")
 
+#: Evaluation material carries this exact line, checked as a property of the
+#: FILE's own content rather than tracked by name or path. B-511 / OBS-194: a
+#: local model asked "why is the BGP session from PE2 to 10.255.0.99 down?" --
+#: a fabrication probe, deliberately naming a peer that does not exist --
+#: called this function, found the retest protocol's own answer ("There is no
+#: such peer...") on the corpus, and returned it verbatim. The answer was
+#: correct and the question stopped measuring anything: a leaked answer key
+#: produces a right answer indistinguishable from the right answer for the
+#: right reason.
+#:
+#: A name-based exclusion list requires someone to remember to extend it every
+#: time a new sealed round or re-test protocol is written. A content marker
+#: does not: every evaluation document in this corpus already extends or is
+#: copied from a predecessor of the same shape (round N+1 from round N, the
+#: next dated LM Studio run from the last), so the marker travels forward with
+#: the file rather than living in a registry a new file has no reason to
+#: touch. `tests/test_knowledge.py` additionally asserts, by filename pattern,
+#: that every currently-known evaluation-document family (`ROUND-*.md`,
+#: `LMSTUDIO-RUN-*.md`, anything matching `*RETEST*` or `*EXPERIMENT*`) is not
+#: merely trusted to carry the marker but is checked to.
+_EVALUATION_MARKER = "<!-- knowledge-search:exclude -- evaluation material (B-511) -->"
+
+
+def _is_evaluation_material(lines: list[str]) -> bool:
+    """True if this document is withheld from the searchable corpus.
+
+    Checked against the first five lines only: the convention is that the
+    marker opens the document, immediately under its title, where anyone
+    skimming the raw file would see it -- not buried where it could sit
+    unnoticed beside content that should not be excluded with it.
+    """
+
+    return any(_EVALUATION_MARKER in line for line in lines[:5])
+
 
 def _repo_root() -> Path | None:
     """Walk up from this file to the directory holding ``pyproject.toml``.
@@ -78,6 +112,18 @@ def search_knowledge(query: str, *, max_results: int = 8) -> dict[str, Any]:
     surface. Heading lines score double: a term in a title is a better lead
     than the same term mid-paragraph. Ordering is deterministic
     (score, then path, then line).
+
+    This project's own internal evaluation material -- sealed test
+    protocols, the questions put to a model under test, and their expected
+    answers -- is withheld from the corpus by design (B-511) and returns no
+    hit, indistinguishably from a topic this project has never documented.
+    **An empty result here is therefore not proof that a topic is
+    undocumented.** That disclosure is stated once, here and in the tool
+    description, rather than attached per query: a per-query "N result(s)
+    withheld" flag would itself be a signal correlated with exactly the
+    fabricated-entity and sealed-prediction queries the exclusion exists to
+    protect, defeating the purpose for the one class of query where it
+    matters most.
     """
 
     query = (query or "").strip()[:MAX_QUERY_LENGTH]
@@ -94,6 +140,8 @@ def search_knowledge(query: str, *, max_results: int = 8) -> dict[str, Any]:
             try:
                 lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
             except OSError:
+                continue
+            if _is_evaluation_material(lines):
                 continue
             rel = str(path.relative_to(root))
             for number, line in enumerate(lines, start=1):

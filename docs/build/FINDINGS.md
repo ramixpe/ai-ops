@@ -6029,3 +6029,55 @@ Filed as B-511. B-512 records the other half of the run: Q8's LDP question was
 answered correctly through `collect_lab_evidence` because `ldp` has no MCP tool
 — the right answer through the only door there was. Deferred deliberately so this
 run's manifest stayed comparable; now unblocked.
+
+---
+
+## OBS-195 · B-511 · Excluding the answer key from the corpus is necessary and not sufficient
+
+The evaluation documents are now excluded from `search_lab_knowledge` by a
+content marker (`<!-- knowledge-search:exclude -->`), with a glob-based test that
+fails if a future `ROUND-*`/`LMSTUDIO-RUN-*`/`*RETEST*`/`*EXPERIMENT*` file is
+added without one. Verified: the protocol and the four sealed rounds no longer
+appear in any result, and the corpus is still searchable for ordinary content.
+
+**It does not close the leak.** Probing for the Q4 answer after the fix:
+
+```
+"10.255.0.99"  -> docs/build/FINDINGS.md:4041
+   "Measured before the fix, on the committed corpus:
+    `investigate("RR1", "10.255.0.99")` for a peer that doe..."
+```
+
+also `BACKLOG.md`, `archive/VERIFICATION.md`, `design/peer-review-response.md`.
+
+The answer key is **replicated**, because this build documents its own evaluation
+thoroughly and those write-ups quote the probe. Every one of those files is a
+legitimate engineering record that the knowledge tool exists to serve — excluding
+`FINDINGS.md` and `BACKLOG.md` would gut the corpus to protect one question.
+
+So the exclusion attacks the wrong layer. The durable fix is on the **question**,
+not the corpus:
+
+> A probe whose answer is written down anywhere is a retrieval test. Make the
+> probe unrepeatable instead of making the corpus forgetful — generate the
+> fabricated identifier fresh at run time, never record it, and the leak is
+> impossible rather than merely patched.
+
+Concretely: Q4's `10.255.0.99` has been written into FINDINGS, BACKLOG,
+VERIFICATION, the protocol and two review documents over five rounds. It has been
+a retrieval test for some time and the exclusion would not have revealed that —
+**the file-level fix would have made the score look repaired while the leak
+continued**, which is the same failure mode as the leak itself: a passing result
+that means less than it appears to.
+
+B-511 stays OPEN with the corpus half done and the question half specified. The
+file exclusion is worth keeping regardless: sealed *predictions* must not be
+searchable even when the question is rotated, or a model can read what the build
+expects to happen before it happens.
+
+One environment bug found by the agent while working, and it is mine: the
+`.claude/worktrees` scope exclusion I added to `mutate_guards.py` (OBS-189) means
+that when the script runs *from inside* a worktree, every path contains that
+string, so the purge silently skips the entire repo. It fails safe here — the
+guard run still detected its own stale bytecode — but the fix I wrote for a race
+introduced a hole in the same function. Filed as B-513.

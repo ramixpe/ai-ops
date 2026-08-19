@@ -1,5 +1,7 @@
 # Round 8 — AS mismatch, and whether rungs 1 and 2 can separate at all
 
+<!-- knowledge-search:exclude -- evaluation material (B-511) -->
+
 **B-463.** The last unseparated rung boundary: `bgp_session` | `transport`.
 
 > **Re-sealed 2026-08-17. The fault changed from MD5 to an AS mismatch**, on the

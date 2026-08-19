@@ -1,5 +1,7 @@
 # Round 7 — does a down port persist as an LFA backup?
 
+<!-- knowledge-search:exclude -- evaluation material (B-511) -->
+
 **B-462. The known soft spot in code that shipped this week.**
 
 `EACH_PATH_INTERFACE` (B-456) takes the interface rung's member set from the

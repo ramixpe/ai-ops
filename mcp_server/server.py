@@ -477,6 +477,11 @@ def search_lab_knowledge(query: str) -> dict:
     nobody read -- OBS-139). Plain text search with `path:line` citations; no
     device is contacted. Not a device-state tool -- for state, use the check/
     lookup tools; for "why is X broken", use `investigate_lab_session`.
+
+    This project's own internal evaluation material -- test protocols and
+    their expected answers -- is withheld from the corpus and returns no hit,
+    the same as a topic nobody has written up. A miss here is not proof a
+    topic is undocumented elsewhere in the project.
     """
 
     from agent_nettools.knowledge import search_knowledge
