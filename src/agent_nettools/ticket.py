@@ -599,7 +599,7 @@ class Ticket:
         *,
         session_count: int,
         latency_ms: float | None = None,
-        retries: int = 0,
+        retries: int | None = None,
         commands_run: int | None = None,
         extra: dict[str, Any] | None = None,
     ) -> TicketWriteResult:
@@ -608,11 +608,25 @@ class Ticket:
         `network_tools._netmiko_send_commands`/`metrics.record_collection`
         shape, per device, per interaction (metrics.py aggregates across
         interactions; this is the one-interaction slice the spec's "device
-        interactions" bullet asks for)."""
+        interactions" bullet asks for).
+
+        `retries` defaults to `None`, not `0` -- it used to default to `0`,
+        which is indistinguishable from "zero retries were measured" and is
+        exactly OBS-188's defect class (a default standing in for a
+        measurement never taken). No caller in this codebase measures a
+        per-device retry count today: `_netmiko_send_commands` computes one,
+        but `network_tools._section_from_combined` and the template runners
+        (`run_template`/`run_templates_split`) strip it out of every per-
+        intent/per-template envelope before it reaches an `Observation`, so
+        `EvidenceEpoch` never sees it and cannot pass it on. Pass an actual
+        int only when one was actually measured; `None` here means "not
+        measured," matching `latency_ms`'s and `commands_run`'s own
+        defaults."""
 
         device = _require_nonempty_str("device", device)
         session_count = _require_nonneg_int("session_count", session_count)
-        retries = _require_nonneg_int("retries", retries)
+        if retries is not None:
+            retries = _require_nonneg_int("retries", retries)
         fields = _merge_extra(
             {
                 "device": device, "session_count": session_count, "latency_ms": latency_ms,

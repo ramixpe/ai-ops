@@ -226,6 +226,15 @@ MUTATIONS = [
      "    sender: Callable[[dict[str, Any], str], str] | None = None,\n"
      ") -> dict[str, Any]:\n",
      "test_run_rendered_command_refuses_a_show_running_config_shaped_smuggled_command"),
+
+    ("B-446-LATENCY-DEDUP", "EvidenceEpoch.latency_ms sums each device's "
+     "DISTINCT observation windows, not every observation -- the many intents "
+     "that share one session's started/completed pair must contribute that "
+     "window's duration once, not once per intent",
+     "src/agent_nettools/epoch.py",
+     "            windows.setdefault(o.device, set()).add((o.started, o.completed))\n",
+     "            windows.setdefault(o.device, []).append((o.started, o.completed))\n",
+     "test_latency_ms_deduplicates_observations_sharing_one_window"),
 ]
 
 

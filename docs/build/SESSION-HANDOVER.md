@@ -2,9 +2,9 @@
 
 > **OVERNIGHT RUN — 2026-08-18 into 2026-08-19. Read this first.**
 >
-> Green and fully pushed at every step: **2491 passed / 24 skipped**, lint clean,
-> **26/26 mutation guards**, four frozen files intact. Tests went
-> **2229 → 2491** overnight. One warning is expected and deliberate — see
+> Green and fully pushed at every step: **2500 passed / 24 skipped**, lint clean,
+> **27/27 mutation guards**, four frozen files intact. Tests went
+> **2229 → 2500** overnight. One warning is expected and deliberate — see
 > "Your call in the morning", item 1.
 >
 > ### Landed
@@ -18,8 +18,12 @@
 > ### Ready to test this morning
 > * **Four flows**: `bgp_session`, `interface`, `isis_adjacency`, `ldp_session`.
 >   A fifth, `device_health`, is **refused on purpose** — see below.
-> * `nettools investigate` writes a **ticket** per run; `nettools ledger
->   summary` / `ledger verdict <id>`, and the id is printed.
+> * `nettools investigate` writes a **ticket** per run, and it now records real
+>   provenance: sessions, commands that returned output, and monotonic latency
+>   per device (measured live at 13,035 ms / 13 commands against 10.8 ms on a
+>   fixture replay). `retries` reads `None`, not `0` — the epoch genuinely
+>   cannot measure it, and a default zero would be a lie (OBS-190).
+>   `nettools ledger summary` / `ledger verdict <id>`, and the id is printed.
 > * **Nine intents** — `bgp_vpnv4` is new (real VPNv4 sessions on RR1 and all
 >   four PEs).
 > * Six services on the `stage2` compose profile; all 19 containers healthy.
@@ -81,8 +85,8 @@
 > remember a flag. (OBS-185)
 >
 > ### Backlog
-> **137 rows** — 76 DONE, 15 OPEN, 28 DEFERRED, 14 BLOCKED, 2 OUT-OF-SCOPE,
-> 1 CLOSED-AS-MEASURED, 1 CLOSED-AS-REFUSED. FINDINGS.md holds **186**
+> **138 rows** — 77 DONE, 15 OPEN, 28 DEFERRED, 14 BLOCKED, 2 OUT-OF-SCOPE,
+> 1 CLOSED-AS-MEASURED, 1 CLOSED-AS-REFUSED. FINDINGS.md holds **187**
 > observations.
 >
 > ### The diagrams are now true

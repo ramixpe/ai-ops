@@ -533,3 +533,91 @@ def test_investigate_writes_a_ticket_carrying_the_session_counts(tmp_path, monke
     assert interactions == {"RR1": 1, "PE2": 2}, (
         f"the ticket must carry the epoch's real session counts, got {interactions}"
     )
+
+
+def test_investigate_writes_a_ticket_carrying_commands_run_and_latency(tmp_path, monkeypatch):
+    """The same seam as the test above, extended to the two provenance
+    fields B-446 shipped with, and which stayed permanently null: measured
+    live against PE1 the night this landed, `commands_run` and `latency_ms`
+    were `None` on every run, not only on the fixture path -- nothing filled
+    them in, though `Ticket.record_device_interaction` always accepted them.
+
+    The expected `commands_run` is derived from an independently run
+    investigation over the same device/subject/sender (`investigate()`'s own
+    default resolver, `inventory_resolver`, since the CLI never overrides
+    it) rather than a hardcoded literal, so this test does not rot if an
+    intent is ever added to the `bgp_session` ladder or the inventory
+    changes PE2's path-scoped interface set -- both would change the exact
+    count without this being the wrong fix.
+    """
+
+    import sys
+
+    from agent_nettools import cli, investigation, ticket
+    from agent_nettools.fixtures import fixture_sender
+
+    reference = investigation.investigate(
+        "RR1", "10.255.0.12", sender=fixture_sender(label="broken")
+    )
+    expected_commands = reference.session_summary["commands_run"]["by_device"]
+    assert expected_commands, "the reference investigation must actually have collected something"
+    assert all(count > 0 for count in expected_commands.values()), expected_commands
+
+    tickets = tmp_path / "tickets"
+    monkeypatch.setenv("NETTOOLS_TICKET_DIR", str(tickets))
+    monkeypatch.setattr(sys, "argv", ["nettools", "investigate", "RR1", "10.255.0.12",
+                                      "--from-fixtures", "--quiet"])
+    cli.main()
+
+    written = sorted(tickets.glob("*.md"))
+    assert len(written) == 1, "one interaction, one ticket"
+
+    data = ticket.read_ticket(written[0])
+    commands_by_device = {d["device"]: d["commands_run"] for d in data["device_interactions"]}
+    latency_by_device = {d["device"]: d["latency_ms"] for d in data["device_interactions"]}
+
+    assert commands_by_device == expected_commands, (
+        f"the ticket's commands_run must match the epoch's own count, got {commands_by_device}, "
+        f"expected {expected_commands}"
+    )
+    for device, count in commands_by_device.items():
+        assert count is not None, f"{device} commands_run must not be null"
+
+    for device, latency in latency_by_device.items():
+        assert latency is not None, f"{device} latency_ms must not be null"
+        assert latency > 0, f"{device} latency_ms must be positive, got {latency}"
+
+
+def test_investigate_ticket_retries_is_none_not_a_default_zero(tmp_path, monkeypatch):
+    """OBS-188's defect class, checked directly at the wiring seam.
+
+    No path from a device to an `Observation` carries a measured per-device
+    retry count today: `_netmiko_send_commands` computes one, but
+    `network_tools._section_from_combined` and the template runners
+    (`run_template`/`run_templates_split`) strip it out of every per-
+    intent/per-template envelope before `collect_epoch` ever sees it. Before
+    this change `record_device_interaction`'s `retries` defaulted to `0`,
+    which reads as "zero retries were measured" and is indistinguishable
+    from a genuine zero -- exactly OBS-188's shape. The ticket must record
+    `None` -- "not measured" -- instead.
+    """
+
+    import sys
+
+    from agent_nettools import cli, ticket
+
+    tickets = tmp_path / "tickets"
+    monkeypatch.setenv("NETTOOLS_TICKET_DIR", str(tickets))
+    monkeypatch.setattr(sys, "argv", ["nettools", "investigate", "RR1", "10.255.0.12",
+                                      "--from-fixtures", "--quiet"])
+    cli.main()
+
+    written = sorted(tickets.glob("*.md"))
+    data = ticket.read_ticket(written[0])
+
+    assert data["device_interactions"], "the ticket must carry at least one device interaction"
+    for interaction in data["device_interactions"]:
+        assert interaction["retries"] is None, (
+            f"{interaction['device']}'s retries must be None (not measured), "
+            f"got {interaction['retries']!r} -- a default masquerading as a measurement"
+        )

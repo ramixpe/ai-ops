@@ -5776,3 +5776,64 @@ print an explicit GREEN/RED before committing.
 > the status you meant to gate on. If the check is load-bearing, its exit code
 > has to reach the `if` — the summary line you print for yourself is a courtesy
 > to the reader, not a control-flow mechanism.
+
+---
+
+## OBS-190 · M1 · The flight recorder had slots for provenance it never filled, and one of them was lying
+
+The ticket is the operator's answer to "what did the application actually do" —
+they asked it, in their own words, to record *"how many times connecting to
+router, what data we got from router."* `Ticket.record_device_interaction()`
+takes `session_count`, `latency_ms`, `commands_run` and `retries`. Only
+`session_count` was ever passed.
+
+I found it by running a **live** investigation and reading the ticket, which is
+the check the whole M1 test suite cannot make: every ticket test runs on
+fixtures, and on fixtures a null latency is indistinguishable from a correct
+one. The gap was not that the fixture path degraded — it was that nothing ever
+filled these fields on **any** path:
+
+```
+{'device': 'PE1', 'session_count': 2, 'commands_run': None,
+ 'latency_ms': None, 'retries': 0}
+```
+
+Three separate findings came out of one probe.
+
+**1. The data existed one layer down and was discarded at the summary.** Each
+`Observation` carries a monotonic `started`/`completed` pair and an envelope
+listing the commands that returned. `EvidenceEpoch.as_dict()["sessions"]` — the
+only per-device summary that reaches the ticket — projected all of that down to
+a count. The fix belongs in the epoch's summary, not the ticket: `ticket.py`
+deliberately holds no reference to `EvidenceEpoch` and takes only
+already-extracted values, so widening the extraction is the change that
+preserves the boundary.
+
+**2. `retries: 0` was a default wearing a measurement's clothes.** No caller
+ever passed a retry count, and the epoch *cannot* know one — the per-intent and
+per-template envelopes strip `_netmiko_send_commands`'s retry counts before an
+`Observation` is built. So the ticket has been reporting a confident zero for a
+quantity it has never once measured. This is OBS-188's shape exactly, arriving a
+third time in a third module: **a default value on an unmeasured field is
+indistinguishable, in the artefact, from a measurement that came back zero.**
+Now `None`, and pinned by a test. Real retry plumbing is a larger change and was
+correctly refused rather than faked.
+
+**3. The magnitude is the proof, not the presence.** A populated field is not
+evidence the field is right — a constant populates too. Fixture replay reports
+`latency_ms: 10.777` for a device; the same code live reports `13035.681` for
+thirteen commands over SSH. Three orders of magnitude, in the direction physics
+requires. That comparison is what makes me believe the number, and it is only
+available because the same measurement runs over two transports with wildly
+different costs.
+
+`commands_run` counts commands that **returned output**, not commands attempted
+— a failed command is already absent from the envelope. That is the honest
+reading of "what data we got from the router", and it means a fixture label
+missing three intents reports those three as zero-command reads rather than
+pretending they were collected.
+
+> A recorder with a field it never fills is worse than one without the field: the
+> schema promises the fact is being captured, and every reader downstream —
+> including a future analysis of "how does our context engineering behave" —
+> will read the null as "this run had none" rather than "we never looked."

@@ -516,12 +516,31 @@ def test_quiet_still_silences_both_streams(monkeypatch, capsys):
 
 def test_the_investigate_payload_carries_the_session_summary(run):
     """`bgp_session`'s own documented shape, reaching all the way to the CLI's
-    rendered JSON: RR1 in one session, PE2 (the fan-out device) in two."""
+    rendered JSON: RR1 in one session, PE2 (the fan-out device) in two.
+
+    `commands_run`/`latency_ms` (the B-446 gap closure) are checked for
+    presence and shape here rather than pinned to a literal: this is the CLI
+    payload, not the epoch itself, and the exact per-device command count
+    depends on inventory-derived path scoping that is not this test's
+    concern (see `test_epoch.py`'s
+    `test_investigation_result_carries_the_epochs_session_summary` for why a
+    literal here would rot for reasons unrelated to this field)."""
 
     _, out = run()
     payload = _payload(out)
 
-    assert payload["sessions"] == {"total": 3, "by_device": {"RR1": 1, "PE2": 2}}
+    sessions = payload["sessions"]
+    assert sessions["total"] == 3
+    assert sessions["by_device"] == {"RR1": 1, "PE2": 2}
+
+    commands = sessions["commands_run"]
+    assert set(commands["by_device"]) == {"RR1", "PE2"}
+    assert commands["total"] == sum(commands["by_device"].values())
+    assert all(count > 0 for count in commands["by_device"].values())
+
+    latency = sessions["latency_ms"]
+    assert set(latency["by_device"]) == {"RR1", "PE2"}
+    assert all(ms > 0 for ms in latency["by_device"].values())
 
 
 # --------------------------------------------------------------------------- #

@@ -315,7 +315,94 @@ class EvidenceEpoch:
     def devices(self) -> tuple[str, ...]:
         return tuple(dict.fromkeys(o.device for o in self.observations))
 
+    @property
+    def commands_run(self) -> dict[str, int]:
+        """How many commands actually returned output, per device.
+
+        Unlike `session_counts`, this **is** safe to derive from
+        `observations` after the fact: it does not need to tell two real
+        sessions apart, only to count what each envelope already says it
+        carries. Every intent and template envelope stores its output under
+        ``envelope["data"]["commands"]`` (`network_tools._section_from_combined`,
+        `run_template`, `run_templates_split`) -- a dict keyed by the exact
+        command string, with **one entry per command that returned output**,
+        so its length is that count without re-deriving anything the
+        transport layer already computed. The three pass-through entries
+        `for_device()` also returns (``"device"``, ``"platform"``,
+        ``"timestamp"``, plain strings, not envelopes) are skipped, matching
+        `for_device`'s own dict shape.
+
+        This counts commands the router **answered**, not commands merely
+        **attempted**: `_netmiko_send_commands` only writes to `outputs` (and
+        therefore only ever appears in `envelope["data"]["commands"]`) on
+        success, so a command that failed after exhausting retries is not
+        counted here and is not double-counted as evidence collected. That
+        is "what data we got from the router," which is what B-446's ticket
+        was asked to answer -- not "how many requests were sent," which this
+        seam cannot honestly answer (see `latency_ms` and `Ticket.
+        record_device_interaction`'s docstring on `retries` for the request-
+        count question this repo cannot yet answer from the epoch).
+        """
+
+        counts: dict[str, int] = {}
+        for o in self.observations:
+            if not isinstance(o.envelope, dict):
+                continue  # the "device"/"platform"/"timestamp" strings.
+            commands = (o.envelope.get("data") or {}).get("commands")
+            if isinstance(commands, dict):
+                counts[o.device] = counts.get(o.device, 0) + len(commands)
+        return counts
+
+    @property
+    def latency_ms(self) -> dict[str, float]:
+        """Milliseconds actually spent reading each device -- monotonic, summed.
+
+        ``collect_epoch`` opens one ``started``/``completed`` window per
+        *device* and every session that device costs (one, or two for a
+        fan-out device -- see `session_counts`) runs inside that single
+        window, sequentially, before ``completed`` is taken. So a device's
+        windows (today, always exactly one) are summed rather than maxed:
+        sessions for one device never overlap, so the sum is the time this
+        investigation actually spent talking to it, which is what "latency"
+        should mean here -- and because there is only ever one window per
+        device today, sum and max currently agree; sum is chosen because it
+        is the one that would still mean the same thing if that ever
+        changed. Distinct windows are deduplicated by identity of
+        ``(started, completed)`` before summing, so the many observations
+        that share one window (every intent and template read in the same
+        session) are not double-counted.
+
+        Computed from ``completed - started`` only -- both **monotonic**
+        (`time.monotonic()`, taken in `collect_epoch`) -- never from
+        `Observation.collected_at`, which is wall-clock and exists for
+        cross-process comparison, not arithmetic (`Observation`'s own
+        docstring; `EvidenceEpoch.skew_seconds` follows the identical rule
+        and this must not be confused with that: `skew_seconds` is
+        ``closed - opened``, one bracket over the *whole epoch*; this is a
+        **per-device** figure, unrelated arithmetic, sharing only the same
+        monotonic-only discipline).
+
+        This is session-level, not per-command: one session's commands share
+        one ``started``/``completed`` pair by construction (`Observation`'s
+        own docstring -- "every intent collected in one session shares one
+        started/completed pair, because they really were one read"), so
+        there is no seam here that could honestly report per-command timing.
+        Dividing this evenly across a device's commands would invent
+        precision nothing measured; it is reported at the grain it was
+        actually observed, one device at a time.
+        """
+
+        windows: dict[str, set[tuple[float, float]]] = {}
+        for o in self.observations:
+            windows.setdefault(o.device, set()).add((o.started, o.completed))
+        return {
+            device: round(sum((completed - started) * 1000 for started, completed in spans), 3)
+            for device, spans in windows.items()
+        }
+
     def as_dict(self) -> dict:
+        commands_run = self.commands_run
+        latency_ms = self.latency_ms
         return {
             "skew_seconds": round(self.skew_seconds, 3),
             "bound_seconds": self.bound_seconds,
@@ -331,6 +418,26 @@ class EvidenceEpoch:
             "sessions": {
                 "total": sum(self.session_counts.values()),
                 "by_device": dict(self.session_counts),
+                # Commands that returned data, and time actually spent
+                # collecting, per device -- both derived from `observations`
+                # (see `commands_run`'s and `latency_ms`'s own docstrings for
+                # why that derivation is sound here, unlike `session_counts`
+                # just above). This is the whole seam
+                # `ticket.Ticket.record_device_interaction`'s `commands_run`/
+                # `latency_ms` reach the ticket through: per
+                # `InvestigationResult.session_summary`'s docstring, the
+                # ticket module takes only already-extracted values and holds
+                # no reference to `EvidenceEpoch`, so everything a caller
+                # might want from the epoch has to be extracted into this
+                # dict, not handed over as the object itself.
+                "commands_run": {
+                    "total": sum(commands_run.values()),
+                    "by_device": commands_run,
+                },
+                "latency_ms": {
+                    "total": round(sum(latency_ms.values()), 3),
+                    "by_device": latency_ms,
+                },
             },
         }
 

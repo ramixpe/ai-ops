@@ -212,15 +212,18 @@ class InvestigationResult:
     origin_unresolved: str | None = None
 
     #: Per-device SSH session counts for this investigation's evidence epoch,
-    #: plus a total -- `EvidenceEpoch.as_dict()["sessions"]`, unchanged, so this
-    #: field cannot itself drift from what the epoch actually counted. Exactly
-    #: the summary `ticket.Ticket.record_device_interaction`'s `session_count`
-    #: needs (B-446's ticket module takes only already-extracted values and
-    #: holds no reference to `EvidenceEpoch`) -- "how many times did this
-    #: investigation connect to a router." `None` when a caller supplied its
-    #: own `collector` (see `investigate`'s docstring): no epoch was built, so
-    #: there is nothing to summarize -- the same reason `descent.coherence` is
-    #: `None` on that path too.
+    #: plus a total, plus (since the ticket B-446 shipped with two of its four
+    #: provenance fields permanently null, measured live) the same shape again
+    #: for commands run and latency -- `EvidenceEpoch.as_dict()["sessions"]`,
+    #: unchanged, so this field cannot itself drift from what the epoch
+    #: actually counted. Exactly the summary `ticket.Ticket.
+    #: record_device_interaction`'s `session_count`/`commands_run`/
+    #: `latency_ms` need (B-446's ticket module takes only already-extracted
+    #: values and holds no reference to `EvidenceEpoch`) -- "how many times
+    #: did this investigation connect to a router, and what data did it get."
+    #: `None` when a caller supplied its own `collector` (see `investigate`'s
+    #: docstring): no epoch was built, so there is nothing to summarize -- the
+    #: same reason `descent.coherence` is `None` on that path too.
     session_summary: dict | None = None
 
     #: Non-semantic fixes applied to a model response, e.g. a stripped fence.

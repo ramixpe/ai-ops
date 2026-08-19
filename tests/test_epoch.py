@@ -547,7 +547,12 @@ def test_session_counts_reflect_the_real_session_cost_per_device():
 def test_as_dict_sessions_summary_matches_session_counts():
     """`as_dict()["sessions"]` is the same idea as its existing
     `"observations": len(...)` field, one level more specific -- surfaced
-    from `session_counts`, not a second, independent count."""
+    from `session_counts`, not a second, independent count. Extended
+    (B-446 gap closure) to `commands_run`/`latency_ms`, each surfaced from
+    the property of the same name rather than re-derived here -- this test
+    is about the *shape* `as_dict()` assembles, not a second implementation
+    of `commands_run`/`latency_ms`'s own arithmetic (that arithmetic has its
+    own tests below)."""
 
     built = epoch.collect_epoch(
         _flow(), "RR1", SUBJECT, resolver=_resolver, sender=fixture_sender(label="broken")
@@ -555,18 +560,205 @@ def test_as_dict_sessions_summary_matches_session_counts():
 
     assert built.as_dict()["sessions"] == {
         "total": 3, "by_device": {"RR1": 1, "PE2": 2},
+        "commands_run": {
+            "total": sum(built.commands_run.values()),
+            "by_device": built.commands_run,
+        },
+        "latency_ms": {
+            "total": round(sum(built.latency_ms.values()), 3),
+            "by_device": built.latency_ms,
+        },
     }
+    # And the numbers behind that shape are real, not a vacuous 0/0 pass --
+    # both devices actually read commands and actually cost time.
+    assert built.commands_run == {"RR1": 9, "PE2": 10}
+    for device in ("RR1", "PE2"):
+        assert built.latency_ms[device] > 0, f"{device} latency_ms must be positive"
 
 
 def test_investigation_result_carries_the_epochs_session_summary():
     """The summary reaches `InvestigationResult` unmodified -- straight off
     `EvidenceEpoch.as_dict()["sessions"]`, so it cannot itself drift from
-    what the epoch actually counted."""
+    what the epoch actually counted.
+
+    `commands_run`/`latency_ms` are checked structurally rather than against
+    a literal count: `investigate()` (unlike a bare `collect_epoch()` call)
+    resolves a real `origin_prefix` from the inventory, which changes PE2's
+    path-scoped interface member set and therefore its command count -- a
+    hardcoded number here would be exactly the "literal that will rot" the
+    brief warns against, rotting the moment that member set changes for a
+    reason unrelated to this field."""
 
     result = investigation.investigate("RR1", SUBJECT, sender=fixture_sender(label="broken"), resolver=_resolver)
 
-    assert result.session_summary == {"total": 3, "by_device": {"RR1": 1, "PE2": 2}}
+    assert result.session_summary["total"] == 3
+    assert result.session_summary["by_device"] == {"RR1": 1, "PE2": 2}
+
+    commands_by_device = result.session_summary["commands_run"]["by_device"]
+    assert set(commands_by_device) == {"RR1", "PE2"}
+    for device, count in commands_by_device.items():
+        assert count > 0, f"{device} commands_run must be positive"
+    assert result.session_summary["commands_run"]["total"] == sum(commands_by_device.values())
+
+    latency_by_device = result.session_summary["latency_ms"]["by_device"]
+    assert set(latency_by_device) == {"RR1", "PE2"}
+    for device, latency in latency_by_device.items():
+        assert latency > 0, f"{device} latency_ms must be positive"
+    assert result.session_summary["latency_ms"]["total"] == pytest.approx(sum(latency_by_device.values()))
+
     assert result.to_payload()["sessions"] == result.session_summary
+
+
+# --------------------------------------------------------------------------- #
+# `commands_run`/`latency_ms` (B-446 gap closure): the ticket's four
+# provenance fields were measured live against PE1 with two of four
+# permanently null -- `commands_run` and `latency_ms` were never filled by
+# anything, on the live path or the fixture one. These come straight off the
+# epoch's own observations rather than off a new field `collect_epoch` has to
+# populate, unlike `session_counts` -- see each property's own docstring for
+# why that derivation is sound here and is not for session counts.
+# --------------------------------------------------------------------------- #
+
+
+def _observation(key, device, started, completed, commands, *, collected_at="2026-08-19T00:00:00+00:00"):
+    return epoch.Observation(
+        key=key, device=device, started=started, completed=completed,
+        envelope={"data": {"commands": commands}}, collected_at=collected_at,
+    )
+
+
+def test_commands_run_counts_returned_output_not_attempts():
+    """A command that was attempted but never returned output (retried into
+    failure, or simply absent from the fixture set -- both happen in this
+    repo) must not count as data collected. Pinned with a hand-built epoch
+    so the distinction is exact rather than incidental to which fixture
+    label happens to be missing a file today."""
+
+    built = epoch.EvidenceEpoch(observations=(
+        _observation("bgp", "RR1", 10.0, 10.5, {"show bgp summary": "..."}),
+        # An unsupported/failed intent: the real shape `_unsupported_result`
+        # and a failed `_section_from_combined` slice both produce -- present,
+        # but with nothing under "commands".
+        _observation("ldp", "RR1", 10.0, 10.5, {}),
+        _observation("bgp", "PE2", 20.0, 20.2, {"show bgp summary": "..."}),
+    ))
+
+    assert built.commands_run == {"RR1": 1, "PE2": 1}
+
+
+def test_commands_run_ignores_the_device_platform_timestamp_passthrough_entries():
+    """`for_device()`'s own shape includes three plain-string entries
+    (``"device"``, ``"platform"``, ``"timestamp"``) alongside real envelopes
+    -- see `collect_evidence`'s return shape. A naive `len(commands)` over
+    every observation's envelope would explode on these; they must be
+    skipped, not counted as zero-command envelopes either."""
+
+    non_envelope = epoch.Observation(
+        key="device", device="RR1", started=10.0, completed=10.5,
+        envelope="RR1", collected_at="2026-08-19T00:00:00+00:00",
+    )
+    built = epoch.EvidenceEpoch(observations=(
+        non_envelope,
+        _observation("bgp", "RR1", 10.0, 10.5, {"show bgp summary": "..."}),
+    ))
+
+    assert built.commands_run == {"RR1": 1}
+
+
+def test_latency_ms_sums_distinct_windows_rather_than_taking_the_max():
+    """The documented design decision (`latency_ms`'s own docstring): summed,
+    not maxed, because sessions for one device run sequentially and never
+    overlap, so the sum is the time actually spent. `collect_epoch` never
+    produces two windows for one device today, so this is pinned against a
+    hand-built epoch that does -- the one shape that would tell sum and max
+    apart."""
+
+    built = epoch.EvidenceEpoch(observations=(
+        _observation("bgp", "RR1", 10.0, 10.5, {"show bgp summary": "..."}),  # 500ms
+        _observation("isis", "RR1", 20.0, 20.2, {"show isis neighbors": "..."}),  # 200ms
+    ))
+
+    # Sum: 700ms. Max would be 500ms -- this is the assertion that tells them apart.
+    assert built.latency_ms == {"RR1": pytest.approx(700.0)}
+
+
+def test_latency_ms_deduplicates_observations_sharing_one_window():
+    """Every intent read in one session shares one `started`/`completed`
+    pair (`Observation`'s own docstring). Ten observations sharing one window
+    must contribute that window's duration once, not ten times."""
+
+    shared = (10.0, 10.5)
+    built = epoch.EvidenceEpoch(observations=tuple(
+        _observation(f"intent-{i}", "RR1", *shared, {f"show {i}": "..."})
+        for i in range(10)
+    ))
+
+    assert built.latency_ms == {"RR1": pytest.approx(500.0)}
+
+
+def test_latency_ms_is_computed_from_monotonic_fields_not_collected_at():
+    """The one thing this must not do, symmetric to
+    `test_skew_computation_is_unaffected_by_collected_at` below:
+    `collected_at` is wall-clock and exists for cross-process comparison,
+    not arithmetic (`Observation`'s own docstring) -- so a `collected_at`
+    that disagrees wildly with `started`/`completed` must not perturb
+    `latency_ms`."""
+
+    built = epoch.EvidenceEpoch(observations=(
+        _observation(
+            "bgp", "RR1", 100.0, 100.5, {"show bgp summary": "..."},
+            collected_at="1970-01-01T00:00:00+00:00",  # wildly different from monotonic
+        ),
+    ))
+
+    assert built.latency_ms == {"RR1": pytest.approx(500.0)}
+
+
+def test_skew_seconds_is_unaffected_by_commands_run_and_latency_ms():
+    """The non-negotiable guard (evidence-epoch.md, B-436/OBS-142):
+    `skew_seconds` is `closed - opened`, a bracket over the whole epoch, and
+    must stay exactly that regardless of anything the new per-device fields
+    compute. A fake clock gives `collect_epoch`'s four `clock()` call sites
+    (`opened`, RR1's `started`/`completed`, PE2's `started`/`completed`,
+    `closed` -- six calls total) deliberately distinct values, so a skew
+    computed from the wrong pair, or perturbed by `commands_run`'s or
+    `latency_ms`'s own arithmetic, would show up as a wrong number here
+    rather than an accidental pass."""
+
+    fake_monotonic = iter([0.0, 0.0, 5.0, 5.0, 7.0, 30.0])
+
+    built = epoch.collect_epoch(
+        _flow(), "RR1", SUBJECT, resolver=_resolver, sender=fixture_sender(label="broken"),
+        clock=lambda: next(fake_monotonic),
+    )
+
+    assert built.skew_seconds == pytest.approx(30.0)
+    assert built.as_dict()["skew_seconds"] == pytest.approx(30.0)
+    # The new fields read a completely different pair of numbers (each
+    # device's own started/completed, not opened/closed) and disagree with
+    # the skew here on purpose -- RR1's window is 5s of the 30s bracket,
+    # PE2's is 2s, neither equal to the 30s skew itself.
+    assert built.as_dict()["sessions"]["latency_ms"]["by_device"] == {
+        "RR1": pytest.approx(5000.0), "PE2": pytest.approx(2000.0),
+    }
+
+
+def test_skew_seconds_and_latency_ms_read_different_fields_of_the_epoch():
+    """They can coincide numerically (the previous test) without being the
+    same computation -- this is the test that would fail if a future edit
+    made `skew_seconds` accidentally read off `latency_ms`, or vice versa.
+    Here `opened`/`closed` (the epoch-wide bracket) and the observations'
+    own `started`/`completed` (per-device) are made to disagree, so the two
+    numbers must disagree too."""
+
+    built = epoch.EvidenceEpoch(
+        observations=(_observation("bgp", "RR1", 10.0, 10.5, {"show bgp summary": "..."}),),
+        opened=0.0, closed=100.0,  # a 100s epoch-wide bracket
+    )
+
+    assert built.skew_seconds == pytest.approx(100.0)
+    assert built.latency_ms["RR1"] == pytest.approx(500.0)
+    assert built.skew_seconds != built.latency_ms["RR1"] / 1000
 
 
 # --------------------------------------------------------------------------- #

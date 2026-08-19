@@ -510,9 +510,17 @@ def _record_in_ticket(handle, args, result, subject, flow, question=None) -> Non
     """Fill a ticket from an InvestigationResult. Never raises.
 
     Everything written here is CODE-OBSERVED: the finding and cause come from
-    the descent, the session counts from the evidence epoch, the coherence from
-    the epoch's own re-read. Nothing is taken from a model's account of itself
-    (OBS-165 -- a true and a false self-report read identically).
+    the descent, the session counts/commands run/latency from the evidence
+    epoch, the coherence from the epoch's own re-read. Nothing is taken from a
+    model's account of itself (OBS-165 -- a true and a false self-report read
+    identically).
+
+    `retries` is deliberately not passed to `record_device_interaction` below:
+    no seam between here and a device carries a measured per-device retry
+    count today (`network_tools._section_from_combined` and the template
+    runners drop `_netmiko_send_commands`'s retry counts before they reach an
+    `Observation`), so it defaults to `None` -- "not measured," not "measured
+    zero." Passing `0` here would be exactly OBS-188's defect class.
     """
 
     if handle is None:
@@ -523,8 +531,14 @@ def _record_in_ticket(handle, args, result, subject, flow, question=None) -> Non
                                    subject=subject, flow_hint=flow)
         sessions = getattr(result, "session_summary", None)
         if sessions:
+            commands_by_device = (sessions.get("commands_run") or {}).get("by_device") or {}
+            latency_by_device = (sessions.get("latency_ms") or {}).get("by_device") or {}
             for device, count in (sessions.get("by_device") or {}).items():
-                handle.record_device_interaction(device, session_count=count)
+                handle.record_device_interaction(
+                    device, session_count=count,
+                    commands_run=commands_by_device.get(device),
+                    latency_ms=latency_by_device.get(device),
+                )
         cause = result.descent.cause
         coherence = result.descent.coherence
         handle.record_answer(
