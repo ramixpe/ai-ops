@@ -127,7 +127,14 @@ def test_the_epoch_costs_fewer_commands_than_collecting_per_rung():
     # toward the origin, which is what makes the interface rung path-scoped.
     # It rides the subject's existing session, so it costs a command and not
     # a login -- which is the distinction B-455 established actually matters.
-    assert (len(epoch_calls), len(per_rung_calls)) == (26, 41)
+    # 30 against 51 at B-109: "ldp"/"ldp_discovery" are two new intents in the
+    # always-collected epoch bundle (neither flow's rungs read them yet, but
+    # the epoch collects every intent per device, not only what the current
+    # flow uses -- see collect_epoch). +4 on the epoch side (2 intents x the
+    # 2 devices this walk touches, RR1 and PE2); +10 on the per-rung side,
+    # because the per-rung path re-collects the whole epoch at every rung
+    # rather than once, so the same 2-intent addition is paid repeatedly.
+    assert (len(epoch_calls), len(per_rung_calls)) == (30, 51)
     assert sum("logging" in c for c in epoch_calls) == 1
 
 

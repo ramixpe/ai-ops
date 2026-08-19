@@ -66,7 +66,10 @@ from .templates import (  # noqa: F401 - re-exported so this module stays the si
 
 # Ordered so evidence sections come out in a sensible narrative: what the device
 # is, then its links, then its protocols, then its traffic engineering.
-INTENT_ORDER = ("facts", "interfaces", "bgp", "lldp", "isis", "sr")
+# "ldp"/"ldp_discovery" (B-109) sit between "isis" and "sr" -- both are MPLS
+# control-plane facts, narratively following the IGP that carries their
+# reachability and preceding the traffic-engineering layer built on top of MPLS.
+INTENT_ORDER = ("facts", "interfaces", "bgp", "lldp", "isis", "ldp", "ldp_discovery", "sr")
 
 PLATFORM_INTENTS: dict[str, dict[str, tuple[str, ...]]] = {
     # Verified against the live lab (XRd 7.11.2) and captured in tests/fixtures.
@@ -76,6 +79,14 @@ PLATFORM_INTENTS: dict[str, dict[str, tuple[str, ...]]] = {
         "bgp": ("show bgp summary",),
         "lldp": ("show lldp neighbors",),
         "isis": ("show isis neighbors",),
+        # B-109. Two intents, not one: "ldp" is the session-level FSM state
+        # (`show mpls ldp neighbor`), "ldp_discovery" is the Hello-level
+        # adjacency that genuinely gates it (`show mpls ldp discovery`) -- a
+        # real, in-protocol precondition, not a merely-correlated signal (see
+        # the `ldp_session_up` docstring in checks.py). Verified against every
+        # live lab device (all nine currently run LDP).
+        "ldp": ("show mpls ldp neighbor",),
+        "ldp_discovery": ("show mpls ldp discovery",),
         "sr": ("show segment-routing traffic-eng policy",),
     },
     # Unverified: no IOS-XE device in the lab. The hostname is not fetched

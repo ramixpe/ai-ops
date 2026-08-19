@@ -84,7 +84,7 @@ def test_every_rung_predicate_runs_with_the_inventory_disabled():
     had quietly grown a dependency -- §0.12, applied to a guarantee that is now
     sampled rather than structural. `isis_neighbor_up` (B-107) joined the
     original five; leaving it out here would be exactly the shrinking-coverage
-    failure §0.12 exists to catch.
+    failure §0.12 exists to catch. `ldp_session_up` (B-109) joins them too.
     """
 
     def bomb(*args, **kwargs):  # pragma: no cover
@@ -97,6 +97,7 @@ def test_every_rung_predicate_runs_with_the_inventory_disabled():
         lambda: checks.route_present(empty, "10.255.0.12/32"),
         lambda: checks.isis_adjacency(empty, None),
         lambda: checks.isis_neighbor_up(empty, "Gi0/0/0/0"),
+        lambda: checks.ldp_session_up(empty, "Gi0/0/0/0"),
         lambda: checks.interface_state(empty, "Gi0/0/0/0"),
     ]
 
@@ -551,6 +552,148 @@ def test_isis_neighbor_up_failed_interfaces_parse_says_so_not_up():
         "interfaces": _section(parsers.PARSE_FAILED),
     }
     result = checks.isis_neighbor_up(evidence, "Gi0/0/0/0")
+    assert result.status == checks.UNEVALUATED
+    assert "could not be read" in result.reason
+    assert "reads up" not in result.reason
+
+
+# --- ldp_session_up: the ldp_session flow's top rung (B-109) --- #
+#
+# Same shape as isis_neighbor_up, with "ldp_discovery" standing in for "lldp"
+# as the corroboration source -- except discovery genuinely gates session
+# formation (a real dependency, not mere correlation; see the function's own
+# docstring), so its distinctions ("Hello done, no session" vs "no reply at
+# all") are stated as facts, not softened the way LLDP corroboration is.
+# Cases 1 and 3 below are measured against the live lab's t0 capture
+# (2026-08-19), not invented: PE1's session to P1 is genuinely Oper, and P2's
+# Gi0/0/0/4 is the real, still-live P2<->PE3 defect (OBS-159/B-496) showing up
+# in LDP exactly as predicted -- Hello sending, never receiving a reply.
+
+
+def test_ldp_session_up_session_oper_is_healthy(monkeypatch):
+    evidence = _fixture_evidence(monkeypatch, "PE1", label="t0")
+    result = checks.ldp_session_up(evidence, "Gi0/0/0/0")
+    assert result.status == checks.HEALTHY
+    assert "10.255.0.1" in result.reason
+    assert result.evidence_keys == ("PE1:ldp:Gi0/0/0/0",)
+
+
+def test_ldp_session_up_session_present_but_not_oper_is_broken():
+    """A record naming the interface exists and its state is not `Oper` -- the
+    one case that needs no corroboration at all, since the device answered
+    directly. Hand-built: no committed fixture catches a session mid-negotiation."""
+
+    evidence = {
+        "device": "PE1",
+        "ldp": _section(
+            parsers.PARSE_OK,
+            [{"peer_id": "10.255.0.1", "state": "Initialized", "discovery_interfaces": ["GigabitEthernet0/0/0/0"]}],
+        ),
+    }
+    result = checks.ldp_session_up(evidence, "Gi0/0/0/0")
+    assert result.status == checks.BROKEN
+    assert "Initialized" in result.reason
+    assert result.evidence_keys == ("PE1:ldp:Gi0/0/0/0",)
+
+
+def test_ldp_session_up_discovery_corroborated_no_reply_is_broken(monkeypatch):
+    """The measured, still-live case: P2's Gi0/0/0/4 has no LDP session record
+    while `show mpls ldp discovery` shows Hello sending on that interface
+    (direction `xmit`) with no `LDP Id:` line at all -- sending, never hearing
+    a reply. Absence corroborated by a real dependency, not an unknown."""
+
+    evidence = _fixture_evidence(monkeypatch, "P2", label="t0")
+    result = checks.ldp_session_up(evidence, "Gi0/0/0/4")
+    assert result.status == checks.BROKEN
+    assert "no peer has been discovered" in result.reason
+    assert result.evidence_keys == ("P2:ldp:Gi0/0/0/4", "P2:ldp_discovery:Gi0/0/0/4")
+
+
+def test_ldp_session_up_discovery_corroborated_hello_established_no_session_is_broken():
+    """Hello completed (a peer_id is present) but no session record at all --
+    a real, distinct fault from "no reply yet". Hand-built: this fabric's
+    sessions all reach Oper once Hello completes, so no committed fixture
+    catches the gap between them."""
+
+    evidence = {
+        "device": "PE1",
+        "ldp": _section(parsers.PARSE_OK, []),
+        "ldp_discovery": _section(
+            parsers.PARSE_OK,
+            [{"interface": "GigabitEthernet0/0/0/0", "peer_id": "10.255.0.1", "direction": "xmit/recv"}],
+        ),
+    }
+    result = checks.ldp_session_up(evidence, "Gi0/0/0/0")
+    assert result.status == checks.BROKEN
+    assert "Hello established" in result.reason
+    assert "no LDP session record" in result.reason
+    assert result.evidence_keys == ("PE1:ldp:Gi0/0/0/0", "PE1:ldp_discovery:Gi0/0/0/0")
+
+
+def test_ldp_session_up_shut_interface_explains_the_silence_and_is_broken():
+    """Neither ldp nor ldp_discovery says anything, and the interface itself is
+    admin-down -- explains the silence in both LDP subsystems at once. Hand-built:
+    the historical `broken` fixture (PE2's Gi0/0/0/0) predates this intent
+    (captured before B-109), so no committed fixture carries both together."""
+
+    evidence = {
+        "device": "PE2",
+        "ldp": _section(parsers.PARSE_OK, []),
+        "ldp_discovery": _section(parsers.PARSE_OK, []),
+        "interfaces": _section(
+            parsers.PARSE_OK,
+            [{"interface": "Gi0/0/0/0", "admin_state": "admin-down", "line_protocol": "down"}],
+        ),
+    }
+    result = checks.ldp_session_up(evidence, "Gi0/0/0/0")
+    assert result.status == checks.BROKEN
+    assert "admin-down" in result.reason
+    assert result.evidence_keys == ("PE2:ldp:Gi0/0/0/0", "PE2:interfaces:Gi0/0/0/0")
+
+
+def test_ldp_session_up_absent_from_all_three_is_unevaluated(monkeypatch):
+    """PE1's `Lo0` is up, but a loopback carries no LDP Hello (link-local
+    multicast has nothing to attach to) and no session -- genuinely ambiguous:
+    the module's absence-is-unevaluated rule protects exactly this case."""
+
+    evidence = _fixture_evidence(monkeypatch, "PE1", label="t0")
+    result = checks.ldp_session_up(evidence, "Lo0")
+    assert result.status == checks.UNEVALUATED
+    assert result.status != checks.BROKEN
+
+
+def test_ldp_session_up_failed_ldp_parse_is_unevaluated():
+    evidence = {"device": "PE1", "ldp": _section(parsers.PARSE_FAILED)}
+    result = checks.ldp_session_up(evidence, "Gi0/0/0/0")
+    assert result.status == checks.UNEVALUATED
+
+
+def test_ldp_session_up_failed_discovery_parse_says_so():
+    """ldp parsed fine and is silent; ldp_discovery could not be read at all --
+    the reason must say *that*, not claim a corroboration that never happened."""
+
+    evidence = {
+        "device": "PE1",
+        "ldp": _section(parsers.PARSE_OK, []),
+        "ldp_discovery": _section(parsers.PARSE_FAILED),
+    }
+    result = checks.ldp_session_up(evidence, "Gi0/0/0/0")
+    assert result.status == checks.UNEVALUATED
+    assert "LDP discovery" in result.reason
+
+
+def test_ldp_session_up_failed_interfaces_parse_says_so_not_up():
+    """ldp and ldp_discovery both parsed fine and are silent; `interfaces`
+    could not be read. The reason must not claim the interface "reads up" --
+    that would assert a fact never observed."""
+
+    evidence = {
+        "device": "PE1",
+        "ldp": _section(parsers.PARSE_OK, []),
+        "ldp_discovery": _section(parsers.PARSE_OK, []),
+        "interfaces": _section(parsers.PARSE_FAILED),
+    }
+    result = checks.ldp_session_up(evidence, "Gi0/0/0/0")
     assert result.status == checks.UNEVALUATED
     assert "could not be read" in result.reason
     assert "reads up" not in result.reason

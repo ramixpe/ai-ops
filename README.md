@@ -415,6 +415,8 @@ Approved read-only commands, by platform:
 - `show bgp summary`
 - `show lldp neighbors`
 - `show isis neighbors`
+- `show mpls ldp neighbor`
+- `show mpls ldp discovery`
 - `show segment-routing traffic-eng policy`
 
 ### cisco_iosxe

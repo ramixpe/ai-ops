@@ -235,3 +235,52 @@ def test_unrecognized_shape_falls_back_to_flat_rendering():
 
     summary = output.render_summary(payload)
     assert json.loads(summary) == payload
+
+
+# --------------------------------------------------------------------------- #
+# Summary/table renderers for payloads that are not per-device (sanity round,
+# 2026-08-19). Both bugs had the same shape: a payload fell through to a
+# renderer that assumed a structure it does not have, and printed something
+# confident and useless rather than failing.
+# --------------------------------------------------------------------------- #
+
+
+def test_audit_summary_names_the_findings_not_just_a_count():
+    """`--format summary` printed `?: WARNING (1 finding(s))` — device, rule and
+    message all gone — because an audit payload shares `severity`+`findings`
+    with a single-device verdict. The TABLE renderer already had this branch;
+    the summary renderer never got it. Same bug, other renderer."""
+
+    payload = {
+        "tool": "audit", "severity": "warning",
+        "devices_examined": ["PE1", "PE2"],
+        "findings": [{"rule": "isolated_but_configured", "severity": "warning",
+                      "category": "device", "devices": ["PE2"],
+                      "message": "PE2 has an active BGP process but no Established session"}],
+        "unevaluated": [],
+    }
+
+    rendered = output.render(payload, "summary")
+
+    assert "isolated_but_configured" in rendered, "the rule must survive"
+    assert "PE2" in rendered, "the device must survive"
+    assert "?" not in rendered.splitlines()[0], "no phantom '?' device"
+
+
+def test_route_event_summary_distinguishes_routed_from_refused():
+    """Before this, BOTH outcomes printed `route_event ?: success`. Identical
+    output for opposite outcomes is worse than no output."""
+
+    routed = {"tool": "route_event", "decisions": [
+        {"routable": True, "flow": "bgp_session", "device": "RR1",
+         "subject": "10.255.0.31",
+         "suggested_command": ["nettools", "investigate", "RR1", "10.255.0.31"]}]}
+    refused = {"tool": "route_event", "decisions": [
+        {"routable": False, "reason": "mnemonic not in the flow table"}]}
+
+    a = output.render(routed, "summary")
+    b = output.render(refused, "summary")
+
+    assert a != b, "a routed and a refused event must not render identically"
+    assert "bgp_session" in a and "RR1" in a
+    assert "not in the flow table" in b

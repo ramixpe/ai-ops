@@ -31,13 +31,18 @@ INTENT_FILES: dict[str, tuple[str, ...]] = {
     "bgp": ("show-bgp-summary.txt",),
     "lldp": ("show-lldp-neighbors.txt",),
     "isis": ("show-isis-neighbors.txt",),
+    # B-109. Only captured under t0/t1 so far (see fixtures/README review
+    # notes) -- unlike the six above, present under every label -- so these
+    # two intents' fixture cases are a strict subset of the others'.
+    "ldp": ("show-mpls-ldp-neighbor.txt",),
+    "ldp_discovery": ("show-mpls-ldp-discovery.txt",),
     "sr": ("show-segment-routing-traffic-eng-policy.txt",),
 }
 
 # Intents whose command carries a table -- used by the anti-vacuity test below
 # to make sure the corpus actually exercises record-producing rows, not just
 # meta-only output (`facts` legitimately never produces records at all).
-_RECORD_BEARING_INTENTS = ("interfaces", "bgp", "lldp", "isis", "sr")
+_RECORD_BEARING_INTENTS = ("interfaces", "bgp", "lldp", "isis", "ldp", "ldp_discovery", "sr")
 
 
 def _discover_fixture_cases() -> list[tuple[str, str, str]]:
@@ -86,7 +91,7 @@ def test_the_fixture_corpus_is_non_empty_and_covers_every_intent():
     parametrized over an empty or lopsided case list instead of the full
     six-intent x nine-device x four-label surface."""
 
-    assert len(FIXTURE_CASES) >= 6 * 9  # at least one label per device per intent
+    assert len(FIXTURE_CASES) >= 8 * 9  # at least one label per device per intent
     intents_covered = {intent for intent, _device, _label in FIXTURE_CASES}
     assert intents_covered == set(INTENT_FILES)
 

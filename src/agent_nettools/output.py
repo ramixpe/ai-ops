@@ -193,6 +193,9 @@ def render_table(payload: dict[str, Any]) -> str:
     if _is_audit_result(payload):
         return _render_audit_table(payload)
 
+    if _is_route_event(payload):
+        return _render_route_event_decisions(payload)
+
     if _is_single_health_verdict(payload):
         return _render_health_device_table({str(payload.get("device", "?")): payload})
 
@@ -260,9 +263,76 @@ def _render_flat_table(payload: dict[str, Any]) -> str:
 # --------------------------------------------------------------------------- #
 
 
+def _is_route_event(payload: dict[str, Any]) -> bool:
+    return payload.get("tool") == "route_event" and "decisions" in payload
+
+
+def _render_route_event_decisions(payload: dict[str, Any]) -> str:
+    """The routing decision — the only thing this command produces.
+
+    Before this, `route-event --format summary` printed `route_event ?: success`
+    whether the event routed or was refused, because a route-event payload has
+    no top-level `device` and fell through to the generic
+    `f"{tool} {device}: {status}"` branch. **Identical output for opposite
+    outcomes is worse than no output** (sanity round, 2026-08-19).
+    """
+
+    decisions = payload.get("decisions") or []
+    if not decisions:
+        return "route_event: no decisions (nothing in the input parsed as an event)"
+    lines = []
+    for d in decisions:
+        if d.get("routable"):
+            argv = d.get("suggested_command") or []
+            lines.append(
+                f"ROUTABLE    {d.get('flow', '?')} on {d.get('device', '?')} "
+                f"subject={d.get('subject', '?')}"
+                + (f"\n  suggested: {' '.join(argv)}" if argv else "")
+            )
+        else:
+            lines.append(f"unroutable  {d.get('reason', 'no reason given')}")
+    return "\n".join(lines)
+
+
+def _render_audit_summary(payload: dict[str, Any]) -> str:
+    """Every finding, not just a count.
+
+    `--format summary` printed `?: WARNING (1 finding(s))` — device, rule and
+    message all gone — because an audit payload shares `severity`+`findings`
+    with a single-device health verdict and fell through to that renderer. The
+    TABLE renderer already learned this (`_is_audit_result`); the summary
+    renderer never got the same branch. Same bug, other renderer, found a day
+    apart (sanity round, 2026-08-19).
+    """
+
+    findings = payload.get("findings") or []
+    head = (f"Fabric audit: {str(payload.get('severity', '?')).upper()} "
+            f"({len(findings)} finding(s) over "
+            f"{len(payload.get('devices_examined') or [])} device(s))")
+    body = [
+        f"  {f.get('severity', '?'):8} {f.get('rule', '?')} "
+        f"[{','.join(f.get('devices') or []) or '-'}] {_compact(f.get('message', ''), limit=90)}"
+        for f in findings
+    ]
+    unevaluated = payload.get("unevaluated") or []
+    if unevaluated:
+        body.append("  unevaluated: " + "; ".join(
+            f"{u['rule']} on {','.join(u['devices'])}" for u in unevaluated))
+    return "\n".join([head, *body])
+
+
 def render_summary(payload: dict[str, Any]) -> str:
     if _is_investigation(payload):
         return _render_investigation_summary(payload)
+
+    # Both branches must precede the health branch below: an audit payload
+    # shares `severity`+`findings` with a single-device verdict, and a
+    # route-event payload has no `device` at all.
+    if _is_audit_result(payload):
+        return _render_audit_summary(payload)
+
+    if _is_route_event(payload):
+        return _render_route_event_decisions(payload)
 
     health_map = _health_fabric_map(payload)
     if health_map is not None:

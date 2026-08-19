@@ -76,7 +76,11 @@ def test_seven_object_types_are_declared():
 
 @pytest.mark.parametrize(
     "object_type",
-    [t for t in flows.OBJECT_TYPES if t not in ("bgp_session", "interface", "isis_adjacency")],
+    [
+        t
+        for t in flows.OBJECT_TYPES
+        if t not in ("bgp_session", "interface", "isis_adjacency", "ldp_session")
+    ],
 )
 def test_an_unimplemented_flow_raises_rather_than_returning_none(object_type):
     """`None` would let a caller read "no flow" as "nothing wrong"."""
@@ -92,7 +96,9 @@ def test_an_unknown_object_type_is_a_key_error_not_a_not_implemented():
         flows.flow_for("bgp_sesion")
 
 
-@pytest.mark.parametrize("object_type", ["bgp_session", "interface", "isis_adjacency"])
+@pytest.mark.parametrize(
+    "object_type", ["bgp_session", "interface", "isis_adjacency", "ldp_session"]
+)
 def test_the_implemented_flows_resolve(object_type):
     flow = flows.flow_for(object_type)
     assert flow.object_type == object_type
@@ -288,6 +294,73 @@ def test_isis_adjacency_subject_schema_names_a_local_interface():
     caller would actually read it, and pins the wording against drift."""
 
     schema = flows.flow_for("isis_adjacency").subject_schema
+    assert "interface" in schema
+    assert "Gi0/0/0/0" in schema
+
+
+# --------------------------------------------------------------------------- #
+# ldp_session (B-109) -- the third flow
+# --------------------------------------------------------------------------- #
+
+
+def test_the_ldp_session_ladder_is_two_rungs_deep():
+    """Same depth and same reasoning as isis_adjacency: LDP discovery (Hello)
+    genuinely gates LDP session formation, but it is read as corroboration
+    *inside* the top rung's check (see `checks.ldp_session_up`'s docstring),
+    not spent as a third rung -- the physical interface is the one genuine
+    dependency left below the session itself.
+    """
+
+    assert [r.name for r in flows.flow_for("ldp_session").descent] == [
+        "ldp_session",
+        "interface",
+    ]
+
+
+def test_the_ldp_session_ladder_never_leaves_the_local_device():
+    """`ldp`, `ldp_discovery` and `interfaces` all describe the device that
+    was asked about, not the peer on the other end of the session."""
+
+    for rung in flows.flow_for("ldp_session").descent:
+        assert rung.device_scope is flows.DeviceScope.LOCAL, rung.name
+        assert rung.subject_rule is flows.SubjectRule.AS_IS, rung.name
+        assert rung.aggregation is None, rung.name
+
+
+def test_ldp_session_reuses_interface_exists_for_subject_presence():
+    """Same subject vocabulary as isis_adjacency and interface -- a local
+    interface name -- so this flow's `subject_present` is that function,
+    unmodified."""
+
+    assert flows.flow_for("ldp_session").subject_present is checks.interface_exists
+    assert flows.flow_for("ldp_session").subject_present is (
+        flows.flow_for("interface").subject_present
+    )
+
+
+def test_the_ldp_session_top_rung_reads_ldp_ldp_discovery_and_interfaces():
+    """The top rung's `collect` must name every section its check reads --
+    the epoch coherence re-read (`epoch._collect_one_rung`) re-collects
+    *exactly* this tuple, same reasoning as isis_adjacency's own top rung
+    (OBS-167)."""
+
+    rung = flows.flow_for("ldp_session").descent[0]
+    assert rung.name == "ldp_session"
+    names = {step.name for step in rung.collect}
+    assert names == {"ldp", "ldp_discovery", "interfaces"}
+    assert all(not step.is_template for step in rung.collect)
+
+
+def test_all_ldp_session_findings_are_reachable_from_a_rung():
+    flow = flows.flow_for("ldp_session")
+    rung_findings = {rung.finding for rung in flow.descent}
+
+    assert rung_findings == {"session_not_up", "interface_line_down"}
+    assert rung_findings | flows.UNIVERSAL_FINDINGS == flow.findings
+
+
+def test_ldp_session_subject_schema_names_a_local_interface():
+    schema = flows.flow_for("ldp_session").subject_schema
     assert "interface" in schema
     assert "Gi0/0/0/0" in schema
 

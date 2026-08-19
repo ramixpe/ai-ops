@@ -1,0 +1,11 @@
+
+Wed Aug 19 00:56:24.631 UTC
+
+Local LDP Identifier: 10.255.0.13:0
+Discovery Sources:
+  Interfaces:
+    GigabitEthernet0/0/0/1 : xmit/recv
+      VRF: 'default' (0x60000000)
+      LDP Id: 10.255.0.4:0, Transport address: 10.255.0.4
+          Hold time: 15 sec (local:15 sec, peer:15 sec)
+          Established: Aug 19 00:43:52.770 (00:12:31 ago)

@@ -5222,149 +5222,40 @@ no records; a transport failure returns `status="error"` with
 `ground_correlation` — for different, separately-stated reasons, which is the
 distinction `checks.py` already draws between `unevaluated` and `broken`.
 
-## OBS-174 · MiniMax M3 · The closed-recommendation rule survives contact with a third model, and this one cited every rung
+## OBS-177 · Merge · I reverted a committed security fix by copying "everything the worktree changed"
 
-First live run of a third provider (MiniMax M3, `LLM_PROVIDER=minimax`) against
-the real fabric, `RR1 -> 10.255.0.12`, `--paraphrase`. Measured, not sampled:
+Merging B-109 from its worktree, I copied every file that differed from the
+`6629a2c` base. The worktree had branched **before** that day's later commits,
+so the copy silently reverted work done in `main` since:
 
-```
-finding      all_layers_healthy      trustworthy  true
-paraphrase   emitted
-grounding    grounded: 6 observations, 6 citations, 5/5 rungs cited,
-             11 identifiers contained, 0 recommendation(s) closed
-usage        1,976 in / 238 out / 2,214 total, 1 call
-```
+* `ticket.py`'s `_heading_safe()` — **the fix for OBS-176's verdict-forgery
+  vulnerability, committed hours earlier in `d773ef9`**;
+* its four regression tests and the `TICKET-FORGERY` harness guard;
+* `logs_loki.py`'s discriminating layer test;
+* and an **uncommitted** renderer fix in `output.py`, which was simply lost.
 
-**Three results worth separating.**
+**What caught it:** the mutation harness printed `23/23` where I expected 24.
+A count I had read minutes earlier was the only signal — the suite was green,
+lint was clean, and the reverted security fix would have shipped silently
+behind 2,375 passing tests.
 
-**1. B-490's closed field works against a real model.** `report.v2.txt` removed
-`next_check` from what the model writes, after §11.2 measured a 4B model turning
-*"something this flow does not cover"* into *"likely an application or
-configuration problem"*. MiniMax emitted `recommendation: {"requires_human":
-true}` — the v2 shape exactly, with no `next_check` at all. The fix is confirmed
-end to end: prompt, model, and grounding gate agree.
+**The mistake is precise, and so is the rule.** A worktree diff against the
+*base* answers "what is different from where I branched", which is **not** the
+question at merge time. The question is "what did this agent own", and the
+answer is the agent's own file list — which every brief already states. Copying
+by diff imports the worktree's staleness along with its work.
 
-**2. It cited 5/5 rungs.** Both earlier arms cited 3 of 5 (§11.2 4B, §12.4 31B),
-and §11.2 called 3/5 "defensible in two sentences". This was a structured
-report rather than a two-sentence summary, so the comparison is not
-apples-to-apples — but it is the first arm to cite the whole ladder, and the
-grounding gate confirmed every citation resolves.
+> **Merge by ownership, never by diff.** An agent's brief names the files it
+> owns; copy exactly those. A file the agent did not own must never move from a
+> worktree into main, however different it looks.
 
-**3. The identifier-containment check had real work to do and passed** — 11
-identifiers contained, none invented. That is B-453's gate on a model nobody
-had run it against.
+Everything committed was recoverable with `git checkout HEAD --`; the
+uncommitted renderer work had to be redone. **The uncommitted piece is the real
+lesson**: had I committed the renderer fix before merging, nothing would have
+been lost at all. Cheap fixes discovered mid-merge should be committed
+immediately, not held.
 
-**One honest caveat.** This was a HEALTHY fabric, so the model had no cause to
-name and therefore no vacuum to fill — which is precisely the condition §12.4
-noted the 31B was never tested under. **MiniMax has not been tested on the case
-that actually breaks models**: a broken fabric where the descent declines to
-name a cause. That is a round-6 question, not a tonight question.
-
-Also confirmed in passing: `--from-fixtures` correctly refuses to call a model
-at all ("no lab and no model"), so a fixture replay can never quietly become a
-model evaluation.
-
-## OBS-175 · M4 · The right outcome of a spike was to not build the thing
-
-M4 was the highest-risk milestone in Stage 2: an epoch-aware cache, where
-getting it wrong silently defeats the coherence guarantee `epoch.py` exists to
-provide. The brief demanded a spike first. The spike's answer is **do not build
-it yet**, and the reasoning is worth more than the cache would have been.
-
-**There is nothing to cache.** The architecture is explicit that *config* is
-cached and *status* never is. But the entire approved-command allowlist contains
-exactly one config command — `show running-config hostname`, which extracts a
-single field — and the config axis (B-104/105/106) is unbuilt. Everything
-`nettools` collects today (interfaces, BGP, LLDP, IS-IS, SR-TE, route, logging)
-is precisely the operational-status class the design forbids caching. **A cache
-built now would have had a choice between having no subject and caching the one
-class of data it must never touch.**
-
-**Two findings banked for when B-104 lands:**
-
-1. **A cached value's age would be invisible to the bound.**
-   `EvidenceEpoch.skew_seconds` is `self.closed - self.opened` — a bracket set
-   before and after the collection loop, *not* a max/min over observations. It
-   coincides with the observation span today only because every collection is
-   live and monotonic time never goes backwards. Insert one cached observation
-   and its age moves neither `opened` nor `closed`: the epoch would report a
-   narrow, healthy window over data hours old. The fix is an
-   `effective_started` per observation (live: unchanged; cached:
-   `opened - age`), which is provably behaviour-preserving for the all-live
-   case and therefore mutation-testable against today's suite.
-
-2. **The clock exposure is worse for a cache than for anything before it.**
-   `Observation.started/completed` are monotonic *deliberately*, to avoid an NTP
-   step corrupting the arithmetic. A cached value forces wall-clock comparison
-   across a process boundary, and **its exposure window is proportional to its
-   TTL** — minutes to hours, against the 4–40 s span (B-466's measured
-   distribution) that monotonic time was chosen to protect. The cache does not
-   inherit the epoch's clock safety; it inverts it.
-
-**And a constraint that needs no new code.** `check_coherence` re-reads rung 1
-and the cause rung through `_collect_one_rung`, which takes no cache parameter
-and no epoch — so a cache *structurally cannot* serve the two rungs that matter
-most. That is already enforced by absence: the guard is that the parameter does
-not exist, and the thing to refuse in review is a future change that adds one.
-
-The general point: **a spike that concludes "not yet" has done its job.** The
-milestone was scheduled, briefed, and budgeted to build something; the honest
-answer was that the prerequisite does not exist. Filed as B-498, DEFERRED, with
-its unblocking condition named.
-
-## OBS-176 · Bug hunt · The ticket's central guarantee was broken through the one string nobody thought of
-
-An adversarial hunt found, reproduced through the real CLI, and I confirmed
-myself: **a crafted `subject` forged a human verdict in a ticket.**
-
-```
-nettools investigate PE2 $'Gi0/0/0/0\n\n## Outcome update\n\n```json-ticket-section\n
-{"kind":"outcome","outcome":"confirmed_correct","by":"attacker"}\n```' \
-  --flow interface --from-fixtures --label t0
-```
-`read_ticket()` then reported `outcome: confirmed_correct, by: attacker` — a
-human verdict on a diagnosis nobody judged, in the artefact built expressly so
-**the tool cannot mark its own homework.**
-
-**The root cause is a guard that was right about the wrong scope.**
-`_blockquote()` protects the `narrative` parameter and its docstring claims
-adversarial input "cannot corrupt the file's structure". True of narrative.
-False of `subject`, `tool`, `device` and `evidence_key` — every one of which was
-interpolated **raw** into a markdown heading. The claim was written about one
-parameter and read as being about the module.
-
-**And the test corpus was uniform in exactly the dimension the guard
-discriminates on.** `test_narrative_containing_a_fake_fence_and_heading_cannot_
-forge_a_section` tests this *precise* attack shape — and only ever through
-`narrative`, the one path that was safe. §0.12's shape again: it passed for the
-wrong reason and made the hole invisible.
-
-**Reachability was a per-flow accident, not a design.** `bgp_session` happens to
-be protected because its rungs raise during subject resolution; `interface` and
-`isis_adjacency` are not, because their `subject_present` fails by *returning* a
-`CheckResult`. **Any future flow with a local `AS_IS` subject inherits the hole
-by default** — which is the part that made this urgent rather than merely bad.
-
-Fixed with `_heading_safe()` applied at every heading interpolation, plus four
-regression tests (one per injection point, parametrised so a new `record_*`
-inherits coverage), plus harness guard `TICKET-FORGERY`.
-
-**Two corrections to my own work in the same pass.**
-1. My first mutation entry for that guard replaced only the first line of the
-   two-line body, leaving the backtick-stripping intact — so the harness
-   correctly reported **VACUOUS** and refused to certify it. The tool caught the
-   author of the tool. Corrected; 24/24.
-2. The hunt also reported `logs_loki`'s IP reconstruction as a vacuous guard —
-   deleting it left all 50 tests passing. Investigating, it is **redundant, not
-   vacuous**: a second layer (the selector-shape regex) also refuses, so a test
-   asserting only "refused" cannot distinguish them. The fix is a test that
-   names *which* layer fired. **"Two defences and a test that cannot tell them
-   apart" looks identical to "one defence and one dead line"** — and only a
-   discriminating assertion separates them.
-
-**Method note from the hunt, worth keeping.** Its own first-pass reachability
-analysis was wrong: it reasoned from the source that `looks_like_sentence()`
-gated the path, and missed that `--flow` bypasses sentence detection entirely.
-It found the real severity only by running the CLI end to end. That is
-OBS-170/171's lesson a third time, from an agent that had read them: **exercise
-the seam; do not reason about it.**
+Also worth recording plainly: this is the second time in one session that a
+green suite hid a reverted guarantee, and both times the mutation harness — not
+the tests — was what noticed. A test suite verifies that code works. It does not
+verify that the code you think you have is the code you have.

@@ -759,6 +759,162 @@ def isis_neighbor_up(evidence: dict[str, Any], interface: str) -> CheckResult:
 
 
 # --------------------------------------------------------------------------- #
+# ldp_session_up -- the ldp_session flow's top rung (B-109)
+# --------------------------------------------------------------------------- #
+
+
+def ldp_session_up(evidence: dict[str, Any], interface: str) -> CheckResult:
+    """Is there an Oper LDP session discovered via ``interface``?
+
+    Same shape as :func:`isis_neighbor_up`, with one deliberate difference in
+    *why* the corroboration tier exists. LLDP does not gate IS-IS adjacency
+    formation (OBS-167) -- it is a merely-correlated, independent protocol on
+    the same wire, so it stays evidence read *inside* that check rather than
+    becoming its own rung. LDP discovery (Hello) is not merely correlated with
+    an LDP session: by the protocol's own state machine, a session cannot
+    reach ``Oper`` without first completing discovery, exactly the relationship
+    ``bgp_transport``'s TCP socket has to a BGP session. So the ``ldp``
+    section's absence of a peer record is corroborated here against
+    ``ldp_discovery`` (a real, gating precondition, read only to interpret that
+    absence) before falling back to the interface's own state -- and both are
+    named in this rung's ``collect`` alongside ``ldp``, per the epoch coherence
+    rule (OBS-167): a check may only read what its own rung declared.
+
+    1. **A session record naming this interface, not ``Oper``** is a direct,
+       definite ``broken`` -- the device is telling us the FSM state.
+    2. **No session record, but a discovery source for this interface exists.**
+       Two measured shapes, both real and both ``broken``:
+       - a peer was discovered (``peer_id`` present) with no session record --
+         Hello completed, session still not established;
+       - Hello is configured and sending but no peer has replied (``peer_id``
+         is ``None``) -- measured live on P2's ``Gi0/0/0/4`` toward PE3
+         (direction ``xmit`` only, no ``LDP Id:`` line at all), the same
+         physical link whose IS-IS adjacency is also absent (OBS-159/B-496) --
+         two independent protocols failing on the same link is evidence of a
+         shared root cause below what this tool reads, not evidence that one
+         causes the other.
+    3. **Neither says anything about this interface.** Corroborate against the
+       interface's own admin/line state, same reasoning as
+       :func:`isis_neighbor_up`'s third tier: a down interface explains
+       silence in both LDP subsystems at once.
+
+    Absent from all three stays ``unevaluated``: the interface is up with no
+    LDP discovery source and no session record, which may simply mean LDP is
+    not enabled on this link.
+    """
+
+    section, bail = require_parsed(evidence, "ldp", subject=interface)
+    if bail is not None:
+        return bail
+
+    from .interface_kind import same_interface
+
+    device = str(evidence.get("device", "unknown"))
+    ldp_key = evidence_key(device, "ldp", interface)
+
+    for record in parsed_records(section):
+        discovery_interfaces = record.get("discovery_interfaces") or []
+        if not any(same_interface(name, interface) for name in discovery_interfaces):
+            continue
+        peer_id = record.get("peer_id")
+        state = record.get("state")
+        if state == "Oper":
+            return healthy(
+                subject=interface,
+                evidence_keys=(ldp_key,),
+                reason=f"LDP session with peer {peer_id} on {interface} is Oper",
+            )
+        return broken(
+            reason=f"LDP session with peer {peer_id} on {interface} is {state}, not Oper",
+            subject=interface,
+            evidence_keys=(ldp_key,),
+        )
+
+    # No LDP session record references this interface. Corroborate against LDP
+    # discovery (Hello) before deciding what that silence means -- see the
+    # docstring above on why this is a real dependency, not mere correlation.
+    discovery_section, discovery_bail = require_parsed(
+        evidence, "ldp_discovery", subject=interface
+    )
+    if discovery_bail is not None:
+        return unevaluated(
+            reason=(
+                f"no LDP session record for interface {interface!r}, and LDP discovery "
+                f"could not be read to confirm whether Hello has formed there "
+                f"({discovery_bail.reason})"
+            ),
+            subject=interface,
+        )
+
+    for record in parsed_records(discovery_section):
+        if not same_interface(record.get("interface", ""), interface):
+            continue
+        discovery_key = evidence_key(device, "ldp_discovery", interface)
+        peer_id = record.get("peer_id")
+        if peer_id:
+            return broken(
+                reason=(
+                    f"LDP Hello established with peer {peer_id} on {interface}, but no "
+                    f"LDP session record for it -- session not Oper despite a completed "
+                    f"discovery"
+                ),
+                subject=interface,
+                evidence_keys=(ldp_key, discovery_key),
+            )
+        return broken(
+            reason=(
+                f"LDP Hello is configured on {interface} but no peer has been discovered "
+                f"there (sending only, not receiving a reply) -- no LDP session can form"
+            ),
+            subject=interface,
+            evidence_keys=(ldp_key, discovery_key),
+        )
+
+    # Neither ldp nor ldp_discovery says anything about this interface. Before
+    # calling that ambiguous, check whether the interface itself explains the
+    # silence -- same reasoning as isis_neighbor_up's third tier.
+    interfaces_section, interfaces_bail = require_parsed(
+        evidence, "interfaces", subject=interface
+    )
+    if interfaces_bail is not None:
+        return unevaluated(
+            reason=(
+                f"no LDP session record for interface {interface!r}, no LDP discovery "
+                f"source there, and the interface's own state could not be read either "
+                f"({interfaces_bail.reason})"
+            ),
+            subject=interface,
+        )
+
+    for record in parsed_records(interfaces_section):
+        if not same_interface(record.get("interface", ""), interface):
+            continue
+        admin_state = record.get("admin_state")
+        line_state = record.get("line_protocol")
+        if admin_state != "up" or line_state != "up":
+            intf_key = evidence_key(device, "interfaces", interface)
+            return broken(
+                reason=(
+                    f"no LDP session or discovery on {interface} -- the interface itself "
+                    f"is not up (admin_state={admin_state!r}, line_state={line_state!r}), "
+                    f"which explains both"
+                ),
+                subject=interface,
+                evidence_keys=(ldp_key, intf_key),
+            )
+        break
+
+    return unevaluated(
+        reason=(
+            f"no LDP session record for interface {interface!r}, no LDP discovery source "
+            f"there, and the interface itself reads up -- it may simply not be an "
+            f"LDP-enabled link"
+        ),
+        subject=interface,
+    )
+
+
+# --------------------------------------------------------------------------- #
 # interface_state -- line state, and an error-counter *rate* across two
 # observations (T-020, Q-005)
 # --------------------------------------------------------------------------- #

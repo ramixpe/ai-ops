@@ -120,6 +120,15 @@ VOLATILE_FIELDS: dict[tuple[str, str], frozenset[str]] = {
     ("cisco_xr", "sr"): frozenset({"operational_duration"}),
     ("cisco_xr", "interfaces"): frozenset(),
     ("cisco_xr", "lldp"): frozenset(),
+    # B-109. "up_time" and the message counters move on a healthy, unchanged
+    # session exactly as bgp's do; "state"/"discovery_interfaces" are the
+    # signal a diff should actually surface.
+    ("cisco_xr", "ldp"): frozenset({"msgs_sent", "msgs_rcvd", "up_time"}),
+    # "established_ago" is the human-relative half of the Established
+    # timestamp ("5d07h ago") and changes every capture; "established" (the
+    # absolute timestamp) is the stable signal, same split as sr's
+    # since/duration pair.
+    ("cisco_xr", "ldp_discovery"): frozenset({"established_ago"}),
 }
 
 # The field identifying a record within an intent, so two snapshots' rows can be
@@ -131,6 +140,8 @@ RECORD_KEYS: dict[tuple[str, str], str | None] = {
     ("cisco_xr", "lldp"): "local_interface",
     ("cisco_xr", "isis"): "system_id",
     ("cisco_xr", "sr"): "policy",
+    ("cisco_xr", "ldp"): "peer_id",
+    ("cisco_xr", "ldp_discovery"): "interface",
 }
 
 
@@ -636,6 +647,281 @@ def parse_xr_isis(outputs: dict[str, str]) -> dict[str, Any]:
     )
 
 
+# --------------------------------------------------------------------------- #
+# ldp / ldp_discovery -- B-109
+# --------------------------------------------------------------------------- #
+#
+# Two commands, two parsers, deliberately not merged into one intent: "ldp"
+# (`show mpls ldp neighbor`) is the session-level FSM state, one block per
+# peer; "ldp_discovery" (`show mpls ldp discovery`) is the Hello-level
+# adjacency, one block per local interface -- a different key (peer_id vs
+# interface), a different natural record shape, and (per checks.ldp_session_up)
+# a genuinely separate rung's evidence. Bundling them the way "facts" bundles
+# hostname+version would have forced one artificial record_key on two
+# differently-keyed tables.
+#
+# Both grammars are walked procedurally rather than with a header/rows split
+# like isis/bgp: each command's output is a sequence of small, ordered
+# sub-blocks (TCP connection / Graceful Restart / State / discovery sources /
+# bound addresses for "ldp"; VRF / LDP Id / Hold time / Established for
+# "ldp_discovery") rather than a single table, so every line is consumed by an
+# explicit state-machine step and appended to ``consumed`` as it is read --
+# there is no need for a separate declared ``IgnoreRule`` table beyond
+# ``XR_COMMON_IGNORES`` (blank lines, the timestamp banner), because nothing
+# here is skipped; everything recognised is captured into a field.
+#
+# Measured live against the lab (2026-08-19, all nine devices): every device
+# runs LDP. P2's Gi0/0/0/4 (the live OBS-159/B-496 P2<->PE3 defect) is the one
+# real "sends Hello, never receives one back" case on the fabric right now --
+# `show mpls ldp discovery` prints it as an interface block with a direction of
+# "xmit" only and no "LDP Id:"/"Hold time:"/"Established:" lines at all, which
+# is exactly the shape the ``peer_id`` (nullable) design below exists for.
+
+_LDP_PEER_RE = re.compile(r"^Peer LDP Identifier: (?P<peer>\S+):0$")
+_LDP_TCP_RE = re.compile(r"^TCP connection: (?P<left>\S+) - (?P<right>\S+)$")
+_LDP_GR_RE = re.compile(r"^Graceful Restart: (?P<gr>\S+)$")
+_LDP_HOLDTIME_RE = re.compile(r"^Session Holdtime: (?P<ht>\d+) sec$")
+_LDP_STATE_RE = re.compile(
+    r"^State: (?P<state>[^;]+); Msgs sent/rcvd: (?P<sent>\d+)/(?P<rcvd>\d+); (?P<mode>.+)$"
+)
+_LDP_UPTIME_RE = re.compile(r"^Up time: (?P<up>.+)$")
+_LDP_IPV4_COUNT_RE = re.compile(r"^IPv4: \((?P<n>\d+)\)$")
+_LDP_IPV6_COUNT_RE = re.compile(r"^IPv6: \((?P<n>\d+)\)$")
+_IPV4_TOKEN_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
+
+
+def parse_xr_ldp_neighbor(outputs: dict[str, str]) -> dict[str, Any]:
+    """Parse ``show mpls ldp neighbor``.
+
+    One block per peer: TCP connection, Graceful Restart, Session Holdtime,
+    State (FSM state, message counters, label-advertisement mode), Up time,
+    the local interface(s) that discovered this peer ("LDP Discovery
+    Sources"), and the peer's own bound addresses. ``discovery_interfaces`` is
+    what :func:`agent_nettools.checks.ldp_session_up` matches a rung's subject
+    interface against; ``bound_addresses`` is captured for completeness
+    (section 0.10 line accounting) but has no reader yet.
+    """
+
+    text = next(iter(outputs.values()), "")
+    lines = text.splitlines()
+
+    records: list[dict[str, Any]] = []
+    consumed: list[str] = []
+    current: dict[str, Any] | None = None
+    section: str | None = None  # None | "discovery" | "addresses"
+    remaining = 0
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        if match := _LDP_PEER_RE.match(line):
+            current = {
+                "peer_id": match["peer"],
+                "discovery_interfaces": [],
+                "bound_addresses": [],
+            }
+            records.append(current)
+            consumed.append(line)
+            section = None
+            remaining = 0
+            continue
+
+        if current is None:
+            continue  # preamble/banner, handled by XR_COMMON_IGNORES
+
+        if match := _LDP_TCP_RE.match(line):
+            left, right = match["left"], match["right"]
+            if left.split(":")[0] == current["peer_id"]:
+                current["peer_tcp"], current["local_tcp"] = left, right
+            else:
+                current["peer_tcp"], current["local_tcp"] = right, left
+            consumed.append(line)
+            continue
+
+        if match := _LDP_GR_RE.match(line):
+            current["graceful_restart"] = match["gr"]
+            consumed.append(line)
+            continue
+
+        if match := _LDP_HOLDTIME_RE.match(line):
+            current["session_holdtime"] = match["ht"]
+            consumed.append(line)
+            continue
+
+        if match := _LDP_STATE_RE.match(line):
+            current["state"] = match["state"].strip()
+            current["msgs_sent"] = match["sent"]
+            current["msgs_rcvd"] = match["rcvd"]
+            current["label_distribution"] = match["mode"].strip()
+            consumed.append(line)
+            continue
+
+        if match := _LDP_UPTIME_RE.match(line):
+            current["up_time"] = match["up"].strip()
+            consumed.append(line)
+            continue
+
+        if line == "LDP Discovery Sources:":
+            section = "discovery"
+            consumed.append(line)
+            continue
+
+        if line == "Addresses bound to this peer:":
+            section = "addresses"
+            consumed.append(line)
+            continue
+
+        if match := _LDP_IPV4_COUNT_RE.match(line):
+            remaining = int(match["n"])
+            consumed.append(line)
+            continue
+
+        if _LDP_IPV6_COUNT_RE.match(line):
+            # Always (0) on this fabric -- IPv4 MPLS only. A non-zero count
+            # would leave its interface/address lines unmatched below, which
+            # is the point: surfaced as `unaccounted_lines`, not swallowed.
+            remaining = 0
+            consumed.append(line)
+            continue
+
+        if section == "discovery" and remaining > 0:
+            current["discovery_interfaces"].append(line)
+            consumed.append(line)
+            remaining -= 1
+            continue
+
+        if section == "addresses":
+            tokens = line.split()
+            if tokens and all(_IPV4_TOKEN_RE.match(token) for token in tokens):
+                current["bound_addresses"].extend(tokens)
+                consumed.append(line)
+                continue
+
+        # Anything else is genuinely unrecognised and falls through to
+        # `unaccounted_lines` via `finalize`/`account_lines`.
+
+    for record in records:
+        record["discovery_interface_count"] = len(record["discovery_interfaces"])
+        record["bound_address_count"] = len(record["bound_addresses"])
+
+    if not records:
+        # An empty peer table is legitimate -- a device with LDP enabled but
+        # no peers yet -- exactly parse_xr_sr's "empty database" reasoning.
+        body = strip_preamble(text, platform="cisco_xr").strip()
+        if body:
+            raise ParseError("no LDP peer blocks found in non-empty output")
+
+    return finalize(
+        raw=text,
+        meta={"peer_count": len(records)},
+        records=records,
+        consumed=consumed,
+    )
+
+
+_LDP_LOCAL_ID_RE = re.compile(r"^Local LDP Identifier: (?P<id>\S+):0$")
+_LDP_IFACE_RE = re.compile(r"^(?P<interface>\S+) : (?P<direction>\S+)$")
+_LDP_VRF_RE = re.compile(r"^VRF: '(?P<vrf>[^']+)' \((?P<vrf_id>0x[0-9a-fA-F]+)\)$")
+_LDP_PEER_ID_RE = re.compile(
+    r"^LDP Id: (?P<peer>\S+):0, Transport address: (?P<transport>\S+)$"
+)
+_LDP_HOLD_RE = re.compile(
+    r"^Hold time: (?P<hold>\d+) sec \(local:(?P<local>\d+) sec, peer:(?P<peer_hold>\d+) sec\)$"
+)
+_LDP_ESTABLISHED_RE = re.compile(r"^Established: (?P<ts>.+) \((?P<ago>.+) ago\)$")
+
+
+def parse_xr_ldp_discovery(outputs: dict[str, str]) -> dict[str, Any]:
+    """Parse ``show mpls ldp discovery``.
+
+    One block per local interface enabled for LDP. ``peer_id`` and
+    ``transport_address`` are ``None`` when Hello has been sent but no peer has
+    replied -- a real, distinct state (measured live: P2's Gi0/0/0/4, direction
+    ``xmit`` only, no ``LDP Id:`` line at all) that :func:`checks.ldp_session_up`
+    reads to tell "never discovered" apart from "discovered, session still not
+    Oper".
+    """
+
+    text = next(iter(outputs.values()), "")
+    lines = text.splitlines()
+
+    meta: dict[str, Any] = {}
+    records: list[dict[str, Any]] = []
+    consumed: list[str] = []
+    current: dict[str, Any] | None = None
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        if match := _LDP_LOCAL_ID_RE.match(line):
+            meta["local_ldp_identifier"] = match["id"]
+            consumed.append(line)
+            continue
+
+        if line in ("Discovery Sources:", "Interfaces:"):
+            consumed.append(line)
+            continue
+
+        if match := _LDP_IFACE_RE.match(line):
+            current = {
+                "interface": match["interface"],
+                "direction": match["direction"],
+                "peer_id": None,
+                "transport_address": None,
+            }
+            records.append(current)
+            consumed.append(line)
+            continue
+
+        if current is None:
+            continue  # preamble/banner, handled by XR_COMMON_IGNORES
+
+        if match := _LDP_VRF_RE.match(line):
+            current["vrf"] = match["vrf"]
+            consumed.append(line)
+            continue
+
+        if match := _LDP_PEER_ID_RE.match(line):
+            current["peer_id"] = match["peer"]
+            current["transport_address"] = match["transport"]
+            consumed.append(line)
+            continue
+
+        if match := _LDP_HOLD_RE.match(line):
+            current["hold_time"] = match["hold"]
+            current["hold_time_local"] = match["local"]
+            current["hold_time_peer"] = match["peer_hold"]
+            consumed.append(line)
+            continue
+
+        if match := _LDP_ESTABLISHED_RE.match(line):
+            current["established"] = match["ts"]
+            current["established_ago"] = match["ago"]
+            consumed.append(line)
+            continue
+
+        # Anything else falls through to `unaccounted_lines`.
+
+    meta["interface_count"] = len(records)
+    meta["discovered_peer_count"] = sum(1 for record in records if record["peer_id"])
+
+    if "local_ldp_identifier" not in meta:
+        body = strip_preamble(text, platform="cisco_xr").strip()
+        if body:
+            raise ParseError("no 'Local LDP Identifier' line found in non-empty output")
+
+    return finalize(
+        raw=text,
+        meta=meta,
+        records=records,
+        consumed=consumed,
+    )
+
+
 _XR_SR_HEADER = re.compile(r"^Color: (?P<color>\d+), End-point: (?P<endpoint>\S+)")
 _XR_SR_STATUS = re.compile(
     r"^Admin: (?P<admin>\S+)\s+Operational: (?P<operational>\S+)"
@@ -797,6 +1083,8 @@ PARSERS: dict[tuple[str, str], Callable[[dict[str, str]], dict[str, Any]]] = {
     ("cisco_xr", "bgp"): parse_xr_bgp,
     ("cisco_xr", "lldp"): parse_xr_lldp,
     ("cisco_xr", "isis"): parse_xr_isis,
+    ("cisco_xr", "ldp"): parse_xr_ldp_neighbor,
+    ("cisco_xr", "ldp_discovery"): parse_xr_ldp_discovery,
     ("cisco_xr", "sr"): parse_xr_sr,
 }
 

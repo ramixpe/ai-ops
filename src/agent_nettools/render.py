@@ -112,6 +112,19 @@ _NEXT_CHECK: dict[str, str] = {
         "area, authentication, network type, or whether IS-IS is enabled on "
         "this interface at all."
     ),
+    # B-109. The ldp_session flow's own reachable finding: the interface is
+    # healthy but no LDP session is Oper on it. `ldp_session_up`'s reason
+    # already distinguishes "Hello never completed" from "Hello completed, no
+    # session" from a raw non-Oper FSM state -- this is generic guidance for
+    # all three, since none of them is a configuration axis this build reads
+    # (B-104), same ceiling as `adjacency_not_up`.
+    "session_not_up": (
+        "No LDP session is Oper on this interface, though the interface itself "
+        "is healthy. Check LDP configuration on both ends -- whether LDP is "
+        "enabled on this interface at all, discovery hello parameters, and "
+        "whether the peer's transport address (usually its loopback) is "
+        "reachable."
+    ),
     flows.CAUSE_NOT_LOCALISED: (
         "Every layer beneath the symptom is healthy, so the cause is not in this "
         "ladder. Check configuration and policy on both ends."

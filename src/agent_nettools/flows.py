@@ -684,10 +684,87 @@ ISIS_ADJACENCY_FLOW = Flow(
 )
 
 
+# --- ldp_session (B-109) -----------------------------------------------------
+#
+# Third flow, built after B-107 established that the two-rung pattern
+# generalises. **The subject is a local interface name**, exactly
+# `isis_adjacency`'s choice and for the same reasons: `ldp` and
+# `ldp_discovery` are both interface-keyed (a peer's own LDP router-id is not
+# guaranteed to be legible or stable any more than a system-id is), no new
+# resolution mechanism is needed, and it is the same vocabulary `interface`
+# and `isis_adjacency` already use.
+#
+# **Two rungs, not three.** The honest-dependency question (OBS-167) was asked
+# of two candidates:
+#
+# * **LDP discovery (Hello) gates LDP session formation** -- this is not
+#   correlation, it is the protocol's own state machine: a session cannot
+#   reach `Oper` without completing discovery first, the same relationship
+#   `bgp_transport`'s TCP socket has to a BGP session. It earns a place in the
+#   evidence `ldp_session_up` reads -- but as corroboration *inside* the top
+#   rung's check, the same shape `bgp_transport` itself uses for its own
+#   socket-vs-FSM read (B-432), not as a separate rung: there is no *third*,
+#   independent verdict discovery could contribute once the top rung already
+#   distinguishes "no session, Hello never completed" from "no session, Hello
+#   completed" from "healthy". Two real distinctions, one rung.
+# * **IS-IS adjacency does NOT gate LDP Hello.** Hello is link-local multicast,
+#   independent of the IGP -- measured live on P2's Gi0/0/0/4 toward PE3
+#   (2026-08-19): IS-IS is down there (OBS-159/B-496, still live) and LDP
+#   discovery is *also* down there (`xmit` only, no reply), but Hello's own
+#   mechanics do not depend on IS-IS being adjacent. Two protocols failing on
+#   the same link is the LLDP-vs-isis shape exactly (OBS-167): a shared root
+#   cause below what this tool reads, not one gating the other. An `isis` rung
+#   here would be the refused hypothesis repeated with a different protocol
+#   name.
+#
+# So the ladder bottoms out at `interface`, same depth and same reasoning as
+# `isis_adjacency`: the physical layer is where this tool's evidence runs out
+# and D3's ceiling hands to a human.
+
+LDP_SESSION_FLOW = Flow(
+    object_type="ldp_session",
+    subject_schema="<local-interface-name>, as the device spells it (Gi0/0/0/0)",
+    descent=(
+        Rung(
+            name="ldp_session",
+            # `ldp_discovery` and `interfaces` are read for corroboration by
+            # `ldp_session_up`, not belt-and-braces -- see the check's
+            # docstring. Both are named here because the epoch coherence
+            # re-read (`epoch._collect_one_rung`) re-collects exactly this
+            # rung's own declared tuple, the OBS-167 lesson: a check may only
+            # read what its own rung's `collect` names.
+            collect=(
+                CollectStep("ldp"),
+                CollectStep("ldp_discovery"),
+                CollectStep("interfaces"),
+            ),
+            check=_checks.ldp_session_up,
+            finding="session_not_up",
+            device_scope=DeviceScope.LOCAL,
+            subject_rule=SubjectRule.AS_IS,
+        ),
+        Rung(
+            name="interface",
+            collect=(
+                CollectStep("interfaces"),
+                CollectStep("interface", parameter="interface", is_template=True),
+            ),
+            check=_checks.interface_state,
+            finding="interface_line_down",
+            device_scope=DeviceScope.LOCAL,
+            subject_rule=SubjectRule.AS_IS,
+        ),
+    ),
+    findings=frozenset({"session_not_up", "interface_line_down"}) | UNIVERSAL_FINDINGS,
+    subject_present=_checks.interface_exists,
+)
+
+
 FLOWS: Mapping[str, Flow] = {
     "bgp_session": BGP_SESSION_FLOW,
     "interface": INTERFACE_FLOW,
     "isis_adjacency": ISIS_ADJACENCY_FLOW,
+    "ldp_session": LDP_SESSION_FLOW,
 }
 
 

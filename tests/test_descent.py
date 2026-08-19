@@ -304,28 +304,97 @@ def test_acceptance_isis_adjacency_survives_the_coherence_re_read():
 
 
 # --------------------------------------------------------------------------- #
-# B-109 fallback — `isis_adjacency` through `investigate()`, every label
+# B-109 — `ldp_session` through `investigate()`, every label
 #
-# B-109 asked for a third flow, `ldp_session`. There is no LDP command in
-# `platforms.APPROVED_COMMANDS` and no LDP fixture under `tests/fixtures/` --
-# `platforms.py` is additions-only and adding a command is a safety-boundary
-# change needing explicit sign-off, so B-109 could not be built and this is
-# the fallback the task brief names instead.
+# The operator explicitly approved adding an LDP command on 2026-08-19,
+# lifting the block a previous agent correctly hit (no approved command, no
+# fixture -- see the git history of this section for that agent's fallback,
+# which pinned `isis_adjacency` a second time instead). `platforms.py` grew
+# two additive intents ("ldp"/"ldp_discovery"), and `tests/fixtures/` grew
+# real captures under `t0`/`t1` for all nine devices (2026-08-19) -- see
+# `parsers.py`'s `parse_xr_ldp_neighbor`/`parse_xr_ldp_discovery` docstrings
+# and `flows.LDP_SESSION_FLOW`'s module comment for the command shapes and the
+# dependency reasoning.
 #
-# OBS-167 is explicit about why this is worth doing on its own merits, not
-# just as a consolation: the hand-built `_collector_for` used everywhere else
-# in this file does not gate a rung's evidence by its declared `collect`
-# tuple, so it cannot catch an undeclared dependency -- only the real
-# `EvidenceEpoch` behind `investigate()` does, via the coherence re-read.
-# Every test above this point that calls `run_descent(..., collector=
-# _collector_for(...))` would have passed against the exact defect B-107
-# shipped and then found (a check reading `interfaces` evidence its rung had
-# not declared). Only `test_acceptance_isis_adjacency_survives_the_coherence
-# _re_read` above runs the real path, and only for one label. These pin the
-# other four labels the same way, so the whole fixture corpus for this flow
-# is exercised through the path that can actually detect that class of bug,
-# and the measured finding for each label cannot drift silently.
+# Same reason as the isis_adjacency block above for going through
+# `investigate()` rather than `run_descent(..., collector=_collector_for(...))`:
+# only the real `EvidenceEpoch` gates a rung's evidence by its declared
+# `collect` tuple, so only it can catch an undeclared dependency. Every case
+# below reports `coherence.status == "coherent"`, asserted directly rather
+# than trusted, so a future rung that reads evidence its own `collect` does
+# not name would fail here exactly the way B-107's did.
+#
+# `ldp`/`ldp_discovery` are captured under `t0`/`t1` only (not `healthy`/
+# `broken`/`isis-broken` -- see the capture note in this session's report:
+# backfilling those older labels with today's live LDP data would mix two
+# different points in time inside one label, which is worse than the two
+# labels this flow actually has). That means fewer rows than the
+# isis_adjacency table above, and one of them (P3's `Gi0/0/0/2`, marked below)
+# is honest about a real consequence of that same age gap in the *other*
+# direction: `t0`/`t1`'s own `interfaces`/`isis` captures are three weeks
+# older than today's live LDP capture, and P3 grew a working link since then
+# that its old `interfaces brief` snapshot still calls `admin-down`. The flow
+# reports exactly what each rung's own evidence says -- that is the point of
+# a rung reading only its own declared section -- so this is pinned rather
+# than hidden.
 # --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("device", "subject", "label", "expected_finding"),
+    [
+        # PE1's session to P1 is genuinely Oper in both live captures.
+        ("PE1", "Gi0/0/0/0", "t0", "all_layers_healthy"),
+        ("PE1", "Gi0/0/0/0", "t1", "all_layers_healthy"),
+        # P2's session to P1 -- the control for the broken case two rows down,
+        # same device, a different, healthy interface.
+        ("P2", "Gi0/0/0/0", "t0", "all_layers_healthy"),
+        # The live, still-open P2<->PE3 defect (OBS-159/B-496), read from P2's
+        # side: `show mpls ldp discovery` shows Hello sending on Gi0/0/0/4
+        # (direction `xmit`) with no `LDP Id:` line -- never receiving a
+        # reply. The interface itself is up, so the walk localises to the top
+        # rung and stops there: `cause_not_localised`, the same finding
+        # isis_adjacency reaches on this identical underlying link.
+        ("P2", "Gi0/0/0/4", "t0", "cause_not_localised"),
+        ("P2", "Gi0/0/0/4", "t1", "cause_not_localised"),
+        # The same defect read from PE3's side is *not* symmetric the way
+        # isis_adjacency's LLDP corroboration made the IS-IS case: PE3's own
+        # `show mpls ldp discovery` has no entry at all for Gi0/0/0/0 -- not
+        # even an orphan "sending, no reply" one -- so this check has nothing
+        # to corroborate against and honestly reports `undetermined` rather
+        # than guessing. Real, measured asymmetry, not a bug: the two ends of
+        # one broken link can carry different amounts of diagnostic evidence.
+        ("PE3", "Gi0/0/0/0", "t0", "undetermined"),
+        # A loopback carries no LDP Hello at all -- link-local multicast has
+        # nothing to attach to. The module's absence-is-unevaluated rule.
+        ("PE1", "Lo0", "t0", "undetermined"),
+        # P3's Gi0/0/0/2: LDP reports an Oper session to P2 (real, captured
+        # live 2026-08-19), while the *interface* rung reads `t0`'s own
+        # `interfaces brief` capture -- three weeks old (2026-07-29) -- which
+        # still shows that port admin-down from before this link existed.
+        # `no_fault_on_path`: the symptom rung is healthy, the interface rung
+        # is broken, and they disagree because they are reading two different
+        # points in time, not because either rung is wrong about what it read.
+        ("P3", "Gi0/0/0/2", "t0", "no_fault_on_path"),
+    ],
+)
+def test_acceptance_ldp_session_through_investigate_pins_every_measured_case(
+    device, subject, label, expected_finding
+):
+    """Measured, not predicted: every value here came from running
+    `investigate()` against the named fixture and reading the result, the
+    same discipline `test_acceptance_isis_adjacency_through_investigate_pins
+    _every_label` established for the previous flow.
+    """
+
+    result = investigate(
+        device, subject, flow="ldp_session", sender=fixture_sender(label=label),
+    )
+
+    assert result.descent.finding == expected_finding
+    assert result.descent.finding in flows.flow_for("ldp_session").findings
+    assert result.descent.coherence is not None
+    assert result.descent.coherence.status == "coherent"
 
 
 @pytest.mark.parametrize(
