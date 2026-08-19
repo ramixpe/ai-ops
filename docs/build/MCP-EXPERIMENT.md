@@ -1043,6 +1043,27 @@ Filed as **B-466**, and it is the highest-value item this run produced.
 
 ---
 
+> **HISTORICAL, from §11 onward (B-495, decided 2026-08-19).** The operator has
+> decided the model question: **`qwen3.8-27b` is production, `gemma-4-e4b` is
+> the test arm.** Every other model this section measures —
+> `gemma-4-31b-it` chief among them — is no longer a live option; forward-
+> looking material (`README.md`, `MCP-RETEST-PROTOCOL.md`, `LMSTUDIO-RUN-*.md`)
+> now names only the two above.
+>
+> **Nothing below this line is deleted, and nothing should be.** §11–§12 are
+> the paired-arm comparison that first showed capability is not monotonic in
+> model size, and §14/§14b are `qwen3.8-27b`'s premise-refusal and diagnostic
+> behaviour — together, this is the measurement the decision rests on. This
+> project's method is that a conclusion travels with its evidence; deleting
+> the evidence would leave the decision standing on nothing. Read `§12`'s and
+> `§14`'s `gemma-4-31b-it` and `gemma-4-e4b` results as **what was measured
+> before the choice was made**, not as live candidates.
+>
+> B-514 (§14's own finding, "a gap in the question set, not in the models")
+> is now built: `model_eval.py`'s premise-handling dimension scores three
+> outcomes — `refused` / `hedged` / `accepted` — rather than the two the
+> rubric had when this section was written.
+
 ## 11. Task 0 re-ask — Q5/Q6 against a real five-rung payload (2026-08-18)
 
 `gemma-4-e4b`, LM Studio 0.4.21+2, classic 23-tool surface, live fabric, no

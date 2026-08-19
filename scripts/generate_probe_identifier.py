@@ -98,6 +98,16 @@ _SKIP_DIR_NAMES = frozenset({
     ".git", ".venv", "venv", "__pycache__", "node_modules",
     ".mypy_cache", ".pytest_cache", ".ruff_cache", ".pytype",
     "build", "dist", "agent_nettools.egg-info",
+    # `.claude` holds agent worktrees -- each a full copy of this repo. Forty
+    # of them had accumulated by 2026-08-19, 382,424 files, and walking them
+    # made this check take minutes instead of a second (OBS-320). Skipping
+    # them is also CORRECT, not merely fast: a worktree is a transient copy of
+    # this same tree, so any address inside one is either already reserved by
+    # the real file it mirrors, or belongs to work that was never merged and
+    # therefore reserves nothing. Same shape as OBS-203, where a scan that
+    # forgot about worktrees silently disabled the mutation harness's own
+    # safety net.
+    ".claude",
 })
 
 _IPV4_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")

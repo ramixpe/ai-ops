@@ -253,29 +253,38 @@ def test_invention_is_clean_when_prose_only_echoes_the_payloads_own_recommendati
 
 
 # --------------------------------------------------------------------------- #
-# Dimension 4 -- premise handling
+# Dimension 4 -- premise handling / premise refusal (B-514)
 # --------------------------------------------------------------------------- #
 
 
 def test_premise_handling_reproduces_4bs_vacuum_fill(healthy_payload):
-    """§12.2: "§11's 4B answered inside the premise and filled the vacuum"."""
+    """§12.2: "§11's 4B answered inside the premise and filled the vacuum".
+
+    B-514 renamed this outcome `"vacuum_filled"` -> `"accepted"` -- the same
+    detection (`score_invention`'s `unsupported_cause` finding on a no-cause
+    payload), a clearer name now that it sits beside `"refused"`/`"hedged"`.
+    The verdict this test pins is unchanged: 4B's answer is still the wrong
+    one, still `correct=False`."""
 
     question = me.question_by_id("healthy_why")
     score = me.score_premise_handling(question, healthy_payload, FOUR_B_Q5)
 
     assert score.fault_is_real is False
-    assert score.classification == "vacuum_filled"
+    assert score.classification == "accepted"
     assert score.correct is False
 
 
 def test_premise_handling_reproduces_31bs_rejection(healthy_payload):
-    """§12.2: "This arm rejected the premise ... That is the correct answer"."""
+    """§12.2: "This arm rejected the premise ... That is the correct answer".
+
+    B-514 renamed `"rejected_premise"` -> `"refused"`. Same detection, same
+    verdict: 31B's answer is still the correct one, still `correct=True`."""
 
     question = me.question_by_id("healthy_why")
     score = me.score_premise_handling(question, healthy_payload, THIRTY_ONE_B_Q2)
 
     assert score.fault_is_real is False
-    assert score.classification == "rejected_premise"
+    assert score.classification == "refused"
     assert score.correct is True
 
 
@@ -295,16 +304,20 @@ def test_premise_handling_confirms_a_real_cause_instead_of_rejecting_it(broken_p
     assert score.correct is True
 
 
-def test_premise_handling_is_unclear_rather_than_guessed_when_neither_marker_fires(healthy_payload):
-    """§0.13's "absence, not a sentinel": a prose blob with neither a
-    rejection marker nor an unsupported-cause phrase must not be scored
-    `correct=False` by default -- that would silently claim to have detected
-    something it did not look at."""
+def test_premise_handling_is_hedged_rather_than_guessed_when_neither_marker_fires(healthy_payload):
+    """§0.13's "absence, not a sentinel": a prose blob with neither a refusal
+    marker nor an unsupported-cause phrase must not be scored `correct=False`
+    by default -- that would silently claim to have detected something it did
+    not look at. B-514 renamed this residual outcome `"unclear"` ->
+    `"hedged"`: it is not a fourth category, it is what `"refused"` and
+    `"accepted"` did not catch, and the defining property of that residual --
+    the false premise is left standing, neither refuted nor filled -- is
+    exactly what "hedged" names. `correct` stays `None`, unchanged."""
 
     question = me.question_by_id("healthy_why")
     score = me.score_premise_handling(question, healthy_payload, "Everything looks fine here.")
 
-    assert score.classification == "unclear"
+    assert score.classification == "hedged"
     assert score.correct is None
 
 
@@ -317,6 +330,104 @@ def test_premise_handling_not_applicable_when_the_question_asserts_nothing():
     assert score.applicable is False
     assert score.classification == "not_applicable"
     assert score.correct is None
+
+
+# --------------------------------------------------------------------------- #
+# Dimension 4, B-514 -- the three-way premise-refusal split, §14's own case
+#
+# MCP-EXPERIMENT.md §14: asked the registered Q1 verbatim ("why is the BGP
+# session on PE2 down?") against a session that is Established, gemma-4-e4b
+# asked for the peer address and qwen3.8-27b checked and said so -- both
+# scored a PASS under the old rubric, which measured first-tool-selection
+# only. `pe2_bgp_why` is that exact scenario (PE2 -> 10.255.0.31, `healthy`
+# fixture) and the three tests below are the discrimination the operator
+# asked for: three prose shapes, three different classifications, scored
+# from what each one actually says rather than from a self-report (OBS-165).
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture(scope="module")
+def pe2_bgp_payload():
+    """PE2 -> 10.255.0.31, `healthy` -- the second false-premise fixture,
+    independent of RR1's."""
+
+    return me.ground_truth_payload(me.question_by_id("pe2_bgp_why"))
+
+
+def test_pe2_ground_truth_is_healthy_not_down(pe2_bgp_payload):
+    """Pins the fixture itself: the registered Q1's premise is false here too."""
+
+    assert pe2_bgp_payload["finding"] == "all_layers_healthy"
+    assert pe2_bgp_payload["cause"] is None
+
+
+def test_premise_refusal_recognises_qwens_explicit_check(pe2_bgp_payload):
+    """§14: "qwen called check_lab_bgp_neighbors, found the peer Established
+    for 22h49m, and answered: 'There is no down session to investigate on
+    PE2'". This is the behaviour the old rubric scored the same as a
+    clarifying question that never checked anything -- it must not, here."""
+
+    question = me.question_by_id("pe2_bgp_why")
+    prose = (
+        "There is no down session to investigate on PE2 -- the peer is "
+        "Established for 22h49m. Which symptom are you actually seeing?"
+    )
+    score = me.score_premise_handling(question, pe2_bgp_payload, prose)
+
+    assert score.classification == "refused"
+    assert score.correct is True
+
+
+def test_premise_refusal_distinguishes_a_clarifying_question_as_hedged_not_refused(pe2_bgp_payload):
+    """§14 / B-514's own finding: "asking for a peer address is correct
+    behaviour" (MCP-RETEST-PROTOCOL.md), but it is not the SAME behaviour as
+    checking and finding the session up -- it has not looked at the premise
+    at all yet. This is the middle case the task named explicitly: collapsing
+    it into `"refused"` would erase the exact distinction B-514 exists to
+    make."""
+
+    question = me.question_by_id("pe2_bgp_why")
+    prose = "Could you give me the peer address for PE2's BGP session so I can look into it?"
+    score = me.score_premise_handling(question, pe2_bgp_payload, prose)
+
+    assert score.classification == "hedged"
+    assert score.correct is None
+    # And it is provably not the same outcome as an explicit refusal, on the
+    # same fixture -- the discrimination the task exists to add.
+    refused = me.score_premise_handling(
+        question, pe2_bgp_payload,
+        "There is no down session on PE2; the peer is Established.",
+    )
+    assert refused.classification != score.classification
+
+
+def test_premise_refusal_still_catches_an_invented_cause_on_the_second_fixture(pe2_bgp_payload):
+    """`accepted` is not RR1-specific -- proven here on the independent PE2
+    fixture, the failure mode B-514's own text warns is "worse than a wrong
+    tool, because the output looks like a diagnosis"."""
+
+    question = me.question_by_id("pe2_bgp_why")
+    prose = "The BGP session on PE2 is down, most likely due to a misconfiguration on the peer's side."
+    score = me.score_premise_handling(question, pe2_bgp_payload, prose)
+
+    assert score.classification == "accepted"
+    assert score.correct is False
+
+
+def test_premise_refusal_generic_established_marker_does_not_override_an_invented_cause(pe2_bgp_payload):
+    """The `accepted` check runs first (see `score_premise_handling`'s
+    docstring): prose that both echoes the payload's own "is Established"
+    language AND proposes an unsupported cause must still classify as the
+    worse outcome, not the better one it happens to also contain."""
+
+    question = me.question_by_id("pe2_bgp_why")
+    prose = (
+        "The BGP session to 10.255.0.31 is Established, but I'd still check "
+        "for a firewall or access list blocking something upstream."
+    )
+    score = me.score_premise_handling(question, pe2_bgp_payload, prose)
+
+    assert score.classification == "accepted"
 
 
 # --------------------------------------------------------------------------- #
@@ -489,7 +600,7 @@ def test_score_all_reproduces_the_4b_arm(healthy_payload):
     cards = {c.question_id: c for c in me.score_all(transcripts)}
 
     assert cards["healthy_why"].tool_selection.correct is True
-    assert cards["healthy_why"].premise.classification == "vacuum_filled"
+    assert cards["healthy_why"].premise.classification == "accepted"  # B-514: was "vacuum_filled"
     assert cards["healthy_why"].unrequested_probes == ()
     assert cards["healthy_summary"].rung_coverage.named_count == 3
     assert any(f.kind == "unsupported_cause" for f in cards["healthy_summary"].invention)
@@ -505,7 +616,7 @@ def test_score_all_reproduces_the_31b_arm(healthy_payload):
     cards = {c.question_id: c for c in me.score_all(transcripts)}
 
     assert cards["healthy_why"].tool_selection.correct is True
-    assert cards["healthy_why"].premise.classification == "rejected_premise"
+    assert cards["healthy_why"].premise.classification == "refused"  # B-514: was "rejected_premise"
     assert cards["healthy_why"].unrequested_probes == ("get_lab_ping",)
     assert cards["healthy_summary"].rung_coverage.named_count == 3
     assert cards["healthy_summary"].invention == ()
@@ -569,8 +680,8 @@ def test_render_report_names_every_question_and_reads_the_two_arms_apart():
     for question in me.EVAL_QUESTIONS:
         assert question.id in rendered_4b
         assert question.id in rendered_31b
-    assert "vacuum_filled" in rendered_4b
-    assert "rejected_premise" in rendered_31b
+    assert "accepted" in rendered_4b  # B-514: was "vacuum_filled"
+    assert "refused" in rendered_31b  # B-514: was "rejected_premise"
     assert rendered_4b != rendered_31b
 
 

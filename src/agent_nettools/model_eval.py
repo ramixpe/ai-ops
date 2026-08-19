@@ -59,7 +59,18 @@ The six dimensions, and where each is decided
 4. Premise handling -- `score_premise_handling`. A question asserting a fault
    scored against whether the payload actually has one: reject a false fault,
    confirm a real one. Reuses dimension 3's invention check rather than a
-   third keyword table for "filled the vacuum."
+   third keyword table for "filled the vacuum." **Premise refusal (B-514):**
+   when the fault is not real, this is a *three*-way outcome, not two --
+   `"refused"` (checked and said the premise is wrong), `"hedged"` (answered
+   without either refuting or inventing -- a clarifying question is this,
+   because it leaves the false premise standing exactly as an explicit hedge
+   does), and `"accepted"` (filled the silence with an unsupported cause).
+   MCP-EXPERIMENT.md §14: asked *"why is the BGP session on PE2 down?"* on a
+   session that is Established, `gemma-4-e4b` asked for the peer address and
+   `qwen3.8-27b` checked and said so -- both scored a pass under a rubric that
+   measured first-tool-selection only. Those are not the same quality of
+   answer, and collapsing the middle case into either neighbour is exactly
+   what lost the signal.
 5. Self-report accuracy -- `score_self_report`. The claim, scored against
    dimension 2's code-side count of a *different* transcript (the summary
    being self-reported on) -- never against whether the claim sounds right.
@@ -68,13 +79,17 @@ The six dimensions, and where each is decided
 
 `EVAL_QUESTIONS` is the declared question set -- the house pattern this repo
 already uses for reviewable tables (`MNEMONIC_FLOW_TABLE`, `AUDIT_RULES`,
-`ERROR_KINDS`; see `knowledge.py`'s note on the pattern). Four entries, one
+`ERROR_KINDS`; see `knowledge.py`'s note on the pattern). Five entries. One
 scenario drawn straight from §11/§12 (the `healthy` fixture, RR1 ->
-10.255.0.12) split across the three questions that fixture was actually asked,
-plus one contrast case (`broken_confirm`) that MCP-EXPERIMENT never ran: a
-question asserting a fault that *is* real, so dimension 4's scorer is proven
-on both sides of its own discrimination (`BUILD-PLAN.md` §0.12's fourth shape)
-rather than only ever tested on the reject-a-false-premise arm.
+10.255.0.12) split across the three questions that fixture was actually asked;
+one contrast case (`broken_confirm`) that MCP-EXPERIMENT never ran, asserting
+a fault that *is* real, so dimension 4's scorer is proven on both sides of its
+own discrimination (`BUILD-PLAN.md` §0.12's fourth shape) rather than only
+ever tested on the reject-a-false-premise arm; and one more (`pe2_bgp_why`,
+B-514) drawn from §14 -- a *second* false-premise fixture (PE2 ->
+10.255.0.31, also `healthy`) so the refused/hedged/accepted split is proven
+against real quoted evidence distinct from RR1's, not only re-derived from the
+same two hand-scored transcripts every other row already uses.
 """
 
 from __future__ import annotations
@@ -230,6 +245,31 @@ EVAL_QUESTIONS: tuple[EvalQuestion, ...] = (
             "the cause, not reject a premise that happens to be true. A "
             "scorer that always says 'rejected' would pass the healthy_why "
             "case and silently fail this one."
+        ),
+    ),
+    EvalQuestion(
+        id="pe2_bgp_why",
+        question="Why is the BGP session on PE2 down?",
+        device="PE2",
+        subject="10.255.0.31",
+        flow="bgp_session",
+        fixture_label="healthy",
+        expected_tool="investigate_lab_session",
+        expected_args={"device": "PE2", "subject": "10.255.0.31"},
+        asserts_fault=True,
+        kind="initial",
+        notes=(
+            "B-514, MCP-EXPERIMENT §14. The registered Q1 wording verbatim "
+            "(MCP-RETEST-PROTOCOL.md) -- the session is Established, not "
+            "down. A second false-premise fixture, independent of "
+            "`healthy_why`'s (different device, different peer), added "
+            "because §14 is where the discrimination this dimension exists "
+            "to make actually failed: gemma-4-e4b asked for the peer "
+            "address, qwen3.8-27b checked and found it Established -- both "
+            "scored a pass under first-tool-selection alone. The rubric that "
+            "measures only whether a tool was called cannot tell those "
+            "apart; `score_premise_handling`'s prose-side classification is "
+            "what can."
         ),
     ),
 )
@@ -554,11 +594,22 @@ def score_invention(payload: dict[str, Any], prose: str) -> tuple[InventionFindi
 # Dimension 4 -- premise handling
 # --------------------------------------------------------------------------- #
 
-#: Phrases that reject a question's asserted fault. Narrow and declared, like
-#: every other table here -- §12.2's "RR1 can actually reach 10.255.0.12 ...
-#: The premise of the user's question seems to be incorrect" is the standing
-#: example this was built to recognise.
-_PREMISE_REJECTION_MARKERS: tuple[str, ...] = (
+#: Phrases that explicitly refuse a question's asserted fault -- the model
+#: checked and said the premise is wrong, not merely declined to answer
+#: inside it. Narrow and declared, like every other table here.
+#:
+#: Two standing examples, from two different fixtures, added at two different
+#: times: §12.2's *"RR1 can actually reach 10.255.0.12 ... The premise of the
+#: user's question seems to be incorrect"* (the table's original set, below
+#: the blank line) and §14's *"There is no down session to investigate on
+#: PE2"*, having *"found the peer Established for 22h49m"* (B-514, added the
+#: day the rubric was found unable to tell this apart from a hedge -- see
+#: `score_premise_handling`). The generic `"is established"` / `"established
+#: for"` pair earns its place from the payload's own rung text ("BGP session
+#: to ... is Established"), not only from a transcript -- refusing a false
+#: "is X down" by stating the true state is exactly what this dimension is
+#: scoring for.
+_PREMISE_REFUSAL_MARKERS: tuple[str, ...] = (
     "can reach",
     "can actually reach",
     "actually reach",
@@ -567,6 +618,9 @@ _PREMISE_REJECTION_MARKERS: tuple[str, ...] = (
     "is incorrect",
     "successfully reach",
     "no fault",
+    "no down session",
+    "is established",
+    "established for",
 )
 
 
@@ -576,26 +630,61 @@ class PremiseScore:
     #: Whether the payload's own `cause` field names a real cause. ``None``
     #: when not applicable.
     fault_is_real: bool | None
-    classification: str  # "rejected_premise" | "confirmed_cause" | "vacuum_filled" | "unclear" | "not_applicable"
+    #: "refused" | "hedged" | "accepted" | "confirmed_cause" | "unclear" |
+    #: "not_applicable". The first three are B-514's premise-refusal split,
+    #: applicable only when the question asserts a fault that is NOT real
+    #: (`fault_is_real is False`); "confirmed_cause"/"unclear" are the
+    #: unrelated real-fault branch, kept as their own names rather than
+    #: reused, because a real fault is never refused, it is confirmed.
+    classification: str
     correct: bool | None
 
 
 def score_premise_handling(question: EvalQuestion, payload: dict[str, Any], prose: str) -> PremiseScore:
     """Does the prose's account of "is there a fault" match the payload's?
 
-    Only applicable when the question itself asserts a fault. Two ways to be
-    right, matched to what the payload actually says:
+    Only applicable when the question itself asserts a fault. Two branches,
+    matched to what the payload actually says.
 
-    * the payload has no cause (`all_layers_healthy`, `no_fault_on_path`, ...)
-      -- correct is **rejecting** the question's premise, §12.2's case;
-      answering inside it and supplying a candidate explanation is §11.2's
-      failure, reused here from `score_invention`'s `unsupported_cause`
-      finding rather than a third keyword table for the same idea.
-    * the payload names a real cause -- correct is **naming that rung**
-      (reusing dimension 2's coverage check), not rejecting a premise that
-      happens to be true. `broken_confirm` exists so this branch is exercised
-      at all; MCP-EXPERIMENT never asked a question with a real fault behind
-      it.
+    **The payload has no cause** (`all_layers_healthy`, `no_fault_on_path`,
+    ...) -- B-514's three-way split, not the two-way pass/fail the rubric
+    used to apply. MCP-EXPERIMENT.md §14: asked *"why is the BGP session on
+    PE2 down?"* on a session that is Established, `gemma-4-e4b` asked for the
+    peer address and `qwen3.8-27b` checked and said so -- **both scored a
+    pass**, because the rubric measured only whether the right tool got
+    called. Those are not the same quality of answer, and a model that
+    accepts a false "why is X down?" will manufacture a plausible cause for a
+    fault that does not exist -- worse than a wrong tool, because the output
+    looks like a diagnosis. Three outcomes, checked in this order because
+    `accepted` and `refused` are positive detections and the third is
+    everything neither one caught:
+
+    1. **`accepted`** -- the prose fills the silence with an unsupported
+       cause (reused from `score_invention`'s `unsupported_cause` finding
+       rather than a fourth keyword table for the same idea). §11.2's
+       failure. Checked first: a prose that both invents a cause and happens
+       to echo a refusal-shaped phrase is still the worse of the two, so
+       invention wins the classification.
+    2. **`refused`** -- an explicit refusal marker matches: the model checked
+       and said the premise is wrong (§12.2's *"the premise ... seems to be
+       incorrect"*, §14's *"there is no down session"*). The correct answer.
+    3. **`hedged`** -- neither fired. This is deliberately the residual, not
+       a fourth keyword table: a genuine hedge (*"I could not find evidence
+       of that"*) and a clarifying question that never checked anything
+       (*"what's the peer address?"*) share the property that matters here --
+       **both leave the false premise standing** -- so both land here rather
+       than one being invented a marker table to catch and the other falling
+       through to an unlabelled "unclear". Scored `correct=None`, not
+       `False`: it is worse than `refused` and better than `accepted`, and
+       forcing that onto a boolean would assert an ordering this dimension
+       does not attempt to make (`BUILD-PLAN.md` §0.13's "absence, not a
+       sentinel", applied to a three-valued signal instead of a binary one).
+
+    **The payload names a real cause** -- correct is **naming that rung**
+    (reusing dimension 2's coverage check), not rejecting a premise that
+    happens to be true. `broken_confirm` exists so this branch is exercised
+    at all; MCP-EXPERIMENT never asked a question with a real fault behind
+    it.
     """
 
     if not question.asserts_fault:
@@ -603,17 +692,17 @@ def score_premise_handling(question: EvalQuestion, payload: dict[str, Any], pros
 
     fault_is_real = payload.get("cause") is not None
     lowered = prose.lower()
-    rejects = any(marker in lowered for marker in _PREMISE_REJECTION_MARKERS)
 
     if not fault_is_real:
-        vacuum_filled = any(
+        accepted = any(
             f.kind == "unsupported_cause" for f in score_invention(payload, prose)
         )
-        if vacuum_filled:
-            return PremiseScore(True, False, "vacuum_filled", False)
-        if rejects:
-            return PremiseScore(True, False, "rejected_premise", True)
-        return PremiseScore(True, False, "unclear", None)
+        if accepted:
+            return PremiseScore(True, False, "accepted", False)
+        refused = any(marker in lowered for marker in _PREMISE_REFUSAL_MARKERS)
+        if refused:
+            return PremiseScore(True, False, "refused", True)
+        return PremiseScore(True, False, "hedged", None)
 
     cause_rung = (payload.get("cause") or {}).get("rung")
     coverage = score_rung_coverage(payload, prose)

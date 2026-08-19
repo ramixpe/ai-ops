@@ -6606,3 +6606,46 @@ the truth because the brief also said *"if a test cannot be honestly updated, sa
 so and leave it failing for me to decide."* **Without that clause the correct
 outcome was unreachable**, because doing the assigned task well and getting the
 right answer were opposites.
+
+---
+
+## OBS-320 · Probe generator · A repo-wide scan that forgot about worktrees, again
+
+`generate_probe_identifier.py`'s second reservation check greps every file in the
+tree for IPv4-shaped strings — deliberately broad, because OBS-195's finding was
+that the leaked probe address had reached files no marker-based exclusion would
+think to check.
+
+Its skip list covered `.git`, `.venv`, caches and build output. It did not cover
+`.claude`, which holds the agent worktrees. By this afternoon there were **40 of
+them — 382,424 files, 5.5 GB** — and the check went from about a second to over
+four minutes, long enough that its own tests were killed by a timeout before
+finishing.
+
+**Skipping them is correct, not merely faster.** A worktree is a transient copy
+of this same tree: an address inside one is either already reserved by the real
+file it mirrors, or belongs to work that was never merged and therefore reserves
+nothing. Verified after the fix — 16 seconds, still 87 reserved addresses, still
+catching `10.255.0.99`.
+
+This is the third scan this session to forget worktrees exist, and the three fail
+differently, which is why no single fix generalised:
+
+* **OBS-203** — `mutate_guards.py` excluded them by absolute-path substring and
+  so excluded *everything*, silently disabling its own safety net.
+* **OBS-300** — a killed run left a mutation behind, and worktree copies made the
+  wrong file look like the right one to diff against.
+* **here** — not excluding them at all turned a linear scan into a quadratic one,
+  because each worktree contains a full copy of the tree being scanned.
+
+> A directory that contains copies of the repository is not an ordinary
+> directory. Any code that walks "the tree" has to decide about it explicitly —
+> and the decision differs by purpose, so it cannot be settled once in a shared
+> constant and forgotten.
+
+A diagnostic note on how this presented: the failing tests looked like a logic
+bug — `unused_hosts` appeared to return every address while ignoring its reserved
+set. Run in isolation the function was correct. The suite run had picked up stale
+bytecode from a guard run killed with its parent shell, and the *real* problem
+underneath was the scan's runtime. Two unrelated faults presenting as one wrong
+answer, and the wrong answer pointed at neither.
