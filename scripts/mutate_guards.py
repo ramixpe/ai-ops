@@ -235,6 +235,15 @@ MUTATIONS = [
      "            windows.setdefault(o.device, set()).add((o.started, o.completed))\n",
      "            windows.setdefault(o.device, []).append((o.started, o.completed))\n",
      "test_latency_ms_deduplicates_observations_sharing_one_window"),
+
+    ("B-508", "every intent PLATFORM_INTENTS['cisco_xr'] declares has a "
+     "CHECK_TOOLS entry -- bgp_vpnv4/ldp/ldp_discovery were collected and "
+     "parsed on every device read with no way for an operator to check any "
+     "of them alone (the third instance of OBS-187/OBS-191's shape: a "
+     "capability exists and the surface does not name it)",
+     "src/agent_nettools/network_tools.py",
+     '    "bgp_vpnv4": check_bgp_vpnv4_neighbors,\n', "",
+     "test_every_cisco_xr_intent_has_a_check_tool"),
 ]
 
 

@@ -41,12 +41,12 @@
 <text x="1506.0" y="156.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.5" font-weight="700" fill="#9a9a94" text-anchor="end">planned</text>
 <rect x="48.0" y="220.0" width="237.3" height="92.0" rx="10" fill="#ffffff" stroke="#d8d8d2" stroke-width="1"/>
 <rect x="48.0" y="220.0" width="237.3" height="3.0" rx="1.5" fill="#15803d" stroke="none" stroke-width="1"/>
-<text x="66.0" y="262.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="27" font-weight="700" fill="#15803d" text-anchor="start">2,525</text>
+<text x="66.0" y="262.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="27" font-weight="700" fill="#15803d" text-anchor="start">2,528</text>
 <text x="66.0" y="282.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12" font-weight="600" fill="#17171a" text-anchor="start">tests</text>
 <text x="66.0" y="299.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="9.8" font-weight="400" fill="#6f6f6a" text-anchor="start">collected; no network, no credentials, no API key</text>
 <rect x="297.3" y="220.0" width="237.3" height="92.0" rx="10" fill="#ffffff" stroke="#d8d8d2" stroke-width="1"/>
 <rect x="297.3" y="220.0" width="237.3" height="3.0" rx="1.5" fill="#15803d" stroke="none" stroke-width="1"/>
-<text x="315.3" y="262.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="27" font-weight="700" fill="#15803d" text-anchor="start">27 / 27</text>
+<text x="315.3" y="262.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="27" font-weight="700" fill="#15803d" text-anchor="start">28 / 28</text>
 <text x="315.3" y="282.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12" font-weight="600" fill="#17171a" text-anchor="start">mutation guards hold</text>
 <text x="315.3" y="299.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="9.8" font-weight="400" fill="#6f6f6a" text-anchor="start">each proven to fail when its guard goes</text>
 <rect x="546.7" y="220.0" width="237.3" height="92.0" rx="10" fill="#ffffff" stroke="#d8d8d2" stroke-width="1"/>
@@ -56,7 +56,7 @@
 <text x="564.7" y="299.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="9.8" font-weight="400" fill="#6f6f6a" text-anchor="start">byte-identical to the pre-build baseline</text>
 <rect x="796.0" y="220.0" width="237.3" height="92.0" rx="10" fill="#ffffff" stroke="#d8d8d2" stroke-width="1"/>
 <rect x="796.0" y="220.0" width="237.3" height="3.0" rx="1.5" fill="#1f5fd0" stroke="none" stroke-width="1"/>
-<text x="814.0" y="262.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="27" font-weight="700" fill="#1f5fd0" text-anchor="start">189</text>
+<text x="814.0" y="262.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="27" font-weight="700" fill="#1f5fd0" text-anchor="start">190</text>
 <text x="814.0" y="282.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12" font-weight="600" fill="#17171a" text-anchor="start">findings recorded</text>
 <text x="814.0" y="299.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="9.8" font-weight="400" fill="#6f6f6a" text-anchor="start">append-only; corrections are appended</text>
 <rect x="1045.3" y="220.0" width="237.3" height="92.0" rx="10" fill="#ffffff" stroke="#d8d8d2" stroke-width="1"/>
@@ -66,27 +66,27 @@
 <text x="1063.3" y="299.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="9.8" font-weight="400" fill="#6f6f6a" text-anchor="start">9 devices × 5 labels — the offline lab</text>
 <rect x="1294.7" y="220.0" width="237.3" height="92.0" rx="10" fill="#ffffff" stroke="#d8d8d2" stroke-width="1"/>
 <rect x="1294.7" y="220.0" width="237.3" height="3.0" rx="1.5" fill="#6f6f6a" stroke="none" stroke-width="1"/>
-<text x="1312.7" y="262.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="27" font-weight="700" fill="#6f6f6a" text-anchor="start">29,350</text>
+<text x="1312.7" y="262.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="27" font-weight="700" fill="#6f6f6a" text-anchor="start">29,393</text>
 <text x="1312.7" y="282.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12" font-weight="600" fill="#17171a" text-anchor="start">lines of source</text>
-<text x="1312.7" y="299.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="9.8" font-weight="400" fill="#6f6f6a" text-anchor="start">+29,796 lines of tests — near 1:1</text>
+<text x="1312.7" y="299.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="9.8" font-weight="400" fill="#6f6f6a" text-anchor="start">+29,884 lines of tests — near 1:1</text>
 <rect x="48.0" y="334.0" width="690.0" height="336.0" rx="11" fill="#ffffff" stroke="#d8d8d2" stroke-width="1"/>
 <text x="68.0" y="362.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="13" font-weight="700" fill="#17171a" text-anchor="start" letter-spacing="0.8">THE BACKLOG, RECONCILED</text>
-<text x="68.0" y="381.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#6f6f6a" text-anchor="start">139 items. The number that matters is not how few are open —</text>
+<text x="68.0" y="381.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#6f6f6a" text-anchor="start">140 items. The number that matters is not how few are open —</text>
 <text x="68.0" y="396.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#6f6f6a" text-anchor="start">it is that every state is one somebody can defend.</text>
-<rect x="68.0" y="416.0" width="364.7" height="26.0" rx="0" fill="#15803d" stroke="none" stroke-width="1"/>
-<text x="250.4" y="433.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12" font-weight="700" fill="#fff" text-anchor="middle">78</text>
-<rect x="432.7" y="416.0" width="130.9" height="26.0" rx="0" fill="#1f5fd0" stroke="none" stroke-width="1"/>
-<text x="498.2" y="433.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12" font-weight="700" fill="#fff" text-anchor="middle">28</text>
-<rect x="563.7" y="416.0" width="70.1" height="26.0" rx="0" fill="#b45309" stroke="none" stroke-width="1"/>
-<text x="598.8" y="433.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12" font-weight="700" fill="#fff" text-anchor="middle">15</text>
-<rect x="633.8" y="416.0" width="65.5" height="26.0" rx="0" fill="#c0392b" stroke="none" stroke-width="1"/>
-<text x="666.6" y="433.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12" font-weight="700" fill="#fff" text-anchor="middle">14</text>
-<rect x="699.3" y="416.0" width="18.7" height="26.0" rx="0" fill="#0f766e" stroke="none" stroke-width="1"/>
-<text x="708.6" y="433.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12" font-weight="700" fill="#fff" text-anchor="middle">4</text>
+<rect x="68.0" y="416.0" width="366.8" height="26.0" rx="0" fill="#15803d" stroke="none" stroke-width="1"/>
+<text x="251.4" y="433.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12" font-weight="700" fill="#fff" text-anchor="middle">79</text>
+<rect x="434.8" y="416.0" width="130.0" height="26.0" rx="0" fill="#1f5fd0" stroke="none" stroke-width="1"/>
+<text x="499.8" y="433.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12" font-weight="700" fill="#fff" text-anchor="middle">28</text>
+<rect x="564.8" y="416.0" width="69.6" height="26.0" rx="0" fill="#b45309" stroke="none" stroke-width="1"/>
+<text x="599.6" y="433.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12" font-weight="700" fill="#fff" text-anchor="middle">15</text>
+<rect x="634.4" y="416.0" width="65.0" height="26.0" rx="0" fill="#c0392b" stroke="none" stroke-width="1"/>
+<text x="666.9" y="433.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12" font-weight="700" fill="#fff" text-anchor="middle">14</text>
+<rect x="699.4" y="416.0" width="18.6" height="26.0" rx="0" fill="#0f766e" stroke="none" stroke-width="1"/>
+<text x="708.7" y="433.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12" font-weight="700" fill="#fff" text-anchor="middle">4</text>
 <rect x="68.0" y="416.0" width="650.0" height="26.0" rx="0" fill="none" stroke="#ffffff" stroke-width="0"/>
 <rect x="68.0" y="454.0" width="11.0" height="11.0" rx="2" fill="#15803d" stroke="none" stroke-width="1"/>
 <text x="86.0" y="464.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11.5" font-weight="650" fill="#15803d" text-anchor="start">DONE</text>
-<text x="160.0" y="464.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="11.5" font-weight="700" fill="#17171a" text-anchor="start">78</text>
+<text x="160.0" y="464.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="11.5" font-weight="700" fill="#17171a" text-anchor="start">79</text>
 <text x="190.0" y="464.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.8" font-weight="400" fill="#6f6f6a" text-anchor="start">shipped and verified</text>
 <rect x="68.0" y="475.0" width="11.0" height="11.0" rx="2" fill="#1f5fd0" stroke="none" stroke-width="1"/>
 <text x="86.0" y="485.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11.5" font-weight="650" fill="#1f5fd0" text-anchor="start">DEFERRED</text>
@@ -166,7 +166,7 @@
 <rect x="1232.8" y="736.0" width="279.2" height="124.0" rx="9" fill="#e8f5ec" stroke="#b9dcc5" stroke-width="1"/>
 <text x="1246.8" y="758.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12.5" font-weight="700" fill="#15803d" text-anchor="start">Now</text>
 <text x="1498.0" y="758.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="10" font-weight="400" fill="#9a9a94" text-anchor="end">—</text>
-<text x="1246.8" y="776.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="11" font-weight="400" fill="#15803d" text-anchor="start">2,525 tests · 27 guards</text>
+<text x="1246.8" y="776.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="11" font-weight="400" fill="#15803d" text-anchor="start">2,528 tests · 28 guards</text>
 <text x="1246.8" y="798.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.2" font-weight="400" fill="#6f6f6a" text-anchor="start">Everything green, everything pushed. The next</text>
 <text x="1246.8" y="812.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.2" font-weight="400" fill="#6f6f6a" text-anchor="start">move is a lab window, not a commit.</text>
 <text x="48.0" y="914.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12" font-weight="400" fill="#6f6f6a" text-anchor="start">The honest summary: the code is done and defended; the claims that still need evidence are the ones only a live fault can produce.</text>

@@ -11,10 +11,14 @@ from helpers import (
 
 from agent_nettools import lab, network_tools
 from agent_nettools.network_tools import (
+    CHECK_TOOLS,
     NETTOOLS_ALLOW_ACTIVE_PROBES_ENV,
     _run_approved_commands,
+    check_bgp_vpnv4_neighbors,
     check_fabric,
     check_isis_neighbors,
+    check_ldp_discovery,
+    check_ldp_neighbors,
     check_lldp_neighbors,
     check_sr_policies,
     collect_evidence,
@@ -32,6 +36,7 @@ from agent_nettools.network_tools import (
 )
 from agent_nettools.platforms import (
     APPROVED_COMMANDS,
+    PLATFORM_INTENTS,
     TemplateValidationError,
     all_intents,
     commands_for,
@@ -190,6 +195,65 @@ def test_lldp_isis_sr_tools_use_approved_commands(monkeypatch):
         result = tool("PE1", sender=echo_sender)
         assert result["status"] == "success"
         assert command in result["data"]["commands"]
+
+
+def test_bgp_vpnv4_ldp_ldp_discovery_tools_use_approved_commands(monkeypatch):
+    """The three intents this test guards were collected on every device read
+    (``collect_evidence``) and parsed, but had no ``CHECK_TOOLS`` entry -- no
+    way for an operator to look at any of them alone. Same shape as
+    ``test_lldp_isis_sr_tools_use_approved_commands`` above."""
+
+    set_device_environment(monkeypatch)
+
+    def echo_sender(device, command):
+        return f"{command} on {device['name']}"
+
+    for tool, command in (
+        (check_bgp_vpnv4_neighbors, "show bgp vpnv4 unicast summary"),
+        (check_ldp_neighbors, "show mpls ldp neighbor"),
+        (check_ldp_discovery, "show mpls ldp discovery"),
+    ):
+        result = tool("PE1", sender=echo_sender)
+        assert result["status"] == "success"
+        assert command in result["data"]["commands"]
+
+
+def test_every_cisco_xr_intent_has_a_check_tool():
+    """The pin OBS-187/OBS-191's third instance closes.
+
+    ``bgp_vpnv4`` (M7/B-503) and ``ldp``/``ldp_discovery`` (B-109) were
+    collected on every device read and parsed, with no ``CHECK_TOOLS`` entry
+    -- an operator debugging LDP got argparse's "invalid choice" for
+    ``nettools ldp PE1``, the same shape as OBS-187 (a refusal unreachable
+    from the CLI) and OBS-191 (two flows unadvertised on MCP): a capability
+    exists and the surface does not name it.
+
+    Both sides are derived from the code, not re-typed here, so a tenth
+    intent added to ``PLATFORM_INTENTS["cisco_xr"]`` without a matching
+    ``CHECK_TOOLS`` entry fails this test rather than shipping silently
+    unreachable. Any intent that legitimately should not get a check belongs
+    in ``_CHECK_TOOL_EXEMPTIONS`` below, named, with a reason -- never a
+    weakened assertion.
+    """
+
+    xr_intents = set(PLATFORM_INTENTS["cisco_xr"])
+    checked = set(CHECK_TOOLS)
+
+    #: Intents deliberately NOT exposed as a standalone CLI check, each with a
+    #: one-line reason. Empty today -- every cisco_xr intent has a check.
+    _CHECK_TOOL_EXEMPTIONS: dict[str, str] = {}
+
+    missing = xr_intents - checked - set(_CHECK_TOOL_EXEMPTIONS)
+    assert not missing, (
+        f"intents in PLATFORM_INTENTS['cisco_xr'] with no CHECK_TOOLS entry: "
+        f"{sorted(missing)}. Add a check_* function and wire it into "
+        f"CHECK_TOOLS, or add a named, reasoned exemption."
+    )
+
+    stale_exemptions = set(_CHECK_TOOL_EXEMPTIONS) - xr_intents
+    assert not stale_exemptions, (
+        f"exemptions naming intents that no longer exist: {sorted(stale_exemptions)}"
+    )
 
 
 def test_check_fabric_runs_named_check_across_all_devices(monkeypatch):

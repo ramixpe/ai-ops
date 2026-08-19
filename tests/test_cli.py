@@ -919,3 +919,27 @@ def test_a_refused_flow_is_still_offered_as_a_choice(monkeypatch, capsys):
     err = capsys.readouterr().err
     assert "invalid choice" in err          # an unknown word IS still rejected
     assert "device_health" in err           # ...and the refused name is listed
+
+
+def test_the_cli_usage_docstring_lists_every_implemented_flow():
+    """The module docstring is printed as top-level help, so it is a SURFACE.
+
+    Fourth instance of one defect class in one night: a capability exists and
+    the surface does not name it (OBS-187 the refusal argparse swallowed,
+    OBS-191 two flows the MCP description omitted, B-508 three intents with no
+    CLI check -- and this line, which still advertised two flows after B-107
+    and B-109 shipped two more).
+
+    Hand-written help text listing a set that the code derives elsewhere will
+    rot every single time the set grows. Pinning it against the registry is the
+    only version that stays true.
+    """
+
+    from agent_nettools import flows
+
+    doc = cli.__doc__ or ""
+    implemented = sorted(n for n, f in flows.FLOWS.items() if f is not None)
+    missing = [n for n in implemented if n not in doc]
+    assert not missing, (
+        f"flows implemented but absent from `nettools --help`: {missing}"
+    )

@@ -2,9 +2,9 @@
 
 > **OVERNIGHT RUN — 2026-08-18 into 2026-08-19. Read this first.**
 >
-> Green and fully pushed at every step: **2502 passed / 24 skipped**, lint clean,
-> **27/27 mutation guards**, four frozen files intact. Tests went
-> **2229 → 2502** overnight. One warning is expected and deliberate — see
+> Green and fully pushed at every step: **2505 passed / 24 skipped**, lint clean,
+> **28/28 mutation guards**, four frozen files intact. Tests went
+> **2229 → 2505** overnight. One warning is expected and deliberate — see
 > "Your call in the morning", item 1.
 >
 > ### Landed
@@ -24,8 +24,15 @@
 >   fixture replay). `retries` reads `None`, not `0` — the epoch genuinely
 >   cannot measure it, and a default zero would be a lie (OBS-190).
 >   `nettools ledger summary` / `ledger verdict <id>`, and the id is printed.
-> * **Nine intents** — `bgp_vpnv4` is new (real VPNv4 sessions on RR1 and all
->   four PEs).
+> * **Nine intents, all nine now runnable directly**: `nettools ldp PE1`,
+>   `nettools ldp_discovery PE1`, `nettools bgp_vpnv4 RR1` were added — those
+>   three were collected on every read and had no way to be looked at alone
+>   (OBS-192). Verified live: RR1 shows 4 VPNv4 neighbours, 2 LDP neighbours.
+> * **The MCP surface is deliberately unchanged at 23 tools.** Those three were
+>   NOT added there, because you are about to run a measured manifest
+>   experiment and 23→26 would silently move the quantity being measured
+>   (B-501's 0.235 ratio, B-479's staged-vs-classic). Adding them to MCP is
+>   your call after the LM Studio run.
 > * Six services on the `stage2` compose profile; all 19 containers healthy.
 > * **The MCP descent tool now advertises all four flows.** It listed only two
 >   until this morning, so `isis_adjacency` and `ldp_session` were built,
@@ -89,8 +96,8 @@
 > remember a flag. (OBS-185)
 >
 > ### Backlog
-> **139 rows** — 78 DONE, 15 OPEN, 28 DEFERRED, 14 BLOCKED, 2 OUT-OF-SCOPE,
-> 1 CLOSED-AS-MEASURED, 1 CLOSED-AS-REFUSED. FINDINGS.md holds **189**
+> **140 rows** — 79 DONE, 15 OPEN, 28 DEFERRED, 14 BLOCKED, 2 OUT-OF-SCOPE,
+> 1 CLOSED-AS-MEASURED, 1 CLOSED-AS-REFUSED. FINDINGS.md holds **190**
 > observations.
 >
 > ### The diagrams are now true

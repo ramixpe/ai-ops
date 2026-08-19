@@ -5882,3 +5882,52 @@ both flows. Removing all four mentions made the test fail correctly.
 > mutation fails to break a test, suspect the mutation before the test — and
 > confirm the mutation actually removed the thing, by counting occurrences
 > rather than trusting one substitution.
+
+---
+
+## OBS-192 · Surfaces · Four instances of one defect in one night, and the sweep that found the last two
+
+Tonight produced four separate cases of a single failure, in four different
+places, none of which any test could catch — because in every case the
+capability worked perfectly and only the *description of it* was wrong:
+
+| # | Surface | The capability | What the caller saw |
+|---|---|---|---|
+| OBS-187 | CLI `--flow` | `device_health`'s reasoned refusal | `invalid choice: 'device_health'` |
+| OBS-191 | MCP tool description | `isis_adjacency`, `ldp_session` | two flows, not four |
+| B-508 | CLI subcommands | `bgp_vpnv4`, `ldp`, `ldp_discovery` intents | `invalid choice` |
+| this | `cli.__doc__` (top-level `--help`) | same two flows | two flows, not four |
+
+The first two I found by accident — one by running the morning smoke test as the
+operator would, one by verifying the MCP server started. After the second I
+stopped fixing instances and swept instead: for every capability registry in the
+build, is every member named on every surface that selects from it? That sweep
+found the third in one command, and the agent closing it found the fourth while
+reading nearby code.
+
+**The generalisation.** Each case is a hand-written list of a set the code
+already derives somewhere else. `CHECK_TOOLS`'s own comment even says it is "one
+source of truth… the same intent names used by `platforms.PLATFORM_INTENTS`" and
+warns about drift in one direction — and the drift arrived from the other. A
+duplicated set does not stay in sync because someone is careful; it stays in
+sync because a test derives one side from the other and fails when they part.
+
+All four now have that test. `CHECK_TOOLS` against `PLATFORM_INTENTS` (with a
+named-and-reasoned exemption dict, currently empty, so a future decision to omit
+one is on the record rather than a silent absence); the MCP description and the
+CLI help against `flows.FLOWS`; the refusal reachable and pinned.
+
+> A capability the surface does not name does not exist to the caller, and no
+> test of the capability will ever notice — the capability is not broken. The
+> only defence is to derive the surface's list from the registry, or to pin one
+> against the other. **Where you cannot derive, you must compare.**
+
+Two process notes from the same work. The agent flagged that regenerating the
+diagrams *before* adding a mutation guard leaves them stale immediately, because
+the guard count is itself a measured tile — regenerate last. And my own probe of
+the three new checks reported "usage: nettools [-h]" for all three, which reads
+like the wiring failed; the positive control (`nettools bgp RR1 --from-fixtures`,
+a check that has worked for months) failed identically, because
+`--from-fixtures` belongs to `investigate` and not to the check subcommands. The
+wiring was fine. **Fifth time tonight a probe of mine indicted working code**,
+and the fifth time the control was what saved it.

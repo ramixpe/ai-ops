@@ -3,7 +3,8 @@
 Exposed as the ``nettools`` console script. Subcommands:
 
     nettools inventory
-    nettools facts | interfaces | bgp | lldp | isis | sr  [DEVICE]
+    nettools facts | interfaces | bgp | bgp_vpnv4 | lldp | isis | ldp |
+             ldp_discovery | sr  [DEVICE]
     nettools fabric [CHECK]
     nettools route DEVICE PREFIX
     nettools bgp-neighbor DEVICE ADDRESS
@@ -11,7 +12,8 @@ Exposed as the ``nettools`` console script. Subcommands:
     nettools logging DEVICE [--count N]
     nettools ping DEVICE ADDRESS
     nettools traceroute DEVICE ADDRESS
-    nettools investigate DEVICE SUBJECT [--flow bgp_session|interface]
+    nettools investigate DEVICE SUBJECT
+                         [--flow bgp_session|interface|isis_adjacency|ldp_session]
                          [--from-fixtures [--label L]] [--paraphrase] [--notify]
                          (SUBJECT may be a sentence, e.g. "why can't RR1 reach
                          10.255.0.12?", when --flow is omitted -- B-112)

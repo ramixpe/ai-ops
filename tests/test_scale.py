@@ -76,7 +76,7 @@ def _cli_subcommand_count() -> int:
                          capture_output=True, text=True).stdout
     import re
 
-    match = re.search(r"\{([a-z0-9,\-]+)\}", out)
+    match = re.search(r"\{([a-z0-9_,\-]+)\}", out)
     assert match, "could not find the subcommand list in --help"
     return len(match.group(1).split(","))
 

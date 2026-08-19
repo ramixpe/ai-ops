@@ -1445,6 +1445,22 @@ def check_bgp_neighbors(
     return run_intent(device_name, "bgp", sender=sender, device=device)
 
 
+def check_bgp_vpnv4_neighbors(
+    device_name: str,
+    *,
+    sender: Callable[[dict[str, Any], str], str] | None = None,
+    device: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Collect MP-BGP VPNv4 neighbor summary information using a read-only command.
+
+    Same neighbor FSM as ``check_bgp_neighbors``, a different address family --
+    see the "bgp_vpnv4" comment beside ``PLATFORM_INTENTS["cisco_xr"]`` for why
+    it is collected as a plain context intent and not a descent flow rung.
+    """
+
+    return run_intent(device_name, "bgp_vpnv4", sender=sender, device=device)
+
+
 def check_lldp_neighbors(
     device_name: str,
     *,
@@ -1467,6 +1483,28 @@ def check_isis_neighbors(
     return run_intent(device_name, "isis", sender=sender, device=device)
 
 
+def check_ldp_neighbors(
+    device_name: str,
+    *,
+    sender: Callable[[dict[str, Any], str], str] | None = None,
+    device: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Collect LDP session (neighbor FSM) state using a read-only command."""
+
+    return run_intent(device_name, "ldp", sender=sender, device=device)
+
+
+def check_ldp_discovery(
+    device_name: str,
+    *,
+    sender: Callable[[dict[str, Any], str], str] | None = None,
+    device: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Collect LDP Hello discovery adjacency state using a read-only command."""
+
+    return run_intent(device_name, "ldp_discovery", sender=sender, device=device)
+
+
 def check_sr_policies(
     device_name: str,
     *,
@@ -1487,8 +1525,11 @@ CHECK_TOOLS: dict[str, Callable[..., dict[str, Any]]] = {
     "facts": get_device_facts,
     "interfaces": check_interfaces,
     "bgp": check_bgp_neighbors,
+    "bgp_vpnv4": check_bgp_vpnv4_neighbors,
     "lldp": check_lldp_neighbors,
     "isis": check_isis_neighbors,
+    "ldp": check_ldp_neighbors,
+    "ldp_discovery": check_ldp_discovery,
     "sr": check_sr_policies,
 }
 
