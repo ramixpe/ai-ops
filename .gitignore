@@ -57,3 +57,11 @@ tickets/
 # logs -- never a record worth keeping, same reasoning as evidence/ and
 # tickets/ above.
 admission/
+
+# B-407's pointer store, same reason tickets/ and admission/ are here: a
+# durable store defaulting to a path inside the repo will be written by any
+# real run and by any test that forgets to isolate it. OBS-172 is the version
+# of this that reached a commit -- 113 test tickets -- and it has now recurred
+# twice more with new stores. The pattern is the finding: a new store inherits
+# none of the containment the previous ones learned.
+session_memory/
