@@ -857,6 +857,19 @@ _DEVICE_HEALTH_REFUSAL = (
 )
 
 
+#: Object types that are deliberately REFUSED rather than merely unbuilt,
+#: mapped to the reason. Public and enumerable so a *surface* (the CLI, the MCP
+#: server) can offer the name and answer with the reasoning, instead of
+#: rejecting it as an unknown word. That distinction is the whole point of a
+#: refusal: `argparse`'s "invalid choice" tells an operator the name is wrong,
+#: when the truth is that the name is right and the answer is "use this other
+#: thing" (measured 2026-08-19 -- the refusal existed in `flow_for` and the CLI
+#: could not reach it, so the operator saw the generic error. OBS-186/OBS-187).
+REFUSED_OBJECT_TYPES: dict[str, str] = {
+    "device_health": _DEVICE_HEALTH_REFUSAL,
+}
+
+
 def flow_for(object_type: str) -> Flow:
     """Return one flow, or raise ``NotImplementedError`` naming the task.
 

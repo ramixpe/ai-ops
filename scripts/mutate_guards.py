@@ -205,6 +205,13 @@ MUTATIONS = [
      "    return EXIT_OK",
      "test_a_ping_with_total_loss_exits_nonzero"),
 
+    ("B-108", "a REFUSED flow reaches the operator with its reason and a "
+     "pointer to the real surface, not argparse's 'invalid choice'",
+     "src/agent_nettools/cli.py",
+     "    if args.flow in flows.REFUSED_OBJECT_TYPES:",
+     "    if False and args.flow in flows.REFUSED_OBJECT_TYPES:",
+     "test_a_refused_flow_is_answered_with_its_reason_not_an_invalid_choice"),
+
     ("B-489", "_run_rendered_command has no command= parameter to smuggle a "
      "pre-rendered string through, bypassing reconstruction against the "
      "declaring template",
@@ -226,19 +233,35 @@ def sh(cmd: str) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, shell=True, cwd=REPO, capture_output=True, text=True)
 
 
+#: Paths whose bytecode cannot affect THIS tree's test run, and so must not be
+#: scanned or purged. `.venv` is the installed interpreter. `.claude/worktrees`
+#: holds independent git checkouts: their `src/` is never on this run's
+#: sys.path, so their caches can neither mask a mutation here nor be safely
+#: deleted -- an agent may be mid-run in one, and purging under it is a race we
+#: would create for no benefit. Narrowing the scan to this tree keeps the
+#: guarantee identical (no stale bytecode for the module under mutation, in the
+#: tree being mutated) while removing files that were never in scope.
+_UNSCANNED = (".venv", ".claude/worktrees")
+
+
+def _in_scope(p: pathlib.Path) -> bool:
+    text = str(p)
+    return not any(skip in text for skip in _UNSCANNED)
+
+
 def purge_pycache() -> None:
     """Defect 2. Bracket every mutation, because the silent direction reports a
     mutation as caught when it was not."""
 
     for cache in REPO.rglob("__pycache__"):
-        if ".venv" not in str(cache):
+        if _in_scope(cache):
             shutil.rmtree(cache, ignore_errors=True)
     shutil.rmtree(REPO / ".pytest_cache", ignore_errors=True)
 
 
 def assert_no_stale_bytecode(path: str) -> None:
     module = pathlib.Path(path).stem
-    stale = [p for p in REPO.rglob(f"{module}.cpython-*.pyc") if ".venv" not in str(p)]
+    stale = [p for p in REPO.rglob(f"{module}.cpython-*.pyc") if _in_scope(p)]
     if stale:
         raise SystemExit(f"REFUSING TO CONTINUE: stale bytecode for {module}: {stale}")
 

@@ -868,3 +868,54 @@ def test_a_real_error_still_exits_nonzero():
 
     error = {"status": "error", "errors": ["x"], "data": {}}
     assert cli._envelope_exit(error) == cli.EXIT_WARNING
+
+
+def test_a_refused_flow_is_answered_with_its_reason_not_an_invalid_choice(
+    monkeypatch, capsys
+):
+    """The CLI must REACH the refusal, not reject the name before it can.
+
+    `flow_for("device_health")` has raised a reasoned refusal since B-108, but
+    argparse's `choices` rejected the word first, so the operator saw
+    "invalid choice: 'device_health'" -- which says the NAME is wrong, when the
+    name is right and only the shape of the answer is different. Measured
+    against the real CLI on 2026-08-19: the library was correct and the surface
+    the operator actually touches was not (OBS-187).
+    """
+
+    _stub_load_dotenv(monkeypatch)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["nettools", "investigate", "PE1", "PE1", "--flow", "device_health",
+         "--from-fixtures"],
+    )
+
+    assert cli.main() == 2
+    err = capsys.readouterr().err
+    assert "invalid choice" not in err
+    # The refusal must name the replacement, or it is a dead end.
+    assert "nettools health DEVICE" in err
+    assert "assess_lab_device_health" in err
+    assert "not a flow" in err
+
+
+def test_a_refused_flow_is_still_offered_as_a_choice(monkeypatch, capsys):
+    """Anti-vacuity companion: the test above would also pass if `device_health`
+    were simply dropped from `choices` and swallowed by a catch-all. It must
+    remain an OFFERED name -- that is what makes the reasoned answer reachable
+    rather than accidental -- while a genuinely unknown word is still rejected.
+    """
+
+    _stub_load_dotenv(monkeypatch)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["nettools", "investigate", "PE1", "PE1", "--flow", "not_a_real_flow"],
+    )
+
+    with pytest.raises(SystemExit):
+        cli.main()
+    err = capsys.readouterr().err
+    assert "invalid choice" in err          # an unknown word IS still rejected
+    assert "device_health" in err           # ...and the refused name is listed

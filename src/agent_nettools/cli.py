@@ -676,6 +676,14 @@ def _cmd_investigate(args: argparse.Namespace) -> int:
     it would report doubt about a diagnosis that has none.
     """
 
+    # A REFUSED flow is answered before any work starts: no fixtures loaded, no
+    # ticket opened, no ledger row. The operator named a real concept and the
+    # honest reply is "that is not a descent, here is the surface that answers
+    # it" -- not argparse's "invalid choice", which says the word was wrong.
+    if args.flow in flows.REFUSED_OBJECT_TYPES:
+        print(flows.REFUSED_OBJECT_TYPES[args.flow], file=sys.stderr)
+        return 2
+
     analyst = None
     sender = None
 
@@ -1416,7 +1424,12 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p_investigate.add_argument(
-        "--flow", default=None, choices=sorted(flows.FLOWS),
+        "--flow", default=None,
+        # Refused flows are accepted as CHOICES so the parser does not
+        # reject them as unknown words -- `_cmd_investigate` answers them
+        # with the reason and a pointer to the real surface. See
+        # flows.REFUSED_OBJECT_TYPES.
+        choices=sorted(set(flows.FLOWS) | set(flows.REFUSED_OBJECT_TYPES)),
         help=(
             "Which dependency ladder to descend (default: bgp_session, unless "
             "SUBJECT reads as a sentence, in which case B-112 free-text "

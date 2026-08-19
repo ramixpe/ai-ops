@@ -5631,3 +5631,52 @@ params itself, so reconstruction runs on every call. What was genuinely missing
 was the *mutation guard*, now added (25/25). Two stale backlog rows in one night,
 both pointing the same way: **a backlog row is a claim about the code, and it
 decays exactly like a comment does.**
+
+---
+
+## OBS-187 · B-108 · The refusal was correct in the library and unreachable from the CLI
+
+OBS-186 recorded `device_health` being refused with a *distinct* message naming
+`nettools health` as the real entry point — deliberately different from the
+generic "not yet built" stub, because unbuilt invites a future agent to build it
+and refused tells them why not to.
+
+The agent that built it reported, accurately, that no CLI wiring was needed
+because `--flow`'s choices are already derived dynamically from `FLOWS`. Both
+halves of that sentence are true. Together they produce this:
+
+```
+$ nettools investigate PE1 PE1 --flow device_health --from-fixtures
+nettools investigate: error: argument --flow: invalid choice: 'device_health'
+(choose from bgp_session, interface, isis_adjacency, ldp_session)
+```
+
+`device_health` is not in `FLOWS` — that is exactly what refusing it means — so
+argparse rejected the word before `flow_for()` could ever be called. The reasoned
+refusal existed, was tested, and **no operator could reach it.** Worse, the
+message actively misinforms: "invalid choice" says *the name is wrong*, when the
+name is right and only the shape of the answer is different. The one user who
+types `--flow device_health` is precisely the user the refusal was written for.
+
+I found this by running the morning smoke test as the operator would, not by
+reading the diff. The library-level test passed throughout.
+
+> A refusal is a **surface** feature, not a library feature. It has to be
+> reachable from the place the mistaken request is actually made, which means
+> the refused name must remain *offered* — validation that rejects it as unknown
+> deletes the answer you wrote.
+
+Fixed by making the refusal enumerable (`flows.REFUSED_OBJECT_TYPES`), widening
+the CLI's choices to include refused names, and answering them in
+`_cmd_investigate` before any work starts — no fixtures loaded, no ticket, no
+ledger row, exit 2. Two tests: the substantive one, and an anti-vacuity
+companion asserting the name is still *offered* (so the fix cannot degrade into
+a catch-all) while a genuinely unknown word is still rejected. Under mutation the
+substantive test fails and the companion passes — they discriminate, which is
+what makes the pair worth having. Guard `B-108` added; 26/26.
+
+**Same-shape risk elsewhere, checked while here:** the MCP surface builds its
+tool list from the same registry, so a refused flow is simply absent there rather
+than misdescribed — a model asking for it gets "no such tool", which is the
+correct answer for a *tool* surface. The CLI is the one place a human types the
+name by hand, and it was the one place that needed this.
