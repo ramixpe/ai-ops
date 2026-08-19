@@ -1,6 +1,15 @@
 # The reasoning gate — design for operator sign-off
 
-**Status: awaiting review. No code written.** B-101/B-102/B-103.
+**Status: approved by the operator 2026-08-19. B-101 and B-102 BUILT to this
+shape (`reasoning_gate.py`); B-103 deliberately not built — see the
+recommendation at the end.**
+
+> This document supersedes `lld-investigation-layer.md` §5.6, which sketched a
+> wider three-field decision schema (`sufficient`/`narrow` carrying `finding`
+> and `object`). That earlier shape let a model return a **finding**, which is
+> precisely what the approved design makes unrepresentable. The LLD predates
+> this decision and is a pre-build delta spec; where the two disagree, this one
+> is authoritative.
 
 This is the first place in the build where a model influences control flow. Every
 existing model call is decorative: it paraphrases a conclusion code already

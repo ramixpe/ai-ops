@@ -323,6 +323,33 @@ MUTATIONS = [
      '                current["authentication_configured"] = True\n',
      '                current["authentication_configured"] = stripped\n',
      "test_config_isis_never_stores_what_follows_authentication"),
+
+    # ---- B-101/B-102: the reasoning gate (docs/design/reasoning-gate.md,
+    # operator-approved). `reasoning_gate.parse_decision` turns a model's raw
+    # "narrow" decision into a `NarrowRequest` by indexing into the
+    # code-enumerated candidate list -- never by reading an identity out of
+    # the model's own text. The bound this entry mutation-tests is the index
+    # range check, and specifically its LOWER half: without it, Python's own
+    # negative indexing lets `index=-1` silently resolve to `candidates[-1]`,
+    # the LAST enumerated candidate, instead of being refused -- a fabricated
+    # selection wearing syntactically valid clothing, exactly the shape
+    # B-459 warns about for a free-text target. Counted before mutating
+    # (OBS-191): the anchor string below occurs exactly once in
+    # reasoning_gate.py (`grep -c` against the line, checked by hand before
+    # this entry was added). Mutated to drop the `index < 0 or` half, leaving
+    # only the upper-bound check -- still refuses an index too large, so a
+    # test that only tried an oversized index would not notice; the guard is
+    # specifically that a negative index is refused too, which is what
+    # `test_a_negative_index_is_refused_not_silently_wrapped` actually
+    # asserts. ----
+
+    ("B-550", "parse_decision refuses a negative index rather than letting "
+     "Python's own negative indexing silently resolve it to the last "
+     "enumerated candidate",
+     "src/agent_nettools/reasoning_gate.py",
+     "        if index < 0 or index >= len(candidates):\n",
+     "        if index >= len(candidates):\n",
+     "test_a_negative_index_is_refused_not_silently_wrapped"),
 ]
 
 

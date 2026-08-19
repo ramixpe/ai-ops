@@ -266,6 +266,13 @@ project(parsed_config, subject) -> dict      # global attrs + this subject + ref
 
 ### 5.6 `investigation.py` — gate, grounding, and the runner
 
+> **SUPERSEDED 2026-08-19.** The decision schema below carries a `finding`
+> field, which the approved design in `reasoning-gate.md` deliberately makes
+> unrepresentable — a model may request more evidence and may never return a
+> verdict. This section is retained as the pre-build sketch it was; read
+> `docs/design/reasoning-gate.md` for what was actually built.
+
+
 Three concerns, one module because they share the run record.
 
 **The gate.** Called only after the descent completes.
