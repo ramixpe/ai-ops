@@ -46,7 +46,7 @@
 <rect x="632.6" y="380.0" width="544.2" height="86.0" rx="10" fill="#eaf1fd" stroke="#1f5fd0" stroke-width="1"/>
 <text x="648.6" y="404.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12.5" font-weight="700" fill="#1f5fd0" text-anchor="start">FOCUSED / CONTEXT TOOLS</text>
 <text x="648.6" y="424.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.8" font-weight="400" fill="#17171a" text-anchor="start">one domain, both readings: context AND one specific check</text>
-<text x="648.6" y="446.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="10.2" font-weight="400" fill="#6f6f6a" text-anchor="start">per-protocol adjacency: ISIS done · LDP · OSPF · MP-BGP · RSVP · CDP …</text>
+<text x="648.6" y="446.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="10.2" font-weight="400" fill="#6f6f6a" text-anchor="start">per-protocol adjacency: ISIS · LDP · MP-BGP VPNv4 done · OSPF/RSVP/CDP surveyed, refused (OBS-183)</text>
 <line x1="1177.8" y1="423.0" x2="1183.8" y2="423.0" stroke="#a8a8a2" stroke-width="1.5" marker-end="url(#arw)"/>
 <rect x="1184.8" y="380.0" width="487.2" height="86.0" rx="10" fill="#e8f5ec" stroke="#15803d" stroke-width="1"/>
 <text x="1200.8" y="404.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12.5" font-weight="700" fill="#15803d" text-anchor="start">DESCENT TOOLS — narrowest</text>
@@ -58,7 +58,7 @@
 <text x="62.0" y="546.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="13" font-weight="700" fill="#17171a" text-anchor="start">nettools</text>
 <rect x="307.7" y="533.0" width="41.9" height="17.0" rx="8" fill="#15803d" stroke="#15803d" stroke-width="1"/>
 <text x="328.7" y="545.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="9.5" font-weight="700" fill="#fff" text-anchor="middle">BUILT</text>
-<text x="62.0" y="568.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.3" font-weight="400" fill="#6f6f6a" text-anchor="start">31 commands · 23 MCP tools · 2 flows</text>
+<text x="62.0" y="568.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.3" font-weight="400" fill="#6f6f6a" text-anchor="start">32 commands · 23 MCP tools · 4 flows</text>
 <text x="62.0" y="584.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.3" font-weight="400" fill="#6f6f6a" text-anchor="start">descent, grounding, epoch, ledger</text>
 <text x="62.0" y="600.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.3" font-weight="400" fill="#6f6f6a" text-anchor="start">the deterministic diagnostic core</text>
 <rect x="375.6" y="522.0" width="313.6" height="108.0" rx="11" fill="#eaf1fd" stroke="#1f5fd0" stroke-width="1"/>
@@ -73,7 +73,7 @@
 <rect x="942.2" y="533.0" width="62.6" height="17.0" rx="8" fill="#1f5fd0" stroke="#1f5fd0" stroke-width="1"/>
 <text x="973.5" y="545.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="9.5" font-weight="700" fill="#fff" text-anchor="middle">BUILD NOW</text>
 <text x="717.2" y="568.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.3" font-weight="400" fill="#6f6f6a" text-anchor="start">DERIVED, never authored</text>
-<text x="717.2" y="584.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.3" font-weight="400" fill="#6f6f6a" text-anchor="start">v1: script collects LLDP/CDP/ISIS</text>
+<text x="717.2" y="584.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.3" font-weight="400" fill="#6f6f6a" text-anchor="start">v1: script collects LLDP/ISIS</text>
 <text x="717.2" y="600.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.3" font-weight="400" fill="#6f6f6a" text-anchor="start">ontology enrichment later (planned)</text>
 <rect x="1030.8" y="522.0" width="313.6" height="108.0" rx="11" fill="#eaf1fd" stroke="#1f5fd0" stroke-width="1"/>
 <text x="1044.8" y="546.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="13" font-weight="700" fill="#17171a" text-anchor="start">NetBox inventory</text>
@@ -162,7 +162,7 @@
 <text x="1092.0" y="964.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12.5" font-weight="700" fill="#17171a" text-anchor="start" letter-spacing="0.8">OPEN — ON THE PLAN</text>
 <text x="1092.0" y="988.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#6f6f6a" text-anchor="start">· memory (session/agent — D14)</text>
 <text x="1092.0" y="1009.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#6f6f6a" text-anchor="start">· measure the context window (the 7-backend manifest cost)</text>
-<text x="1092.0" y="1030.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#6f6f6a" text-anchor="start">· protocol expansion: LDP · LLDP · RSVP · OSPF · MP-BGP · CDP</text>
+<text x="1092.0" y="1030.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#6f6f6a" text-anchor="start">· protocol coverage: settled (OBS-183) — LDP/MP-BGP VPNv4 added, OSPF/RSVP/CDP refused</text>
 <text x="1092.0" y="1051.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#6f6f6a" text-anchor="start">· RR-aware TS agent flow · neo4j ontology (v2)</text>
 <text x="1092.0" y="1072.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#6f6f6a" text-anchor="start">· round 6 + Q1 — still the owed measurement</text>
 <text x="48.0" y="1104.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12" font-weight="400" fill="#6f6f6a" text-anchor="start">The guarantee that survives every box on this page: no verdict is reached from anything but parsed, point-in-time device fields — the model selects and fills, history frames, flows act, and only a human scores the ledger.</text>

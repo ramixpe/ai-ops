@@ -230,7 +230,7 @@ Read these before changing anything in the investigation layer.
 | [docs/build/HOLISTIC-REVIEW.md](docs/build/HOLISTIC-REVIEW.md) | **The 2026-08-18 five-perspective review.** Two security defects fixed (B-481/B-482), 18 UX fixes, the two-lens-convergence meta-finding (OBS-156) |
 | [docs/archive/PEER-REVIEW-BRIEF.md](docs/archive/PEER-REVIEW-BRIEF.md) | **Give this to a reviewer.** What to read, what is already known wrong, where to attack |
 | [docs/build/OPERATOR-RUNBOOK.md](docs/build/OPERATOR-RUNBOOK.md) | Step by step for the outstanding lab work |
-| [docs/diagrams/](docs/diagrams/) | **Six SVGs of the system as built** — layer stack, one call end to end, the trust boundary, capabilities, current state, the descent. Generated from the tree; regenerate, never hand-edit |
+| [docs/diagrams/](docs/diagrams/) | **Seven SVGs of the system as built** — layer stack, one call end to end, the trust boundary, capabilities, current state, the descent, the Stage 2 architecture. Generated from the tree; regenerate, never hand-edit — `docs/diagrams/facts.py` measures every number, `tests/test_diagrams.py` fails if a diagram no longer matches its own regeneration |
 | [docs/README.md](docs/README.md) | Map of the docs tree and reading order |
 
 **Non-negotiable while the build plan is active:** `tests/test_safety.py` and

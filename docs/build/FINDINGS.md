@@ -5680,3 +5680,54 @@ tool list from the same registry, so a refused flow is simply absent there rathe
 than misdescribed — a model asking for it gets "no such tool", which is the
 correct answer for a *tool* surface. The CLI is the one place a human types the
 name by hand, and it was the one place that needed this.
+
+---
+
+## OBS-188 · Diagrams · The measurement layer rendered a failed measurement as a confident zero
+
+The seven architecture SVGs claimed to be generated from the tree. They were not
+— every number was a string literal, and re-running all seven generators produced
+byte-identical output while the tree had moved a long way underneath them:
+
+| claimed | actual |
+|---|---|
+| 1,963 tests | 2,491 |
+| 20 / 20 guards | 26 / 26 |
+| 120 backlog items | 137 |
+| 6 intents | 9 |
+| 2 flows | 4 built + 1 refused + 2 unbuilt |
+
+A number presented as a measurement, that is in fact a literal nobody has
+re-checked, is worse than no number: the reader's confidence is calibrated to
+"this was measured" while the value is calibrated to whenever someone last typed
+it. `docs/diagrams/facts.py` now measures each one at generation time, and
+`tests/test_diagrams.py` byte-diffs a fresh regeneration against the committed
+SVG, so a diagram cannot go stale without the suite failing.
+
+**The defect worth recording is in the fix, not the original.** The new fact
+layer parsed `pytest`'s summary with `counts.get("passed", 0)`. I ran a cold
+regeneration and got a diagram reading **"0 tests · 26 guards"** in a green
+KPI tile — the pytest subprocess had failed, and the failure was rendered as a
+measurement of zero.
+
+The cause was mine and mundane (shell state does not persist between my tool
+calls, so `sys.executable` was the system python, which has no pytest). But I
+spent a cycle suspecting non-determinism in the generator, because *the artefact
+looked like a successful run of a flaky measurement rather than a failed one.*
+The moment the fallback was replaced with `UnmeasuredError`, the true cause
+printed itself in one line: `No module named pytest`.
+
+This is the same distinction `metrics_prometheus.py` was built around three
+hours earlier — **absence of a sample is not a value of zero** — arriving in a
+completely different module, written by a different agent, for a different
+purpose. It is apparently not a lesson a codebase learns once:
+
+> A default value on a failed measurement is a lie with a plausible shape. Fail
+> loudly instead: the diagram that does not generate gets noticed, the diagram
+> that says "0" gets believed.
+
+Also fixed here: `mutate_guards.py`'s stale-bytecode scan walked
+`.claude/worktrees/`, so a *live* agent's regenerated cache made the whole guard
+run refuse to start, and its purge raced that agent's files. Those checkouts are
+never on this tree's `sys.path`, so they were never in scope. Scoped, and proven
+both ways — still refuses on in-tree stale bytecode, ignores a worktree copy.

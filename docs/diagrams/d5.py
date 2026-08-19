@@ -1,10 +1,23 @@
+import facts
 from svgkit import *
+
+guard_n = facts.guard_count()
+frozen_n = facts.frozen_file_count()
+tests_n = facts.tests_passed()
+skipped_n = facts.tests_skipped()
+findings_n = facts.findings_count()
+fixtures_stat = facts.fixture_stats()
+src_n = facts.src_lines()
+tests_lines_n = facts.tests_lines()
+backlog_n = facts.backlog_total()
+_ratio = tests_lines_n / src_n if src_n else 0
+_ratio_label = "near 1:1" if 0.8 <= _ratio <= 1.25 else f"{_ratio:.1f}:1"
 
 W, H = 1580, 940
 s = Svg(W, H)
 header(s, "Where we are",
        "Part 1 (MVP-0) is built, reviewed and green. What remains before publication needs a lab window and a human — not more code.",
-       "2026-08-18 · 235 commits")
+       f"{facts.last_commit_date()} · {facts.commit_count()} commits")
 
 # ---------- journey ----------
 jy = 132
@@ -31,12 +44,20 @@ for i, (name, sub, st) in enumerate(STAGES):
 
 # ---------- KPI tiles ----------
 ky = jy + 88
-KPI = [("1,963", "tests passing", "24 skipped · ~15 s · zero network", GREEN),
-       ("20 / 20", "mutation guards hold", "each proven to fail when its guard goes", GREEN),
-       ("4 / 4", "frozen files intact", "byte-identical to the pre-build baseline", GREEN),
-       ("157", "findings recorded", "append-only; corrections are appended", BLUE),
-       ("563", "committed captures", "9 devices × 4 labels — the offline lab", BLUE),
-       ("21,116", "lines of source", "+21,044 lines of tests — near 1:1", MUTED)]
+# Wall-clock suite duration is deliberately not shown here: on a machine
+# shared with other concurrent work (this repo's own agent harness runs many
+# worktrees at once) it swings widely enough between otherwise-identical
+# runs -- 23s to 45s, observed back to back on an unchanged tree -- that no
+# fixed rounding bucket keeps two fresh regenerations byte-identical. Every
+# other number on this tile is a property of the tree; that one would only
+# ever be a property of how busy the box happened to be.
+KPI = [(facts.fmt(tests_n), "tests passing", f"{skipped_n} skipped · zero network", GREEN),
+       (f"{guard_n} / {guard_n}", "mutation guards hold", "each proven to fail when its guard goes", GREEN),
+       (f"{frozen_n} / {frozen_n}", "frozen files intact", "byte-identical to the pre-build baseline", GREEN),
+       (facts.fmt(findings_n), "findings recorded", "append-only; corrections are appended", BLUE),
+       (facts.fmt(fixtures_stat["captures"]), "committed captures",
+        f"{fixtures_stat['devices']} devices × {fixtures_stat['labels']} labels — the offline lab", BLUE),
+       (facts.fmt(src_n), "lines of source", f"+{facts.fmt(tests_lines_n)} lines of tests — {_ratio_label}", MUTED)]
 tw = (W - 96 - 5 * 12) / 6
 for i, (big, label, sub, col) in enumerate(KPI):
     x = 48 + i * (tw + 12)
@@ -51,13 +72,21 @@ by = ky + 114
 BW = 690
 s.rect(48, by, BW, 336, fill="#ffffff", stroke=LINE, rx=11)
 s.text(68, by + 28, "THE BACKLOG, RECONCILED", size=13, weight="700", ls="0.8")
-s.text(68, by + 47, "120 items. The number that matters is not how few are open —", size=11, fill=MUTED)
+s.text(68, by + 47, f"{backlog_n} items. The number that matters is not how few are open —", size=11, fill=MUTED)
 s.text(68, by + 62, "it is that every state is one somebody can defend.", size=11, fill=MUTED)
 
-STATES = [("DONE", 54, GREEN, "shipped and verified"),
-          ("DEFERRED", 26, BLUE, "examined, and each carries its unblocking condition"),
-          ("OPEN", 24, AMBER, "real work, not yet started"),
-          ("BLOCKED", 16, RED, "cannot proceed — hardware, or outside this repo")]
+# BACKLOG.md's own vocabulary documents 5 states; two more (CLOSED-AS-REFUSED,
+# CLOSED-AS-MEASURED) appear once each in practice. facts.backlog_buckets()
+# folds anything past the original 4 into one "OTHER" bucket, so this bar
+# keeps its original shape and still accounts for every row.
+_STATE_STYLE = {
+    "DONE": (GREEN, "shipped and verified"),
+    "DEFERRED": (BLUE, "examined, and each carries its unblocking condition"),
+    "OPEN": (AMBER, "real work, not yet started"),
+    "BLOCKED": (RED, "cannot proceed — hardware, or outside this repo"),
+    "OTHER": (TEAL, "out-of-scope by decision, or closed some way other than DONE"),
+}
+STATES = [(name, n, *_STATE_STYLE[name]) for name, n in facts.backlog_buckets()]
 total = sum(n for _, n, _, _ in STATES)
 bx, bary = 68, by + 82
 barw = BW - 40
@@ -104,6 +133,10 @@ for n, title, sub in GATES:
 hy = by + 356
 s.rect(48, hy, W - 96, 190, fill="#ffffff", stroke=LINE, rx=11)
 s.text(68, hy + 28, "THE LAST FIVE WAVES — WHAT GOT BUILT, AND WHAT EACH ONE TAUGHT", size=13, weight="700", ls="0.8")
+# The first four waves are historical snapshots of past commits -- not
+# properties of the current tree, so re-measuring them from HEAD would just
+# be a different kind of wrong. Only "Now" describes the tree this generator
+# is looking at, so only its metric is measured.
 WAVES = [("FIX-PLAN", "6 agents", "1,820 → 1,916 tests",
           "The merge gate caught what reading did not:\na test that proved the helper, not the wiring."),
          ("OPS wave", "solo", "→ 1,954 tests",
@@ -112,7 +145,7 @@ WAVES = [("FIX-PLAN", "6 agents", "1,820 → 1,916 tests",
           "Two contradictory totals six lines apart, and a\nread-first handover 35 commits stale."),
          ("Holistic", "4 lenses", "2 security fixes",
           "Two reviewers, working blind to each other,\nfound the same two defects. That is a measurement."),
-         ("Now", "—", "1,963 tests · 20 guards",
+         ("Now", "—", f"{facts.fmt(tests_n)} tests · {guard_n} guards",
           "Everything green, everything pushed. The next\nmove is a lab window, not a commit.")]
 cw = (W - 96 - 40 - 4 * 12) / 5
 for i, (name, who, metric, lesson) in enumerate(WAVES):

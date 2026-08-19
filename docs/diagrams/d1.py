@@ -1,10 +1,32 @@
+import facts
 from svgkit import *
+
+# ---------------- measured facts (see facts.py) ----------------
+SL = lambda name: facts.module_lines(f"src/agent_nettools/{name}")  # noqa: E731
+ML = lambda name: facts.module_lines(f"mcp_server/{name}")  # noqa: E731
+
+cli_subcommand_count = len(facts.cli_subcommands())
+classic_tool_count = len(facts.classic_mcp_tools())
+staged_tool_count = len(facts.staged_mcp_tools())
+audit_rule_count = facts.audit_rule_count()
+flows = facts.flows_summary()
+declared_flow_count = len(flows["declared"])
+implemented_flow_count = len(flows["implemented"])
+cmd_counts = facts.approved_command_counts()
+verb_allowlist = facts.verb_allowlist_display()
+guard_n = facts.guard_count()
+lab_devices = facts.lab_devices()
+facts.assert_contains("src/agent_nettools/network_tools.py", r"def _netmiko_send_commands",
+                       "d1.py's TRANSPORT box code pointer")
+ROLE_LABEL = {"core": "core", "edge": "edge", "route-reflector": "reflector"}
 
 W, H = 1580, 1000
 s = Svg(W, H)
 header(s, "ios-xr-nettools — repo anatomy",
-       "21,116 lines of source + 1,326 in the MCP server · 20,440 lines of tests · 235 commits · read-only, single lab, 9 Cisco XRd nodes",
-       "2026-08-18 · feat/investigation-layer")
+       f"{facts.fmt(facts.src_lines())} lines of source + {facts.fmt(facts.mcp_lines())} in the MCP server · "
+       f"{facts.fmt(facts.tests_lines())} lines of tests · {facts.commit_count()} commits · "
+       f"read-only, single lab, {len(lab_devices)} Cisco XRd nodes",
+       facts.header_tag())
 
 SPINE_X, SPINE_W = 48, 1010
 RAIL_X, RAIL_W = 1090, W - 1090 - 48
@@ -26,38 +48,39 @@ def layout(pills, maxw, pad=16, gap=8, size=12.5):
 LAYERS = [
     dict(t="ENTRY POINTS", n="1", c=SLATEBG, sc=LINE, tc=INK,
          d="how a question arrives — five front doors, every one read-only",
-         p=[("cli.py", "1,396 · 31 subcommands"),
-            ("mcp_server/server.py", "818 · 23 tools (classic)"),
-            ("staged_surface.py", "247 · 6 tools (opt-in)"),
-            ("event_routing.py", "350 · syslog/Alertmanager → flow"),
-            ("notifier.py", "370 · Telegram, egress-bounded")]),
+         p=[("cli.py", f"{facts.fmt(SL('cli.py'))} · {cli_subcommand_count} subcommands"),
+            ("mcp_server/server.py", f"{facts.fmt(ML('server.py'))} · {classic_tool_count} tools (classic)"),
+            ("staged_surface.py", f"{facts.fmt(ML('staged_surface.py'))} · {staged_tool_count} tools (opt-in)"),
+            ("event_routing.py", f"{facts.fmt(SL('event_routing.py'))} · syslog/Alertmanager → flow"),
+            ("notifier.py", f"{facts.fmt(SL('notifier.py'))} · Telegram, egress-bounded")]),
     dict(t="ANSWER LAYER", n="2", c="#ffffff", sc=LINE, tc=INK,
          d="composes a diagnosis out of already-parsed facts — never out of device text",
-         p=[("investigation.py", "787 · drives the descent"),
-            ("checks.py", "1,535 · per-role health rules"),
-            ("audit.py", "288 · 5 fabric-vs-itself rules"),
-            ("fabric_analysis.py", "189"),
-            ("knowledge.py", "176 · grep, not RAG"),
-            ("output.py", "466 · json | table | summary")]),
+         p=[("investigation.py", f"{facts.fmt(SL('investigation.py'))} · drives the descent"),
+            ("checks.py", f"{facts.fmt(SL('checks.py'))} · per-role health rules"),
+            ("audit.py", f"{facts.fmt(SL('audit.py'))} · {audit_rule_count} fabric-vs-itself rules"),
+            ("fabric_analysis.py", facts.fmt(SL('fabric_analysis.py'))),
+            ("knowledge.py", f"{facts.fmt(SL('knowledge.py'))} · grep, not RAG"),
+            ("output.py", f"{facts.fmt(SL('output.py'))} · json | table | summary")]),
     dict(t="DETERMINISTIC CORE", n="3", c=BLUEBG, sc="#b9d0f4", tc=BLUE,
          d="NO MODEL CALL, EVER — if this layer ever needs one, something above it was designed wrong",
-         p=[("descent.py", "546 · lowest broken rung wins"),
-            ("flows.py", "626 · 7 declared / 2 implemented"),
-            ("epoch.py", "736 · one observation window"),
-            ("grounding.py", "973 · citation + chain + containment"),
-            ("topology.py", "369"), ("interface_kind.py", "197")]),
+         p=[("descent.py", f"{facts.fmt(SL('descent.py'))} · lowest broken rung wins"),
+            ("flows.py", f"{facts.fmt(SL('flows.py'))} · {declared_flow_count} declared / {implemented_flow_count} implemented"),
+            ("epoch.py", f"{facts.fmt(SL('epoch.py'))} · one observation window"),
+            ("grounding.py", f"{facts.fmt(SL('grounding.py'))} · citation + chain + containment"),
+            ("topology.py", facts.fmt(SL('topology.py'))), ("interface_kind.py", facts.fmt(SL('interface_kind.py')))]),
     dict(t="EVIDENCE & PARSING", n="4", c="#ffffff", sc=LINE, tc=INK,
          d="the only code in the repository that reads raw device text",
-         p=[("network_tools.py", "2,032 · the one transport chokepoint"),
-            ("parsers.py", "844"), ("template_parsers.py", "1,742"),
-            ("evidence_store.py", "548 · json | sqlite"),
-            ("log_window.py", "423"),
-            ("fixtures.py", "339 · 563 captures, replay offline")]),
+         p=[("network_tools.py", f"{facts.fmt(SL('network_tools.py'))} · the one transport chokepoint"),
+            ("parsers.py", facts.fmt(SL('parsers.py'))), ("template_parsers.py", facts.fmt(SL('template_parsers.py'))),
+            ("evidence_store.py", f"{facts.fmt(SL('evidence_store.py'))} · json | sqlite"),
+            ("log_window.py", facts.fmt(SL('log_window.py'))),
+            ("fixtures.py", f"{facts.fmt(SL('fixtures.py'))} · {facts.fmt(facts.fixture_stats()['captures'])} captures, replay offline")]),
     dict(t="SAFETY BOUNDARY", n="5", c=REDBG, sc="#f0bfb8", tc=RED,
          d="checked BEFORE credentials load and BEFORE a socket opens — both files frozen since the pre-build baseline",
-         p=[("platforms.py", "204 · FROZEN · exact-match frozenset", dict(stroke="#e0a79e")),
-            ("templates.py", "476 · FROZEN · canonicalise by reconstruction", dict(stroke="#e0a79e"))],
-         foot="cisco_xr 7 · cisco_iosxe 5 · juniper_junos 5 approved commands.  VERB_ALLOWLIST = {show, ping, traceroute}."
+         p=[("platforms.py", f"{facts.fmt(SL('platforms.py'))} · FROZEN · exact-match frozenset", dict(stroke="#e0a79e")),
+            ("templates.py", f"{facts.fmt(SL('templates.py'))} · FROZEN · canonicalise by reconstruction", dict(stroke="#e0a79e"))],
+         foot=f"cisco_xr {cmd_counts['cisco_xr']} · cisco_iosxe {cmd_counts['cisco_iosxe']} · "
+              f"juniper_junos {cmd_counts['juniper_junos']} approved commands.  VERB_ALLOWLIST = {verb_allowlist}."
               "  There is no run_command(), no config mode, no shell."),
 ]
 
@@ -87,6 +110,7 @@ s.badge(SPINE_X + 26, y + 22, "6", col="#55555a")
 s.text(SPINE_X + 46, y + 21, "TRANSPORT", size=13.5, weight="700", ls="0.9")
 s.text(SPINE_X + 46 + w_sans("TRANSPORT", 13.5) * 1.16 + 9 * 0.9 + 20, y + 21,
        "netmiko over SSH · one login per device per observation window, not one per question", size=11.8, fill=MUTED)
+# `_netmiko_send_commands` is a code pointer, not a count -- left literal.
 s.text(SPINE_X + SPINE_W - 18, y + 21, "_netmiko_send_commands()  ← the single exit", size=11.5,
        fill=MUTED, anchor="end", family=MONO)
 y += 44
@@ -95,13 +119,14 @@ y += 20
 
 s.rect(SPINE_X, y, SPINE_W, 62, fill=GREENBG, stroke="#b9dcc5", rx=12)
 s.text(SPINE_X + 20, y + 24, "THE LAB", size=13.5, weight="700", fill=GREEN, ls="0.9")
+# "containerlab", the /24, and "IS-IS + SR + iBGP over a route reflector" are
+# architecture description, not tree-derived counts -- the device count is.
 s.text(SPINE_X + 20 + w_sans("THE LAB", 13.5) * 1.16 + 7 * 0.9 + 20, y + 24,
-       "containerlab · 9 Cisco IOS-XR (XRd) nodes on 172.20.250.0/24 · IS-IS + SR + iBGP over a route reflector",
+       f"containerlab · {len(lab_devices)} Cisco IOS-XR (XRd) nodes on 172.20.250.0/24 · IS-IS + SR + iBGP over a route reflector",
        size=11.8, fill=MUTED)
 dx = SPINE_X + 20
-for d, role in [("P1", "core"), ("P2", "core"), ("P3", "core"), ("P4", "core"),
-                ("PE1", "edge"), ("PE2", "edge"), ("PE3", "edge"), ("PE4", "edge"), ("RR1", "reflector")]:
-    dx += s.pill(dx, y + 32, d, role, fill="#fff", stroke="#b9dcc5", h=22, size=11.5,
+for d, role in lab_devices:
+    dx += s.pill(dx, y + 32, d, ROLE_LABEL.get(role, role), fill="#fff", stroke="#b9dcc5", h=22, size=11.5,
                  tcol=GREEN, subcol=MUTED) + 7
 
 # ---------------- right rail ----------------
@@ -114,17 +139,18 @@ s.text(RAIL_X + 20, ry + 63, "No model call happens unless you ask for one.", si
        fill=PURPLE, weight="600")
 s.rect(RAIL_X + 18, ry + 76, RAIL_W - 36, 48, fill="#fff", stroke="#d5c6f5", rx=8)
 s.text(RAIL_X + 30, ry + 96, "model_egress.py", size=12.5, family=MONO, weight="600", fill=PURPLE)
-s.text(RAIL_X + 30 + w_mono("model_egress.py", 12.5) + 10, ry + 96, "441 · the projector", size=11, fill=MUTED)
+s.text(RAIL_X + 30 + w_mono("model_egress.py", 12.5) + 10, ry + 96, f"{facts.fmt(SL('model_egress.py'))} · the projector", size=11, fill=MUTED)
 s.text(RAIL_X + 30, ry + 114, "raw text withheld-with-count · free text quoted", size=10.8, fill=MUTED)
 ly = ry + 136
-for lbl, sub in [("prompt_library.py", "363 · builds every prompt"),
-                 ("evidence_budget.py", "250 · fits the window"),
-                 ("llm_analysis.py", "785 · analyze / correlate"),
-                 ("agent_loop.py", "708 · bounded tool loop"),
-                 ("mcp_server/boundary.py", "260 · sanitise-on-register")]:
+for lbl, name, sub in [("prompt_library.py", "prompt_library.py", "builds every prompt"),
+                 ("evidence_budget.py", "evidence_budget.py", "fits the window"),
+                 ("llm_analysis.py", "llm_analysis.py", "analyze / correlate"),
+                 ("agent_loop.py", "agent_loop.py", "bounded tool loop"),
+                 ("mcp_server/boundary.py", "boundary.py", "sanitise-on-register")]:
     s.text(RAIL_X + 30, ly, "•", size=12, fill=PURPLE)
     s.text(RAIL_X + 42, ly, lbl, size=11.5, family=MONO, fill=INK)
-    s.text(RAIL_X + 42 + w_mono(lbl, 11.5) + 8, ly, sub, size=10.8, fill=MUTED)
+    line_n = SL(name) if lbl != "mcp_server/boundary.py" else ML(name)
+    s.text(RAIL_X + 42 + w_mono(lbl, 11.5) + 8, ly, f"{facts.fmt(line_n)} · {sub}", size=10.8, fill=MUTED)
     ly += 19
 s.text(RAIL_X + 20, ry + 250, "Providers: Anthropic · OpenAI · MiniMax · any", size=11.2, fill=MUTED)
 s.text(RAIL_X + 20, ry + 266, "OpenAI-compatible local server (LM Studio).", size=11.2, fill=MUTED)
@@ -152,7 +178,7 @@ for n, title, body, layer in INV:
     s.text(RAIL_X + RAIL_W - 20, iy + 8, f"layer {layer}", size=10, fill=FAINT, anchor="end", family=MONO)
     iy += 68
 s.text(RAIL_X + 20, ry + 348,
-       "Each is pinned by a test that fails when the guard is removed (20/20 verified).",
+       f"Each is pinned by a test that fails when the guard is removed ({guard_n}/{guard_n} verified).",
        size=10.8, fill=GREEN)
 
 # branch arrow from spine layer 2 to the model rail

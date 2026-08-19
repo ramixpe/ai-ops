@@ -1,9 +1,22 @@
+import facts
 from svgkit import *
+
+cli_subcommands = facts.cli_subcommands()
+classic_tools = facts.classic_mcp_tools()
+staged_tools = facts.staged_mcp_tools()
+probe_tools = set(facts.classic_mcp_probe_tools())
+intents = facts.cisco_xr_intents()
+lab_devices = facts.lab_devices()
+templates = facts.cisco_xr_templates()
+flows = facts.flows_summary()
+settings_n = facts.settings_count()
 
 W, H = 1580, 940
 s = Svg(W, H)
 header(s, "What it can actually do",
-       "31 CLI subcommands · 23 MCP tools on the classic surface, 6 on the staged one · 6 collection intents · 2 investigation flows of 7 declared",
+       f"{len(cli_subcommands)} CLI subcommands · {len(classic_tools)} MCP tools on the classic surface, "
+       f"{len(staged_tools)} on the staged one · {len(intents)} collection intents · "
+       f"{len(flows['implemented'])} investigation flows of {len(flows['declared'])} declared",
        "every one of them read-only")
 
 # legend
@@ -44,22 +57,28 @@ def group(x, y, w, title, note, rows, maxw):
         yy += 32
     return h
 
+# The 6 base intents keep their plain "live" pill; the 3 added since (B-109's
+# ldp/ldp_discovery, the bgp_vpnv4 context intent) render identically — the
+# row wraps automatically as the intent count grows, per `group()` above.
 y = 148
-y += group(LX, y, LW, "ASK ONE DEVICE A QUESTION", "the six collection intents — one login answers all six", [
-    ("facts", None, "live"), ("interfaces", None, "live"), ("bgp", None, "live"),
-    ("lldp", None, "live"), ("isis", None, "live"), ("sr", None, "live"),
-    ("fabric", "one check, all 9 devices", "live"), ("inventory", "credential-free", "off"),
+intent_rows = [(name, None, "live") for name in intents]
+y += group(LX, y, LW, "ASK ONE DEVICE A QUESTION", f"the {len(intents)} collection intents — one login answers all {len(intents)}",
+    intent_rows + [
+    ("fabric", f"one check, all {len(lab_devices)} devices", "live"), ("inventory", "credential-free", "off"),
 ], LW - 34) + 14
 
-y += group(LX, y, LW, "LOOK UP ONE OBJECT", "validated parameterised templates — the argument is re-rendered, never interpolated", [
-    ("route", "DEVICE PREFIX", "live"), ("bgp-neighbor", "DEVICE ADDRESS", "live"),
-    ("interface", "DEVICE NAME", "live"), ("logging", "DEVICE --count N", "live"),
-    ("ping", "sends ICMP", "probe"), ("traceroute", "sends UDP", "probe"),
-], LW - 34) + 14
+_TEMPLATE_DISPLAY = {"route": "route", "bgp_neighbor": "bgp-neighbor", "interface": "interface",
+                     "logging": "logging", "ping": "ping", "traceroute": "traceroute"}
+_TEMPLATE_ARGS = {"route": "DEVICE PREFIX", "bgp_neighbor": "DEVICE ADDRESS", "interface": "DEVICE NAME",
+                  "logging": "DEVICE --count N", "ping": "sends ICMP", "traceroute": "sends UDP"}
+lookup_rows = [(_TEMPLATE_DISPLAY[n], _TEMPLATE_ARGS[n], "live") for n in templates["lookups"]]
+probe_rows = [(_TEMPLATE_DISPLAY[n], _TEMPLATE_ARGS[n], "probe") for n in templates["probes"]]
+y += group(LX, y, LW, "LOOK UP ONE OBJECT", "validated parameterised templates — the argument is re-rendered, never interpolated",
+    lookup_rows + probe_rows, LW - 34) + 14
 
 y += group(LX, y, LW, "DIAGNOSE", "the part that answers 'why', not just 'what'", [
     ("investigate", "the deterministic descent", "off"), ("health", "role-aware verdicts", "off"),
-    ("audit", "5 fabric-vs-itself rules", "off"), ("learn-topology", "derive expected state", "off"),
+    ("audit", f"{facts.audit_rule_count()} fabric-vs-itself rules", "off"), ("learn-topology", "derive expected state", "off"),
     ("diff", "vs latest or golden", "live"), ("flaps", "oscillation across history", "off"),
 ], LW - 34) + 14
 
@@ -75,7 +94,7 @@ y += group(LX, y, LW, "MODEL-ASSISTED — OPT-IN, NEVER THE DEFAULT", "these are
 
 y += group(LX, y, LW, "OPS PLUMBING", "how it plugs into the rest of a NOC", [
     ("route-event", "syslog/Alertmanager → flow", "off"), ("--notify", "Telegram, egress-bounded", "off"),
-    ("config show | check", "38 declared settings", "off"), ("inspect", "smoke-test the MCP surface", "off"),
+    ("config show | check", f"{settings_n} declared settings", "off"), ("inspect", "smoke-test the MCP surface", "off"),
     ("version", None, "off"),
 ], LW - 34)
 
@@ -88,31 +107,35 @@ s.text(RX + 18, ry + 60, "because collapsing to one would destroy the A/B that",
 s.text(RX + 18, ry + 75, "measures whether a small model selects better from it.", size=10.9, fill=MUTED)
 
 s.rect(RX + 16, ry + 88, RW - 32, 22, fill=SLATEBG, rx=6)
-s.text(RX + 26, ry + 103, "classic — 23 tools  (the default)", size=11.5, weight="650", family=MONO)
-TOOLS = ["list_lab_devices", "get_lab_device_facts", "check_lab_interfaces",
-         "check_lab_bgp_neighbors", "check_lab_lldp_neighbors", "check_lab_isis_neighbors",
-         "check_lab_sr_policies", "check_lab_fabric", "collect_lab_evidence", "get_lab_route",
-         "get_lab_bgp_neighbor", "get_lab_interface", "get_lab_logging",
-         "search_lab_knowledge", "explain_lab_mnemonic", "diff_lab_device_against_latest",
-         "diff_lab_device_against_golden", "assess_lab_device_health", "assess_lab_fabric_health",
-         "detect_lab_flaps", "investigate_lab_session", "get_lab_ping", "get_lab_traceroute"]
+s.text(RX + 26, ry + 103, f"classic — {len(classic_tools)} tools  (the default)", size=11.5, weight="650", family=MONO)
 ty = ry + 126
-for i, t_ in enumerate(TOOLS):
-    col = AMBER if t_ in ("get_lab_ping", "get_lab_traceroute") else MUTED
+n_rows = -(-len(classic_tools) // 2)  # ceil div — the list wraps at 2 columns regardless of count
+for i, t_ in enumerate(classic_tools):
+    col = AMBER if t_ in probe_tools else MUTED
     s.text(RX + 26 + (0 if i % 2 == 0 else 216), ty + (i // 2) * 15, "· " + t_,
            size=10.2, family=MONO, fill=col)
-ty += 12 * 15 + 14
+ty += n_rows * 15 + 14
 
 s.rect(RX + 16, ty, RW - 32, 22, fill=BLUEBG, rx=6)
-s.text(RX + 26, ty + 15, "staged — 6 tools  (NETTOOLS_MCP_SURFACE=staged)", size=11.5, weight="650",
+s.text(RX + 26, ty + 15, f"staged — {len(staged_tools)} tools  (NETTOOLS_MCP_SURFACE=staged)", size=11.5, weight="650",
        family=MONO, fill=BLUE)
 ty += 32
-for name, q in [("explore_lab", "what is here, is it broadly OK?"),
-                ("check_lab", "what is the state of X right now?"),
-                ("lookup_lab", "what does this device say about X?"),
-                ("investigate_lab", "why is this broken?"),
-                ("history_lab", "what changed on this device?"),
-                ("probe_lab", "can it reach that, right now?")]:
+# One question per staged tool — hand-written (the point of a staged tool IS
+# its question, per staged_surface.py's own docstring), keyed by name so a
+# tool added or renamed there fails this lookup instead of silently
+# rendering blank.
+_STAGED_QUESTIONS = {
+    "explore_lab": "what is here, is it broadly OK?",
+    "check_lab": "what is the state of X right now?",
+    "lookup_lab": "what does this device say about X?",
+    "investigate_lab": "why is this broken?",
+    "history_lab": "what changed on this device?",
+    "probe_lab": "can it reach that, right now?",
+}
+for name in staged_tools:
+    q = _STAGED_QUESTIONS.get(name)
+    if q is None:
+        raise SystemExit(f"d4.py: staged tool {name!r} has no entry in _STAGED_QUESTIONS — add one.")
     s.text(RX + 26, ty, name, size=11, family=MONO, fill=BLUE, weight="600")
     s.text(RX + 26 + w_mono(name, 11) + 10, ty, q, size=10.3, fill=MUTED)
     ty += 17

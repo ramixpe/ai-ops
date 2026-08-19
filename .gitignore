@@ -34,6 +34,11 @@ evidence/
 .coverage
 htmlcov/
 
+# docs/diagrams/facts.py's speedup cache for the expensive measurements (a
+# full pytest run, a real `investigate --from-fixtures` invocation) -- a
+# derived, machine-local artifact, invalidated by its own tree signature.
+docs/diagrams/.facts_cache.json
+
 # install-docs.sh backups
 .docs-backup-*/
 

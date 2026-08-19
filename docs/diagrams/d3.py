@@ -1,4 +1,15 @@
+import facts
 from svgkit import *
+
+PATHS_FILES = [
+    "src/agent_nettools/prompt_library.py",
+    "src/agent_nettools/llm_analysis.py",
+    "src/agent_nettools/evidence_budget.py",
+    "src/agent_nettools/agent_loop.py",
+    "mcp_server/boundary.py",
+]
+for _f in PATHS_FILES:
+    facts.assert_file_exists(_f, "d3.py's five egress paths")
 
 W, H = 1580, 990
 s = Svg(W, H)
@@ -37,7 +48,7 @@ stage(48, 320, "1 · WHAT THE DEVICE SAYS", RED, REDBG, [
     ("t", ""),
     ("t", "Anyone who can make a device log a line"),
     ("t", "can choose that line's contents."),
-], "measured: 17,916 chars of prose in one run")
+], f"measured: {facts.fmt(facts.raw_prose_chars_for_walkthrough())} chars of prose in one run")
 
 s.line(378, py_ + 116, 404, py_ + 116, stroke="#a8a8a2", sw=1.6, marker="arw")
 
@@ -50,7 +61,7 @@ stage(412, 300, "2 · PARSED", INK, "#ffffff", [
     ("t", ""),
     ("t", "So a parsed record is not a safe record —"),
     ("t", "that is the whole reason step 3 exists."),
-], "563 committed captures parse this way")
+], f"{facts.fmt(facts.fixture_stats()['captures'])} committed captures parse this way")
 
 s.line(742, py_ + 116, 768, py_ + 116, stroke="#a8a8a2", sw=1.6, marker="arw")
 

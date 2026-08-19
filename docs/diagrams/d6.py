@@ -1,4 +1,16 @@
+import facts
 from svgkit import *
+
+flows = facts.flows_summary()
+rung_counts = facts.flow_rung_counts()
+intents = facts.cisco_xr_intents()
+templates = facts.cisco_xr_templates()
+cmd_counts = facts.approved_command_counts()
+verb_allowlist = facts.verb_allowlist_display()
+
+def _rung_word(name):
+    n = rung_counts[name]
+    return f"{name} — {n} rung" + ("" if n == 1 else "s")
 
 W, H = 1580, 1010
 s = Svg(W, H)
@@ -15,20 +27,25 @@ s.text(LX + w_sans("THE THREE TIERS", 13.5) * 1.16 + 26, 132,
 TIERS = [
  ("III", "FLOWS", PURPLE, PURPBG,
   "A named dependency ladder for one kind of object.",
-  ["bgp_session — 5 rungs", "interface — 1 rung",
-   "declared but not built: isis_adjacency · ldp_session ·",
-   "l3vpn_service · device_health · topology"],
+  [" · ".join(_rung_word(n) for n in flows["implemented"]),
+   # `device_health` is investigated-and-refused (B-108, OBS-186), which is a
+   # different claim from "not yet built" -- l3vpn_service/topology are the
+   # latter. Keeping them on separate lines is what keeps that distinction
+   # visible rather than flattening both into one "not built" list.
+   f"refused, not merely unbuilt: {' · '.join(flows['refused'])}",
+   f"declared, not yet built: {' · '.join(flows['unbuilt'])}"],
   "A flow is data, not code. Adding one adds no new rule."),
  ("II", "TOOLS / INTENTS", BLUE, BLUEBG,
   "A named question with a fixed answer shape.",
-  ["6 collection intents: facts · interfaces · bgp · lldp · isis · sr",
-   "4 object lookups: route · bgp_neighbor · interface · logging",
-   "2 active probes: ping · traceroute"],
+  [f"{len(intents)} collection intents: {' · '.join(intents)}",
+   f"{len(templates['lookups'])} object lookups: {' · '.join(templates['lookups'])}",
+   f"{len(templates['probes'])} active probes: {' · '.join(templates['probes'])}"],
   "Each maps to approved commands plus a parser. Nothing else."),
  ("I", "COMMANDS", RED, REDBG,
   "Exact strings, frozen, matched by identity.",
-  ["cisco_xr: 7    cisco_iosxe: 5    juniper_junos: 5",
-   "VERB_ALLOWLIST = {show, ping, traceroute}",
+  [f"cisco_xr: {cmd_counts['cisco_xr']}    cisco_iosxe: {cmd_counts['cisco_iosxe']}    "
+   f"juniper_junos: {cmd_counts['juniper_junos']}",
+   f"VERB_ALLOWLIST = {verb_allowlist}",
    "templates re-render every argument from a typed object"],
   "There is no run_command(). This is the floor everything stands on."),
 ]
@@ -63,18 +80,28 @@ s.text(RX, 132, "THE LADDER — flow: bgp_session", size=13.5, weight="700", ls=
 s.text(RX + w_sans("THE LADDER — flow: bgp_session", 13.5) * 1.16 + 58, 132,
        "walked top to bottom, always", size=11.3, fill=MUTED)
 
-RUNGS = [
- ("bgp_session", "LOCAL", "bgp", "Is the session Established?",
-  "the symptom you were paged about"),
- ("transport", "LOCAL", "bgp_neighbor", "Is there a TCP session under it?",
-  "separates 'BGP is unhappy' from 'nothing is connected'"),
- ("route_to_peer", "LOCAL", "route", "Is there a route to the peer address?",
-  "no route → the session cannot form, whatever BGP says"),
- ("igp_adjacency", "SUBJECT", "isis", "Does the far device have IGP adjacencies?",
-  "the walk crosses to the OTHER device here"),
- ("interface", "SUBJECT", "interfaces + route + interface", "Are the path's member links up?",
-  "ANY_HEALTHY over the member set — one live member is enough"),
-]
+# name/scope/collects come straight from FLOWS["bgp_session"].descent
+# (facts.bgp_session_ladder()); the question and its rationale are
+# hand-written prose the code has no field for, keyed by rung name so a
+# ladder change that adds, removes or renames a rung fails this lookup
+# instead of silently rendering a stale question beside a real rung.
+_RUNG_PROSE = {
+    "bgp_session": ("Is the session Established?", "the symptom you were paged about"),
+    "transport": ("Is there a TCP session under it?",
+                  "separates 'BGP is unhappy' from 'nothing is connected'"),
+    "route_to_peer": ("Is there a route to the peer address?",
+                       "no route → the session cannot form, whatever BGP says"),
+    "igp_adjacency": ("Does the far device have IGP adjacencies?",
+                       "the walk crosses to the OTHER device here"),
+    "interface": ("Are the path's member links up?",
+                  "ANY_HEALTHY over the member set — one live member is enough"),
+}
+RUNGS = []
+for rung in facts.bgp_session_ladder():
+    if rung["name"] not in _RUNG_PROSE:
+        raise SystemExit(f"d6.py: rung {rung['name']!r} has no entry in _RUNG_PROSE — add one.")
+    q, why = _RUNG_PROSE[rung["name"]]
+    RUNGS.append((rung["name"], rung["scope"], rung["collects"], q, why))
 ry = 152
 for i, (name, scope, collects, q, why) in enumerate(RUNGS):
     last = i == len(RUNGS) - 1

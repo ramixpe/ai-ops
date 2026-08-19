@@ -1,4 +1,8 @@
+import facts
 from svgkit import *
+
+_flows = facts.flows_summary()
+_lab_devices = facts.lab_devices()
 
 W, H = 1720, 1130
 s = Svg(W, H)
@@ -57,8 +61,12 @@ GW = W - 96
 for i, (title, sub, examples, col, bg, frac) in enumerate([
     ("FLOWS — widest", "frame the problem, gather broadly, all side-effects",
      "audit · analyze --fabric · health --all · n8n: notify/ticket/schedule", PURPLE, PURPBG, 0.36),
+    # OSPF/RSVP/CDP are not "still to add" -- the 2026-08-19 protocol sweep
+    # (OBS-183) measured no observable state for any of the three on this
+    # fabric and refused them permanently, not provisionally. ISIS/LDP/MP-BGP
+    # VPNv4 are the ones that are real here, and all three now have coverage.
     ("FOCUSED / CONTEXT TOOLS", "one domain, both readings: context AND one specific check",
-     "per-protocol adjacency: ISIS done · LDP · OSPF · MP-BGP · RSVP · CDP …", BLUE, BLUEBG, 0.34),
+     "per-protocol adjacency: ISIS · LDP · MP-BGP VPNv4 done · OSPF/RSVP/CDP surveyed, refused (OBS-183)", BLUE, BLUEBG, 0.34),
     ("DESCENT TOOLS — narrowest", "one subject, one rung, one verdict from parsed fields",
      "investigate · get_bgp_neighbor · a single rung check", GREEN, GREENBG, 0.30),
 ]):
@@ -79,11 +87,15 @@ s.text(48, y3, "THE BACKENDS BEHIND THE HUB", size=13.5, weight="700", ls="0.8")
 y3 += 12
 BK = [
  ("nettools", "BUILT", GREEN, GREENBG,
-  ["31 commands · 23 MCP tools · 2 flows", "descent, grounding, epoch, ledger", "the deterministic diagnostic core"]),
+  [f"{len(facts.cli_subcommands())} commands · {len(facts.classic_mcp_tools())} MCP tools · {len(_flows['implemented'])} flows",
+   "descent, grounding, epoch, ledger", "the deterministic diagnostic core"]),
  ("n8n", "BUILD NOW", BLUE, BLUEBG,
   ["spin up docker; first flow list next", "wide steps + ALL side-effects", "flows declared, reviewed like code"]),
  ("neo4j", "BUILD NOW", BLUE, BLUEBG,
-  ["DERIVED, never authored", "v1: script collects LLDP/CDP/ISIS", "ontology enrichment later (planned)"]),
+  # CDP is confirmed off this fabric (OBS-183: "% CDP is not enabled"
+  # everywhere; it speaks LLDP instead) -- a v1 collector has nothing to read
+  # from it.
+  ["DERIVED, never authored", "v1: script collects LLDP/ISIS", "ontology enrichment later (planned)"]),
  ("NetBox inventory", "BUILD NOW", BLUE, BLUEBG,
   ["collector script feeds it from net", "then a NetBox MCP -> LM Studio", "derived, not authored — like neo4j"]),
  ("documentation", "BUILD NOW", BLUE, BLUEBG,
@@ -146,10 +158,10 @@ y5 = y4 + 196
 s.rect(48, y5, W - 96, 64, fill="#ffffff", stroke=LINE, rx=12)
 s.text(68, y5 + 26, "THE FABRIC", size=12.5, weight="700", ls="0.8")
 s.text(68 + w_sans("THE FABRIC", 12.5) * 1.16 + 24, y5 + 26,
-       "9 × IOS-XR (XRd) on 172.20.250.0/24 · syslog → .101 · gNMI → telegraf · SSH reads only through nettools' frozen allowlist — no config mode, no shell, four invariants unchanged",
+       f"{len(_lab_devices)} × IOS-XR (XRd) on 172.20.250.0/24 · syslog → .101 · gNMI → telegraf · SSH reads only through nettools' frozen allowlist — no config mode, no shell, four invariants unchanged",
        size=11, fill=MUTED)
 dx = 68
-for d in ("P1", "P2", "P3", "P4", "PE1", "PE2", "PE3", "PE4", "RR1"):
+for d, _role in _lab_devices:
     dx += s.pill(dx, y5 + 36, d, None, fill=GREENBG, stroke="#b9dcc5", tcol=GREEN, h=20, size=10.5) + 6
 s.text(dx + 16, y5 + 50, "PE3↔P2 IS-IS break preserved as the isis-broken fixture — the config axis's first live demand", size=10.3, fill=AMBER)
 
@@ -174,7 +186,11 @@ s.text(1092, y6 + 26, "OPEN — ON THE PLAN", size=12.5, weight="700", ls="0.8")
 for j, ln in enumerate([
   "memory (session/agent — D14)",
   "measure the context window (the 7-backend manifest cost)",
-  "protocol expansion: LDP · LLDP · RSVP · OSPF · MP-BGP · CDP",
+  # Resolved by the 2026-08-19 protocol sweep (OBS-183), not still open:
+  # LDP (B-109) and MP-BGP VPNv4 shipped; OSPF/RSVP/CDP were surveyed live
+  # against all nine devices and refused -- no observable state on this
+  # fabric, not merely "not yet built".
+  "protocol coverage: settled (OBS-183) — LDP/MP-BGP VPNv4 added, OSPF/RSVP/CDP refused",
   "RR-aware TS agent flow · neo4j ontology (v2)",
   "round 6 + Q1 — still the owed measurement",
 ]):

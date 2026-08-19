@@ -1,16 +1,58 @@
+import facts
 from svgkit import *
+
+# ---------------- an actual `--from-fixtures` run (see facts.py) ----------------
+walk = facts.investigate_walkthrough()
+payload = walk["payload"]
+exit_code = walk["exit_code"]
+rungs_examined = payload.get("rungs_examined")
+cause = payload.get("cause", {})
+finding = payload.get("finding")
+trustworthy = payload.get("trustworthy")
+intents = facts.intent_order()
+
+# Hand-shortened paraphrases of each rung's real (long) `reason` string, kept
+# literal because the column width here has no room for the full sentence
+# investigate actually returns -- but asserted below against a fixed rung
+# sequence, so a future change to the ladder or the fixture fails this
+# generator loudly instead of silently drifting out of sync with what
+# `payload["rungs"]` really says.
+_WHY = {
+    "bgp_session": "state: Idle",
+    "transport": "socket not armed for read",
+    "route_to_peer": "% Network not in table",
+    "igp_adjacency": "0 IS-IS adjacencies",
+    "interface": "1 of 3 members healthy",
+}
+_EXPECTED_SEQUENCE = ("bgp_session", "transport", "route_to_peer", "igp_adjacency", "interface")
+_rung_names = tuple(r["rung"] for r in payload.get("rungs", []))
+if _rung_names != _EXPECTED_SEQUENCE:
+    raise SystemExit(
+        "d2.py's hand-shortened rung reasons (_WHY) no longer match the real "
+        f"`investigate --from-fixtures` ladder: expected {_EXPECTED_SEQUENCE}, "
+        f"got {_rung_names}. Update _WHY (and the prose around it) to match, "
+        "then rerun."
+    )
+
+_EXIT_MEANING = {
+    0: "ok / info — nothing actionable",
+    1: "a fault was found",
+    2: "not trustworthy, or could not run",
+}
 
 W, H = 1580, 1020
 s = Svg(W, H)
 header(s, "One call, end to end",
-       "nettools investigate RR1 10.255.0.12 — what actually happens between the command and the answer. Every value below is from a real run.",
-       "flow: bgp_session · 5 rungs")
+       f"nettools investigate {facts.WALKTHROUGH_DEVICE} {facts.WALKTHROUGH_SUBJECT} — what actually happens between the command and the answer. Every value below is from a real run.",
+       f"flow: {facts.WALKTHROUGH_FLOW} · {rungs_examined} rungs")
 
 # command bar
 s.rect(48, 120, W - 96, 52, fill="#1b1b1f", stroke="none", rx=10)
-s.text(68, 152, "$ nettools investigate RR1 10.255.0.12 --from-fixtures --format table",
+s.text(68, 152, f"$ nettools investigate {facts.WALKTHROUGH_DEVICE} {facts.WALKTHROUGH_SUBJECT} --from-fixtures --format table",
        size=15, family=MONO, fill="#e9e9e6")
-s.text(W - 68, 152, "exit 1 (a fault was found)  ·  0.25 s  ·  no network, no credentials, no API key",
+s.text(W - 68, 152,
+       f"exit {exit_code} ({_EXIT_MEANING.get(exit_code, 'unrecognised exit code')})  ·  "
+       f"~{facts.investigate_walkthrough_duration_bucket_s():.1f} s  ·  no network, no credentials, no API key",
        size=12, family=MONO, fill="#8f8f88", anchor="end")
 
 LX, LW = 48, 862
@@ -27,22 +69,25 @@ STAGES = [
   "epoch.validate_prewalk_collection()"),
  ("3", "Collect the evidence epoch — once", TEAL,
   ["One SSH login per device for the whole walk, not one per rung or per question.",
-   "6 intents (facts · interfaces · bgp · lldp · isis · sr). Here: replayed from fixtures."],
+   f"{len(intents)} intents ({' · '.join(intents)}). Here: replayed from fixtures."],
   "network_tools.collect_evidence()"),
  ("4", "Parse — the only place device text is read", TEAL,
   ["Raw output → typed records. Parse failure is a state, not an exception:",
    "a rung whose parse did not reach PARSE_OK is 'unevaluated', never 'healthy'."],
   "parsers.py · template_parsers.py"),
  ("5", "Walk the ladder", GREEN,
-  ["Five rungs, top to bottom. Every verdict is code comparing parsed fields —",
+  [f"{rungs_examined} rungs, top to bottom. Every verdict is code comparing parsed fields —",
    "no model, no heuristic, no scoring. broken → keep going. unevaluated → stop."],
   "descent.py"),
  ("6", "Pick the cause: the LOWEST broken rung", GREEN,
   ["Not the first. The first broken rung is the symptom you already knew about;",
-   "the lowest one is what to go and fix. Here: interface on PE2."],
+   f"the lowest one is what to go and fix. Here: {cause.get('rung')} on {cause.get('device')}."],
   "descent.DescentResult.cause"),
  ("7", "Coherence + grounding gates", AMBER,
-  ["Epoch skew measured 0.013 s against a 30 s bound → coherent.",
+  # The specific skew figure is a worked-example number from one run's timing
+  # rather than a repeatable count -- left illustrative, like the command
+  # bar's own wall-clock time.
+  ["Epoch skew measured against a 30 s bound → coherent.",
    "Grounding checks citation, chain and identifier containment before anything is emitted."],
   "epoch.py · grounding.py"),
  ("8", "Render and exit", MUTED,
@@ -75,14 +120,10 @@ s.text(cols[0], ry + 70, "RUNG", size=10, family=MONO, fill=FAINT)
 s.text(cols[1], ry + 70, "DEV", size=10, family=MONO, fill=FAINT)
 s.text(cols[2], ry + 70, "VERDICT", size=10, family=MONO, fill=FAINT)
 s.line(RX + 20, ry + 78, RX + RW - 20, ry + 78, stroke=LINE)
-rows = [("bgp_session", "RR1", "BROKEN", "state: Idle"),
-        ("transport", "RR1", "BROKEN", "socket not armed for read"),
-        ("route_to_peer", "RR1", "BROKEN", "% Network not in table"),
-        ("igp_adjacency", "PE2", "BROKEN", "0 IS-IS adjacencies"),
-        ("interface", "PE2", "BROKEN", "1 of 3 members healthy")]
+rows = [(r["rung"], r["device"], r["status"].upper(), _WHY[r["rung"]]) for r in payload["rungs"]]
 yy = ry + 98
 for i, (r, d, v, why) in enumerate(rows):
-    last = i == len(rows) - 1
+    last = (r, d) == (cause.get("rung"), cause.get("device"))
     if last:
         s.rect(RX + 14, yy - 15, RW - 28, 38, fill=REDBG, stroke="#f0bfb8", rx=7)
     s.text(cols[0], yy, r, size=11.5, family=MONO, fill=RED if last else INK, weight="600" if last else "400")
@@ -101,11 +142,13 @@ ry += 272
 s.rect(RX, ry, RW, 132, fill=GREENBG, stroke="#b9dcc5", rx=10)
 s.text(RX + 20, ry + 26, "THE ANSWER", size=12.5, weight="700", fill=GREEN, ls="0.9")
 s.text(RX + 20, ry + 52, "finding:", size=11.5, fill=MUTED, family=MONO)
-s.text(RX + 100, ry + 52, "interface_line_down on PE2", size=12.5, family=MONO, weight="600", fill=GREEN)
+s.text(RX + 100, ry + 52, f"{finding} on {cause.get('device')}", size=12.5, family=MONO, weight="600", fill=GREEN)
 s.text(RX + 20, ry + 74, "trustworthy:", size=11.5, fill=MUTED, family=MONO)
-s.text(RX + 120, ry + 74, "true", size=12.5, family=MONO, weight="600", fill=GREEN)
+s.text(RX + 120, ry + 74, str(trustworthy).lower(), size=12.5, family=MONO, weight="600", fill=GREEN)
 s.text(RX + 20, ry + 96, "report:", size=11.5, fill=MUTED, family=MONO)
-s.text(RX + 100, ry + 96, "emitted — rendered from the descent", size=12, family=MONO, fill=GREEN)
+s.text(RX + 100, ry + 96,
+       "emitted — rendered from the descent" if trustworthy else "withheld — not trustworthy enough to report",
+       size=12, family=MONO, fill=GREEN)
 s.text(RX + 20, ry + 116, "No model spoke here. None was asked to.", size=11, fill=MUTED)
 
 ry += 150
@@ -126,8 +169,8 @@ for t_, b in items:
     iy += 62
 
 s.text(48, H - 26,
-       "The point of the ladder: five things were broken, and only one of them is worth a truck roll. "
-       "The descent is what turns 'the session is down' into 'go look at PE2's bundle members'.",
+       f"The point of the ladder: {rungs_examined} things were broken, and only one of them is worth a truck roll. "
+       f"The descent is what turns 'the session is down' into 'go look at {cause.get('device')}'s bundle members'.",
        size=12, fill=MUTED)
 s.save("02-call-path.svg")
 print("ok")
