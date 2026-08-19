@@ -95,13 +95,13 @@ _REPINNED: dict[str, tuple[str, str, Signoff]] = {
         "literal, which cannot be extended in place. tests/test_safety.py and "
         "test_template_security.py pass UNEDITED against it, which is the "
         "guarantee that actually matters.",
-        PendingOperatorReview(
-            decided_by="Opus 5 orchestrator",
-            date="2026-08-19",
-            note="under the standing autonomous Stage-2 mandate -- NOT "
-            "operator sign-off. The operator's §0.5 review of this repin is "
-            "OWED and is on the morning list (OBS-182).",
-        ),
+        "operator sign-off, 2026-08-19 -- given explicitly in session after "
+        "review of the bgp_vpnv4 addition. This slot previously held a "
+        "PendingOperatorReview sentinel recording that the review was OWED; "
+        "the review has now happened, so the sentinel is retired rather than "
+        "left to raise a warning nobody needs to act on (OBS-182). The "
+        "sentinel machinery stays -- it is what makes the honest state "
+        "sayable next time.",
     ),
 }
 
