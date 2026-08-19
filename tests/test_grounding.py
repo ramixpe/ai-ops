@@ -1469,3 +1469,212 @@ def test_ground_report_runs_containment_so_the_emit_path_cannot_miss_it():
 
     assert not result.ok
     assert "uncontained_identifier" in [f.kind for f in result.failures]
+
+
+# --------------------------------------------------------------------------- #
+# B-670 -- an interpretation cannot invent a cause a `cause: None` descent
+# does not support (measured: OBS-370)
+#
+# check_recommendation_closed (B-490) closed this exact failure for
+# `recommendation.next_check`. It has nothing to say about `interpretations[].
+# claim`, which is free prose by design -- and MCP-EXPERIMENT.md §11.2's
+# fabricated sentence ("the issue is likely an application or configuration
+# problem") cites no identifier and no evidence key, so citation integrity,
+# chain coverage and identifier containment all pass a report carrying it
+# clean. `report.v2.txt` constraints 5/6 already forbid this in words; this is
+# the code-side enforcement D18 says a prompt clause alone cannot provide.
+# --------------------------------------------------------------------------- #
+
+
+def test_the_gap_this_check_closes():
+    """Stated as a measurement, not a claim: run the *other* three checks
+    alone against a report an interpretation invents a cause in, and watch
+    them pass it. This is the exact report `probe_gap.py` (OBS-370) found
+    passing `ground_report` before `check_no_invented_cause` existed.
+    """
+
+    descent = _all_layers_healthy_descent()
+    report = {
+        "observations": [{"claim": "Established",
+                          "evidence_key": "RR1:bgp:10.255.0.12"}],
+        "interpretations": [
+            {"claim": (
+                "Since no fault was found on this path, the issue is likely "
+                "related to an application or configuration problem outside "
+                "of the network path itself."
+            ), "based_on": ["obs-1"]},
+        ],
+    }
+
+    assert grounding.check_grounding(
+        report, grounding.descent_evidence_keys(descent)
+    ).ok, "cites a real observation -- citation integrity has nothing to fail"
+    assert grounding.check_chain_coverage(report, descent).ok, (
+        "no cause, no chain -- there is nothing to require coverage of"
+    )
+    assert grounding.check_identifier_containment(report, descent).ok, (
+        "'application or configuration problem' names no identifier at all"
+    )
+
+    result = grounding.ground_report(report, descent)
+
+    assert not result.ok
+    assert [f.kind for f in result.failures] == ["unsupported_cause"]
+
+
+def test_an_interpretation_inventing_a_cause_is_refused():
+    descent = _all_layers_healthy_descent()
+    report = {
+        "observations": [{"claim": "Established",
+                          "evidence_key": "RR1:bgp:10.255.0.12"}],
+        "interpretations": [
+            {"claim": "likely a firewall or access list is blocking it",
+             "based_on": ["obs-1"]},
+        ],
+    }
+
+    result = grounding.check_no_invented_cause(report, descent)
+
+    assert not result.ok
+    assert result.failures[0].kind == "unsupported_cause"
+    assert result.failures[0].locus == "interpretation-1"
+
+
+def test_the_companion_a_grounded_interpretation_with_no_cause_passes():
+    """Without this the check could refuse every no-cause report and look
+    like it works. `BUILD-PLAN.md` §0.12: a guardrail needs the case that
+    must *not* fire (OBS-181)."""
+
+    descent = _all_layers_healthy_descent()
+    report = {
+        "observations": [{"claim": "Established",
+                          "evidence_key": "RR1:bgp:10.255.0.12"}],
+        "interpretations": [
+            {"claim": "The BGP session is Established and the one rung this "
+                      "flow checked is healthy.", "based_on": ["obs-1"]},
+        ],
+    }
+
+    result = grounding.check_no_invented_cause(report, descent)
+
+    assert result.ok, result.summary()
+    assert result.invented_cause_checked == 2
+    assert not result.vacuous
+
+    assert grounding.ground_report(report, descent).ok
+
+
+def test_an_observation_can_also_smuggle_in_an_invented_cause():
+    """The docstring's claim that every prose field is scanned, not only
+    interpretations -- report.v2.txt constraint 4 says an observation is
+    supposed to be one rung's factual state, but nothing stops a model
+    writing causal language into one anyway."""
+
+    descent = _all_layers_healthy_descent()
+    report = {
+        "observations": [
+            {"claim": "Established, though the service running on "
+                      "10.255.0.12 is down",
+             "evidence_key": "RR1:bgp:10.255.0.12"},
+        ],
+        "interpretations": [],
+    }
+
+    result = grounding.check_no_invented_cause(report, descent)
+
+    assert not result.ok
+    assert result.failures[0].locus == "obs-1"
+
+
+def test_the_check_does_not_apply_when_the_descent_found_a_real_cause():
+    """Gated on `descent.cause is None`, not on the finding string.
+
+    `_contained_descent()` (the B-453 fixture) has a real broken rung, so
+    naming a cause is not invention here -- and this check has no opinion on
+    whether the NAMED cause is the right one, only on whether one was
+    invented out of a vacuum. That harder problem -- a real rung misread as
+    its own explanation -- is `render.py`'s declared "deterministic
+    entailment over natural language is not available" limit, and this
+    function does not attempt it.
+    """
+
+    descent = _contained_descent()
+    report = {
+        "interpretations": [
+            {"claim": "likely an application misconfiguration on PE2",
+             "based_on": ["obs-1"]},
+        ],
+    }
+
+    result = grounding.check_no_invented_cause(report, descent)
+
+    assert result.ok
+    assert result.invented_cause_checked == 0, "not applicable -- nothing was scanned"
+
+
+def test_an_undetermined_finding_with_no_broken_rung_is_also_checked():
+    """`cause is None` also covers `undetermined` when nothing broke before
+    the walk hit an unread rung -- report.v2.txt constraint 5's other case
+    ("do not speculate about what the unread rung would probably have
+    shown")."""
+
+    descent = DescentResult(
+        flow="bgp_session", device="RR1", subject="10.255.0.12",
+        finding="undetermined",
+        outcomes=(RungOutcome("bgp_session", "RR1",
+                              CheckResult(UNEVALUATED, reason="no evidence")),))
+    report = {
+        "interpretations": [
+            {"claim": "probably a software bug in the BGP process",
+             "based_on": []},
+        ],
+    }
+
+    assert descent.cause is None
+    result = grounding.check_no_invented_cause(report, descent)
+
+    assert not result.ok
+
+
+def test_a_failure_never_carries_the_models_sentence():
+    """OBS-061's rule, applied to this check. The failure names the fixed
+    vocabulary phrase this module declared (safe -- it is not model text) and
+    the descent's own finding string, never the sentence around them."""
+
+    descent = _all_layers_healthy_descent()
+    sentence = (
+        "the operator should immediately suspect a memory leak in the BGP "
+        "process and restart it before anything else"
+    )
+    report = {
+        "interpretations": [{"claim": sentence, "based_on": []}],
+    }
+
+    result = grounding.check_no_invented_cause(report, descent)
+
+    assert not result.ok
+    rendered = result.summary()
+    assert sentence not in rendered
+    for word in ("operator", "restart", "immediately", "suspect"):
+        assert word not in rendered.lower(), f"model prose leaked: {word}"
+
+
+def test_ground_report_runs_the_cause_check_so_the_emit_path_cannot_miss_it():
+    """The wiring is the point -- mirrors
+    `test_ground_report_runs_containment_so_the_emit_path_cannot_miss_it`
+    above, and is the guard `scripts/mutate_guards.py`'s B-670 entry targets."""
+
+    descent = _all_layers_healthy_descent()
+    report = {
+        "observations": [{"claim": "Established",
+                          "evidence_key": "RR1:bgp:10.255.0.12"}],
+        "interpretations": [
+            {"claim": "likely a software issue outside this flow's coverage",
+             "based_on": ["obs-1"]},
+        ],
+    }
+
+    result = grounding.ground_report(report, descent)
+
+    assert not result.ok
+    assert "unsupported_cause" in [f.kind for f in result.failures]

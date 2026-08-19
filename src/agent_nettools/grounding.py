@@ -71,6 +71,7 @@ __all__ = [
     "check_absence_coverage",
     "check_chain_coverage",
     "check_identifier_containment",
+    "check_no_invented_cause",
     "check_recommendation_closed",
     "check_timeline_citations",
     "claims_present",
@@ -138,6 +139,7 @@ class GroundingResult:
     timeline_entries_checked: int = 0
     identifiers_checked: int = 0
     recommendations_checked: int = 0
+    invented_cause_checked: int = 0
 
     @property
     def ok(self) -> bool:
@@ -160,6 +162,7 @@ class GroundingResult:
             or self.timeline_entries_checked
             or self.identifiers_checked
             or self.recommendations_checked
+            or self.invented_cause_checked
         )
 
     def merge(self, other: GroundingResult) -> GroundingResult:
@@ -179,6 +182,9 @@ class GroundingResult:
             recommendations_checked=(
                 self.recommendations_checked + other.recommendations_checked
             ),
+            invented_cause_checked=(
+                self.invented_cause_checked + other.invented_cause_checked
+            ),
         )
 
     def summary(self) -> str:
@@ -193,7 +199,8 @@ class GroundingResult:
                 f"{self.absence_claims_checked} absence claims backed, "
                 f"{self.timeline_entries_checked} timeline entries cited, "
                 f"{self.identifiers_checked} identifiers contained, "
-                f"{self.recommendations_checked} recommendation(s) closed"
+                f"{self.recommendations_checked} recommendation(s) closed, "
+                f"{self.invented_cause_checked} cause claim(s) checked"
             )
         return f"not grounded ({len(self.failures)} failures): " + "; ".join(
             str(f) for f in self.failures
@@ -520,6 +527,123 @@ def check_recommendation_closed(report: dict, descent: DescentResult) -> Groundi
     )
 
 
+# --- Unsupported cause in prose (B-670) ---------------------------------------
+#
+# check_recommendation_closed (B-490) closes `recommendation.next_check` to the
+# descent's own text, verbatim. But the identical failure MCP-EXPERIMENT.md
+# §11.2 measured is reachable through `interpretations[].claim` too, and
+# check_recommendation_closed has nothing to say about it: an interpretation is
+# free prose *by design* -- it exists to synthesise the causal chain in the
+# model's own words -- so it cannot be closed to one fixed string the way
+# `next_check` is.
+#
+# Measured directly against this module, not theorised (OBS-370): a report
+# whose every rung is properly observed and cited -- so `check_grounding` and
+# `check_chain_coverage` both pass clean -- and whose interpretation reads
+# almost verbatim as the sentence §11.2 recorded live ("the issue is likely an
+# application or configuration problem outside of the network path itself")
+# on a `cause: None` descent, passed `ground_report` before this function
+# existed. Nothing upstream of it has an opinion on what an interpretation's
+# prose *says*, only on whether it cites something real -- and "an
+# application or configuration problem" cites nothing, so citation integrity
+# has nothing to fail and identifier containment (B-453) has no invented
+# identifier to catch either. `report.v2.txt`'s own constraints 5 and 6
+# already forbid this in words ("Do not supply a likely cause ... a plausible
+# guess in its place is worse than the gap, because it reads exactly like a
+# finding") -- this is D18's own distinction ("prompt / agent context sets
+# expectation, does not enforce; code is the single chokepoint that does")
+# applied to this project's own prompt library, not only to the command
+# allowlist the decision was written about.
+#
+# The vocabulary below is deliberately the same list `model_eval.py`'s
+# `_UNSUPPORTED_CAUSE_VOCABULARY` already carries, declared independently here
+# rather than imported: `model_eval.py` imports `canonical_identifier`/
+# `clean_token` FROM this module, so the reverse import would be circular, and
+# the two checkers read different inputs anyway -- free MCP narration prose
+# there, typed report fields here -- the same shape of split that module's own
+# docstring gives for keeping its `_IDENTIFIER_LIKE` independent of this
+# module's finer-grained `_IFACE`/`_device_name_families`. Extend both by hand
+# the day a real transcript adds a phrase to one; a table that can drift is
+# still worth more than no table (`BUILD-PLAN.md` §0.12).
+#
+# Gated on `descent.cause is None`, exactly like `model_eval.score_invention`'s
+# own gate -- not on the finding string, because `cause_not_localised` and
+# `no_fault_on_path` can both carry a non-`None` `cause` (a real broken rung
+# that is the symptom itself, or a broken rung off the dependency path), and
+# naming *that* rung is not invention -- it is the harder problem of a real
+# rung being misread as its own explanation. `render.py`'s own "deterministic
+# entailment over natural language is not available" applies here exactly as
+# it does to `model_eval.py`, and this function does not attempt that harder
+# problem.
+
+_UNSUPPORTED_CAUSE_VOCABULARY: tuple[str, ...] = (
+    "application",
+    "service running",
+    "service is down",
+    "configuration problem",
+    "misconfigur",
+    "firewall",
+    "access list",
+    "acl ",
+    "security polic",
+    "software bug",
+    "software issue",
+    "hardware failure",
+    "process crash",
+    "memory leak",
+    "cpu utilization",
+    "authentication issue",
+    "certificate expir",
+)
+
+
+def check_no_invented_cause(report: dict, descent: DescentResult) -> GroundingResult:
+    """Refuse prose that fills a no-cause finding's silence with a cause. B-670.
+
+    Applicable only when ``descent.cause is None`` -- nothing was found broken,
+    so any phrase from :data:`_UNSUPPORTED_CAUSE_VOCABULARY` appearing anywhere
+    in the report's prose can only be invented. Scans every claim
+    :func:`_report_prose` already extracts -- observations and interpretations
+    alike, not only interpretations: an observation is supposed to be one
+    rung's factual state (`report.v2.txt` constraint 4), but nothing upstream
+    of this stops a model writing causal language into one anyway, and the
+    failure this exists to catch is defined by what the text says, not which
+    field it landed in.
+
+    One failure per locus is enough to refuse the report, so the first
+    matching phrase wins rather than every one -- three keyword hits in one
+    sentence are one defect, not three.
+    """
+
+    if not isinstance(report, dict) or descent.cause is not None:
+        return GroundingResult()
+
+    failures: list[GroundingFailure] = []
+    checked = 0
+
+    for locus, text in _report_prose(report):
+        checked += 1
+        lowered = text.lower()
+        for phrase in _UNSUPPORTED_CAUSE_VOCABULARY:
+            if phrase in lowered:
+                failures.append(
+                    GroundingFailure(
+                        "unsupported_cause",
+                        locus,
+                        # Names this module's own declared phrase, never the
+                        # model's sentence around it -- OBS-061's rule, same
+                        # as `check_recommendation_closed`'s failure above.
+                        f"proposes {phrase!r} as an explanation, but the descent "
+                        f"named no cause ({descent.finding!r}); a "
+                        f"plausible-sounding cause is not one the evidence "
+                        f"supports, and it reads exactly like a finding",
+                    )
+                )
+                break
+
+    return GroundingResult(failures=tuple(failures), invented_cause_checked=checked)
+
+
 def _sequence(report: object, key: str) -> tuple[list, GroundingFailure | None]:
     """Read a list-valued field from an untrusted report."""
 
@@ -771,6 +895,11 @@ def ground_report(report: dict, descent: DescentResult) -> GroundingResult:
     :func:`check_recommendation_closed` (B-490) closes a different gap: citation
     integrity has no opinion on what an exempt recommendation *says*, so a
     paraphrase that invents a diagnosis there passes every other check here.
+    :func:`check_no_invented_cause` (B-670) closes the same gap in the field
+    `check_recommendation_closed` does not reach: an interpretation, cited and
+    internally consistent, whose own prose fills a `cause: None` finding's
+    silence with an unsupported cause — measured live as the same sentence
+    §11.2 caught in `next_check`, landing in `interpretations[].claim` instead.
     """
 
     keys = descent_evidence_keys(descent)
@@ -779,6 +908,7 @@ def ground_report(report: dict, descent: DescentResult) -> GroundingResult:
         .merge(check_chain_coverage(report, descent))
         .merge(check_identifier_containment(report, descent))
         .merge(check_recommendation_closed(report, descent))
+        .merge(check_no_invented_cause(report, descent))
     )
     return _refuse_unmeasured(merged, report, locus="report")
 
@@ -858,6 +988,7 @@ def _refuse_unmeasured(
         absence_claims_checked=result.absence_claims_checked,
         timeline_entries_checked=result.timeline_entries_checked,
         recommendations_checked=result.recommendations_checked,
+        invented_cause_checked=result.invented_cause_checked,
     )
 
 

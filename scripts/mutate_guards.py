@@ -541,7 +541,28 @@ MUTATIONS = [
      "src/agent_nettools/ticket.py",
      '    return "\\n".join((f"> {line}" if line else ">") for line in lines) + "\\n"\n',
      '    return "\\n".join(lines) + "\\n"\n',
-     "test_a_model_response_disguised_as_a_ticket_section_cannot_forge_one")
+     "test_a_model_response_disguised_as_a_ticket_section_cannot_forge_one"),
+
+    # ---- B-670: `check_no_invented_cause` is reached by the gate. It closes
+    # the gap `check_recommendation_closed` (B-490) does not reach: an
+    # interpretation, properly cited and otherwise passing `check_grounding`/
+    # `check_chain_coverage`/`check_identifier_containment` clean, whose own
+    # prose fills a `cause: None` finding's silence with an unsupported cause
+    # (MCP-EXPERIMENT.md §11.2's measured sentence, landing in
+    # `interpretations[].claim` instead of `recommendation.next_check`;
+    # measured directly against this module as OBS-370). Same shape as the
+    # B-453 entry above -- removing the `.merge(...)` line disables the check
+    # without touching its own logic, so a passing direct-call test would not
+    # notice; only a test exercising `ground_report` itself can. Counted
+    # before adding this entry (OBS-191): the anchor string below occurs
+    # exactly once in grounding.py (`grep -c`, 2026-08-19). ----
+
+    ("B-670", "an interpretation cannot invent a cause a `cause: None` "
+     "descent does not support -- check_no_invented_cause is reached by "
+     "the gate",
+     "src/agent_nettools/grounding.py",
+     "        .merge(check_no_invented_cause(report, descent))\n", "",
+     "check_no_invented_cause"),
 ]
 
 

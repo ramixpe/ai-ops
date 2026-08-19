@@ -6649,3 +6649,57 @@ set. Run in isolation the function was correct. The suite run had picked up stal
 bytecode from a guard run killed with its parent shell, and the *real* problem
 underneath was the scan's runtime. Two unrelated faults presenting as one wrong
 answer, and the wrong answer pointed at neither.
+
+---
+
+## OBS-370 · B-405 · The "no invented cause" guarantee was enforced on one field of three
+
+B-405 asked for prompt-library expansion, with a list of prompts from D18. The
+agent was told to measure which prompt actually fails today rather than build the
+list. It measured, and found the problem was not in a prompt at all.
+
+`report.v2.txt` already forbids inventing a cause when the descent found none —
+constraints 5 to 7, written in direct response to MCP-EXPERIMENT §11.2, where a
+4B model paraphrased a no-cause finding into *"likely an application or
+configuration problem"*. B-490 then closed that hole in `grounding.py`.
+
+**B-490 closed it for `recommendation.next_check` only.** The agent built a probe:
+a real `DescentResult` from the `healthy` fixture (`all_layers_healthy`,
+`cause: None`), and a report where every rung is correctly observed and correctly
+cited — but whose **interpretation** repeats §11.2's fabricated sentence almost
+verbatim. `ground_report()` returned `ok: True`.
+
+Every existing check passed it, and each for a good reason:
+`check_grounding` found the citations present, `check_chain_coverage` found the
+rungs covered, `check_identifier_containment` found no invented identifier —
+**because the fabricated sentence cites nothing and names nothing.** It is pure
+unsupported prose, which is exactly the shape none of them look for.
+
+I reproduced it myself: disabling the new check makes the demonstrating test
+fail; restoring it passes. The gap was real and reachable.
+
+Two things worth keeping.
+
+**The fix belonged in enforcement, not in the prompt.** The prompt text was
+already correct — it says plainly not to do this. A model that ignores an
+instruction is not fixed by rewording the instruction. That is the same division
+`platforms.py` makes: the allowlist is not a request, and `grounding.py`'s
+failure objects have no field a model's prose can occupy. **The prompt sets the
+expectation; code is the chokepoint.**
+
+**A guarantee closed on one field is not closed.** B-490 was a real fix, verified,
+and it left two of three prose fields open — a report's `observations[].claim`
+and `interpretations[].claim` reach a model by exactly the same path as
+`next_check`. This is the same shape as OBS-111 (14 of 20 MCP tools returned raw
+device text because the guarantee was only ever checked on the CLI path) and
+B-481 (free-text quoting present on one path, absent on the other).
+
+> When a guarantee is implemented per-field, the question is never "does it
+> work?" — it is "which fields did we not enumerate?". Enumerate them from the
+> structure, not from the one that prompted the fix.
+
+`prompt_library.py` and `prompts/` were left untouched, and none of B-405's
+original prompt list was built: nothing measured showed a need for it. Scope from
+a document rather than from evidence is the mistake B-105 and B-503 were both
+refused for this week, and refusing it a third time is the row working as
+intended.

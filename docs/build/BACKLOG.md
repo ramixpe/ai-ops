@@ -145,7 +145,7 @@ cost of the state a reconciliation cannot express, measured (OBS-140).
 | **B-402** | `DONE` | OBS-103 | — | OBS-103 |
 | **B-403** | `DONE` | OBS-123 | B-107 (OPEN) | OBS-123 |
 | **B-404** | `DONE` | OBS-123 | MVP-0 | OBS-123 |
-| **B-405** | `OPEN` | prompt library expansion. D18; MVP-1 | MVP-1 | OBS-140 |
+| **B-405** | `DONE` | **CLOSED 2026-08-19 by measurement, and the answer was not a prompt.** Told to measure which prompt fails rather than build D18's list, the investigation found `report.v2` already forbids inventing a cause — and that **B-490's fix covered `recommendation.next_check` only**. A probe with a real no-cause descent and a fabricated *interpretation* passed `ground_report()` clean: every existing check approved it because the invented sentence cites nothing and names no identifier, which is precisely the shape none of them inspect. Fixed in `grounding.py` (enforcement), not in the prompt (text) — a model ignoring an instruction is not fixed by rewording it. **No prompt from B-405's original list was built**; nothing measured showed a need | — | OBS-370 |
 | **B-406** | `DEFERRED` | until Stage 2 — gNMI telemetry. D8 | Stage 2 | OBS-140 |
 | **B-407** | `OPEN` | session memory, multi-turn. D14; MVP-1, and small | MVP-1 | OBS-140 |
 | **B-408** | `DEFERRED` | until Stage 2 — probe budgeting matters under event storms. D13 | Stage 2 | OBS-140 |
