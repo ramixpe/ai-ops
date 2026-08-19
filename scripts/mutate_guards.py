@@ -307,6 +307,16 @@ MUTATIONS = [
     # at "is this field falsy" would not notice; the guard is specifically
     # that no secret-shaped text reaches any field, which is what the test
     # below actually asserts (`canary not in json.dumps(parsed)`).
+    ("OBS-202", "an abbreviated interface name is EXPANDED to the spelling "
+     "the telemetry stores, so `Gi0/0/0/0` from check_lab_interfaces reaches "
+     "the same series as `GigabitEthernet0/0/0/0` -- without it the natural "
+     "list-then-ask workflow returns zero samples and reports the series was "
+     "never observed, which is a confidently wrong answer rather than an error",
+     "src/agent_nettools/metrics_prometheus.py",
+     "        return canonical(value)",
+     "        return value",
+     "test_an_abbreviated_interface_name_finds_the_same_series_as_the_long_form"),
+
     ("B-104", "config_isis never stores what follows an 'authentication ...' "
      "line in a structured field",
      "src/agent_nettools/config_section.py",

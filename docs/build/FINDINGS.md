@@ -6427,3 +6427,60 @@ One process note the agent surfaced: the diagram generators write relative to th
 process's cwd, so they must be run from `docs/diagrams/`. Invoked by absolute path
 from elsewhere they silently write stray SVGs into the wrong directory — caught
 and cleaned before it reached a commit.
+
+---
+
+## OBS-202 · M5b · The history tool answered "never observed" 68 times about series that existed
+
+The operator drove an exploration session against the new tools: list a device's
+interfaces, then ask each one for its utilisation history. **68 consecutive calls
+returned `records_returned: 0` and `series_known: false`** — whose coverage note
+reads *"no series matching this device/interface/metric selector has been
+observed in the existence-check lookback; this points at a wrong device,
+interface, or metric combination, not a scrape gap."*
+
+Prometheus held **56 series** for that metric the whole time.
+
+The cause is the long-versus-short interface name, for the **fourth** time:
+
+| the model sends | source | result |
+|---|---|---|
+| `Gi0/0/0/0` | what `check_lab_interfaces` returns | 0 records, `series_known=False` |
+| `GigabitEthernet0/0/0/0` | what gNMI stores in `interface_name` | 58 records |
+
+`show interfaces brief` abbreviates; gNMI does not. So **the single most natural
+workflow a model can follow — enumerate the interfaces, then ask about each —
+fails on every interface**, and the tool never says "I don't understand that
+name". It says the series was never observed.
+
+That last part is what makes this worse than a bug. The four absence cases exist
+precisely so a caller can tell a collection gap from a real zero from a wrong
+selector, and case 3's wording is confident and specific. Here it was **right
+about the mechanism and wrong about the world**: no series matched *that
+selector*, and the honest conclusion — "your interface name is not the one the
+telemetry uses" — is the one thing the message does not offer. A model has no way
+to doubt it. `logs_loki`'s and `metrics_prometheus`'s whole design is about not
+manufacturing certainty from absence, and this manufactured certainty from a
+spelling difference.
+
+Fixed by expanding in the slot validator: `canonical()` already maps `Gi0/0/0/0`
+→ `GigabitEthernet0/0/0/0`, and the expansion is legitimate here for the reason
+its own docstring gives — it is scoped to one device, and the device is a
+separate validated slot in the same selector. Verified live: both spellings now
+return 59 records; `Lo0` still correctly reports `series_known=False`, because
+loopbacks genuinely carry no generic-counter telemetry. That negative control is
+what distinguishes "expand the name" from "accept anything and hope".
+
+**Four recurrences now** — OBS-178 (bulk fallback), OBS-193 (zero NetBox cables),
+and this. Every one a silent wrong answer rather than an error, because an
+interface name that does not match is indistinguishable from an interface that
+has nothing to report.
+
+> Two spellings of one identifier is not a formatting inconvenience, it is a
+> correctness hazard, and it will keep costing until every boundary that accepts
+> an interface name canonicalises on the way in. The places that compare are
+> already fixed one at a time; what is missing is the rule that a name crossing
+> *into* this system is normalised at the door.
+
+Filed as B-519: audit every parameter that accepts an interface name and
+canonicalise at entry, rather than waiting for the fifth instance.

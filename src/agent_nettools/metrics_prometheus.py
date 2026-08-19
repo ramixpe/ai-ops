@@ -207,6 +207,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Mapping
 
 from .coverage import Coverage
+from .interface_kind import canonical
 from .inventory_model import find_device
 from .parsers import PARSE_FAILED, PARSE_OK
 
@@ -413,7 +414,21 @@ class _InterfaceSlot:
             raise PrometheusQueryError(f"{name}: must not be empty")
         if not _INTERFACE_NAME_RE.fullmatch(value) or ".." in value:
             raise PrometheusQueryError(f"{name}: not a valid interface name: {value!r}")
-        return value
+        # Expand an abbreviated name to the spelling the telemetry actually
+        # stores. gNMI writes `interface_name="GigabitEthernet0/0/0/0"`, while
+        # `show interfaces brief` -- and therefore `check_lab_interfaces`, and
+        # therefore any model that lists interfaces before asking for their
+        # history -- says `Gi0/0/0/0`. Matching the label literally meant that
+        # workflow returned zero samples with `series_known=False`, whose note
+        # reads "no series matching this device/interface/metric selector has
+        # been observed": a confidently wrong answer that a model has no way to
+        # doubt (measured 2026-08-19 over 68 consecutive calls, OBS-202).
+        #
+        # `canonical` expands rather than merely comparing, and is valid here
+        # for the reason its own docstring sets: the expansion is scoped to one
+        # device, because the device is a separate validated slot in the same
+        # selector.
+        return canonical(value)
 
 
 #: Short, caller-facing counter name -> the real Prometheus metric name.

@@ -839,3 +839,53 @@ def test_existence_check_is_a_second_http_call_with_a_wider_window(monkeypatch):
     lookback = int(series_params["end"]) - int(series_params["start"])
     assert lookback == prom.DEFAULT_EXISTENCE_LOOKBACK_SECONDS
     assert series_params["match[]"] == f'{_ISIS_METRIC}{{source="PE1"}}'
+
+
+def test_an_abbreviated_interface_name_finds_the_same_series_as_the_long_form():
+    """`check_lab_interfaces` hands a model `Gi0/0/0/0`; gNMI stores
+    `GigabitEthernet0/0/0/0`. Both must reach the same series.
+
+    Measured 2026-08-19 over 68 consecutive live calls: a model listed a
+    device's interfaces and asked for each one's history, and every single call
+    returned zero samples with `series_known=False` -- whose note says "no
+    series matching this device/interface/metric selector has been observed".
+    The series existed (56 of them). The name did not match. The tool was
+    confidently wrong in a way the caller had no means to doubt, which is worse
+    than an error (OBS-202).
+    """
+
+    captured: list[str] = []
+
+    def fetcher(base, path, params):
+        captured.append(params.get("query") or params.get("match[]") or "")
+        return {"status": "success", "data": {"resultType": "matrix", "result": []}}
+
+    for name in ("Gi0/0/0/0", "GigabitEthernet0/0/0/0"):
+        captured.clear()
+        prom.run_named_query(
+            "interface_rate_history", fetcher=fetcher, device="PE1",
+            interface=name, counter="input_errors",
+            since_seconds=300, step_seconds=60,
+        )
+        assert captured, "no query was built"
+        assert 'interface_name="GigabitEthernet0/0/0/0"' in captured[0], (
+            f"{name!r} did not expand to the stored spelling: {captured[0]}"
+        )
+
+
+def test_the_expansion_does_not_accept_an_invented_interface():
+    """Anti-vacuity companion. Expanding an abbreviation must not become
+    'accept anything and hope' -- a name that is not a valid interface is still
+    refused, and a valid-but-unknown one still reaches the selector verbatim
+    rather than being mapped onto something that exists.
+    """
+
+    def fetcher(base, path, params):
+        return {"status": "success", "data": {"resultType": "matrix", "result": []}}
+
+    bad = prom.run_named_query(
+        "interface_rate_history", fetcher=fetcher, device="PE1",
+        interface='Gi0/0/0/0" or up{a="', counter="input_errors",
+        since_seconds=300, step_seconds=60,
+    )
+    assert bad["status"] == "error"
