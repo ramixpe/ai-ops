@@ -5731,3 +5731,48 @@ Also fixed here: `mutate_guards.py`'s stale-bytecode scan walked
 run refuse to start, and its purge raced that agent's files. Those checkouts are
 never on this tree's `sys.path`, so they were never in scope. Scoped, and proven
 both ways — still refuses on in-tree stale bytecode, ignores a worktree copy.
+
+---
+
+## OBS-189 · Diagrams · A pinned artefact cannot display a fact that changes when you commit it
+
+Two red pushes in a row, same root cause, and the cause is a design error rather
+than an accident.
+
+`tests/test_diagrams.py` byte-diffs a fresh regeneration against every committed
+SVG, so the diagrams cannot silently go stale. Good. But two of the facts they
+displayed were **properties of the history, not of the tree**:
+
+* `commit_count()` — 287, then 289. Committing the regenerated diagram increments
+  the number the diagram shows, so the pin is unsatisfiable by construction:
+  every commit lands red, and the fix for each red commit is another commit.
+* `tests_passed()` — the *outcome of a run*. It drops whenever anything is
+  failing, including the diagram test itself, so a failure changes the number
+  that the failing diagram is being compared against. The artefact and its own
+  test observe each other.
+
+Both are honest measurements. Neither may be baked into a pinned artefact.
+
+The rule that resolves it: **a byte-pinned artefact may display only facts about
+the tree's *content*.** Intents, flows, settings, approved commands, line counts,
+backlog rows, findings, fixture captures, CLI subcommands, MCP tools, mutation
+guards, frozen files — all content. Commit count, commit date, tests-passed,
+wall-clock duration — all volatile. `tests_collected()` replaced
+`tests_passed()`: "how many tests exist" is a content fact and is stable under
+pass/fail, where "how many passed" is not.
+
+There is a third finding buried in how I found this, and it is the least
+flattering. Both red pushes happened because **I read a failure and committed
+anyway.** The first time my commands were newline-separated, so `git commit` ran
+regardless. I "fixed" that with `&&` — and the second push was red too, because
+`python -m pytest -q | tail -2` exits with **`tail`'s** status, not pytest's, so
+the `&&` chain saw success. A pipeline launders a failure into a zero exit code,
+and I had wrapped every gate command in exactly that shape for readability.
+
+Now: capture to a file, keep the exit code in a variable, test the variables, and
+print an explicit GREEN/RED before committing.
+
+> Reading a result is not the same as gating on it, and a pipe silently discards
+> the status you meant to gate on. If the check is load-bearing, its exit code
+> has to reach the `if` — the summary line you print for yourself is a courtesy
+> to the reader, not a control-flow mechanism.

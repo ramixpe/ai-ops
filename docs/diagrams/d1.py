@@ -24,7 +24,7 @@ W, H = 1580, 1000
 s = Svg(W, H)
 header(s, "ios-xr-nettools — repo anatomy",
        f"{facts.fmt(facts.src_lines())} lines of source + {facts.fmt(facts.mcp_lines())} in the MCP server · "
-       f"{facts.fmt(facts.tests_lines())} lines of tests · {facts.commit_count()} commits · "
+       f"{facts.fmt(facts.tests_lines())} lines of tests · "
        f"read-only, single lab, {len(lab_devices)} Cisco XRd nodes",
        facts.header_tag())
 

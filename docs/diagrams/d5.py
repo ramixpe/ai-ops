@@ -3,8 +3,8 @@ from svgkit import *
 
 guard_n = facts.guard_count()
 frozen_n = facts.frozen_file_count()
-tests_n = facts.tests_passed()
-skipped_n = facts.tests_skipped()
+tests_n = facts.tests_collected()
+collected_note = "collected; no network, no credentials, no API key"
 findings_n = facts.findings_count()
 fixtures_stat = facts.fixture_stats()
 src_n = facts.src_lines()
@@ -17,7 +17,7 @@ W, H = 1580, 940
 s = Svg(W, H)
 header(s, "Where we are",
        "Part 1 (MVP-0) is built, reviewed and green. What remains before publication needs a lab window and a human — not more code.",
-       f"{facts.last_commit_date()} · {facts.commit_count()} commits")
+       f"branch {facts.current_branch()}")
 
 # ---------- journey ----------
 jy = 132
@@ -51,7 +51,7 @@ ky = jy + 88
 # fixed rounding bucket keeps two fresh regenerations byte-identical. Every
 # other number on this tile is a property of the tree; that one would only
 # ever be a property of how busy the box happened to be.
-KPI = [(facts.fmt(tests_n), "tests passing", f"{skipped_n} skipped · zero network", GREEN),
+KPI = [(facts.fmt(tests_n), "tests", collected_note, GREEN),
        (f"{guard_n} / {guard_n}", "mutation guards hold", "each proven to fail when its guard goes", GREEN),
        (f"{frozen_n} / {frozen_n}", "frozen files intact", "byte-identical to the pre-build baseline", GREEN),
        (facts.fmt(findings_n), "findings recorded", "append-only; corrections are appended", BLUE),

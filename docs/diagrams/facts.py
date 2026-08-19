@@ -147,6 +147,24 @@ def _git(*args: str) -> str:
 
 
 @functools.lru_cache(maxsize=1)
+#: ---------------------------------------------------------------------------
+#: VOLATILE facts: true of this *history* or of one test RUN, not of the tree's
+#: content. A byte-pinned diagram (tests/test_diagrams.py) must not display
+#: these, because committing the regenerated diagram changes them -- the commit
+#: count increments *because* you committed the diagram that shows it, so the
+#: pin can never be satisfied and every commit lands red. Measured the hard way
+#: on 2026-08-19: two red pushes in a row, 287 -> 289 commits (OBS-189).
+#:
+#: `tests_passed()` is volatile for a subtler reason: it is the outcome of a
+#: run, so it drops whenever anything is failing -- including the diagram test
+#: itself, which then reports a number that disagrees with the diagram that
+#: caused the disagreement. `tests_collected()` is the content fact -- how many
+#: tests EXIST -- and is stable under pass/fail, so that is what the diagrams
+#: show.
+#:
+#: These stay exported: they are honest measurements and useful to a human
+#: running facts.py directly. They simply may not be baked into a pinned SVG.
+#: ---------------------------------------------------------------------------
 def commit_count() -> int:
     return int(_git("rev-list", "--count", "HEAD"))
 
