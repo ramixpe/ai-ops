@@ -1323,3 +1323,57 @@ model-size floor that does not apply to `nettools investigate` **does** apply
 to the MCP surface, and §11.2's invented service on a loopback is what that
 floor looks like from underneath. Recorded as a property of the surface, not a
 defect in it.
+
+---
+
+## §13 — The 2026-08-19 run: two models, nine questions, the widened flow menu
+
+First run after `investigate_lab_session`'s description was corrected to advertise
+all four flows (OBS-191). Arms: `google/gemma-4-e4b` and `gemma-4-31b-it`, fresh
+session each, LM Studio 0.4.21, 23-tool classic surface unchanged.
+
+| | Q1 first tool | Q2 | Q3 control | Q4 | Q5/Q6 | Q7 IS-IS | Q8 LDP | Q9 refusal | score |
+|---|---|---|---|---|---|---|---|---|---|
+| e4b | named `investigate`, asked for peer IP | reached descent | health tool | error, no invention | honest | **`isis_adjacency`** | `collect_evidence` | health tool | **8/9** |
+| 31b | `check_lab_bgp_neighbors` | 4 tools, never descended | health tool | read the answer key | honest | **`isis_adjacency`** | `collect_evidence` | health tool | **6/9** |
+
+### What this run establishes
+
+**The description fix reached behaviour.** Both models selected
+`flow="isis_adjacency"` with `subject="GigabitEthernet0/0/0/2"` — the *local
+interface*, which is the vocabulary added to the description the same morning,
+and not the neighbour's name a model would otherwise guess. Twelve hours earlier
+that flow was structurally unselectable. This is the first measurement showing a
+menu correction changing what a model does, not merely what it could read.
+
+**The larger model scored lower on the measurement that matters.** 31b answered
+Q1 with `check_lab_bgp_neighbors` and Q2 with four tools in sequence, never
+descending. e4b enumerated the whole tool list in its reasoning, identified
+`investigate_lab_session` as the only tool answering *why*, and asked for the
+peer address it needed. **Tool selection is not monotonic in model size** —
+B-495 said capability is not monotonic and this is a second, independent
+instance, on a different axis (selection rather than restatement).
+
+**Both negative controls held.** Q3 ("is PE1 healthy?") and Q9 ("run a
+device_health investigation") both went to `assess_lab_device_health`. Neither
+model acquired "reach for the descent tool for everything", which is the failure
+a positive Q1 alone cannot distinguish.
+
+### Two defects in the instrument, not the models
+
+**1. The corpus contains the answer key.** `search_lab_knowledge` indexes
+`docs/build/MCP-RETEST-PROTOCOL.md`, which holds the questions *and* their
+expected answers. 31b searched it on Q4 and found line 70 verbatim: *"There is no
+such peer. `10.255.0.99` is a well-formed address that exists nowhere in…"*. That
+is not fabrication — the claim is grounded and the model behaved correctly — but
+Q4 stopped measuring *does it invent a peer* and started measuring *can it
+search*. **A test whose answers live in the system under test measures retrieval,
+not reasoning**, and it does so silently, because a correct answer looks the same
+either way. B-511.
+
+**2. Q8's miss is the harness's fault, not the models'.** Neither used
+`ldp_session`; both fell back to `collect_lab_evidence` and read the LDP section
+out of it. The answer was right and the route was wrong — and it could not have
+been right, because `ldp` has no MCP tool. `collect_lab_evidence` was the only
+door available. Scored as partial for both; the fix is B-512, deliberately
+deferred past this run so the manifest stayed comparable.

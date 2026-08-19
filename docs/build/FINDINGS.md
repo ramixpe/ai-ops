@@ -5979,3 +5979,53 @@ agrees with you.
 Result: NetBox now holds 9 devices, 73 interfaces, 5 IP addresses and 15 cables,
 with `software_version` and `configured_hostname` as custom fields — all derived
 from live parsed evidence, none hand-authored.
+
+---
+
+## OBS-194 · MCP §13 · A menu fix changed behaviour, and the test corpus leaked its own answers
+
+Two results from the 2026-08-19 two-model run, one about the build and one about
+the instrument.
+
+**The build result.** Yesterday's fix to `investigate_lab_session`'s description
+(OBS-191 — it advertised two flows while four were built) is confirmed to reach
+*behaviour*. Both models, independently, selected `flow="isis_adjacency"` with
+`subject="GigabitEthernet0/0/0/2"`: the correct flow, and the **local interface**
+as the subject rather than the neighbour's name. That subject vocabulary was
+added to the description in the same commit precisely because a model would
+otherwise have to guess, and would guess the neighbour. Twelve hours earlier the
+flow could not be selected at all. A surface correction is now measured, not
+assumed.
+
+**The size result.** `gemma-4-31b-it` scored 6/9; `gemma-4-e4b` scored 8/9. The
+larger model answered Q1 with `check_lab_bgp_neighbors` and Q2 with four tools in
+sequence, never reaching the descent. The smaller one enumerated the tool list,
+reasoned that only `investigate_lab_session` answers *why*, and asked for the
+peer address it was missing. B-495 already established that capability is not
+monotonic in size for restatement fidelity; this is a second instance on a
+different axis — **tool selection** — and from a different pair of models.
+
+**The instrument defect, which matters more.** `search_lab_knowledge` indexes the
+whole docs tree, including `docs/build/MCP-RETEST-PROTOCOL.md` — the file holding
+the questions *and* the expected answers. On Q4 the 31b model searched it and
+returned line 70 nearly verbatim: *"There is no such peer."*
+
+Nothing about that is dishonest. The tool is designed to search the corpus, the
+corpus contained the answer, and the answer was correct. That is what makes it
+dangerous: **a leaked answer key produces a right answer that is indistinguishable
+from the right answer for the right reason.** Q4 exists to detect fabrication of
+a plausible peer; it silently became a retrieval test, and would have kept
+scoring as a pass indefinitely.
+
+The general form is worth stating, because this build keeps its evaluation
+material *inside* the repository the tools read:
+
+> If the system under test can read the test, the test measures retrieval. Any
+> sealed prediction, protocol or expected answer that lives in a searchable
+> corpus must be excluded from it — and the exclusion has to be asserted by a
+> test, because the leak's symptom is a passing score.
+
+Filed as B-511. B-512 records the other half of the run: Q8's LDP question was
+answered correctly through `collect_lab_evidence` because `ldp` has no MCP tool
+— the right answer through the only door there was. Deferred deliberately so this
+run's manifest stayed comparable; now unblocked.
