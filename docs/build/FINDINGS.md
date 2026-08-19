@@ -5221,3 +5221,45 @@ no records; a transport failure returns `status="error"` with
 `query_complete=False`. Both make `Coverage.complete` false and are refused by
 `ground_correlation` — for different, separately-stated reasons, which is the
 distinction `checks.py` already draws between `unevaluated` and `broken`.
+
+## OBS-174 · MiniMax M3 · The closed-recommendation rule survives contact with a third model, and this one cited every rung
+
+First live run of a third provider (MiniMax M3, `LLM_PROVIDER=minimax`) against
+the real fabric, `RR1 -> 10.255.0.12`, `--paraphrase`. Measured, not sampled:
+
+```
+finding      all_layers_healthy      trustworthy  true
+paraphrase   emitted
+grounding    grounded: 6 observations, 6 citations, 5/5 rungs cited,
+             11 identifiers contained, 0 recommendation(s) closed
+usage        1,976 in / 238 out / 2,214 total, 1 call
+```
+
+**Three results worth separating.**
+
+**1. B-490's closed field works against a real model.** `report.v2.txt` removed
+`next_check` from what the model writes, after §11.2 measured a 4B model turning
+*"something this flow does not cover"* into *"likely an application or
+configuration problem"*. MiniMax emitted `recommendation: {"requires_human":
+true}` — the v2 shape exactly, with no `next_check` at all. The fix is confirmed
+end to end: prompt, model, and grounding gate agree.
+
+**2. It cited 5/5 rungs.** Both earlier arms cited 3 of 5 (§11.2 4B, §12.4 31B),
+and §11.2 called 3/5 "defensible in two sentences". This was a structured
+report rather than a two-sentence summary, so the comparison is not
+apples-to-apples — but it is the first arm to cite the whole ladder, and the
+grounding gate confirmed every citation resolves.
+
+**3. The identifier-containment check had real work to do and passed** — 11
+identifiers contained, none invented. That is B-453's gate on a model nobody
+had run it against.
+
+**One honest caveat.** This was a HEALTHY fabric, so the model had no cause to
+name and therefore no vacuum to fill — which is precisely the condition §12.4
+noted the 31B was never tested under. **MiniMax has not been tested on the case
+that actually breaks models**: a broken fabric where the descent declines to
+name a cause. That is a round-6 question, not a tonight question.
+
+Also confirmed in passing: `--from-fixtures` correctly refuses to call a model
+at all ("no lab and no model"), so a fixture replay can never quietly become a
+model evaluation.
