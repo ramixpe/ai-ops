@@ -5263,3 +5263,51 @@ name a cause. That is a round-6 question, not a tonight question.
 Also confirmed in passing: `--from-fixtures` correctly refuses to call a model
 at all ("no lab and no model"), so a fixture replay can never quietly become a
 model evaluation.
+
+## OBS-175 · M4 · The right outcome of a spike was to not build the thing
+
+M4 was the highest-risk milestone in Stage 2: an epoch-aware cache, where
+getting it wrong silently defeats the coherence guarantee `epoch.py` exists to
+provide. The brief demanded a spike first. The spike's answer is **do not build
+it yet**, and the reasoning is worth more than the cache would have been.
+
+**There is nothing to cache.** The architecture is explicit that *config* is
+cached and *status* never is. But the entire approved-command allowlist contains
+exactly one config command — `show running-config hostname`, which extracts a
+single field — and the config axis (B-104/105/106) is unbuilt. Everything
+`nettools` collects today (interfaces, BGP, LLDP, IS-IS, SR-TE, route, logging)
+is precisely the operational-status class the design forbids caching. **A cache
+built now would have had a choice between having no subject and caching the one
+class of data it must never touch.**
+
+**Two findings banked for when B-104 lands:**
+
+1. **A cached value's age would be invisible to the bound.**
+   `EvidenceEpoch.skew_seconds` is `self.closed - self.opened` — a bracket set
+   before and after the collection loop, *not* a max/min over observations. It
+   coincides with the observation span today only because every collection is
+   live and monotonic time never goes backwards. Insert one cached observation
+   and its age moves neither `opened` nor `closed`: the epoch would report a
+   narrow, healthy window over data hours old. The fix is an
+   `effective_started` per observation (live: unchanged; cached:
+   `opened - age`), which is provably behaviour-preserving for the all-live
+   case and therefore mutation-testable against today's suite.
+
+2. **The clock exposure is worse for a cache than for anything before it.**
+   `Observation.started/completed` are monotonic *deliberately*, to avoid an NTP
+   step corrupting the arithmetic. A cached value forces wall-clock comparison
+   across a process boundary, and **its exposure window is proportional to its
+   TTL** — minutes to hours, against the 4–40 s span (B-466's measured
+   distribution) that monotonic time was chosen to protect. The cache does not
+   inherit the epoch's clock safety; it inverts it.
+
+**And a constraint that needs no new code.** `check_coherence` re-reads rung 1
+and the cause rung through `_collect_one_rung`, which takes no cache parameter
+and no epoch — so a cache *structurally cannot* serve the two rungs that matter
+most. That is already enforced by absence: the guard is that the parameter does
+not exist, and the thing to refuse in review is a future change that adds one.
+
+The general point: **a spike that concludes "not yet" has done its job.** The
+milestone was scheduled, briefed, and budgeted to build something; the honest
+answer was that the prerequisite does not exist. Filed as B-498, DEFERRED, with
+its unblocking condition named.
