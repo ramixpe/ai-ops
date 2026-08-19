@@ -350,6 +350,26 @@ MUTATIONS = [
      "        if index < 0 or index >= len(candidates):\n",
      "        if index >= len(candidates):\n",
      "test_a_negative_index_is_refused_not_silently_wrapped"),
+    # B-106: the intent-vs-observed diff (D16's payoff). `config_diff.FieldDiff`
+    # closes over three outcomes -- agrees/disagrees/cannot_compare -- and
+    # refuses to construct a `cannot_compare` result with no `reason`. That is
+    # the guard against this build's own recurring failure, an absence
+    # rendered as a value (OBS-188, OBS-202), applied to the new axis. Counted
+    # before mutating (OBS-191): the anchor string below occurs exactly once
+    # in config_diff.py (`grep -c` against the line, confirmed before this
+    # entry was added). Mutated to a no-op `pass`, so a `cannot_compare`
+    # `FieldDiff` with no reason constructs silently instead of raising --
+    # the test below only holds if that construction is rejected.
+    ("B-540", "a cannot_compare FieldDiff must carry a reason, or a missing "
+     "comparison silently reads as a value nobody actually checked",
+     "src/agent_nettools/config_diff.py",
+     '        if self.outcome == CANNOT_COMPARE and not self.reason:\n'
+     '            raise ValueError(\n'
+     '                "a cannot_compare FieldDiff must carry a reason -- an absence with "\n'
+     '                "no explanation is indistinguishable from a value nobody checked"\n'
+     '            )\n',
+     '        pass\n',
+     "test_cannot_compare_without_a_reason_is_rejected"),
 ]
 
 
