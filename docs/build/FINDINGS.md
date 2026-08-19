@@ -6756,3 +6756,61 @@ number that did not match, in a session where several agents were adding guards.
 **A count is a weak signal and it was the only one available** — the per-guard
 detail had been lost to a killed run. Worth making the harness report its
 verdicts durably rather than only to stdout.
+
+---
+
+## OBS-410 · B-103 · The config axis closed the demand for the narrowing pass, and 953 investigations say so
+
+`docs/design/reasoning-gate.md` held B-103 pending B-106 and named the exact test:
+
+> *"It is worth asking whether the config axis removes most of the demand for
+> this gate… I would rather build the gate against cases that survive B-106's
+> intent-vs-observed diff than against today's list."*
+
+B-106 landed, so the question became answerable. It was answered by sweeping the
+**entire committed fixture corpus** — every device × every label
+(`healthy`/`broken`/`isis-broken`/`t0`/`t1`) × every flow × every subject the
+evidence itself names: **953 investigations.**
+
+**Eight `cause_not_localised` occurrences, all one underlying case.** Every one
+traces to B-496 — PE3↔P2's IS-IS-enabled but unnumbered interface. Eight because
+the fault is visible from both ends, under two flows that share the root cause
+(`isis_adjacency` directly, `ldp_session` because LDP discovery fails on the same
+link), across the three captures spanning the period it was live. No other
+device, flow or label produces it. `bgp_session` has never produced it in this
+corpus.
+
+**`config_diff.reconcile_interface` explains all eight**, wherever the config
+axis was actually captured. On `t0`/`t1` it returns `CANNOT_COMPARE` — correctly,
+because those captures predate B-104's templates. That is a fixture-coverage gap
+reporting itself as a gap rather than as agreement, which is the third outcome
+doing precisely its job.
+
+So **B-103 is refused.** Zero cases survive the config axis to demonstrate a
+narrowing pass against, and building one would be a capability added and never
+exercised (OBS-121) — the pattern already refused for B-105, B-503 and B-498.
+`descent.py`, `investigation.py` and `reasoning_gate.py` are untouched; nothing
+needed writing, because nothing is being built.
+
+I spot-checked independently before accepting it: six hits in my own smaller
+sweep, every one on the PE3/P2 IS-IS link. The agent also found the measurement
+convergently confirmed by pinned tests in `test_descent.py` it had not read
+beforehand.
+
+**Two tests now carry the measurement instead of this prose.** One proves
+B-101/B-102's candidate machinery is live against the real case; one proves
+`config_diff` already answers what a narrowing pass would have asked. A refusal
+recorded only in a document decays; a refusal with an executable witness tells
+the next person whether it still holds.
+
+> The gate's own design predicted this and said to check. The valuable part is
+> not that we avoided building something — it is that the design named its own
+> falsifying condition in advance, so the check was cheap and the answer was
+> not a matter of taste.
+
+**A trap caught on the way.** `conftest.py` isolates `NETTOOLS_TICKET_DIR` per
+test because of OBS-172 (113 test tickets once committed). Session memory writes
+files too, and had no such fixture — every test running `investigate` would have
+written real files into the repo tree. Same defect, new store, caught before it
+landed rather than after. Worth noting the general form: **a new durable store
+inherits none of the isolation the previous ones learned.**

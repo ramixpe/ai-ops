@@ -49,3 +49,17 @@ def _admission_state_never_leaks_across_tests(tmp_path, monkeypatch):
     """
 
     monkeypatch.setenv("NETTOOLS_ADMISSION_DIR", str(tmp_path / "admission"))
+
+
+@pytest.fixture(autouse=True)
+def _session_memory_never_lands_in_the_repo(tmp_path, monkeypatch):
+    """Point every test's session-memory pointer files at a temp directory.
+
+    `nettools investigate` records a session turn (B-407) after every run and
+    defaults to `session_memory/` beside the repo -- the identical shape
+    `NETTOOLS_TICKET_DIR` above exists to close (OBS-172), one file per
+    session id (typically a parent process id) rather than one per ticket,
+    but landing in the working tree either way. Same fix, same reasoning.
+    """
+
+    monkeypatch.setenv("NETTOOLS_SESSION_MEMORY_DIR", str(tmp_path / "session_memory"))

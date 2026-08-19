@@ -12,8 +12,12 @@ from __future__ import annotations
 
 import pytest
 
+from agent_nettools import config_diff as cd
 from agent_nettools.checks import BROKEN, HEALTHY, UNEVALUATED, CheckResult
 from agent_nettools.descent import DescentResult, RungOutcome
+from agent_nettools.fixtures import fixture_sender
+from agent_nettools.investigation import investigate
+from agent_nettools.network_tools import collect_evidence
 from agent_nettools.reasoning_gate import (
     Candidate,
     GateRefusal,
@@ -364,3 +368,76 @@ class TestCandidatesForDescentNeverQueriesANewDevice:
         )
         candidates = candidates_for_descent(descent, lambda d: _interfaces_evidence("Gi0/0/0/0"))
         assert {c.device for c in candidates} == {"PE1"}
+
+
+# --------------------------------------------------------------------------- #
+# OBS-410 / B-103's evidence question, measured rather than narrated
+#
+# `docs/design/reasoning-gate.md` held B-103 (the narrowing pass) pending
+# B-106: "I do not think it removes all of it, but I would rather build the
+# gate against cases that survive B-106's intent-vs-observed diff than
+# against today's list." A full sweep of the committed fixture corpus
+# (every device, every flow, every label, every subject the evidence itself
+# names -- OBS-410) found exactly one surviving underlying
+# `cause_not_localised` case -- B-496, the PE3<->P2 unnumbered IS-IS link --
+# observed 8 raw times (both ends, two flows that share the root cause,
+# three labels/captures spanning the period the fault was live).
+# `config_diff.reconcile_interface` explains every one of them wherever the
+# config axis was actually captured (`isis-broken`; `t0`/`t1` predate
+# B-104's config templates and simply have nothing to compare, not a
+# config-axis failure). Zero residual cases survive, so **B-103 is refused
+# (CLOSED-AS-REFUSED)** rather than built, on the evidence recorded here as
+# OBS-410 and logged as this session's decision, B-710 -- see this session's
+# build report for the full sweep methodology and results.
+# survive, so B-103 was refused rather than built. These two tests are that
+# measurement, executable rather than narrated (OBS-165's own rule, applied
+# to a build decision rather than a ticket).
+# --------------------------------------------------------------------------- #
+
+
+class TestB103EvidenceQuestion:
+    """Both tests exercise the SAME real descent -- B-496's naturally-
+    occurring fault, replayed from the committed `isis-broken` fixture, not a
+    synthetic evidence dict -- so the two claims (the gate's machinery is
+    live and connectable; the config axis already answers the question a
+    narrowing pass exists to ask) are about one identical case, not two
+    conveniently-chosen ones.
+    """
+
+    def test_the_real_cause_not_localised_case_offers_real_narrowing_candidates(self):
+        """B-101/B-102 are not just unit-tested against synthetic evidence --
+        wired against a live descent, they enumerate a real candidate a
+        narrowing pass could point at. This is what "the machinery is fine,
+        there is currently nothing left for it to narrow toward" means: it is
+        not that `candidates_for_descent` is broken or empty."""
+
+        sender = fixture_sender(label="isis-broken")
+        result = investigate("PE3", "Gi0/0/0/0", flow="isis_adjacency", sender=sender)
+        assert result.descent.finding == "cause_not_localised"
+
+        candidates = candidates_for_descent(
+            result.descent, lambda device: collect_evidence(device, sender=sender)
+        )
+        assert any(c.kind == "interface" and c.id == "Gi0/0/0/0" for c in candidates)
+
+    def test_config_diff_already_answers_what_a_narrowing_pass_would_have_asked(self):
+        """The measurement behind the B-103 refusal. For the one
+        `cause_not_localised` case the committed corpus has, the config axis
+        (B-106, already built and wired nowhere near this gate -- see
+        `config_diff.py`'s own "Not a rung" section) names the exact
+        disagreement in one deterministic step: no model, no chosen index, no
+        second pass over the descent. A narrowing pass built today would have
+        nothing left to add for this case, which is the evidence
+        `docs/design/reasoning-gate.md` asked for before B-103 was built."""
+
+        sender = fixture_sender(label="isis-broken")
+        result = investigate("PE3", "Gi0/0/0/0", flow="isis_adjacency", sender=sender)
+        assert result.descent.finding == "cause_not_localised"
+
+        evidence = cd.gather_reconciliation_evidence("PE3", ["Gi0/0/0/0"], sender=sender)
+        reconciliation = cd.reconcile_interface(evidence, "PE3", "Gi0/0/0/0")
+
+        assert reconciliation.has_disagreement
+        isis_field = {f.field: f for f in reconciliation.fields}["isis_adjacency"]
+        assert isis_field.outcome == cd.DISAGREES
+        assert "IS-IS" in isis_field.reason

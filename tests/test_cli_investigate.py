@@ -634,3 +634,161 @@ def test_the_ledger_id_is_surfaced_so_an_operator_can_run_ledger_verdict(
         assert f"nettools ledger verdict {real_id}" in err
     finally:
         ledger.reset()
+
+
+# --------------------------------------------------------------------------- #
+# B-407 -- session memory wiring
+#
+# `session_memory.py` shipped with the exact call this wiring makes already
+# specified in its own docstring; these tests exercise it through the real
+# CLI entry point, `NETTOOLS_SESSION_MEMORY_DIR` isolated per test by
+# `conftest.py`'s autouse fixture (the same OBS-172 shape `NETTOOLS_TICKET_DIR`
+# was isolated for). Every refusal test has a positive control alongside it
+# through the identical path (OBS-181).
+# --------------------------------------------------------------------------- #
+
+
+def test_a_run_records_a_turn_session_memory_can_recall(monkeypatch):
+    from agent_nettools import session_memory as sm
+
+    code = _main(
+        ["investigate", "PE3", "Gi0/0/0/0", "--flow", "isis_adjacency",
+         "--from-fixtures", "--label", "isis-broken", "--session", "test-sess-1"],
+        monkeypatch,
+    )
+    assert code == 1  # cause_not_localised -- a fault was found on the path
+
+    recalled = sm.recall("test-sess-1")
+    assert recalled.outcome == sm.FOUND
+    assert recalled.turn.device == "PE3"
+    assert recalled.turn.subject == "Gi0/0/0/0"
+    assert recalled.turn.flow == "isis_adjacency"
+    assert recalled.turn.run_id
+    assert recalled.turn.ticket_path
+
+
+def test_it_resolves_subject_from_the_previous_turn_in_the_same_session(
+    monkeypatch, capsys,
+):
+    """Positive control (OBS-181) for the refusal tests below: a legitimate
+    'it', with a real prior turn to resolve against, must actually work."""
+
+    _main(
+        ["investigate", "PE3", "Gi0/0/0/0", "--flow", "isis_adjacency",
+         "--from-fixtures", "--label", "isis-broken", "--session", "test-sess-2"],
+        monkeypatch,
+    )
+    capsys.readouterr()
+
+    code = _main(
+        ["investigate", "PE3", "it",
+         "--from-fixtures", "--label", "isis-broken", "--session", "test-sess-2"],
+        monkeypatch,
+    )
+    out, err = capsys.readouterr()
+
+    assert code == 1
+    assert "resolved to subject 'Gi0/0/0/0'" in err
+    # No --flow given the second time either -- it comes from the recalled
+    # turn, so the descent runs isis_adjacency again, not the bgp_session
+    # default (B-112's pre-existing fallback).
+    assert _payload(out)["flow"] == "isis_adjacency"
+
+
+def test_it_resolves_device_from_the_previous_turn_too(monkeypatch, capsys):
+    _main(
+        ["investigate", "PE3", "Gi0/0/0/0", "--flow", "isis_adjacency",
+         "--from-fixtures", "--label", "isis-broken", "--session", "test-sess-3"],
+        monkeypatch,
+    )
+    capsys.readouterr()
+
+    code = _main(
+        ["investigate", "it", "it",
+         "--from-fixtures", "--label", "isis-broken", "--session", "test-sess-3"],
+        monkeypatch,
+    )
+    out, err = capsys.readouterr()
+
+    assert code == 1
+    assert "resolved to device 'PE3'" in err
+    assert _payload(out)["device"] == "PE3"
+
+
+def test_an_explicit_flow_is_never_overridden_by_the_recalled_one(monkeypatch, capsys):
+    """Recall only fills in what was not supplied -- an explicit --flow is
+    what the human asked for this turn, not a suggestion recall may override."""
+
+    _main(
+        ["investigate", "PE3", "Gi0/0/0/0", "--flow", "isis_adjacency",
+         "--from-fixtures", "--label", "isis-broken", "--session", "test-sess-4"],
+        monkeypatch,
+    )
+    capsys.readouterr()
+
+    _main(
+        ["investigate", "PE3", "it", "--flow", "ldp_session",
+         "--from-fixtures", "--label", "isis-broken", "--session", "test-sess-4"],
+        monkeypatch,
+    )
+    out, _ = capsys.readouterr()
+
+    assert _payload(out)["flow"] == "ldp_session"
+
+
+def test_it_with_no_recorded_turn_refuses_rather_than_treating_it_as_literal(
+    monkeypatch, capsys,
+):
+    """A store that was never written for this session must refuse (exit 2)
+    -- not silently look up a device or subject literally named 'it', which
+    does not exist on this fabric."""
+
+    code = _main(
+        ["investigate", "it", "it",
+         "--from-fixtures", "--label", "isis-broken", "--session", "never-used-session"],
+        monkeypatch,
+    )
+    out, _ = capsys.readouterr()
+    payload = _payload(out)
+
+    assert code == 2
+    assert payload["status"] == "error"
+    assert any("does not resolve" in e for e in payload["errors"])
+
+
+def test_it_is_case_insensitive(monkeypatch, capsys):
+    _main(
+        ["investigate", "PE3", "Gi0/0/0/0", "--flow", "isis_adjacency",
+         "--from-fixtures", "--label", "isis-broken", "--session", "test-sess-5"],
+        monkeypatch,
+    )
+    capsys.readouterr()
+
+    code = _main(
+        ["investigate", "PE3", "IT",
+         "--from-fixtures", "--label", "isis-broken", "--session", "test-sess-5"],
+        monkeypatch,
+    )
+    out, _ = capsys.readouterr()
+
+    assert code == 1
+    assert _payload(out)["subject"] == "Gi0/0/0/0"
+
+
+def test_two_different_sessions_do_not_see_each_others_turns(monkeypatch, capsys):
+    _main(
+        ["investigate", "PE3", "Gi0/0/0/0", "--flow", "isis_adjacency",
+         "--from-fixtures", "--label", "isis-broken", "--session", "session-a"],
+        monkeypatch,
+    )
+    capsys.readouterr()
+
+    code = _main(
+        ["investigate", "it", "it",
+         "--from-fixtures", "--label", "isis-broken", "--session", "session-b"],
+        monkeypatch,
+    )
+    out, _ = capsys.readouterr()
+
+    assert code == 2
+    assert "does not resolve" in _payload(out)["errors"][0]

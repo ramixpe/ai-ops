@@ -15,8 +15,11 @@ Exposed as the ``nettools`` console script. Subcommands:
     nettools investigate DEVICE SUBJECT
                          [--flow bgp_session|interface|isis_adjacency|ldp_session]
                          [--from-fixtures [--label L]] [--paraphrase] [--notify]
+                         [--session ID]
                          (SUBJECT may be a sentence, e.g. "why can't RR1 reach
-                         10.255.0.12?", when --flow is omitted -- B-112)
+                         10.255.0.12?", when --flow is omitted -- B-112; DEVICE
+                         and/or SUBJECT may be the literal word "it" to resolve
+                         against this session's last turn -- B-407)
     nettools audit [--from-fixtures [--label L]]
     nettools analyze [DEVICE] [--show-evidence] [--save]
     nettools analyze --fabric [--show-evidence] [--save]
@@ -655,6 +658,143 @@ def _record_diagnosis_in_ledger(result, args, subject, flow, run_id=None) -> Non
         _note(f"# {write.warning}", args)
 
 
+def _session_id(args: argparse.Namespace) -> str:
+    """One id per interactive sitting (B-407) -- `session_memory.py`'s own
+    docstring names three CLI-layer choices for minting it ("a shell PID, an
+    explicit --session flag, a generated value cached in a dotfile") and
+    leaves the pick to this file. This is the one that needs no extra state:
+    an explicit ``--session`` wins; otherwise the parent process id, which is
+    typically the shell that invoked `nettools` and so is stable across every
+    invocation from one terminal and distinct across separate ones.
+    """
+
+    explicit = getattr(args, "session", None)
+    return explicit or str(os.getppid())
+
+
+def _resolve_it_reference(args: argparse.Namespace) -> int | None:
+    """Resolve a literal ``"it"`` DEVICE or SUBJECT against session memory
+    (B-407), mutating ``args.device``/``args.subject``/``args.flow`` in
+    place on success -- exactly as if the human had typed the resolved
+    values directly, so every line below this call in `_cmd_investigate`
+    (ticket, ledger, notify, the descent itself) needs no awareness that
+    resolution happened. Returns an exit code if the run must abort instead
+    (no session recorded, or the store could not be read), or ``None`` to
+    continue.
+
+    Case-insensitive exact-token match only -- not sentence parsing. A bare
+    "it" inside a free-text question (B-112's `"why can't RR1 reach
+    10.255.0.12?"`) is `flow_selection.select_flow`'s problem; this only
+    ever fires when DEVICE or SUBJECT *is* the word "it", the shape
+    `session_memory.py`'s own docstring names ("a bare 'it' in a follow-up").
+    """
+
+    wants_device = args.device.casefold() == "it"
+    wants_subject = args.subject.casefold() == "it"
+    if not (wants_device or wants_subject):
+        return None
+
+    from . import session_memory
+
+    session_id = _session_id(args)
+    try:
+        recalled = session_memory.recall(session_id)
+    except ValueError as exc:
+        _emit({
+            "tool": "investigate", "status": "error",
+            "device": args.device, "subject": args.subject,
+            "errors": [f"invalid --session {session_id!r}: {exc}"],
+        }, args)
+        return EXIT_CRITICAL
+
+    if recalled.outcome != session_memory.FOUND:
+        # NOT_FOUND and CANNOT_RECALL both refuse -- OBS-188/OBS-202's shape,
+        # applied here: a store that could not be read must never be treated
+        # as "no prior turn" and quietly fall through to reading "it" as a
+        # literal (nonexistent) device or subject name.
+        reason = (
+            "no earlier turn is recorded for this session"
+            if recalled.outcome == session_memory.NOT_FOUND
+            else recalled.reason
+        )
+        _emit({
+            "tool": "investigate", "status": "error",
+            "device": args.device, "subject": args.subject,
+            "errors": [
+                f"'it' does not resolve for session {session_id!r}: {reason}",
+                "give DEVICE/SUBJECT explicitly, or run an investigation "
+                "first so a later 'it' has a turn to point at",
+            ],
+        }, args)
+        return EXIT_CRITICAL
+
+    turn = recalled.turn
+    missing = [
+        name for name, wants, have in (
+            ("device", wants_device, turn.device),
+            ("subject", wants_subject, turn.subject),
+        )
+        if wants and not have
+    ]
+    if missing:
+        _emit({
+            "tool": "investigate", "status": "error",
+            "device": args.device, "subject": args.subject,
+            "errors": [
+                f"'it' does not resolve: the last recorded turn for session "
+                f"{session_id!r} has no {' or '.join(missing)}",
+            ],
+        }, args)
+        return EXIT_CRITICAL
+
+    if wants_device:
+        _note(
+            f"# 'it' resolved to device {turn.device!r} from this session's "
+            f"last turn ({turn.recorded_at}).", args,
+        )
+        args.device = turn.device
+    if wants_subject:
+        _note(
+            f"# 'it' resolved to subject {turn.subject!r} from this session's "
+            f"last turn ({turn.recorded_at}).", args,
+        )
+        args.subject = turn.subject
+    # Only when the caller did not already name one -- an explicit --flow is
+    # what the human asked for, and a recalled flow must not override it.
+    if args.flow is None and turn.flow:
+        args.flow = turn.flow
+    return None
+
+
+def _record_session_turn(handle, args, subject, flow) -> None:
+    """Remember this turn so a later "it" in the same session can resolve it
+    (B-407). Never raises -- a pointer this small must not be able to take
+    an investigation down, the same posture `_record_in_ticket` and
+    `_record_diagnosis_in_ledger` already take for their own bookkeeping.
+
+    Called after `_open_ticket_for` returns and `subject`/`flow` are
+    resolved -- exactly the call `session_memory.py`'s own docstring
+    specified in advance.
+    """
+
+    from . import session_memory
+
+    try:
+        write = session_memory.record_turn(
+            _session_id(args),
+            device=getattr(args, "device", None),
+            subject=subject,
+            flow=flow,
+            run_id=getattr(handle, "run_id", None),
+            ticket_path=str(handle.path) if handle is not None else None,
+        )
+    except ValueError as exc:  # invalid --session, or a run recording nothing
+        _note(f"# session memory not recorded: {exc}", args)
+        return
+    if not write.persisted:
+        _note(f"# session memory not recorded: {write.warning}", args)
+
+
 def _default_actor() -> str:
     from .network_tools import _resolve_actor
 
@@ -743,6 +883,14 @@ def _cmd_investigate(args: argparse.Namespace) -> int:
     model; only the correlation is qualified, and downgrading the exit code for
     it would report doubt about a diagnosis that has none.
     """
+
+    # B-407: a literal "it" DEVICE/SUBJECT resolves against this session's
+    # last turn before anything else runs -- no fixtures loaded, no ticket
+    # opened, no ledger row, exactly the same posture the REFUSED-flow check
+    # just below takes for a named-but-unbuilt flow.
+    abort = _resolve_it_reference(args)
+    if abort is not None:
+        return abort
 
     # A REFUSED flow is answered before any work starts: no fixtures loaded, no
     # ticket opened, no ledger row. The operator named a real concept and the
@@ -844,11 +992,16 @@ def _cmd_investigate(args: argparse.Namespace) -> int:
     # field code-observed. Opened here rather than at the top of the command so
     # the resolved flow/subject are known -- the ticket records what was
     # actually investigated, not what was typed.
+    ticket_handle = _open_ticket_for(args, subject, flow, entry_point="cli:investigate")
     _record_in_ticket(
-        _open_ticket_for(args, subject, flow, entry_point="cli:investigate"),
-        args, result, subject, flow,
+        ticket_handle, args, result, subject, flow,
         question=(raw_subject if raw_subject != subject else None),
     )
+    # B-407: the pointer a later "it" in this same session resolves through
+    # -- the same resolved device/subject/flow the ticket above just
+    # recorded, plus that ticket's own run_id/path so a later turn can follow
+    # it straight to the content, never a second copy of it.
+    _record_session_turn(ticket_handle, args, subject, flow)
 
     for repair in result.repairs:
         _note(f"# Repaired a model response: {repair}", args)
@@ -1569,6 +1722,14 @@ def build_parser() -> argparse.ArgumentParser:
              "best-effort: a failure is reported and never changes the exit code. "
              "With the default provider ('none') this is a no-op, not an error, so "
              "the flag is safe in a cron entry written before a channel exists.",
+    )
+    p_investigate.add_argument(
+        "--session", default=None,
+        help="Session id session memory (B-407) is keyed by -- ties a literal "
+             "\"it\" DEVICE/SUBJECT to an earlier turn in the same sitting, and "
+             "labels the turn this run records for a later one to resolve. "
+             "Default: the parent process id (stable across every invocation "
+             "from one shell, distinct across separate ones).",
     )
     p_investigate.set_defaults(func=_cmd_investigate)
 

@@ -477,6 +477,20 @@ SETTINGS: tuple[Setting, ...] = (
         "investigation that triggered it.",
         "ticket",
     ),
+    # -- session_memory.py --
+    Setting(
+        "NETTOOLS_SESSION_MEMORY_DIR", "path", "session_memory",
+        "Directory holding one small JSON file per interactive session (B-407) "
+        "-- a pointer to the device/subject/flow/ticket of that session's most "
+        "recent `nettools investigate` turn, so a later 'it' in the same "
+        "session can resolve without the human restating it. Overwritten each "
+        "turn, never appended -- this is not a history. Same precedence as "
+        "NETTOOLS_TICKET_DIR: a real default rather than opt-in-only, because "
+        "the whole point is surviving between separate `nettools` process "
+        "invocations. A write failure degrades (RecordWriteResult.persisted="
+        "False) and never fails the investigation that triggered it.",
+        "session_memory",
+    ),
     # -- fixtures.py --
     Setting(
         "NETTOOLS_FIXTURE_DIR", "path", "tests/fixtures",

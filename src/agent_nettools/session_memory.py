@@ -104,21 +104,33 @@ Three independent reasons converge, not one:
   which is the specific failure this change was warned to avoid: a fifth
   record that can drift from a fourth is worse than no fifth record.
 
-**Not wired into `cli.py`, `investigation.py`, or `agent_loop.py`.** Those
-files belong to other tracks this session and are out of scope for this
-change. This module ships the recorder, the query surface, and its tests
-only -- the same posture `ledger.py` and `ticket.py` themselves shipped
-under, each documenting the exact call its own wiring needs without applying
-it. The call this module needs, once a caller owns session identity: after
-`ticket.open_ticket(...)` returns and a flow/device/subject are resolved,
-`session_memory.record_turn(session_id, device=..., subject=..., flow=...,
-run_id=ticket.run_id, ticket_path=ticket.path)`; at the start of a run, before
-prompting the human for a device/subject that was not supplied on the command
-line, `session_memory.recall(session_id)` and fall back to its `turn` fields
-only when `outcome == FOUND`. Minting/holding `session_id` itself (one
-per interactive sitting -- a shell PID, an explicit `--session` flag, a
-generated value cached in a dotfile) is a CLI-layer decision this module does
-not make.
+**Wired into `cli.py` only, not `investigation.py` or `agent_loop.py`.**
+Those two remain out of scope for this change -- `investigate()` itself takes
+no session identity and should not grow one just to serve its one caller's
+bookkeeping (the same reason `ticket.py`'s recording lives in `cli.py`, one
+level up, and not inside `investigation.py`). `cli._cmd_investigate` makes
+exactly the two calls this docstring specified in advance: after
+`_open_ticket_for(...)` returns and `subject`/`flow` are resolved,
+`cli._record_session_turn` calls `session_memory.record_turn(session_id,
+device=..., subject=..., flow=..., run_id=ticket.run_id,
+ticket_path=str(ticket.path))`, never raising (the same degrade-on-failure
+posture `_record_in_ticket`/`_record_diagnosis_in_ledger` already take for
+their own bookkeeping). And at the top of the command, before DEVICE/SUBJECT
+are used for anything else, `cli._resolve_it_reference` recognises a literal
+`"it"` (case-insensitive, exact token -- not sentence parsing; a pronoun
+inside a free-text question like B-112's `"why can't RR1 reach
+10.255.0.12?"` is `flow_selection.py`'s problem, not this module's) in either
+position, calls `session_memory.recall(session_id)`, and substitutes
+`turn.device`/`turn.subject`/`turn.flow` only when `outcome == FOUND` --
+`NOT_FOUND` and `CANNOT_RECALL` both refuse the run with a stated reason
+rather than silently falling through to treating `"it"` as a literal device
+or subject name. `cli._session_id` mints the identity: an explicit
+`--session` flag if given, else `str(os.getppid())` -- the parent process
+(typically the invoking shell), which needs no dotfile or generated value to
+persist, stays stable across every `nettools` invocation from one terminal,
+and differs across separate ones. That is one of the three options this
+docstring named in advance for a CLI-layer decision it deliberately left
+open; see `cli.py` for the choice and its reasoning in place.
 
 Found nothing vs. could not find out (OBS-188, OBS-202's shape, applied here)
 ----------------------------------------------------------------------------------
@@ -164,25 +176,24 @@ lookup for one session at a time, never a query across many -- so building a
 second backend now would repeat the cache spike's "empty shell" mistake at a
 smaller scale: capability added and never exercised (OBS-121).
 
-**No new environment variable, for the same reason `ledger.py` has none: the
-module that owns `settings.py` is another track this session**, and
-`tests/test_settings.py::test_every_source_env_var_is_declared` fails loudly
-(by design) on any `_ENV`-suffixed constant this module cannot also declare
-in `settings.SETTINGS`. Unlike `ledger.py`, though, this module still ships a
-*real* default directory rather than an in-memory-only one: `ledger.py`'s
-in-memory default is fine because a slow-accumulating accuracy corpus losing
-one process's worth of diagnoses is a real but acceptable limit; a session
-memory whose entire purpose is surviving *between* separate `nettools`
-process invocations would be pointless with an in-memory-only default, since
+**`NETTOOLS_SESSION_MEMORY_DIR`, added once `cli.py`'s track wired this
+module in and took ownership of `settings.py` too.** This module still ships
+a *real* default directory rather than an in-memory-only one, for the reason
+recorded when it shipped without the override: `ledger.py`'s in-memory
+default is fine because a slow-accumulating accuracy corpus losing one
+process's worth of diagnoses is a real but acceptable limit; a session memory
+whose entire purpose is surviving *between* separate `nettools` process
+invocations would be pointless with an in-memory-only default, since
 "nettools <command> is a fresh process every time" (`metrics.py`'s own
 docstring) is exactly the boundary this module exists to survive. So
-`get_store(base_dir=None)` resolves to the literal relative path
-`DEFAULT_SESSION_MEMORY_DIR` when no `base_dir` is given -- a real default,
-just not an environment-configurable one yet. Once a track owns
-`settings.py`, adding `NETTOOLS_SESSION_MEMORY_DIR` there and reading it here
-(mirroring `NETTOOLS_TICKET_DIR`) is a small, additive follow-up; it is not
-done in this change because it cannot be done honestly without touching a
-file this change was told not to touch.
+`get_store(base_dir=None)` resolves, in order, to an explicit `base_dir`,
+then `NETTOOLS_SESSION_MEMORY_DIR` if set, then the literal relative path
+`DEFAULT_SESSION_MEMORY_DIR` -- mirroring `NETTOOLS_TICKET_DIR`'s own
+precedence (`ticket.py`'s `_explicit_dir or os.getenv(...) or DEFAULT...`)
+exactly, including the same `.strip()` treatment of an empty-but-set value as
+unset. Declared in `settings.SETTINGS` (`"session_memory"` module) so
+`tests/test_settings.py::test_every_source_env_var_is_declared` sees it,
+per that test's own standing rule for any `_ENV`-suffixed constant.
 """
 
 from __future__ import annotations
@@ -226,14 +237,17 @@ NOT_FOUND = "not_found"
 CANNOT_RECALL = "cannot_recall"
 OUTCOMES: frozenset[str] = frozenset({FOUND, NOT_FOUND, CANNOT_RECALL})
 
-#: The real (but not environment-configurable -- see the module docstring's
-#: "Storage" section on why) default directory, resolved by `get_store` when
-#: no `base_dir` is given. Deliberately NOT named with an `_ENV` suffix and
-#: NOT read via `os.getenv` anywhere in this module: `settings.py` is out of
-#: scope for this change, and `tests/test_settings.py` fails loudly on any
-#: undeclared env var discovered in `src/` -- see that module docstring
-#: section for the full reasoning.
+#: The real default directory, resolved by `get_store` when neither an
+#: explicit `base_dir` nor `NETTOOLS_SESSION_MEMORY_DIR_ENV` is set -- see the
+#: module docstring's "Storage" section.
 DEFAULT_SESSION_MEMORY_DIR = "session_memory"
+
+#: Mirrors `ticket.NETTOOLS_TICKET_DIR_ENV`'s own naming and precedence
+#: exactly: an explicit `base_dir` wins, then this variable, then
+#: `DEFAULT_SESSION_MEMORY_DIR`. Declared in `settings.SETTINGS` under the
+#: `"session_memory"` module -- see that table for the description shown by
+#: `nettools config show`.
+NETTOOLS_SESSION_MEMORY_DIR_ENV = "NETTOOLS_SESSION_MEMORY_DIR"
 
 #: Session ids are joined directly into a filesystem path
 #: (`FileSessionMemoryStore._path`). Bounds what a session id is allowed to
@@ -262,7 +276,17 @@ def _timestamp_now() -> str:
 
 
 def _session_dir(base_dir: str | None) -> Path:
-    return Path(base_dir or DEFAULT_SESSION_MEMORY_DIR)
+    """Resolve the store's directory: explicit ``base_dir``, else
+    ``NETTOOLS_SESSION_MEMORY_DIR`` if it is set to a non-blank value, else
+    :data:`DEFAULT_SESSION_MEMORY_DIR`. Same precedence and the same
+    ``.strip()`` treatment of a set-but-empty value as unset that
+    `ticket.Ticket`'s own directory resolution gives `NETTOOLS_TICKET_DIR`.
+    """
+
+    if base_dir:
+        return Path(base_dir)
+    env_dir = os.getenv(NETTOOLS_SESSION_MEMORY_DIR_ENV, "").strip()
+    return Path(env_dir or DEFAULT_SESSION_MEMORY_DIR)
 
 
 def _atomic_write_text(path: Path, text: str) -> None:
@@ -490,14 +514,14 @@ class FileSessionMemoryStore(SessionMemoryStore):
 
 def get_store(base_dir: str | None = None) -> SessionMemoryStore:
     """Return the session memory store: `FileSessionMemoryStore`, resolved
-    against ``base_dir`` or `DEFAULT_SESSION_MEMORY_DIR`.
+    against ``base_dir``, else `NETTOOLS_SESSION_MEMORY_DIR`, else
+    `DEFAULT_SESSION_MEMORY_DIR` -- see :func:`_session_dir`.
 
     Only one backend exists today -- see the module docstring's "Storage"
-    section for why a second one has no demonstrated need yet, and why this
-    factory has no environment-variable selector (unlike
-    `evidence_store.get_store`) until a track that owns `settings.py` adds
-    one. `base_dir` is the only override, exactly `evidence_store.get_store`'s
-    own parameter of the same name and purpose.
+    section for why a second one has no demonstrated need yet. `base_dir` is
+    the explicit override, exactly `evidence_store.get_store`'s own parameter
+    of the same name and purpose; the environment variable is the same
+    precedence `ticket.py` gives `NETTOOLS_TICKET_DIR`.
     """
 
     return FileSessionMemoryStore(base_dir)
