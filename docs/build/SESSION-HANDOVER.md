@@ -2,9 +2,9 @@
 
 > **OVERNIGHT RUN — 2026-08-18 into 2026-08-19. Read this first.**
 >
-> Green and fully pushed at every step: **2481 passed / 24 skipped**, lint clean,
-> **25/25 mutation guards**, four frozen files intact. Tests went
-> **2229 → 2481** overnight. One warning is expected and deliberate — see
+> Green and fully pushed at every step: **2491 passed / 24 skipped**, lint clean,
+> **26/26 mutation guards**, four frozen files intact. Tests went
+> **2229 → 2491** overnight. One warning is expected and deliberate — see
 > "Your call in the morning", item 1.
 >
 > ### Landed
@@ -82,8 +82,19 @@
 >
 > ### Backlog
 > **137 rows** — 76 DONE, 15 OPEN, 28 DEFERRED, 14 BLOCKED, 2 OUT-OF-SCOPE,
-> 1 CLOSED-AS-MEASURED, 1 CLOSED-AS-REFUSED. FINDINGS.md holds **185**
+> 1 CLOSED-AS-MEASURED, 1 CLOSED-AS-REFUSED. FINDINGS.md holds **186**
 > observations.
+>
+> ### The diagrams are now true
+> `docs/diagrams/` claimed to be generated from the tree and wasn't — every
+> number was a literal, stale by a wide margin (1,963 tests against 2,491;
+> 20/20 guards against 26/26; 120 backlog items against 137). They now measure
+> at generation time, and `tests/test_diagrams.py` byte-diffs a regeneration
+> against every committed SVG, so one cannot go stale without the suite going
+> red. **Look at `05-current-state.svg` first in the morning** — it is now an
+> accurate picture rather than a flattering one. Note the consequence: editing
+> `FINDINGS.md` or `BACKLOG.md` now requires regenerating the diagrams in the
+> same commit (OBS-188).
 >
 > ### Frozen-file baseline moved twice — one signed off, one awaiting you
 > `platforms.py` gained the `ldp`/`ldp_discovery` intents (**operator-approved**,
