@@ -1379,3 +1379,76 @@ out of it. The answer was right and the route was wrong — and it could not hav
 been right, because `ldp` has no MCP tool. `collect_lab_evidence` was the only
 door available. Scored as partial for both; the fix is B-512, deliberately
 deferred past this run so the manifest stayed comparable.
+
+---
+
+## §14 — qwen3.8-27b, an out-of-band capability probe
+
+Run by the operator immediately after the MCP surface grew 23 → 29, so **this arm
+is not comparable to §13's two**: `check_lab_ldp_neighbors` and
+`check_lab_ldp_discovery` did not exist when the gemma models were tested, which
+made Q8 unwinnable for them. Recorded as a capability reading, not a scored
+comparison. The operator's framing: too slow for routine testing, candidate for
+production later.
+
+**9/9**, and three of the nine are above the bar the questions were written to.
+
+### What separates it from both §13 arms
+
+Not tool selection — all three reached `investigate_lab_session` with
+`flow="isis_adjacency"` on Q7. The difference is epistemic.
+
+**1. It refused a false premise.** Q1 asks *"why is the BGP session on PE2
+down?"*. It is not down. qwen called `check_lab_bgp_neighbors`, found the peer
+Established for 22h49m, and answered: *"There is no down session to investigate on
+PE2"* — then listed the layers a BGP-shaped symptom might actually live in and
+asked which symptom was really being seen. e4b asked for the peer address; 31b
+went tool-shopping. **Neither questioned the premise**, and the question was never
+designed to test that — it was designed to measure first-tool selection. The
+better behaviour was invisible to the scoring rubric until a model produced it.
+
+**2. It read tool descriptions as guidance rather than as a menu.** On Q9 it
+graded `interface_admin_up_line_down` on `Gi0/0/0/2.300` as *"likely benign — a
+line-down subinterface is normal on this fabric"*. That sentence exists verbatim
+in `check_lab_interfaces`'s description. Both gemma arms reported the same finding
+as actionable. It also stated that `investigate_lab_session` *"can't take
+`device_health` as a flow by design"* — reading the refusal added to the
+description that same morning (OBS-191) and explaining it rather than merely
+avoiding it.
+
+This is the strongest evidence yet for the position OBS-112 took: the tool
+description is the reasoning surface, not documentation. The same words produced
+better behaviour in a better model — the ceiling was in the reader, but the
+information was already there.
+
+**3. It marked the boundary of its own evidence.** On Q7 it cross-referenced
+LLDP, IS-IS and interface state into a table, concluded Gi0/0/0/2 is simply not
+an IS-IS-enabled link, and then wrote: *"If you expected Gi0/0/0/2 to be a CORE
+link… the absence of both LLDP and IS-IS would be a real anomaly worth chasing."*
+It named the assumption its conclusion rests on, which is the thing a human on
+call actually needs and which no rubric here rewards.
+
+On Q6 it went further and identified the test itself — *"The user is essentially
+testing whether I'll falsely claim completeness"* — then answered honestly
+anyway. Worth noting against B-511: a model that recognises it is being evaluated
+is a second, quieter way for an evaluation to stop measuring what it thinks.
+
+### What this changes
+
+**B-495 is reinforced, not overturned.** Capability is not monotonic in size:
+31b (larger) scored below e4b (smaller) in §13. qwen is both larger *and* better,
+which is consistent — size does not predict, but it does not preclude.
+
+**It confirms the new tools are discoverable.** qwen selected
+`check_lab_ldp_neighbors` and `check_lab_ldp_discovery` unprompted, roughly an
+hour after they were registered, with no prompting about their existence.
+
+**For production the relevant property is premise-refusal.** A model that accepts
+"why is X down?" when X is up will manufacture a plausible cause for a fault that
+does not exist. That failure is worse than a wrong tool choice, because the output
+looks like a diagnosis. Latency is a real cost; this is worth paying it for.
+
+**A gap in the question set, not in the models.** Q1 cannot distinguish "asked a
+sensible clarifying question" from "noticed the premise was false" — e4b scored
+a pass for the former. A future set needs a question whose premise is wrong in a
+way that only checking reveals. Filed as B-514.
