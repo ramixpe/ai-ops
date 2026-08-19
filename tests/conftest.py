@@ -25,3 +25,27 @@ def _tickets_never_land_in_the_repo(tmp_path, monkeypatch):
     """
 
     monkeypatch.setenv("NETTOOLS_TICKET_DIR", str(tmp_path / "tickets"))
+
+
+@pytest.fixture(autouse=True)
+def _admission_state_never_leaks_across_tests(tmp_path, monkeypatch):
+    """Point every test's admission/probe-budget lock files at a temp directory.
+
+    admission.py (B-408/B-444) gates concurrent collection and active-probe
+    rate budgeting with real flock files under `NETTOOLS_ADMISSION_DIR`
+    (default `./admission`) -- deliberately filesystem-based and cross-process,
+    since a routed investigation is a separate OS process (event_routing.py).
+    Left at its default, every test that exercises the real (non-`sender`)
+    transport path -- `install_fake_netmiko`, which still runs the real
+    `_netmiko_send_commands` this module gates -- would read and write the
+    SAME `./admission` directory as every other test in the same run, and the
+    probe-budget windows in particular persist actual timestamps on disk: a
+    handful of ping/traceroute tests sharing one device name is enough to
+    silently exhaust `NETTOOLS_MAX_ACTIVE_PROBES_PER_DEVICE` partway through
+    an unrelated later test, the same "writes into the working tree and
+    contaminates the next thing that reads it" shape `NETTOOLS_TICKET_DIR`
+    above already exists to close (OBS-172). Same fix, same reasoning: give
+    every test its own directory nobody else can see, autouse and unconditional.
+    """
+
+    monkeypatch.setenv("NETTOOLS_ADMISSION_DIR", str(tmp_path / "admission"))

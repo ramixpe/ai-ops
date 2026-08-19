@@ -94,15 +94,36 @@ def test_the_notifier_cannot_receive_an_evidence_bundle():
 
     If someone ever adds an `evidence=` parameter here, this test fails, and it
     should: the addition is the defect, not the test.
+
+    B-681 added `trustworthy`/`cause`/`ticket_id` -- small, code-typed values
+    (a bool, a three-field dict, an id), never a route for a bundle -- so the
+    expected set below grew to name them explicitly rather than the test
+    being loosened to `<=`/a subset check, which would stop catching a FUTURE
+    `evidence=` addition just as surely as deleting the test would.
     """
 
     import inspect
 
     params = set(inspect.signature(N.notify).parameters)
-    assert params == {"report", "device", "subject", "finding", "notifier", "silence"}
+    assert params == {
+        "report", "device", "subject", "finding", "notifier",
+        # B-483: a matched silence, which cannot carry evidence either --
+        # see SilenceNotice's own docstring.
+        "silence",
+        # B-681: the RCA the second notification is supposed to carry. All
+        # three are small, code-typed values -- a bool, a three-field dict of
+        # code-authored strings, an id -- not a route an evidence bundle could
+        # arrive through. The point of asserting the EXACT set, rather than a
+        # subset, is that widening it is a deliberate act someone must come
+        # here and justify.
+        "trustworthy", "cause", "ticket_id",
+    }
 
     send = set(inspect.signature(N.Notifier.send).parameters)
-    assert send == {"self", "report", "subject", "device", "finding"}
+    assert send == {
+        "self", "report", "subject", "device", "finding",
+        "trustworthy", "cause", "ticket_id",
+    }
 
 
 def test_only_report_fields_are_rendered_into_the_message():
@@ -124,6 +145,182 @@ def test_only_report_fields_are_rendered_into_the_message():
     assert "running-config" not in text
     assert "interface_line_down" in text
     assert "1 of 3 members healthy" in text
+
+
+# --------------------------------------------------------------------------- #
+# B-681: the RCA, not just the alarm -- trustworthy/cause/ticket_id
+# --------------------------------------------------------------------------- #
+
+
+def test_omitting_the_new_fields_renders_byte_identical_output():
+    """Positive control (OBS-181): the additive change changes nothing when
+    a caller does not opt into it -- proves the new parameters are truly
+    additive rather than a rewrite of the existing contract."""
+
+    kwargs = dict(device="RR1", subject="10.255.0.12", finding="interface_line_down")
+    before = N.render_report_text(_report(), **kwargs)
+    after = N.render_report_text(
+        _report(), trustworthy=None, cause=None, ticket_id=None, **kwargs
+    )
+    assert before == after
+
+
+def test_the_cause_rung_and_device_are_rendered_when_localised():
+    text = N.render_report_text(
+        _report(), device="RR1", subject="10.255.0.12", finding="interface_line_down",
+        cause={"rung": "interface", "device": "PE2", "reason": "line protocol down"},
+    )
+    assert "Cause: interface on PE2" in text
+
+
+def test_no_cause_line_when_nothing_was_localised():
+    """`cause` is `None` for `undetermined`/`no_fault_on_path`/etc -- the
+    same "absent, not a fabricated line" rule every other optional field in
+    this renderer already follows."""
+
+    text = N.render_report_text(
+        _report(), device="RR1", subject="10.255.0.12", finding="all_layers_healthy",
+        cause=None,
+    )
+    assert "Cause:" not in text
+
+
+def test_trustworthy_true_and_false_render_distinctly():
+    yes = N.render_report_text(_report(), device="RR1", subject="10.255.0.12",
+                                finding="interface_line_down", trustworthy=True)
+    no = N.render_report_text(_report(), device="RR1", subject="10.255.0.12",
+                               finding="interface_line_down", trustworthy=False)
+
+    assert "Trustworthy: yes" in yes
+    assert "Trustworthy: NO" in no
+    assert "verify" in no.lower()
+
+
+def test_trustworthy_omitted_renders_no_trustworthy_line():
+    """`None` (never checked/not passed) must not read as either yes or no."""
+
+    text = N.render_report_text(_report(), device="RR1", subject="10.255.0.12",
+                                 finding="interface_line_down")
+    assert "Trustworthy" not in text
+
+
+def test_the_ticket_id_is_rendered_so_the_operator_can_pick_it_up():
+    text = N.render_report_text(
+        _report(), device="RR1", subject="10.255.0.12", finding="interface_line_down",
+        ticket_id="a1b2c3d4e5f6",
+    )
+    assert "Ticket: a1b2c3d4e5f6" in text
+
+
+def test_no_ticket_id_omits_the_ticket_line():
+    text = N.render_report_text(_report(), device="RR1", subject="10.255.0.12",
+                                 finding="interface_line_down")
+    assert "Ticket:" not in text
+
+
+def test_all_three_new_fields_reach_telegram_together(monkeypatch):
+    """End to end through `notify()`/`TelegramNotifier`, not just the pure
+    renderer -- proves the fields actually reach the wire, not only the
+    function under direct test."""
+
+    capture = _Capture()
+    record = N.notify(
+        _report(), device="RR1", subject="10.255.0.12", finding="interface_line_down",
+        trustworthy=False,
+        cause={"rung": "bgp_session", "device": "RR1", "reason": "session Idle"},
+        ticket_id="deadbeef",
+        notifier=_telegram(monkeypatch, capture),
+    )
+
+    assert record["ok"] is True
+    text = json.loads(capture.requests[0].data)["text"]
+    assert "Cause: bgp_session on RR1" in text
+    assert "Trustworthy: NO" in text
+    assert "Ticket: deadbeef" in text
+
+
+# --------------------------------------------------------------------------- #
+# OBS-381: the `authoritative` guard -- never relay a model's paraphrase as
+# if it were the code-rendered finding.
+# --------------------------------------------------------------------------- #
+
+
+def test_a_non_authoritative_report_is_refused_not_relayed():
+    report = _report()
+    report["authoritative"] = False
+
+    with pytest.raises(N.NotifierError) as exc:
+        N.render_report_text(report, device="RR1", subject="10.255.0.12",
+                              finding="interface_line_down")
+    assert "non-authoritative" in str(exc.value)
+    assert "paraphrase" in str(exc.value)
+
+
+def test_a_non_authoritative_report_is_swallowed_by_notify_not_raised(monkeypatch):
+    """The refusal is real (proven above) but must degrade like every other
+    send failure -- `notify()` never raises, per this module's central rule."""
+
+    report = _report()
+    report["authoritative"] = False
+    capture = _Capture()
+
+    record = N.notify(report, device="RR1", subject="10.255.0.12",
+                       finding="interface_line_down",
+                       notifier=_telegram(monkeypatch, capture))
+
+    assert record["ok"] is False
+    assert "non-authoritative" in record["error"]
+    assert capture.requests == []
+
+
+def test_a_report_with_no_authoritative_key_at_all_still_renders():
+    """OBS-181: the refusal test above needs a positive control, and this is
+    it -- a report with NO `authoritative` key at all (every caller that
+    predates the flag, and every OTHER test in this file via `_report()`,
+    which sets it `True`) still renders: the check is `is False`, not
+    `is not True`."""
+
+    report = _report()
+    del report["authoritative"]
+
+    text = N.render_report_text(report, device="RR1", subject="10.255.0.12",
+                                 finding="interface_line_down")
+    assert "interface_line_down" in text
+
+
+# --------------------------------------------------------------------------- #
+# Device text and the projector -- checked, not assumed (see the module
+# docstring's "Device text and the projector" section for the full reasoning
+# this test pins as a deliberate, tested decision rather than a silent gap).
+# --------------------------------------------------------------------------- #
+
+
+def test_a_bgp_last_reset_reason_embedded_in_a_claim_renders_verbatim_by_design():
+    """`checks.bgp_transport`'s `_last_reset_note` folds a device's own
+    `last_reset_reason` into a rung's `reason`, which `render.render_report`
+    then folds into an observation's `claim` -- there is no longer a named
+    field to apply `model_egress.quote_device_text` to by the time this
+    module receives it, and redacting the CONTENT of an already-composed
+    claim string would make this module the redaction filter its own
+    docstring refuses to be. Pinned here so this is a checked, tested
+    decision, not an unexamined one -- see the module docstring."""
+
+    report = _report()
+    report["observations"].append({
+        "claim": (
+            "1/5 bgp_session on RR1 is broken: session to 10.255.0.12 is Idle; "
+            "the device last recorded a reset 3m ago with reason "
+            "'BGP Notification received: administrative shutdown' "
+            "(history, not current state)"
+        ),
+        "evidence_key": "RR1:bgp:10.255.0.12",
+    })
+
+    text = N.render_report_text(report, device="RR1", subject="10.255.0.12",
+                                 finding="interface_line_down")
+
+    assert "administrative shutdown" in text
+    assert "(history, not current state)" in text
 
 
 # --------------------------------------------------------------------------- #
@@ -183,7 +380,8 @@ def test_a_provider_that_raises_is_swallowed_and_recorded(monkeypatch):
     class Exploding(N.Notifier):
         name = "exploding"
 
-        def send(self, report, *, subject, device, finding):
+        def send(self, report, *, subject, device, finding,
+                  trustworthy=None, cause=None, ticket_id=None):
             raise RuntimeError("the channel is on fire")
 
     record = N.notify(_report(), device="RR1", subject="10.255.0.12",
@@ -367,7 +565,8 @@ def test_the_cli_hands_the_notifier_the_report_and_nothing_else(monkeypatch):
     class Recording(N.Notifier):
         name = "recording"
 
-        def send(self, report, *, subject, device, finding):
+        def send(self, report, *, subject, device, finding,
+                  trustworthy=None, cause=None, ticket_id=None):
             seen["report"] = report
             seen["finding"] = finding
 

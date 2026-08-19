@@ -51,3 +51,9 @@ docs/diagrams/.facts_cache.json
 # 113 of them were swept into a01b70d by `git add -A` before this line existed
 # (OBS-150's mistake, second occurrence).
 tickets/
+
+# Admission-control lock files and active-probe budget windows (B-408/B-444).
+# Real, live, run-local state -- flock markers and sliding-window timestamp
+# logs -- never a record worth keeping, same reasoning as evidence/ and
+# tickets/ above.
+admission/

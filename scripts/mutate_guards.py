@@ -653,6 +653,73 @@ MUTATIONS = [
      "        if mnemonic not in routable_mnemonics:\n",
      "        if False:\n",
      "test_fires_true_with_no_flow_table_entry_is_a_loud_error_not_a_silent_false"),
+    # ---- B-408/B-444: admission control for concurrent collection, and
+    # active-probe rate budgeting. Two guards, not one -- the ENFORCEMENT
+    # (does the per-device cap actually refuse a second concurrent
+    # collection) and the STRUCTURAL claim (does a refusal actually mark the
+    # envelope unevaluated, rather than leaving it looking like a healthy
+    # empty success -- OBS-188/OBS-202's shape, applied to this new axis).
+    # Counted before adding these entries (OBS-191): `if not got_device:`
+    # occurs exactly once in admission.py, and the two-line block
+    # `refusal = exc.refusal` / `result["status"] = STATUS_ERROR` occurs
+    # exactly once in network_tools.py (`result["status"] = STATUS_ERROR` by
+    # itself appears 16 times across the file's many other error paths, so
+    # the mutation anchors the *pair*, not the bare line, to target this one
+    # unambiguously) -- both checked with a `python3 -c` substring count,
+    # 2026-08-19. ----
+
+    ("B-444-DEVICE-CAP", "admission.admit refuses a second concurrent "
+     "collection against the same device once NETTOOLS_MAX_CONCURRENT_"
+     "PER_DEVICE slots are already held -- the per-device floor B-444 "
+     "measured against the live lab (3+ concurrent SSH sessions to one "
+     "device produced real connection failures roughly a third of the "
+     "time)",
+     "src/agent_nettools/admission.py",
+     "        if not got_device:\n",
+     "        if False:\n",
+     "test_admit_refuses_a_second_concurrent_collection_against_one_device"),
+
+    ("B-444-UNEVALUATED", "an admission refusal marks the envelope "
+     "STATUS_ERROR -- which checks.py already reports as unevaluated, "
+     "never healthy -- rather than leaving a fresh envelope's default "
+     "STATUS_SUCCESS untouched, which would be exactly the absence-"
+     "reported-as-a-value shape OBS-188/OBS-202 already named as this "
+     "build's most repeated defect",
+     "src/agent_nettools/network_tools.py",
+     '    refusal = exc.refusal\n    result["status"] = STATUS_ERROR\n',
+     '    refusal = exc.refusal\n',
+     "test_collect_evidence_refusal_never_opens_a_session_and_never_looks_healthy"),
+    # ---- B-680 (Job 1): reading a ticket back through an MCP tool
+    # (`list_lab_tickets`/`read_lab_ticket`, `mcp_server/server.py`,
+    # backed by `agent_nettools.ticket_read`). `ticket.py`'s own
+    # `_heading_safe`/`_blockquote` (the two entries directly above) already
+    # prove a caller string or a model's own response cannot forge a NEW
+    # SECTION in the FILE. Nothing before this entry tested the read path:
+    # once `ticket.read_ticket`'s parsed dict is handed to a SECOND model
+    # through a tool call, a field's raw CONTENT (not the file's structure)
+    # is what a reading model sees, and `ticket_read._quote_untrusted_fields`
+    # is the guard that keeps that content inside untrusted-content
+    # delimiters instead of bare beside genuinely trusted fields. Counted
+    # before adding this entry (OBS-191): the anchor string below occurs
+    # exactly once in ticket_read.py (`_quote_untrusted_fields` is the only
+    # call site that tests the `_UNTRUSTED_TEXT_FIELDS` membership at all),
+    # confirmed with a literal `str.count` against the file, not `grep -c`
+    # against a line (a line-based count would not have distinguished this
+    # from the near-identical prose in this module's own docstrings, which
+    # quote the same condition in English). Mutated to `if False`, which
+    # disables wrapping for EVERY field this module would otherwise contain
+    # (not only `response_text` -- `question`, `subject`, `excerpt`, ...) --
+    # exactly why the symbol below (found by `resolve_guard_tests`, never
+    # guessed) is sufficient: any one of them going bare is a containment
+    # failure this test is built to notice. ----
+
+    ("TICKET-READ-CONTAINMENT", "a ticket's untrusted text fields (a prior "
+     "model's own response among them) are wrapped in untrusted-content "
+     "delimiters before an MCP tool returns them, never left bare",
+     "src/agent_nettools/ticket_read.py",
+     "                if key in _UNTRUSTED_TEXT_FIELDS and isinstance(value, str)\n",
+     "                if False\n",
+     "test_a_forged_verdict_inside_a_models_prior_response_is_contained_on_read"),
 ]
 
 

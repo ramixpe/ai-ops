@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-from . import evidence_store, metrics, parsers, template_parsers
+from . import admission, evidence_store, metrics, parsers, template_parsers
 from .evidence_store import get_store
 from .inventory import InventoryError, get_device, load_inventory
 from .inventory_model import load_inventory_file
@@ -154,6 +154,45 @@ def _unsupported_result(
     result = _base_result(tool, device_name, source=source)
     result["status"] = STATUS_UNSUPPORTED
     result["data"] = {"intent": intent, "platform": platform, "commands": {}}
+    return result
+
+
+def _mark_admission_refused(
+    result: dict[str, Any], exc: admission.AdmissionDenied
+) -> dict[str, Any]:
+    """Turn a caller's in-progress envelope into an admission refusal, in place.
+
+    ``status`` becomes ``STATUS_ERROR`` -- deliberately not a new status
+    value. See ``admission.py``'s module docstring ("What a refused request
+    returns"): every downstream verdict consumer, most importantly
+    ``checks.py``'s ``_uneval_reason`` (frozen with respect to this change,
+    owned elsewhere), already treats ``STATUS_ERROR`` as "this intent
+    yielded nothing trustworthy" and reports the verdict as ``unevaluated``,
+    never ``healthy``. Reusing it is what makes "a refused read is
+    unevaluated, never a healthy zero" true against code this change cannot
+    touch, rather than aspirational until that code learns a new word.
+
+    ``result["admission"]`` is additive and new: present only on a refusal,
+    so a caller that wants to tell "we chose not to try" apart from "the
+    device actually failed" can, without parsing prose out of ``errors``.
+    ``result["data"]["commands"]`` is defaulted to ``{}`` if the caller had
+    not already set it -- every real call site's normal-path envelope has
+    this key, and a refusal must have the same shape, never a bare absence
+    a caller could mistake for something else missing.
+    """
+
+    refusal = exc.refusal
+    result["status"] = STATUS_ERROR
+    result["data"].setdefault("commands", {})
+    result["errors"].append(
+        f"admission refused ({refusal.scope}): {refusal.reason} -- "
+        "unevaluated, not attempted"
+    )
+    result["admission"] = {
+        "outcome": "refused",
+        "scope": refusal.scope,
+        "reason": refusal.reason,
+    }
     return result
 
 
@@ -381,9 +420,53 @@ def _netmiko_send_commands(
     retries actually consumed before it eventually succeeded, present only for
     entries that needed at least one -- how a retry is made obvious in the
     result, alongside the audit log's own per-attempt record.
+
+    **B-444.** This is the audit+metrics chokepoint every real (non-``sender``)
+    caller in this module funnels through, so it is also the one place
+    admission control (``admission.admit``) is applied -- a per-device and a
+    fabric-wide cap on concurrent live sessions, both measured against this
+    lab (see ``admission.py``'s module docstring). ``admission.admit`` raises
+    ``admission.AdmissionDenied`` *before* any connection is attempted and
+    *before* the netmiko import below even runs, when a request cannot be
+    admitted right now; every caller below catches it and turns it into a
+    refusal envelope -- see ``_mark_admission_refused``. ``session_started``
+    (in ``_netmiko_send_commands_admitted``) is measured *inside* the
+    admitted window, not from this function's own entry, so
+    ``NETTOOLS_METRICS_FILE`` latency reflects real transport time, never
+    time spent queued for a slot.
     """
 
-    from netmiko import ConnectHandler  # Imported lazily so unit tests do not need live SSH.
+    device_name_for_admission = device.get("name") or device.get("hostname", "unknown")
+    with admission.admit(device_name_for_admission):
+        return _netmiko_send_commands_admitted(
+            device,
+            commands,
+            read_timeout=read_timeout,
+            connect_timeout=connect_timeout,
+            banner_timeout=banner_timeout,
+            retries=retries,
+            retry_backoff=retry_backoff,
+        )
+
+
+def _netmiko_send_commands_admitted(
+    device: dict[str, Any],
+    commands: list[str],
+    *,
+    read_timeout: float | None = None,
+    connect_timeout: float | None = None,
+    banner_timeout: float | None = None,
+    retries: int | None = None,
+    retry_backoff: float | None = None,
+) -> tuple[dict[str, str], list[str], dict[str, int]]:
+    """The real transport body of ``_netmiko_send_commands``, run only once
+    admission has already been granted. Split out purely so the admission
+    gate in the function above wraps a single call rather than needing to be
+    threaded through every return statement below; every parameter and every
+    line of behavior is otherwise unchanged from before B-444.
+    """
+
+    from netmiko import ConnectHandler
 
     session_started = time.monotonic()
     platform = device.get("platform", "")
@@ -570,7 +653,10 @@ def _run_approved_commands(
                 result["errors"].append(f"{command}: {exc}")
         return result
 
-    outputs, errors, retries = _netmiko_send_commands(device, commands)
+    try:
+        outputs, errors, retries = _netmiko_send_commands(device, commands)
+    except admission.AdmissionDenied as exc:
+        return _mark_admission_refused(result, exc)
     result["data"]["commands"] = outputs
     if retries:
         result["data"]["retries"] = retries
@@ -807,7 +893,14 @@ def _run_rendered_command(
         _attach_parsed_template(result, platform, template_name)
         return result
 
-    outputs, errors, retries = _netmiko_send_commands(device, [command], read_timeout=read_timeout)
+    try:
+        outputs, errors, retries = _netmiko_send_commands(
+            device, [command], read_timeout=read_timeout
+        )
+    except admission.AdmissionDenied as exc:
+        _mark_admission_refused(result, exc)
+        _attach_parsed_template(result, platform, template_name)
+        return result
     result["data"]["commands"] = dict(outputs)
     if retries:
         result["data"]["retries"] = retries
@@ -862,16 +955,34 @@ def run_template(
 
     template = template_for(platform, template_name)
 
-    if template.active_probe and not _active_probes_allowed():
-        result = _safe_error(
-            "run_template",
-            device_name,
-            "Active probes (ping/traceroute) are disabled: "
-            f"{NETTOOLS_ALLOW_ACTIVE_PROBES_ENV} is set to a falsy value. Unset it or set it to "
-            "1/true to allow ping/traceroute templates.",
-        )
-        result["data"] = {"template": template_name, "platform": platform}
-        return result
+    if template.active_probe:
+        if not _active_probes_allowed():
+            result = _safe_error(
+                "run_template",
+                device_name,
+                "Active probes (ping/traceroute) are disabled: "
+                f"{NETTOOLS_ALLOW_ACTIVE_PROBES_ENV} is set to a falsy value. Unset it or set it to "
+                "1/true to allow ping/traceroute templates.",
+            )
+            result["data"] = {"template": template_name, "platform": platform}
+            return result
+        # B-408: the on/off gate above says probes are allowed at all; this
+        # is the rate on top of it, checked -- like everything above -- before
+        # any device access. See admission.py's "Active-probe budgeting".
+        # `sender is not None` short-circuits the transport entirely (fixture
+        # replay, a test double) -- it generates no real traffic, so it must
+        # never be budget-gated, the same "no device access on the injection
+        # path" principle admission.admit() already follows structurally by
+        # living inside _netmiko_send_commands.
+        if sender is None:
+            try:
+                admission.check_probe_budget(device_name)
+            except admission.AdmissionDenied as exc:
+                result = _base_result("run_template", device_name)
+                result["data"] = {"template": template_name, "platform": platform}
+                _mark_admission_refused(result, exc)
+                _attach_parsed_template(result, platform, template_name)
+                return result
 
     # Rendering (and both of its checks) now happens inside
     # `_run_rendered_command` itself -- see B-489 in its docstring. Calling it
@@ -942,12 +1053,26 @@ def run_templates(
         if template is None:
             result["errors"].append(f"{template_name}: no such template for {platform}")
             continue
-        if template.active_probe and not _active_probes_allowed():
-            result["errors"].append(
-                f"{template_name}: active probes are disabled by "
-                f"{NETTOOLS_ALLOW_ACTIVE_PROBES_ENV}"
-            )
-            continue
+        if template.active_probe:
+            if not _active_probes_allowed():
+                result["errors"].append(
+                    f"{template_name}: active probes are disabled by "
+                    f"{NETTOOLS_ALLOW_ACTIVE_PROBES_ENV}"
+                )
+                continue
+            # B-408: rate on top of the on/off gate above. See
+            # admission.py's "Active-probe budgeting". Skipped entirely on
+            # the `sender` (fixture/test-double) path -- see run_template's
+            # identical comment for why.
+            if sender is None:
+                try:
+                    admission.check_probe_budget(device_name)
+                except admission.AdmissionDenied as exc:
+                    result["errors"].append(
+                        f"{template_name}: admission refused ({exc.refusal.scope}): "
+                        f"{exc.refusal.reason} -- unevaluated, not attempted"
+                    )
+                    continue
         try:
             command = render_command(platform, template_name, **params)
         except TemplateValidationError as exc:
@@ -996,9 +1121,12 @@ def run_templates(
         result["data"]["commands"] = {}
         return result
 
-    outputs, errors, retries = _netmiko_send_commands(
-        device, commands, read_timeout=max(read_timeouts) if read_timeouts else None
-    )
+    try:
+        outputs, errors, retries = _netmiko_send_commands(
+            device, commands, read_timeout=max(read_timeouts) if read_timeouts else None
+        )
+    except admission.AdmissionDenied as exc:
+        return _mark_admission_refused(result, exc)
     result["data"]["commands"] = dict(outputs)
     if retries:
         result["data"]["retries"] = retries
@@ -1071,6 +1199,11 @@ def run_templates_split(
             result["errors"].extend(
                 batch_errors or [f"{command}: no output returned by the batch"]
             )
+            if batch.get("admission"):
+                # Same reasoning as _section_from_combined: the whole batch
+                # was admission-refused, so every entry sliced from it
+                # inherits the marker, not just the error text.
+                result["admission"] = batch["admission"]
         _attach_parsed_template(result, platform, template_name)
         envelopes.append(result)
 
@@ -1180,13 +1313,29 @@ def collect_evidence_and_templates(
             rendered.append(None)
             errors.append(f"{template_name}: no such template for {platform}")
             continue
-        if template.active_probe and not _active_probes_allowed():
-            rendered.append(None)
-            errors.append(
-                f"{template_name}: active probes are disabled by "
-                f"{NETTOOLS_ALLOW_ACTIVE_PROBES_ENV}"
-            )
-            continue
+        if template.active_probe:
+            if not _active_probes_allowed():
+                rendered.append(None)
+                errors.append(
+                    f"{template_name}: active probes are disabled by "
+                    f"{NETTOOLS_ALLOW_ACTIVE_PROBES_ENV}"
+                )
+                continue
+            # B-408: rate on top of the on/off gate above. See
+            # admission.py's "Active-probe budgeting". Skipped entirely on
+            # the `sender` (fixture/test-double) path -- see run_template's
+            # identical comment for why.
+            if sender is None:
+                try:
+                    admission.check_probe_budget(device_name)
+                except admission.AdmissionDenied as exc:
+                    rendered.append(None)
+                    errors.append(
+                        f"{template_name}: admission refused "
+                        f"({exc.refusal.scope}): {exc.refusal.reason} -- "
+                        "unevaluated, not attempted"
+                    )
+                    continue
         try:
             command = render_command(platform, template_name, **params)
         except TemplateValidationError as exc:
@@ -1244,6 +1393,8 @@ def collect_evidence_and_templates(
                 list(combined.get("errors") or [])
                 or [f"{command}: no output returned by the batch"]
             )
+            if combined.get("admission"):
+                result["admission"] = combined["admission"]
         _attach_parsed_template(result, platform, template_name)
         envelopes.append(result)
 
@@ -1290,9 +1441,13 @@ def _run_approved_commands_and_templates(
 
     # `sender is None` on this path by construction -- the real transport.
     result = _base_result("run_approved_commands", device_name, source=SOURCE_LIVE)
-    outputs, errors, retries = _netmiko_send_commands(
-        device, commands, read_timeout=read_timeout
-    )
+    result["data"] = {"platform": platform, "commands": {}}
+    try:
+        outputs, errors, retries = _netmiko_send_commands(
+            device, commands, read_timeout=read_timeout
+        )
+    except admission.AdmissionDenied as exc:
+        return _mark_admission_refused(result, exc)
     result["data"] = {"platform": platform, "commands": dict(outputs)}
     if retries:
         result["data"]["retries"] = retries
@@ -1682,6 +1837,13 @@ def _section_from_combined(
         related = [error for error in combined["errors"] if error.startswith(prefixes)]
         # A connection-level failure carries no command prefix; report it as-is.
         result["errors"] = related or list(combined["errors"])
+
+    if combined.get("admission"):
+        # The whole batch was admission-refused (B-444) -- every intent
+        # sliced from it inherits the same marker, not just the error text,
+        # so a per-intent consumer can tell "refused" apart from "the device
+        # failed" the same way a whole-batch consumer already can.
+        result["admission"] = combined["admission"]
 
     return result
 

@@ -41,6 +41,8 @@ environment (`DEVICE_USERNAME`, `DEVICE_PASSWORD`).
 - `get_lab_netbox_inventory`
 - `get_lab_netbox_topology`
 - `get_lab_graph_topology`
+- `list_lab_tickets`
+- `read_lab_ticket`
 
 There is no shell, configuration tool, or generic command runner.
 
@@ -305,6 +307,74 @@ same treatment `bgp_neighbor`'s `last_reset_reason` already gets.
 error -- when this device has no policy at that colour/endpoint at all;
 IOS-XR answers a non-matching colour/endpoint with nothing, not an error.
 
+### Reading a ticket back: `list_lab_tickets` / `read_lab_ticket` (B-680)
+
+The operator's own scenario is *event > notification > investigation > rca >
+notification, then the operator picks up the ticket through LM Studio for
+more investigation*. Without a read tool, that pickup starts from nothing and
+re-asks a model what `nettools investigate`'s flight recorder
+(`ticket.py`, `NETTOOLS_TICKET_DIR`) already recorded. These two tools close
+that gap, and only that gap -- both are `_read_only_tool`, like every check
+above: a ticket is a local file, not an external service or a device, so
+neither gate (`NETTOOLS_MCP_ALLOW_ACTIVE_PROBES`/
+`NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES`) applies to either.
+
+`list_lab_tickets(limit=20, include_closed=false)` takes **zero required
+parameters** -- an operator should not need to already know a `run_id` to ask
+"what needs attention". It defaults to OPEN tickets only, most recently
+opened first. `read_lab_ticket(run_id)` takes exactly one parameter, and it
+is deliberately `run_id`, **never a path**: `ticket.read_ticket` takes a path
+because its existing callers already have one, but an MCP tool's caller is a
+model, and a path-shaped parameter on a tool a model can call is an
+arbitrary-file-read vulnerability. `run_id` is `ticket.TicketRecorder.open`'s
+own existing join key, and `notifier.py`'s notification (B-681, below)
+carries the exact string this parameter wants, so an operator reading a
+Telegram alert already has what they need to type here.
+
+**The containment is a new guarantee, not an inherited one.**
+`ticket.py`'s own forgery defenses (`_heading_safe`/`_blockquote`, OBS-176)
+were proven on the WRITE path: a caller string or a model's own response
+carrying a forged `## Outcome update` heading and a fenced
+`json-ticket-section` block cannot become a real section when the file is
+parsed back. That says nothing about what happens once the resulting dict is
+handed to a SECOND model through a tool call -- a JSON string is
+syntactically inert, but a model reading its *content* does not parse JSON,
+it reads prose, and unmarked prose that looks like a forged verdict is
+exactly the shape of thing an instruction-following model can be steered by.
+Nothing before this tool tested that path. `agent_nettools.ticket_read`
+wraps every operator/event/model-authored field (`question`, `subject`, a
+device-adjacent `excerpt`, and -- uniquely to a ticket -- a prior model's own
+`response_text`) in `model_egress.quote_device_text`'s untrusted-content
+delimiters, the SAME primitive `mcp_server.boundary.sanitize` already uses
+for a parsed record's free text, before either tool returns anything.
+Mutation-tested by `scripts/mutate_guards.py`'s `TICKET-READ-CONTAINMENT`
+entry; the adversarial round trip is
+`tests/test_ticket_read.py::test_a_forged_verdict_inside_a_models_prior_
+response_is_contained_on_read`.
+
+**Code-observed stays apart from model-claimed, on read too.**
+`ticket.py`'s central rule -- the ticket records what the CODE observed,
+never what a model SAYS it did (OBS-165) -- only means something here if the
+read tool preserves the split rather than flattening every section into one
+blob. `read_lab_ticket`'s `data.ticket` carries `code_observed` (the
+question, the tool/device timeline, evidence provenance, and `answer` --
+`ticket.record_answer`'s own docstring: "the deterministic descent's own
+answer... never a model's", returned unwrapped, exactly as trustworthy as
+when the code wrote it) separately from `model_claimed` (every
+`record_model_exchange`, under a static, tool-authored `warning` restating
+what OBS-165 measured -- present even when there is nothing to warn about, so
+"no warning shown" is never mistaken for "nothing to be careful of"). A
+model reading its own predecessor's prior claims as if they were established
+fact is OBS-165 with an extra hop; this tool hands over the claim, but never
+without the label.
+
+`data.found` is `false` -- not an error -- when no ticket matches a
+`run_id`; that is a normal outcome (stale, mistyped, or a pruned ticket), the
+same "absence is a normal answer" shape `get_lab_sr_policy_detail` already
+uses. Neither tool ever populates `errors`: there is nothing in either call
+path that can fail in a way `mcp_server.boundary.ERROR_KINDS` needs to
+classify.
+
 ### Snapshots, diffing, health, and flap detection (Phase 8)
 
 Through Phase 7 these were CLI-only (`nettools diff`/`baseline`/`health`/
@@ -336,7 +406,7 @@ symptom. Every verdict is code comparing parsed fields; **no model is involved
 and none is called**, and the report is rendered from the descent's own typed
 fields rather than written by one.
 
-It exists because the other tools (34 at last count — the list above is authoritative) answer *what is the state of X*, and
+It exists because the other tools (36 at last count — the list above is authoritative) answer *what is the state of X*, and
 the question an operator actually has is *why is this broken*. Answering that by
 calling six tools and reasoning over the results is exactly where a model
 invents a plausible chain; this returns one that was derived.

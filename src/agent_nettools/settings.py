@@ -192,6 +192,81 @@ SETTINGS: tuple[Setting, ...] = (
         "Where timestamped/golden evidence snapshots are stored (file backend).",
         "evidence_store, network_tools",
     ),
+    # -- admission.py (B-408/B-444): admission control for concurrent
+    # collection, and active-probe rate budgeting. See admission.py's module
+    # docstring for the measured numbers behind the two concurrency defaults
+    # -- they are the boundary this lab's own data supports, not round
+    # numbers; the two probe-budget defaults below them are a stated policy
+    # choice instead, since there is no failure threshold to discover by
+    # sending more ICMP at the lab.
+    Setting(
+        "NETTOOLS_ADMISSION_DIR", "path", "admission",
+        "Directory holding the flock lock files admission.py uses to gate "
+        "concurrent collection and active-probe rate budgets. Deliberately "
+        "filesystem-based, not in-memory: event_routing.py's own routed "
+        "investigations are separate OS processes, so only a cross-process "
+        "primitive actually protects against an event storm.",
+        "admission",
+    ),
+    Setting(
+        "NETTOOLS_MAX_CONCURRENT_PER_DEVICE", "int", 1,
+        "Concurrent live collections admitted against one device at once. "
+        "Measured 2026-08-19: 3+ concurrent SSH sessions to one device in "
+        "this lab produced real connection failures roughly a third of the "
+        "time (banner-read errors, connection resets) that a retry budget "
+        "could not reliably clear while contention persisted.",
+        "admission",
+        minimum=1,
+    ),
+    Setting(
+        "NETTOOLS_MAX_CONCURRENT_FABRIC", "int", 4,
+        "Concurrent live collections admitted fabric-wide at once, "
+        "independent of and in addition to the per-device cap. Measured "
+        "2026-08-19: 2 and 4 concurrent collections against different "
+        "devices completed in a tight ~1.8s band with zero failures; 8 and "
+        "9 also completed with zero failures but with tail latency up to "
+        "~20x that band. 4 is the widest measured value that stayed inside "
+        "the clean band, not an extrapolation past what this 9-device lab "
+        "could exercise.",
+        "admission",
+        minimum=1,
+    ),
+    Setting(
+        "NETTOOLS_ADMISSION_WAIT_SECONDS", "float", 0.0,
+        "How long a caller waits for a busy admission slot before being "
+        "refused. Default 0 -- refuse immediately rather than queue, since "
+        "a second concurrent read of the same device buys nothing over "
+        "waiting for the first to finish and report.",
+        "admission",
+        minimum=0,
+    ),
+    Setting(
+        "NETTOOLS_MAX_ACTIVE_PROBES_PER_DEVICE", "int", 3,
+        "Active probes (ping/traceroute) admitted against one device per "
+        "NETTOOLS_ACTIVE_PROBE_WINDOW_SECONDS. A stated policy default, not "
+        "a measured ceiling -- see NETTOOLS_MAX_CONCURRENT_PER_DEVICE for "
+        "the distinction. Checked only when NETTOOLS_ALLOW_ACTIVE_PROBES "
+        "already allows probes at all; this is the rate on top of that "
+        "on/off gate, not a replacement for it.",
+        "admission",
+        minimum=1,
+    ),
+    Setting(
+        "NETTOOLS_MAX_ACTIVE_PROBES_FABRIC", "int", 10,
+        "Active probes admitted fabric-wide per "
+        "NETTOOLS_ACTIVE_PROBE_WINDOW_SECONDS, independent of and in "
+        "addition to the per-device probe budget. A stated policy default, "
+        "not a measured ceiling.",
+        "admission",
+        minimum=1,
+    ),
+    Setting(
+        "NETTOOLS_ACTIVE_PROBE_WINDOW_SECONDS", "float", 60.0,
+        "Sliding-window width the two active-probe budgets above are "
+        "counted over.",
+        "admission",
+        minimum=0.001,
+    ),
     # -- credential_resolver.py --
     Setting(
         "NETTOOLS_CREDENTIAL_PROVIDER", "enum", "env",
