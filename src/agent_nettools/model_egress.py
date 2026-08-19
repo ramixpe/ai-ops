@@ -328,6 +328,20 @@ ERROR_KINDS: tuple[tuple[str, str], ...] = (
     ("prometheus response was not valid json", "the metrics store's response could not be parsed as JSON"),
     ("prometheus query did not return a success status", "the metrics store rejected the query or reported an internal error"),
     ("prometheus response was not the expected", "the metrics store's response was not in the expected shape"),
+    # --- netbox.py (this task): kept byte-identical to
+    # `mcp_server.boundary.ERROR_KINDS`'s own copy of this block --
+    # `get_lab_netbox_inventory`/`get_lab_netbox_topology`'s own refusals and
+    # transport failures, the same four-shape set (unknown name, non-2xx
+    # HTTP, invalid JSON, unexpected shape) `logs_loki.py`/
+    # `metrics_prometheus.py` already established above. A missing
+    # NETBOX_URL/NETBOX_TOKEN classifies through the EXISTING "required
+    # environment variable" entry (see `netbox.run_named_read`'s own
+    # docstring for why that needed no new entry either).
+    ("unknown netbox query", "the query name was not recognised; valid: cable_topology, device_inventory"),
+    ("netbox returned http status", "the inventory store returned a non-success HTTP status"),
+    ("netbox response was not valid json", "the inventory store's response could not be parsed as JSON"),
+    ("netbox response was not the expected", "the inventory store's response was not in the expected shape"),
+    ("netbox request failed", "the inventory store could not be reached"),
     # --- B-512 (Job 2): the MCP-only gate on the external-source tools
     # (get_lab_logs/get_lab_interface_rate_history/
     # get_lab_isis_adjacency_history), the same "classified, never a silent

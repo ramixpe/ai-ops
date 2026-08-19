@@ -17,6 +17,7 @@ from __future__ import annotations
 import subprocess
 import sys
 
+import pytest
 from helpers import set_device_environment
 
 from agent_nettools import parsers
@@ -921,3 +922,243 @@ def test_the_cable_match_is_not_merely_matching_everything(monkeypatch):
     write_records(records, dry_run=False, client_factory=lambda url, token: client)
 
     assert client.dcim.cables.create_calls == 0
+
+
+# --------------------------------------------------------------------------- #
+# read_records -- the read half (this task). Stdlib urllib, fetcher= seam
+# (the same injection idiom logs_loki.py's `fetcher=` and metrics_prometheus
+# .py's own already use) so this suite runs with no NetBox reachable and no
+# pynetbox package required.
+# --------------------------------------------------------------------------- #
+
+from agent_nettools import netbox  # noqa: E402 -- module-qualified for run_named_read/etc below
+
+
+def test_unknown_read_query_is_refused_and_the_fetcher_is_never_called(monkeypatch):
+    monkeypatch.setenv("NETBOX_URL", "http://netbox.invalid")
+    monkeypatch.setenv("NETBOX_TOKEN", "t")
+    called = []
+
+    def fetcher(base_url, token, path):
+        called.append(path)
+        return {"count": 0, "next": None, "results": []}
+
+    result = netbox.run_named_read("not_a_real_query", fetcher=fetcher)
+
+    assert result["status"] == "error"
+    assert "unknown netbox query" in result["errors"][0].lower()
+    assert called == [], "an unknown query name must never reach the fetcher"
+
+
+def test_run_named_read_has_no_parameter_shaped_like_a_raw_query_string():
+    import inspect
+
+    params = set(inspect.signature(netbox.run_named_read).parameters)
+    assert not (params & {"filter", "query", "cypher", "path", "url"})
+
+
+def test_missing_credentials_are_refused_not_forwarded_to_the_fetcher(monkeypatch):
+    monkeypatch.delenv("NETBOX_URL", raising=False)
+    monkeypatch.delenv("NETBOX_TOKEN", raising=False)
+    called = []
+
+    result = netbox.run_named_read(
+        "device_inventory", fetcher=lambda *a: called.append(a) or {"results": []}
+    )
+
+    assert result["status"] == "error"
+    assert "Required environment variable is not set" in result["errors"][0]
+    assert "NETBOX_URL" in result["errors"][0] and "NETBOX_TOKEN" in result["errors"][0]
+    assert called == []
+
+
+def test_device_inventory_shapes_the_recorded_fields(monkeypatch):
+    monkeypatch.setenv("NETBOX_URL", "http://netbox.invalid")
+    monkeypatch.setenv("NETBOX_TOKEN", "t")
+
+    def fetcher(base_url, token, path):
+        assert path == "/api/dcim/devices/"
+        return {
+            "count": 1,
+            "next": None,
+            "results": [{
+                "name": "PE1",
+                "platform": {"name": "cisco_xr"},
+                "device_type": {"model": "cisco XRd-CP-C-01"},
+                "status": {"value": "active"},
+                "custom_fields": {"configured_hostname": "PE1", "software_version": "7.11.2 LNT"},
+                "interface_count": 8,
+                "description": "",
+                "last_updated": "2026-08-19T09:46:57Z",
+            }],
+        }
+
+    result = netbox.run_named_read("device_inventory", fetcher=fetcher)
+
+    assert result["status"] == "success"
+    [record] = result["data"]["parsed"]["records"]
+    assert record == {
+        "name": "PE1",
+        "platform": "cisco_xr",
+        "configured_hostname": "PE1",
+        "device_type": "cisco XRd-CP-C-01",
+        "software_version": "7.11.2 LNT",
+        "status": "active",
+        "interface_count": 8,
+        "description": "",
+        "last_updated": "2026-08-19T09:46:57Z",
+    }
+    assert result["data"]["parsed"]["meta"]["truncated"] is False
+    assert result["data"]["parsed"]["meta"]["newest_last_updated"] == "2026-08-19T09:46:57Z"
+
+
+def test_cable_topology_matches_terminations_to_device_and_interface(monkeypatch):
+    monkeypatch.setenv("NETBOX_URL", "http://netbox.invalid")
+    monkeypatch.setenv("NETBOX_TOKEN", "t")
+
+    def fetcher(base_url, token, path):
+        assert path == "/api/dcim/cables/"
+        return {
+            "count": 1,
+            "next": None,
+            "results": [{
+                "status": {"value": "connected"},
+                "description": "",
+                "last_updated": "2026-08-19T09:54:31Z",
+                "a_terminations": [
+                    {"object_type": "dcim.interface",
+                     "object": {"name": "Gi0/0/0/0", "device": {"name": "P1"}}}
+                ],
+                "b_terminations": [
+                    {"object_type": "dcim.interface",
+                     "object": {"name": "Gi0/0/0/0", "device": {"name": "P2"}}}
+                ],
+            }],
+        }
+
+    result = netbox.run_named_read("cable_topology", fetcher=fetcher)
+
+    [record] = result["data"]["parsed"]["records"]
+    assert record["device_a"] == "P1" and record["interface_a"] == "Gi0/0/0/0"
+    assert record["device_b"] == "P2" and record["interface_b"] == "Gi0/0/0/0"
+
+
+def test_a_malformed_cable_termination_degrades_to_none_rather_than_crashing(monkeypatch):
+    """A NetBox this collector does not own exclusively can hold a cable
+    shape this reader was not written against (a breakout, a non-interface
+    termination) -- must not raise."""
+
+    monkeypatch.setenv("NETBOX_URL", "http://netbox.invalid")
+    monkeypatch.setenv("NETBOX_TOKEN", "t")
+
+    def fetcher(base_url, token, path):
+        return {
+            "count": 1, "next": None,
+            "results": [{
+                "status": {"value": "connected"}, "description": "",
+                "last_updated": "2026-08-19T09:54:31Z",
+                "a_terminations": [],  # zero terminations -- not this collector's shape
+                "b_terminations": [
+                    {"object_type": "dcim.rearport", "object": {"name": "x"}}
+                ],  # not a plain interface
+            }],
+        }
+
+    result = netbox.run_named_read("cable_topology", fetcher=fetcher)
+
+    [record] = result["data"]["parsed"]["records"]
+    assert record["device_a"] is None and record["interface_a"] is None
+    assert record["device_b"] is None and record["interface_b"] is None
+
+
+def test_a_non_null_next_is_reported_as_truncated_not_silently_dropped(monkeypatch):
+    monkeypatch.setenv("NETBOX_URL", "http://netbox.invalid")
+    monkeypatch.setenv("NETBOX_TOKEN", "t")
+
+    def fetcher(base_url, token, path):
+        return {
+            "count": 200, "next": "http://netbox.invalid/api/dcim/devices/?offset=1",
+            "results": [],
+        }
+
+    result = netbox.run_named_read("device_inventory", fetcher=fetcher)
+
+    assert result["data"]["parsed"]["meta"]["truncated"] is True
+    assert result["data"]["parsed"]["meta"]["netbox_reported_count"] == 200
+
+
+def test_an_http_error_status_classifies_through_the_status_entry(monkeypatch):
+    monkeypatch.setenv("NETBOX_URL", "http://netbox.invalid")
+    monkeypatch.setenv("NETBOX_TOKEN", "bad-token")
+
+    def raising_fetcher(base_url, token, path):
+        raise netbox.NetBoxTransportError("netbox returned http status 403")
+
+    result = netbox.run_named_read("device_inventory", fetcher=raising_fetcher)
+
+    assert result["status"] == "error"
+    from mcp_server.boundary import sanitize
+
+    sanitized = sanitize(result)
+    assert "unclassified" not in sanitized["errors"][0]
+    assert "non-success HTTP status" in sanitized["errors"][0]
+
+
+def test_a_malformed_json_body_is_a_transport_error_not_a_crash():
+    # Exercises the real fetcher's JSON/shape guards directly (no network,
+    # via a faked `urllib.request.urlopen`): a bytes-decodable but non-JSON
+    # body, and a JSON body missing "results".
+    class _FakeHTTPResponse:
+        def __init__(self, body: bytes):
+            self._body = body
+            self.status = 200
+
+        def read(self):
+            return self._body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    import urllib.request
+
+    original_urlopen = urllib.request.urlopen
+
+    def fake_urlopen(request, timeout=None):
+        return _FakeHTTPResponse(b"not json")
+
+    try:
+        urllib.request.urlopen = fake_urlopen
+        with pytest.raises(netbox.NetBoxTransportError, match="not valid json"):
+            netbox._http_fetcher("http://netbox.invalid", "t", "/api/dcim/devices/")
+    finally:
+        urllib.request.urlopen = original_urlopen
+
+    def fake_urlopen_bad_shape(request, timeout=None):
+        return _FakeHTTPResponse(b'{"no_results_key": true}')
+
+    try:
+        urllib.request.urlopen = fake_urlopen_bad_shape
+        with pytest.raises(netbox.NetBoxTransportError, match="expected paginated shape"):
+            netbox._http_fetcher("http://netbox.invalid", "t", "/api/dcim/devices/")
+    finally:
+        urllib.request.urlopen = original_urlopen
+
+
+def test_the_netbox_read_free_text_field_name_choice_adds_nothing_new_to_free_text_fields():
+    """Documents and pins the reuse decision (module docstring, "What is
+    (and is not) free text here"): `description` was already a member of
+    `model_egress.FREE_TEXT_FIELDS`'s flattened name set from
+    `("interface", "description")` -- this module's own read tools add ZERO
+    new entries."""
+
+    from agent_nettools import model_egress
+
+    names = frozenset(field for _context, field in model_egress.FREE_TEXT_FIELDS)
+    assert "description" in names
+    assert not any(
+        context in ("device_inventory", "cable_topology")
+        for context, _field in model_egress.FREE_TEXT_FIELDS
+    )

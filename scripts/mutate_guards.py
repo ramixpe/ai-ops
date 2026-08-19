@@ -272,6 +272,30 @@ MUTATIONS = [
      "            if external_source and not _mcp_external_sources_allowed():\n",
      "            if external_source and False:\n",
      "test_external_source_gate_actually_prevents_the_call_when_disabled"),
+
+    # ---- This task: NetBox/neo4j as MCP read tools. The main new guard is
+    # the "derived, not authoritative" claim in `get_lab_netbox_inventory`'s
+    # own description -- OBS-112/MCP §14 established that a tool's
+    # DESCRIPTION, not its docstring's existence, is what a model actually
+    # reasons from, so the one sentence stating NetBox is a recording (never
+    # live) is the load-bearing text, not a side note. Counted before adding
+    # this entry (OBS-191): the anchor string occurs exactly once in
+    # server.py (`grep -c` against the line below), so removing it here
+    # cannot leave the claim true elsewhere in the file by accident. The
+    # gate reused for these two tools (NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES,
+    # `_external_source_tool`) is the same shared mechanism B-512-GATE above
+    # already mutation-tests generically -- a new gate-specific entry here
+    # would duplicate that guard, not add one. ----
+
+    ("NETBOX-DERIVED", "get_lab_netbox_inventory's description states "
+     "NetBox is DERIVED from parsed device evidence and is never "
+     "authoritative about the live fabric -- the reasoning surface a model "
+     "actually acts on (OBS-112), not merely documented in a module a model "
+     "never reads",
+     "mcp_server/server.py",
+     "    collector and is NEVER authoritative about the live fabric: it is a\n",
+     "    collector: it is a\n",
+     "test_netbox_tools_state_they_are_derived_not_authoritative"),
 ]
 
 

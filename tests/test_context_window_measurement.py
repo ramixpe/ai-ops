@@ -101,16 +101,22 @@ def test_manifest_sizes_are_pinned_within_a_band_that_catches_a_doubling(mc):
     assert classic["tool_count"] >= 23
     assert staged["tool_count"] == 6
 
-    # Measured today: classic 20,117 chars / 23 tools, staged 4,723 / 6.
-    # Banded, not exact, because prose is edited routinely -- but the
-    # ceiling matters: 30,000 sits well below a doubling of the classic
-    # baseline (~40,234) and well above normal docstring editing, so a
-    # regression shaped like MCP-EXPERIMENT.md §10's real +86% jump
-    # (5,961 -> 11,107 on the old, smaller description-only measure) fails
-    # here instead of quietly shipping.
-    assert 12_000 <= classic["manifest_chars"] <= 30_000, (
+    # Measured today: classic 31,669 chars / 31 tools, staged 4,723 / 6. The
+    # ceiling was last raised (30,000) for B-512's Loki/Prometheus tools and
+    # had drifted stale by the time this task's own two NetBox read tools
+    # (get_lab_netbox_inventory/get_lab_netbox_topology) pushed the real,
+    # measured figure past it -- a genuine, reviewed capability addition
+    # whose descriptions deliberately carry non-negotiable "derived, not
+    # authoritative" safety framing (OBS-112/MCP §14: the description IS the
+    # reasoning surface a model acts on), not prose bloat. Re-banded rather
+    # than loosened without limit: 34,000 sits well below a doubling of
+    # today's own baseline (~63,338) and well above normal docstring
+    # editing, so a regression shaped like MCP-EXPERIMENT.md §10's real
+    # +86% jump (5,961 -> 11,107 on the old, smaller description-only
+    # measure) still fails here instead of quietly shipping.
+    assert 12_000 <= classic["manifest_chars"] <= 34_000, (
         f"classic manifest is {classic['manifest_chars']} chars, outside "
-        "[12000, 30000] -- if it grew, check whether it roughly doubled "
+        "[12000, 34000] -- if it grew, check whether it roughly doubled "
         "(see MCP-EXPERIMENT.md Sec10) before assuming this is routine"
     )
     assert 2_500 <= staged["manifest_chars"] <= 8_000, (

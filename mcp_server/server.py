@@ -22,7 +22,7 @@ except ModuleNotFoundError:
     # MCP SDK < 2.0 exposed it as FastMCP.
     from mcp.server.fastmcp import FastMCP
 
-from agent_nettools import logs_loki, metrics_prometheus
+from agent_nettools import logs_loki, metrics_prometheus, netbox
 from agent_nettools.health import evaluate_fabric
 from agent_nettools.inventory_model import load_inventory_file
 from agent_nettools.investigation import investigate
@@ -1120,6 +1120,74 @@ def get_lab_isis_adjacency_history(
         step_seconds=step_seconds,
     )
     return _with_prometheus_coverage(envelope, device_name)
+
+
+# --------------------------------------------------------------------------- #
+# Job 3 (this task): NetBox as an external-source tool, the same third
+# registration class Loki/Prometheus already use -- two named reads
+# (`netbox.NETBOX_READ_QUERIES`), no filter/query/cypher parameter on either
+# tool, gated by the same NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES.
+#
+# neo4j gets NO tool here. Checked live (2026-08-19, docker exec cypher-shell
+# against the running neo4j container): `MATCH (n) RETURN count(n)` -> 0,
+# `MATCH ()-[r]->() RETURN count(r)` -> 0. Empty. A read tool over an empty
+# graph would tell a model "no topology exists" in a fabric that has one --
+# worse than no tool, B-509's own shape (an inventory tool over an empty
+# NetBox would have been worse than none). If graph.write_graph is ever run
+# for real, the read half belongs here, built the same way as NetBox's below.
+# --------------------------------------------------------------------------- #
+
+
+@_external_source_tool()
+def get_lab_netbox_inventory() -> dict:
+    """Answers: *what does NetBox currently record about this fabric's devices?*
+
+    Prefer this over `list_lab_devices` for what was last COLLECTED from the
+    live devices (platform, hostname, hardware model, software version)
+    rather than what is DECLARED in `inventory/lab.yaml` -- that is what
+    `list_lab_devices` answers, also with no device contacted. This queries
+    an external inventory system (NetBox), not a device: no SSH session is
+    opened.
+
+    NetBox is DERIVED from parsed device evidence by this project's own
+    collector and is NEVER authoritative about the live fabric: it is a
+    recording of what was last collected, not a live read, and NetBox is
+    shared, so it can also be stale or edited by something else. Check each
+    record's `last_updated`, and `data.parsed.meta.oldest_last_updated`/
+    `newest_last_updated` for the read as a whole, before treating anything
+    here as current -- for current state prefer `list_lab_devices`,
+    `get_lab_device_facts`, or `check_lab_interfaces`.
+
+    `data.parsed.meta.truncated` is true only if NetBox reports more devices
+    than this call returned (this lab's nine fit one page today).
+    """
+
+    return netbox.run_named_read("device_inventory")
+
+
+@_external_source_tool()
+def get_lab_netbox_topology() -> dict:
+    """Answers: *what does NetBox record as physically cabled to what?*
+
+    Prefer this over `check_lab_lldp_neighbors` for the fabric's reconciled
+    physical topology rather than one device's own live LLDP view: a cable
+    only exists here if both ends' evidence mutually agreed when this
+    project's own collector (`netbox.write_records`) recorded it, so a
+    one-sided or disagreeing report never appears (`check_lab_lldp_neighbors`
+    is what surfaces that disagreement itself). This queries an external
+    inventory system (NetBox), not a device: no SSH session is opened.
+
+    NetBox's cable table is DERIVED from LLDP evidence and is NEVER
+    authoritative about live cabling: a link removed or re-patched since the
+    last collection still appears here until the collector runs again. Check
+    each record's `last_updated` before treating a cable as currently
+    present; for a device's live links, prefer `check_lab_lldp_neighbors`.
+
+    `data.parsed.meta.truncated` is true only if NetBox reports more cables
+    than this call returned.
+    """
+
+    return netbox.run_named_read("cable_topology")
 
 
 # --------------------------------------------------------------------------- #

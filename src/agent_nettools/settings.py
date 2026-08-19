@@ -523,6 +523,19 @@ SETTINGS: tuple[Setting, ...] = (
         "netbox",
         unknown_bool_disables=True,
     ),
+    # -- netbox.py, the read half (this task): the two MCP tools
+    # (get_lab_netbox_inventory/get_lab_netbox_topology, via
+    # netbox.run_named_read) read the SAME NETBOX_URL/NETBOX_TOKEN above --
+    # never a second credential pair -- so only the read-specific timeout is
+    # new here.
+    Setting(
+        "NETTOOLS_NETBOX_TIMEOUT_SECONDS", "float", 10.0,
+        "HTTP timeout for one NetBox read (netbox.run_named_read). Same "
+        "default as NETTOOLS_LOKI_TIMEOUT_SECONDS/"
+        "NETTOOLS_PROMETHEUS_TIMEOUT_SECONDS.",
+        "netbox",
+        minimum=0.001,
+    ),
     # -- credential_resolver.py, via inventory/lab.yaml's credential group --
     # These three are the *conventional* names this lab's own inventory.yaml
     # configures (username_env/password_env/ssh_keyfile_env) -- see

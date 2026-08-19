@@ -6374,3 +6374,56 @@ confused.
 The same shape sank the diagrams earlier today (OBS-189): a byte-pinned artefact
 and an append-only log are both single-writer structures that a parallel build
 hands to several writers at once.
+
+---
+
+## OBS-201 · M6 · NetBox exposed to a model; neo4j refused because the graph is empty
+
+MCP surface 29 → 31. Two zero-parameter read tools over the NetBox that was
+populated this morning: `get_lab_netbox_inventory` (what was last *collected* —
+platform, configured hostname, hardware, software version, interface count, per
+record `last_updated`) and `get_lab_netbox_topology` (the 15 cables).
+
+**`get_lab_netbox_topology` is a stricter claim than a live LLDP read**, and that
+is the reason to have it. A `Cable` only exists in NetBox when *both* ends
+reported each other; a one-sided or disagreeing LLDP report never becomes one.
+This fabric's LLDP is known to contradict itself (`learn-topology` reports it), so
+"both ends agree" is a materially different question from "what does this device
+say it sees", and the two tools answer different things rather than one being a
+cache of the other.
+
+**neo4j got no tool, and that is the finding.** Queried directly:
+`MATCH (n) RETURN count(n)` → **0**, relationships → **0**. The graph is empty
+because the collector has never been run against it. A read tool over an empty
+graph is worse than none: a model asking "what is the topology?" would be told
+nothing exists and would reasonably conclude the fabric has no topology. Same
+reasoning as B-509 — an inventory tool over an empty NetBox would have been worse
+than none. Pinned by a test asserting `agent_nettools.graph` is never imported by
+the server, so the absence is deliberate rather than pending.
+
+Side note on why the earlier auth failure happened: the credentials are set in
+the container's environment (`NEO4J_AUTH`) and **not** in `.env`, so nothing in
+this repo could have found them. Worth knowing before B-517 runs the collector.
+
+**Free text needed zero new table entries, for the second time today.** NetBox's
+`description` is operator-editable, and `description` is already in the flat
+free-text set via `("interface", "description")` — so quoting fired
+automatically. Its `comments` field is deliberately *not* exposed: adding it would
+widen a flat, name-only match set for a field nothing populates. That is the
+right trade, and it is the same double-edged property OBS-196 recorded — matching
+by field name alone over-matches by design, which is a hazard when the name is
+generic and a gift when a new source can reuse an existing one.
+
+**The manifest grew and the measurement moved with it.** B-501 measured the
+classic manifest at 20,117 chars; it is now **31,669**, and the context-window
+test's ceiling was raised 30,000 → 34,000. That is a real capability addition, not
+bloat — six history/inventory tools that did not exist this morning — but it means
+B-479's staged-vs-classic ratio (0.235) is now measured against a different
+classic. The staged surface did not grow. **Any future comparison must state which
+manifest it used**, or the ratio silently improves every time the classic surface
+grows, which would make the staged surface look better for doing nothing.
+
+One process note the agent surfaced: the diagram generators write relative to the
+process's cwd, so they must be run from `docs/diagrams/`. Invoked by absolute path
+from elsewhere they silently write stray SVGs into the wrong directory — caught
+and cleaned before it reached a commit.

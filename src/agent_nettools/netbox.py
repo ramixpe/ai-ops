@@ -18,7 +18,8 @@ the evidence it was built from ever disagree, the evidence wins and NetBox is
 rebuilt from it -- there is no path in this module that edits a NetBox
 record by hand.
 
-Two layers, deliberately kept apart, the same split :mod:`graph` uses:
+Four layers, deliberately kept apart, the same split :mod:`graph` uses for its
+first two:
 
 - :func:`build_records` -- **pure**. Evidence in, a :class:`NetBoxRecords`
   out. No HTTP, no import of ``pynetbox`` anywhere in its call path. Testable
@@ -40,6 +41,20 @@ Two layers, deliberately kept apart, the same split :mod:`graph` uses:
   ``NETTOOLS_NETBOX_WRITE_ENABLED`` is set to a recognized truthy value (see
   :func:`write_enabled`) -- two independent gates, so neither a forgotten
   keyword argument nor a stray import can mutate anything.
+- :func:`run_named_read` -- **thin, the other direction**. Reads back what
+  this collector (or another one -- see below) has already written, over
+  NetBox's REST API. Named, slot-validated queries only, the same discipline
+  `logs_loki.run_named_query`/`metrics_prometheus.run_named_query` already
+  use for their own external sources (Stage-2 M5) -- there is no parameter on
+  this function, or on the MCP tools built from it, that accepts a filter,
+  path, or query string a caller controls. Uses the stdlib's ``urllib``, not
+  ``pynetbox`` -- a *read* tool must not require the optional ``netbox``
+  extra to be installed any more than :func:`build_records` does, and
+  `logs_loki.py`/`metrics_prometheus.py` already established that a GET
+  against a JSON API needs nothing beyond the standard library. See its own
+  section below, "read_records -- the read half", for what this returns and
+  why, including why neo4j gets no equivalent (Job 3 of this task: it is
+  empty).
 
 Device identity is the inventory device name -- the same stable key
 :mod:`topology` resolves every LLDP-reported name back to via
@@ -124,8 +139,12 @@ derive-don't-author boundary the rest of the module holds to.
 from __future__ import annotations
 
 import ipaddress
+import json
 import os
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from . import interface_kind, parsers, topology
@@ -934,3 +953,385 @@ def write_records(
     client = make_client(resolved_url, resolved_token)
     applied_counts = _apply(client, records)
     return NetBoxWriteResult(dry_run=False, applied=True, operations=operations, counts=applied_counts)
+
+
+# --------------------------------------------------------------------------- #
+# read_records -- the read half. Stdlib ``urllib``, never ``pynetbox`` -- see
+# the module docstring's "Four layers" section. Built for the two MCP tools
+# this task adds (`get_lab_netbox_inventory`/`get_lab_netbox_topology`,
+# `mcp_server/server.py`), but this module owns the HTTP and shaping so the
+# tool functions stay thin wrappers, the same layering `logs_loki.py`/
+# `metrics_prometheus.py` already established for their own external sources.
+#
+# **NetBox is DERIVED, never authoritative about the live fabric -- restated
+# here because the read half is where a caller could forget it.** Every
+# record this returns is `write_records`' own prior write (or another
+# collector's, or an operator's hand edit through NetBox's own UI -- NetBox is
+# a shared system this module does not own exclusively, see `_apply`'s
+# comment on `device_cache`/other NetBox users). Reading it back answers "what
+# was last recorded", never "what is true on the fabric right now" -- that
+# question is what `list_lab_devices`/`check_lab_interfaces`/
+# `check_lab_lldp_neighbors` (live, credentialed, over SSH) answer instead.
+# `last_updated`, carried on every record, is the one honest signal a caller
+# has for how stale a given row is; there is no fresher timestamp to give.
+# --------------------------------------------------------------------------- #
+
+#: Timeout for one NetBox HTTP GET. Same name shape and same default as
+#: `logs_loki.LOKI_TIMEOUT_ENV`/`metrics_prometheus.PROMETHEUS_TIMEOUT_ENV` --
+#: a caller tuning one of those three already knows the pattern.
+NETBOX_TIMEOUT_ENV = "NETTOOLS_NETBOX_TIMEOUT_SECONDS"
+DEFAULT_TIMEOUT_SECONDS = 10.0
+
+#: The literal `network_tools._source_for` docstring already names as the
+#: intended spelling for this exact source ("A brand-new, non-SSH source
+#: (Loki, NetBox)... `_base_result(..., source="loki")`").
+SOURCE_NETBOX = "netbox"
+
+
+def _float_env(name: str, default: float) -> float:
+    """A further copy of the `_float_env` shape `settings.py`'s own
+    docstring already notes is duplicated (`network_tools.py`, `notifier.py`,
+    `logs_loki.py`, `metrics_prometheus.py`) -- not a new smell, the same
+    module-independence choice `logs_loki.py`'s own copy documents."""
+
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+class NetBoxReadError(ValueError):
+    """A named read query is unknown. Never raised out of
+    :func:`run_named_read` -- caught there and turned into a
+    ``status="error"`` envelope, the same discipline `logs_loki.py`'s
+    `LokiQueryError`/`run_named_query` already use."""
+
+
+class NetBoxTransportError(Exception):
+    """The HTTP call to NetBox failed, or its response was not usable.
+    `logs_loki.LokiTransportError`'s exact counterpart."""
+
+
+#: The named-query table: a read query's identity IS the API path it reads,
+#: declared here rather than accepted as a caller-supplied string. Two
+#: entries, matching the two candidates the task's own brief names --
+#: "what devices exist and what are they" (distinct from `list_lab_devices`,
+#: which reads `inventory/lab.yaml`, the *declared* inventory, not what was
+#: last collected) and "what is cabled to what" (the mutually-confirmed LLDP
+#: cables `_lldp_cables` builds -- see that function's docstring for the
+#: stricter-than-`graph.py` bar a link has to clear to become one). Neither
+#: takes a parameter: this lab's whole recorded inventory is nine devices and
+#: fifteen cables, small enough to return in full every time, so there is no
+#: `device_name` slot to validate the way `logs_loki._DeviceSlot` has one --
+#: adding a filter parameter nobody asked for would be exactly the "generic
+#: passthrough" the brief says not to build.
+NETBOX_READ_QUERIES: dict[str, str] = {
+    "device_inventory": "/api/dcim/devices/",
+    "cable_topology": "/api/dcim/cables/",
+}
+
+
+def known_netbox_read_queries() -> tuple[str, ...]:
+    return tuple(sorted(NETBOX_READ_QUERIES))
+
+
+def _netbox_read_timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _read_base_envelope(query_name: str) -> dict[str, Any]:
+    """`network_tools._base_result`'s shape, rebuilt locally -- see
+    `logs_loki._base_envelope`'s docstring for why this is not imported
+    (`network_tools.py` is out of scope for edits, and `_base_result` is
+    private). ``device`` is always ``None``: both queries are fabric-wide,
+    never scoped to one device -- there is no `device_name` parameter on
+    :func:`run_named_read` to echo back."""
+
+    return {
+        "tool": "run_named_read",
+        "device": None,
+        "status": "success",
+        "timestamp": _netbox_read_timestamp(),
+        "source": SOURCE_NETBOX,
+        "data": {},
+        "errors": [],
+    }
+
+
+def _read_error_envelope(query_name: str, message: str) -> dict[str, Any]:
+    envelope = _read_base_envelope(query_name)
+    envelope["status"] = "error"
+    envelope["errors"].append(message)
+    # `data.intent` is set even on a refusal -- see `logs_loki._base_envelope`'s
+    # docstring for the trap this closes: `model_egress._envelope_context`
+    # reads `data["intent"]`/`data["template"]` and nothing else, so an error
+    # envelope needs the same identity a success one carries to stay
+    # projector-safe (not that either query currently carries free text --
+    # see "What is (and is not) free text here" below -- but an envelope
+    # that forgets its context once is a habit that eventually reaches one
+    # that does).
+    envelope["data"] = {
+        "intent": query_name,
+        "query_name": query_name,
+        "parse_status": parsers.PARSE_FAILED,
+        "parsed": {"records": [], "meta": {"record_count": 0, "truncated": False}},
+    }
+    return envelope
+
+
+def _http_fetcher(base_url: str, token: str, path: str) -> dict[str, Any]:
+    """The real transport. stdlib `urllib` only, no `pynetbox` -- see the
+    section banner above. Never used by a test -- see `run_named_read`'s
+    `fetcher=` seam.
+
+    ``limit=0`` asks NetBox for every matching object in one page (confirmed
+    live, 2026-08-19: 9 devices and 15 cables each came back in one response
+    with ``next: null``) -- this lab's whole recorded inventory easily fits
+    one HTTP call. :func:`run_named_read` still checks the response's own
+    ``next`` field and reports a non-null one as a coverage gap rather than
+    assuming ``limit=0`` is always honored by every NetBox version or proxy
+    in front of one.
+    """
+
+    url = f"{base_url.rstrip('/')}{path}?limit=0"
+    timeout = _float_env(NETBOX_TIMEOUT_ENV, DEFAULT_TIMEOUT_SECONDS)
+    request = urllib.request.Request(
+        url, headers={"Authorization": f"Token {token}", "Accept": "application/json"}, method="GET"
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            status = getattr(response, "status", 200)
+            body = response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        # Handled BEFORE the broader URLError clause below (HTTPError is a
+        # URLError subclass): this is the single most likely real failure --
+        # a missing, revoked or wrong NETBOX_TOKEN returns 403 -- and it must
+        # classify through "netbox returned http status", not fall through to
+        # "an unclassified error" the way a bare `str(exc)` would (the same
+        # gap `mcp_server.boundary.ERROR_KINDS`' 2026-08-18 comment names for
+        # netmiko's TCP-connect failure).
+        raise NetBoxTransportError(f"netbox returned http status {exc.code}") from exc
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        raise NetBoxTransportError(f"netbox request failed: {exc}") from exc
+
+    if not (200 <= int(status) < 300):
+        raise NetBoxTransportError(f"netbox returned http status {status}")
+
+    try:
+        parsed = json.loads(body)
+    except ValueError as exc:
+        raise NetBoxTransportError("netbox response was not valid json") from exc
+
+    if not isinstance(parsed, dict) or not isinstance(parsed.get("results"), list):
+        raise NetBoxTransportError("netbox response was not the expected paginated shape")
+
+    return parsed
+
+
+# --------------------------------------------------------------------------- #
+# What is (and is not) free text here, and the field-name choice
+# --------------------------------------------------------------------------- #
+#
+# NetBox's ``description`` field on a device/interface/cable is
+# operator-editable free text -- set by this collector's own writes (always
+# empty today: `_apply` never sets it) or, since NetBox is a shared system
+# this module does not own exclusively, by a human through NetBox's UI or a
+# future second collector. Either way it must cross the MCP boundary quoted,
+# never bare (constraint 3 of this task).
+#
+# The field is named ``description`` here -- deliberately reusing the exact
+# name, not inventing ``netbox_description`` or similar. `mcp_server.boundary
+# .sanitize` matches free text by FIELD NAME ALONE, built by flattening
+# `model_egress.FREE_TEXT_FIELDS`'s `(context, field)` pairs
+# (`_FREE_TEXT_FIELD_NAMES`) -- and `"description"` is ALREADY a member of
+# that flat set, from `("interface", "description")` (the per-interface
+# `show interfaces <name>` template's own free-text field). So this module
+# adds ZERO new entries to `model_egress.FREE_TEXT_FIELDS` and needs no
+# import of that module at all: reusing the name is what makes the quoting
+# automatic, the exact move `logs_loki.py`'s own "Field-name choice" section
+# documents for `text`/`code`. See `tests/test_netbox.py`'s
+# `test_the_netbox_read_free_text_field_name_choice_adds_nothing_new_...`
+# for the pinned proof.
+#
+# NetBox's ``comments`` field (a second, longer free-text field NetBox offers
+# devices and cables, distinct from ``description``) is deliberately NOT
+# exposed by v1. Surfacing it would mean either inventing a new field name
+# (widening `_FREE_TEXT_FIELD_NAMES` by one member, the "hazard and the
+# convenience are the same mechanism" trade OBS-196 named) or collapsing two
+# NetBox fields into the one reused ``description`` key, which would silently
+# merge two different operator-authored notes under one label. Neither is
+# worth it for a field this collector never writes and no evidence source
+# populates -- a real future need can add `("device_inventory", "comments")`
+# to `model_egress.FREE_TEXT_FIELDS` deliberately, as its own reviewed
+# widening, rather than by this module reaching for it unasked.
+
+
+def _device_read_record(raw: dict[str, Any]) -> dict[str, Any]:
+    """One NetBox `dcim.Device` API object -> one compact, model-safe record.
+
+    Only what a caller asking "what devices exist and what are they"
+    actually needs: identity, platform, the two custom fields this
+    collector's own writer defines (`configured_hostname`/`software_version`
+    -- see `_apply`), a structured interface count (NetBox's own rollup
+    field, not a second HTTP call), and `last_updated` so staleness is
+    checkable per row. Deliberately excludes NetBox's ``id``/``url``/site/
+    role/manufacturer scaffolding (:data:`DEFAULT_SITE_SLUG` and siblings) --
+    real fields on the live object, but deployment-level constants this
+    collector itself chose (see the module docstring's "What NetBox's own
+    schema needs" section), not facts about the device worth spending a
+    model's attention on.
+    """
+
+    device_type = raw.get("device_type") if isinstance(raw.get("device_type"), dict) else {}
+    platform = raw.get("platform") if isinstance(raw.get("platform"), dict) else {}
+    status = raw.get("status") if isinstance(raw.get("status"), dict) else {}
+    custom_fields = raw.get("custom_fields") if isinstance(raw.get("custom_fields"), dict) else {}
+
+    return {
+        "name": raw.get("name"),
+        "platform": platform.get("name"),
+        "configured_hostname": custom_fields.get("configured_hostname"),
+        "device_type": device_type.get("model"),
+        "software_version": custom_fields.get("software_version"),
+        "status": status.get("value"),
+        "interface_count": raw.get("interface_count"),
+        "description": raw.get("description") or "",
+        "last_updated": raw.get("last_updated"),
+    }
+
+
+def _cable_termination(terminations: Any) -> tuple[str | None, str | None]:
+    """``(device, interface)`` for one end of a cable, or ``(None, None)``.
+
+    NetBox's ``a_terminations``/``b_terminations`` are lists because NetBox
+    4.x supports multi-object cable ends (e.g. a breakout); this collector's
+    own writer (`_apply`) only ever creates single-interface terminations, but
+    this module reads a NetBox that other tools or a human may also write to
+    (see the "What is (and is not) free text" note above), so a termination
+    this reader does not recognise -- zero, more than one, or not a plain
+    interface -- degrades to an honest ``(None, None)`` rather than guessing
+    which one to report or crashing on an index error.
+    """
+
+    if not isinstance(terminations, list) or len(terminations) != 1:
+        return None, None
+    termination = terminations[0]
+    if not isinstance(termination, dict) or termination.get("object_type") != "dcim.interface":
+        return None, None
+    obj = termination.get("object") if isinstance(termination.get("object"), dict) else {}
+    device = obj.get("device") if isinstance(obj.get("device"), dict) else {}
+    return device.get("name"), obj.get("name")
+
+
+def _cable_read_record(raw: dict[str, Any]) -> dict[str, Any]:
+    """One NetBox `dcim.Cable` API object -> one compact, model-safe record:
+    which two device/interface pairs this cable joins, and how NetBox
+    presently reports its own connection status."""
+
+    status = raw.get("status") if isinstance(raw.get("status"), dict) else {}
+    device_a, interface_a = _cable_termination(raw.get("a_terminations"))
+    device_b, interface_b = _cable_termination(raw.get("b_terminations"))
+
+    return {
+        "device_a": device_a,
+        "interface_a": interface_a,
+        "device_b": device_b,
+        "interface_b": interface_b,
+        "status": status.get("value"),
+        "description": raw.get("description") or "",
+        "last_updated": raw.get("last_updated"),
+    }
+
+
+_RECORD_BUILDERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
+    "device_inventory": _device_read_record,
+    "cable_topology": _cable_read_record,
+}
+
+
+def run_named_read(
+    query_name: str,
+    *,
+    fetcher: Callable[[str, str, str], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """The one read entry point. Never raises -- an unknown query name, a
+    missing credential, an unreachable NetBox, or a malformed response all
+    come back as a ``status="error"`` envelope in the same shape a success
+    uses, the same contract `logs_loki.run_named_query` already gives its
+    own caller (including a model choosing a query by which MCP tool it
+    calls, never by a string it supplies -- see `NETBOX_READ_QUERIES`).
+
+    Credentials are read from ``NETBOX_URL``/``NETBOX_TOKEN`` -- the exact
+    same two environment variables :func:`write_records` reads, never a
+    second pair -- and only from there; there is no default URL the way
+    `logs_loki._loki_url` has one, for the same reason :func:`write_records`
+    offers none (the module docstring's "guessing wrong is worse than
+    refusing" argument applies identically to a read). Missing either one
+    produces the message ``"Required environment variable is not set: ..."``
+    -- deliberately worded to match `credential_resolver.py`'s own phrasing,
+    so it classifies through the EXISTING
+    ``("required environment variable", "a credential is not configured")``
+    entry in `mcp_server.boundary.ERROR_KINDS`/`agent_nettools.model_egress
+    .ERROR_KINDS` with no new entry needed for this case either.
+    """
+
+    builder = _RECORD_BUILDERS.get(query_name)
+    if builder is None:
+        return _read_error_envelope(
+            query_name,
+            f"unknown netbox query {query_name!r}; valid: "
+            f"{', '.join(known_netbox_read_queries())}",
+        )
+
+    url = os.environ.get(NETBOX_URL_ENV, "").strip()
+    token = os.environ.get(NETBOX_TOKEN_ENV, "").strip()
+    missing = [name for name, value in ((NETBOX_URL_ENV, url), (NETBOX_TOKEN_ENV, token)) if not value]
+    if missing:
+        return _read_error_envelope(
+            query_name, f"Required environment variable is not set: {', '.join(missing)}"
+        )
+
+    path = NETBOX_READ_QUERIES[query_name]
+    active_fetcher = fetcher or _http_fetcher
+
+    try:
+        raw = active_fetcher(url, token, path)
+    except NetBoxTransportError as exc:
+        return _read_error_envelope(query_name, str(exc))
+
+    results = raw.get("results")
+    records = [builder(item) for item in results if isinstance(item, dict)]
+    reported_count = raw.get("count") if isinstance(raw.get("count"), int) else len(records)
+    truncated = raw.get("next") is not None
+
+    last_updated_values = sorted(
+        value for record in records if isinstance(value := record.get("last_updated"), str)
+    )
+
+    envelope = _read_base_envelope(query_name)
+    envelope["data"] = {
+        "intent": query_name,
+        "query_name": query_name,
+        "parse_status": parsers.PARSE_OK,
+        "parsed": {
+            "records": records,
+            "meta": {
+                "record_count": len(records),
+                "netbox_reported_count": reported_count,
+                # Absence-is-not-zero, NetBox's version: `limit=0` returns
+                # everything in this lab's own measured case (see
+                # `_http_fetcher`'s docstring), but a caller must not have to
+                # trust that blindly -- a non-null `next` means this read is
+                # NOT the whole recorded inventory, and says so rather than
+                # silently reporting a partial page as complete.
+                "truncated": truncated,
+                "oldest_last_updated": last_updated_values[0] if last_updated_values else None,
+                "newest_last_updated": last_updated_values[-1] if last_updated_values else None,
+            },
+        },
+    }
+    return envelope

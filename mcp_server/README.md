@@ -35,6 +35,8 @@ environment (`DEVICE_USERNAME`, `DEVICE_PASSWORD`).
 - `get_lab_logs`
 - `get_lab_interface_rate_history`
 - `get_lab_isis_adjacency_history`
+- `get_lab_netbox_inventory`
+- `get_lab_netbox_topology`
 
 There is no shell, configuration tool, or generic command runner.
 
@@ -152,6 +154,61 @@ is one fixed, configured address, not an arbitrary one), and its own gate:
 - A refusal is classified (`mcp_server/boundary.py`'s `ERROR_KINDS`,
   "external evidence sources are disabled"), never a silent no-op.
 
+### External-source tools: NetBox (this task)
+
+`get_lab_netbox_inventory` and `get_lab_netbox_topology` are the third
+external source registered through `_external_source_tool`, the same class
+and the same `NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES` gate Loki/Prometheus
+already use above. Each wraps exactly one entry of
+`netbox.NETBOX_READ_QUERIES` (`device_inventory`/`cable_topology`); neither
+takes a parameter at all -- this lab's whole recorded inventory (nine
+devices, fifteen cables) fits one HTTP call each, so there is no
+`device_name`/filter slot to add, let alone one a caller could fill with a
+query string.
+
+**Derived, never authoritative -- stated in both tool descriptions, not just
+here.** NetBox is populated by this project's own collector
+(`netbox.write_records`, `src/agent_nettools/netbox.py`) from a past parsed
+device evidence collection; it is a *recording*, not a live read, and it can
+be stale or -- since NetBox is a shared system this collector does not own
+exclusively -- hand-edited by something else. `get_lab_netbox_inventory` is
+also deliberately distinct from `list_lab_devices`: that tool reads the
+*declared* inventory (`inventory/lab.yaml`) and contacts nothing; this tool
+reads what was last *collected* from the live devices. Every record carries
+its own `last_updated`, and each read's `data.parsed.meta.oldest_last_updated`/
+`newest_last_updated` summarise the whole batch, so a caller can judge
+staleness without scanning every row. `data.parsed.meta.truncated` is `true`
+only if NetBox reports more records than one call returned (never observed
+at this lab's scale, but checked rather than assumed).
+
+**Free text crosses the same boundary, by reusing a name rather than adding
+one.** A NetBox device/cable's `description` field is operator-editable —
+empty today at this lab, but not guaranteed to stay that way, since NetBox is
+shared. `description` was already a member of `mcp_server.boundary`'s flat
+free-text field-name set (from the `interface` template's own
+`("interface", "description")` entry in
+`agent_nettools.model_egress.FREE_TEXT_FIELDS`), so reusing that exact field
+name here adds **zero** new entries to that table and the quoting is
+automatic — the same move `logs_loki.py` made for `text`/`code`. NetBox's
+second free-text field, `comments`, is deliberately **not** exposed in v1;
+see `netbox.py`'s "What is (and is not) free text here" section for why.
+
+`get_lab_netbox_topology`'s cables are held to a **stricter** bar than a live
+`check_lab_lldp_neighbors` read: `netbox.write_records` only ever records a
+cable when both ends' LLDP evidence mutually agreed at collection time (see
+`netbox.py`'s "Cabling" section) -- a one-sided or disagreeing report never
+becomes a NetBox `Cable` at all.
+
+**neo4j gets no read tool.** Checked live before building anything (2026-08-19,
+`docker exec ... cypher-shell` against the running container):
+`MATCH (n) RETURN count(n)` and `MATCH ()-[r]->() RETURN count(r)` both
+returned `0`. A read tool over an empty graph would tell a model "no
+topology exists" in a fabric that plainly has one -- worse than no tool at
+all (`graph.py`'s own docstring names the same derive-don't-author discipline
+NetBox follows; B-509 is this failure mode's precedent for NetBox itself,
+before that store had real data). If `graph.write_graph` is ever run for
+real, the read half belongs beside NetBox's, built the same way.
+
 ### Snapshots, diffing, health, and flap detection (Phase 8)
 
 Through Phase 7 these were CLI-only (`nettools diff`/`baseline`/`health`/
@@ -183,7 +240,7 @@ symptom. Every verdict is code comparing parsed fields; **no model is involved
 and none is called**, and the report is rendered from the descent's own typed
 fields rather than written by one.
 
-It exists because the other tools (28 at last count — the list above is authoritative) answer *what is the state of X*, and
+It exists because the other tools (30 at last count — the list above is authoritative) answer *what is the state of X*, and
 the question an operator actually has is *why is this broken*. Answering that by
 calling six tools and reasoning over the results is exactly where a model
 invents a plausible chain; this returns one that was derived.
@@ -206,8 +263,9 @@ parameter degrades to the bare decorator instead of crashing the server).
 `get_lab_ping`/`get_lab_traceroute` additionally carry `open_world_hint=True`
 and a distinguishing `title` (`server.ACTIVE_PROBE_ANNOTATIONS_SUPPORTED`,
 B-473) -- see "Active probes" above. `get_lab_logs`/
-`get_lab_interface_rate_history`/`get_lab_isis_adjacency_history` carry a
-distinguishing `title` of their own without `open_world_hint`
+`get_lab_interface_rate_history`/`get_lab_isis_adjacency_history`/
+`get_lab_netbox_inventory`/`get_lab_netbox_topology` carry a distinguishing
+`title` of their own without `open_world_hint`
 (`server.EXTERNAL_SOURCE_ANNOTATIONS_SUPPORTED`, B-512) -- see "External-
 source tools" above.
 
