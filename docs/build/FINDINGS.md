@@ -6960,3 +6960,72 @@ this is a wiring gap, not an adoption question.
 > but an assertion about **coverage of its own surface**: for each `record_*`,
 > either a production call site exists or an explicit exemption says why not.
 > The same enumerator shape B-519 used for interface names.
+
+---
+
+## OBS-450 · B-207/B-208 · The determinism claim is now measured, and the model path failed in a way variance testing could not have shown
+
+Both rows said, in their own words, that they had to happen *before* Stage 2
+shipped rather than after. Stage 2 has substantially shipped, so they were late —
+which made them more useful, because they measured something real instead of
+something planned.
+
+### B-207 — variance
+
+**The deterministic path has zero variance, proven rather than asserted.** 80
+investigations (4 conditions × n=20) produced **one distinct signature per
+condition** — byte-for-byte agreement on finding, cause, every rung status and
+the coherence verdict. I re-ran 25 of my own and got the same. `descent.py`'s
+"no model call, deliberately and permanently" now has a number behind it.
+
+**The model path was also exactly reproducible**, which is the less obvious
+result: 30 real calls, 1 distinct raw response per condition, at temperature 0.
+Rung coverage 5/5 every run, zero invented identifiers, premise handling
+consistent (`refused` 10/10 on the false premise, `confirmed_cause` 10/10 on the
+real fault).
+
+**And the interesting finding is not variance at all.** `broken_confirm`'s
+*correlate* exchange had `grounding_ok` **0.0 across all ten runs** —
+deterministically malformed JSON from that 9B model on the larger correlate
+prompt. Not a flaky failure; a consistent one.
+
+That matters because **a variance experiment is designed to find inconsistency,
+and the defect it surfaced is perfectly consistent.** Repeating a call ten times
+is how you notice that all ten are wrong in the same way — a single run would
+have looked like one bad response. The grounding gate did its job (the paraphrase
+was refused every time, so nothing unverified reached a user), but the model was
+silently failing one of its two jobs on every single run.
+
+Two honest limits, both stated by the run rather than discovered later: the live
+deterministic path could not be measured (credentials absent in that worktree —
+recorded as a `SKIPPED` artifact with the reason, not as a null result), and this
+covers one local model at temperature 0, so non-greedy cloud-provider variance
+remains untested.
+
+As a substitute for the live descent it pulled two keyless sources and found
+Prometheus reporting **85 IS-IS adjacency resets** fabric-wide over 7 days at
+15-minute sampling — against the 66 I measured at hourly sampling. Both are real;
+**finer sampling catches more resets**, which is itself the answer to "how many
+did we miss", and a caution against quoting either number without its step.
+
+### B-208 — the property suite
+
+12 properties, 1000 examples each, all holding — including adversarial inputs
+(empty collections, disagreeing re-reads at every skew/bound ratio,
+delimiter-smuggling attempts). Each drives real production code rather than a
+reimplementation: the descent never names an unobserved cause; `unevaluated`
+always stops the walk; **absence-never-zero across three separate layers**;
+coherence refuses on disagreement regardless of window width; the projector never
+lets raw device text escape unquoted.
+
+No property failed. That is a weaker result than a failure would have been, and
+the suite's value is prospective — it is now a shape-level assertion rather than
+an example-level one, which is what the Stage 2 gate was asking for.
+
+One property was deliberately not attempted, with the reasoning recorded:
+citation completeness is not a shape a context-free generator produces usefully.
+
+**A dependency that exists on one machine is a test that silently skips
+everywhere else** — `hypothesis` was installed ad hoc into a venv; it is now
+declared in the dev extras so the gate actually runs for anyone who checks this
+out.

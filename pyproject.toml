@@ -47,6 +47,11 @@ llm = [
     "openai>=1.99.0",
 ]
 dev = [
+    # B-208's property suite. Declared here rather than left as an ad-hoc
+    # venv install, so the Stage-2 gate actually runs for anyone who checks
+    # this out -- a dependency that exists only on one machine is a test
+    # that silently skips everywhere else.
+    "hypothesis>=6",
     "pytest>=8.3.0",
     "ruff>=0.8.0",
 ]
