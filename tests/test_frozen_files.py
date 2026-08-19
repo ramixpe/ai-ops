@@ -120,19 +120,7 @@ _REPINNED: dict[str, tuple[str, str, Signoff]] = {
         "exercised by the existing adversarial-string/verb-allowlist/"
         "banned-snippet/placeholder-matching suite automatically), which is "
         "the guarantee that actually matters.",
-        PendingOperatorReview(
-            decided_by="Sonnet 5 (B-104 task agent)",
-            date="2026-08-19",
-            note="Task brief was explicit that platforms.py/templates.py "
-            "take additions only, with re-pinning required, and named the "
-            "PendingOperatorReview sentinel as the honest way to record a "
-            "re-pin that has not yet had a human review (OBS-182) -- this "
-            "session does not have operator sign-off on the addition, only "
-            "the frozen tests passing unedited against it and a live-lab "
-            "measurement (nine devices) backing the two command strings. "
-            "See docs/build/BACKLOG.md B-104 and this session's report for "
-            "the full argument the operator should review.",
-        ),
+        "operator sign-off, 2026-08-19 -- confirmed in session: the two config section templates (show running-config router isis, and interface <name>) are approved to run against the lab. Additive only; no bare show running-config; both frozen safety suites pass UNEDITED.",
     ),
 }
 
