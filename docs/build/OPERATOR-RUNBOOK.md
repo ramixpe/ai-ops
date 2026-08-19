@@ -4,6 +4,11 @@
 sitting down at a terminal with the `sota-xrd` fabric reachable. It assumes you
 have read nothing else recently — that is the point of it existing.
 
+**Paged about a running system instead?** Wrong document — see
+[`docs/build/ON-CALL-RUNBOOK.md`](ON-CALL-RUNBOOK.md) (B-410). This one is for
+lab work; that one is for someone who just got a Telegram message at 3 a.m.
+and needs to know what it means before they need to know anything else.
+
 Work top to bottom. Task A is the highest-value use of a lab window; Tasks C and
 part of D need no lab at all and can be done from a sofa.
 

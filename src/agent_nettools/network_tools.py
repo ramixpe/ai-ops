@@ -1711,11 +1711,47 @@ def _iter_check_results(
         name = str(device_record["name"])
         return name, tool(name, sender=sender, device=device_record)
 
-    workers = max(1, min(max_workers, len(devices)))
+    # Throttle the fan-out to the admission cap rather than letting admission
+    # REFUSE the overflow. B-444's fabric cap was measured against independent
+    # concurrent processes, where refusing is right: nothing coordinates them and
+    # a refused read retries later. A fabric sweep is the opposite case -- one
+    # process deliberately asking for every device, which `check_fabric`,
+    # `audit` and `analyze --fabric` all do. Refusing there does not protect the
+    # fabric, it silently returns `unevaluated` for over half of it and calls
+    # that an answer.
+    #
+    # Measured 2026-08-19: with max_workers=8 against a cap of 4, a nine-device
+    # sweep came back with five devices refused and the failure surfaced as
+    # "bgp check failed (admission refused (fabric))" -- a working feature turned
+    # into a half-answer by a limit that was correct for a different situation
+    # (OBS-460).
+    #
+    # Shaping the pool is strictly better than refusing its overflow: the same
+    # number of sessions reach the devices, in the same measured-safe width, and
+    # every device still gets read.
+    workers = max(1, min(max_workers, len(devices), _admission_fabric_cap()))
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         futures = [pool.submit(run_one, device) for device in devices]
         for future in concurrent.futures.as_completed(futures):
             yield future.result()
+
+
+def _admission_fabric_cap() -> int:
+    """The fabric-wide concurrency cap, or a large number if admission is off.
+
+    Read through `admission` rather than duplicated, so the two can never
+    disagree about the limit -- the failure mode this whole module exists to
+    avoid.
+    """
+
+    try:
+        from . import admission
+    except Exception:  # noqa: BLE001 -- admission is a guardrail, not a dependency
+        return 1_000_000
+    try:
+        return max(1, int(admission.fabric_concurrency_cap()))
+    except Exception:  # noqa: BLE001
+        return 1_000_000
 
 
 def iter_fabric(

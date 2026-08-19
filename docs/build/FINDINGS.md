@@ -6814,3 +6814,149 @@ files too, and had no such fixture — every test running `investigate` would ha
 written real files into the repo tree. Same defect, new store, caught before it
 landed rather than after. Worth noting the general form: **a new durable store
 inherits none of the isolation the previous ones learned.**
+
+---
+
+## OBS-430 · B-406 · gNMI refused, and the container named `gnmic` is not running gnmic
+
+B-406 asked for gNMI telemetry as an evidence source. I briefed it with the
+premise that gnmic already populates Prometheus, so the question was what a
+direct adapter would add.
+
+**The premise was wrong, and the agent checked instead of building on it.**
+`docker-compose.yml` says plainly that gnmic was replaced with Telegraf, because
+gnmic's `listen` mode does not support Cisco's proprietary self-describing-GPB
+MDT format and Telegraf's `cisco_telemetry_mdt` input handles it natively. The
+`gnmic.yaml` in the tree is dead config, unmounted. The real path is Cisco MDT
+dial-out → Telegraf → Prometheus. **The container is still named
+`sota-lab-platform-gnmic-1`.** A name that outlived its implementation, and I
+read the name as the fact.
+
+**gNMI itself is live and entirely unused** — every device runs a gNMI server on
+`grpc port 57400`, sharing SSH's own credentials, and `capabilities()` returns
+1024 supported YANG models. Nothing in this repo talks to it.
+
+### The measurement that decided it
+
+The agent pulled PE1's IS-IS neighbour state both ways and diffed them.
+
+Its first reading was that Prometheus dropped the numeric leaves — SID values,
+backup MPLS label, hold-time. **It then checked and corrected itself**: Telegraf
+gives *each numeric leaf its own metric series* (7 distinct IS-IS metric names),
+so nothing numeric is lost; it is spread across sibling series rather than
+gathered in one record. That self-correction is the difference between a refusal
+that holds and one that gets reopened next month.
+
+One confirmed loss: `topologies-supported`, a two-item string list, collapses to
+a single Prometheus label because Telegraf has no key to fold into the metric
+name. Narrow, and not load-bearing — address-family support is already inferable
+from which `_ipv4_next_hop`/`_ipv6_next_hop` series exist.
+
+Latency measured at ~124s lag, matching the device's `sample-interval 120000`.
+Real, but nothing in `flows.py`/`checks.py` needs sub-130s freshness — the
+descent reads live over SSH, and D8 already says the device wins on current
+state.
+
+### Why refusing is right
+
+A standalone adapter would duplicate `metrics_prometheus.py` entirely — named-query
+allowlist, four absence cases, coverage integration, envelope, test seam — for
+evidence already reachable through it. **Two sources that can disagree about the
+same fact is a defect generator**, and this build has spent the day fixing
+defects of exactly that shape.
+
+The cheaper growth paths already exist and are proven: a new `show` command for
+point-in-time facts (which lands inside `APPROVED_COMMANDS`, the one safety
+boundary), or a new sensor path plus a `PROMETHEUS_QUERIES` entry for new trend
+data — done twice this week already.
+
+> Seventh item refused on measured evidence this week. The pattern that keeps
+> paying: **measure first, and let the measurement rather than the row's framing
+> decide.** Three of the seven refusals also corrected the brief that commissioned
+> them, which is only possible because the brief asked for a measurement rather
+> than for the thing.
+
+---
+
+## OBS-460 · B-444 · A measured cap, correct for one situation, silently broke a working feature in another
+
+Admission control shipped with caps derived from live measurement: 1 concurrent
+collection per device, 4 fabric-wide. Both numbers are right for what they were
+measured against — **independent concurrent processes**, where a refused read is
+the correct outcome because nothing coordinates them and the caller retries.
+
+`check_fabric` is the opposite case. It is **one process deliberately asking for
+every device**, fanning out with `max_workers=8`. Against a cap of 4, five of
+nine devices came back:
+
+```
+P1: bgp check failed (admission refused (fabric): 4 concurrent collections
+    already in flight fabric-wide -- unevaluated, not attempted)
+```
+
+`nettools audit`, `check_fabric` and `analyze --fabric` were all returning
+`unevaluated` for most of the fabric and presenting it as a completed sweep.
+
+**Refusing did not protect anything there.** The devices were going to be read
+either way; the only question was how many at once. So the fix is to **shape the
+fan-out to the cap rather than refuse its overflow** — the same number of
+sessions, the same measured-safe width, and every device still read. The pool
+now derives its width from `admission.fabric_concurrency_cap()`, read through
+admission rather than duplicated, so the shaper and the gate cannot disagree
+about the limit.
+
+Two things worth keeping.
+
+**A limit is only correct relative to the situation it was measured in.** The
+measurement was sound and the caps are right; the error was applying a
+cross-process contention limit to intra-process fan-out without asking whether
+the two are the same problem. They are not: one has no coordinator, the other
+*is* the coordinator.
+
+**The symptom was a passing-looking failure.** The sweep did not error. It
+returned a result for every device, five of which said `unevaluated` with a
+reason nobody was reading. The build's own rule — a refused read is
+`unevaluated`, never healthy — worked exactly as designed and still produced a
+misleading answer, because *nothing above it distinguished "this device was not
+read" from "this device was read and is fine"* at the summary level.
+
+Caught by `test_persistence_hardening.py`, a test about error-message quality
+that had nothing to do with admission control. It asserted the enriched failure
+names the command, and got an admission refusal instead.
+
+---
+
+## OBS-470 · B-446 · Four of the ticket's nine record methods are never called
+
+Assessing whether the ticket superseded B-446's "ticket-grade run bundle", the
+answer was mostly yes on **schema** and no on **wiring**.
+
+`Ticket` exposes nine `record_*` methods. `cli.py`'s `_cmd_investigate` — the
+one production caller — calls five. Never called anywhere:
+
+- `record_tool_event` — *"the commands that succeeded, failed or were not supported"*
+- `record_evidence_source` — provenance per envelope
+- `record_context_footprint` — what was sent versus withheld
+- `record_intent` — how the intent was resolved
+
+The first two are the original spec's **headline asks**, quoted in `ticket.py`'s
+own module docstring: *"the cited evidence or compact command excerpts, not only
+opaque evidence-key names."* Every ticket written today omits them, and the API
+to write them has existed the whole time.
+
+This is the session's most repeated defect in yet another costume — a capability
+built, tested, documented, and never reached by the surface that would use it
+(OBS-187 the CLI refusal, OBS-191 the MCP flow list, OBS-192 three intents, B-512
+the LDP tools). **Here the caller and the callee are in the same repository,
+written to the same spec, and still did not meet.**
+
+So B-446 does not close. It narrows: *wire `cli.py` to call the four existing
+methods, and build the cross-run comparison the "handover view" half asked for.*
+The original deferral condition ("until workflow adoption") no longer applies —
+this is a wiring gap, not an adoption question.
+
+> A method with no caller is not an API, it is an intention. The test that would
+> have caught this is not a unit test of `Ticket` — every one of those passes —
+> but an assertion about **coverage of its own surface**: for each `record_*`,
+> either a production call site exists or an explicit exemption says why not.
+> The same enumerator shape B-519 used for interface names.

@@ -293,6 +293,23 @@ def _held_slot(paths: list[Path], *, wait_seconds: float) -> Iterator[bool]:
             handle.close()
 
 
+def fabric_concurrency_cap() -> int:
+    """The configured fabric-wide concurrency cap.
+
+    Exposed so a caller that fans out deliberately -- `iter_fabric`, and so
+    `check_fabric`/`audit`/`analyze --fabric` above it -- can SHAPE its pool to
+    this width instead of being refused for exceeding it. Refusing an
+    independent process is right; refusing one process's intentional sweep
+    returns `unevaluated` for most of the fabric and calls it an answer
+    (OBS-460).
+
+    Read through here rather than duplicated at the call site, so the shaper and
+    the gate can never disagree about the limit.
+    """
+
+    return _int_env(NETTOOLS_MAX_CONCURRENT_FABRIC_ENV, DEFAULT_MAX_CONCURRENT_FABRIC)
+
+
 def _device_slot_paths(device_name: str, admission_dir: Path, capacity: int) -> list[Path]:
     safe = _sanitize(device_name)
     return [admission_dir / f"device.{safe}.{i}.lock" for i in range(max(1, capacity))]
