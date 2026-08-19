@@ -2,8 +2,10 @@
 
 The fixture assertions were MEASURED first, then pinned -- not assumed. The
 three labels carry the fabric's real history: healthy is clean, broken carries
-PE2's dead-but-configured BGP, t0 additionally carries the three renamed
-hostnames (OBS-103).
+PE2's dead-but-configured BGP. t0 used to additionally carry the three renamed
+hostnames (OBS-103); the 2026-08-19 refresh (B-593) resolved that renaming in
+the live lab, so t0 now audits as clean as healthy -- see
+``test_t0_no_longer_has_the_three_renamed_hostnames`` below.
 """
 
 from __future__ import annotations
@@ -44,14 +46,22 @@ def test_broken_catches_pe2_configured_but_dead():
     assert result["findings"][0]["devices"] == ["PE2"]
 
 
-def test_t0_catches_the_three_renamed_hostnames():
-    """OBS-103's three renames, surfaced as info -- benign but named."""
+def test_t0_no_longer_has_the_three_renamed_hostnames():
+    """B-593 (2026-08-19 refresh): OBS-103's three renames -- P1 was
+    ``LEAF05_DHCP_SERVER``, P3 ``Lab-leaf01``, PE4 ``SDWAN-Edge01`` -- are
+    gone. All three devices now report their own inventory label as their
+    configured hostname (cross-checked in ``show running-config hostname``
+    for each), the same resolution ``tests/test_topology.py``'s
+    ``test_the_hostname_map_now_carries_only_inventory_labels`` measures
+    directly. `t0` audits exactly as clean as `healthy` now -- no drift
+    finding, because there is no longer any drift to find."""
 
     result = run_audit(_fabric("t0"))
 
     drift = [f for f in result["findings"] if f["rule"] == "hostname_inventory_drift"]
-    assert sorted(f["devices"][0] for f in drift) == ["P1", "P3", "PE4"]
-    assert all(f["severity"] == "info" for f in drift)
+    assert drift == []
+    assert result["severity"] == "ok"
+    assert result["findings"] == []
 
 
 # --------------------------------------------------------------------------- #

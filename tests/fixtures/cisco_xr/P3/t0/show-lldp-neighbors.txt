@@ -1,11 +1,14 @@
 
-Wed Jul 29 11:59:07.237 UTC
+Wed Aug 19 14:08:00.587 UTC
 Capability codes:
 	(R) Router, (B) Bridge, (T) Telephone, (C) DOCSIS Cable Device
 	(W) WLAN Access Point, (P) Repeater, (S) Station, (O) Other
 
 Device ID       Local Intf                      Hold-time  Capability      Port ID
-LEAF05_DHCP_SERVER GigabitEthernet0/0/0/0          120        R               GigabitEthernet0/0/0/1
-SDWAN-Edge01    GigabitEthernet0/0/0/4          120        R               GigabitEthernet0/0/0/0
+P1              GigabitEthernet0/0/0/0          120        R               GigabitEthernet0/0/0/1
+P4              GigabitEthernet0/0/0/1          120        R               GigabitEthernet0/0/0/1
+P2              GigabitEthernet0/0/0/2          120        R               GigabitEthernet0/0/0/2
+PE2             GigabitEthernet0/0/0/3          120        R               GigabitEthernet0/0/0/1
+PE4             GigabitEthernet0/0/0/4          120        R               GigabitEthernet0/0/0/0
 
-Total entries displayed: 2
+Total entries displayed: 5

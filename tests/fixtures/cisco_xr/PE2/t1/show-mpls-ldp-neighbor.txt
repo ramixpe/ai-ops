@@ -1,12 +1,12 @@
 
-Wed Aug 19 00:55:59.627 UTC
+Wed Aug 19 14:10:13.698 UTC
 
 Peer LDP Identifier: 10.255.0.1:0
   TCP connection: 10.255.0.1:646 - 10.255.0.12:21664
   Graceful Restart: No
   Session Holdtime: 180 sec
-  State: Oper; Msgs sent/rcvd: 2021/2013; Downstream-Unsolicited
-  Up time: 1d04h
+  State: Oper; Msgs sent/rcvd: 2931/2927; Downstream-Unsolicited
+  Up time: 1d18h
   LDP Discovery Sources:
     IPv4: (1)
       GigabitEthernet0/0/0/0
@@ -18,11 +18,11 @@ Peer LDP Identifier: 10.255.0.1:0
     IPv6: (0)
 
 Peer LDP Identifier: 10.255.0.3:0
-  TCP connection: 10.255.0.3:646 - 10.255.0.12:54829
+  TCP connection: 10.255.0.3:646 - 10.255.0.12:42585
   Graceful Restart: No
   Session Holdtime: 180 sec
-  State: Oper; Msgs sent/rcvd: 2014/2020; Downstream-Unsolicited
-  Up time: 1d04h
+  State: Oper; Msgs sent/rcvd: 485/487; Downstream-Unsolicited
+  Up time: 06:39:47
   LDP Discovery Sources:
     IPv4: (1)
       GigabitEthernet0/0/0/1

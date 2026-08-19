@@ -1,5 +1,5 @@
 
-Wed Jul 29 12:00:47.300 UTC
+Wed Aug 19 14:10:17.720 UTC
 Cisco IOS XR Software, Version 7.11.2 LNT
 Copyright (c) 2013-2024 by Cisco Systems, Inc.
 
@@ -13,5 +13,5 @@ Build Information:
 
 cisco XRd Control Plane
 cisco XRd-CP-C-01 processor with 256GB of memory
-RR1 uptime is 15 hours, 38 minutes
+RR1 uptime is 5 days, 20 hours, 53 minutes
 XRd Control Plane Container

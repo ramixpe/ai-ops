@@ -1,5 +1,5 @@
 
-Wed Jul 29 11:59:14.406 UTC
+Wed Aug 19 14:08:09.901 UTC
 BGP router identifier 10.255.0.31, local AS number 65000
 BGP generic scan interval 60 secs
 Non-stop routing is enabled
@@ -18,7 +18,7 @@ Process       RcvTblVer   bRIB/RIB   LabelVer  ImportVer  SendTblVer  StandbyVer
 Speaker               7          7          7          7           7           0
 
 Neighbor        Spk    AS MsgRcvd MsgSent   TblVer  InQ OutQ  Up/Down  St/PfxRcd
-10.255.0.11       0 65000     946     959        7    0    0 15:35:34          0
-10.255.0.12       0 65000     773     792        0    0    0 02:47:34 Idle
-10.255.0.13       0 65000     943     960        7    0    0 15:35:24          0
-10.255.0.14       0 65000     728     741        0    0    0 03:35:18 Idle
+10.255.0.11       0 65000    8472    8665        7    0    0    1d09h          0
+10.255.0.12       0 65000    8516    8778        7    0    0    1d01h          0
+10.255.0.13       0 65000    8469    8680        7    0    0    1d09h          0
+10.255.0.14       0 65000    8476    8662        7    0    0    5d19h          0

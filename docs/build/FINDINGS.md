@@ -6549,3 +6549,60 @@ a guard run, zero failures — previously the exact trigger.
 investigation. But a HOLDS verdict *could* have been printed while contamination
 the harness should have caught simply had not fired yet. Post-fix: four full
 33-guard runs, 33/33 every time.
+
+---
+
+## OBS-300 · Harness · A killed mutation run left the source tree mutated, and the symptom pointed somewhere else
+
+I wrapped the gate in a 10-minute timeout. The suite had grown past eight
+minutes; adding `mutate_guards.py` pushed it over, `timeout` sent SIGTERM
+mid-mutation, and the run died between mutating a file and restoring it.
+
+`run_one` restores in a `finally`. **`finally` does not run on a signal** —
+Python's default SIGTERM handler terminates the process without unwinding. So
+`epoch.py` was left holding the mutation:
+
+```python
+@property
+def refuses(self) -> bool:
+    return False                                    # the mutation
+    # return self.status in (FABRIC_MOVED, UNVERIFIED)   # the real code
+```
+
+**The failure mode is the danger, not the interruption.** There was no error, no
+log line, no warning. The only symptom was three `test_epoch.py` tests failing —
+the coherence tests, which had *just* been surrounded by a large fixture refresh
+that broke eighteen other tests. Every contextual cue said "fixture casualty".
+
+I dispatched an agent to fix them as fixture casualties. **It refused.** It
+byte-diffed the fixtures those tests actually read, found zero differences,
+proved the tests never touch `t0`/`t1` at all, then monkey-patched the single
+property in memory and reproduced the failure character-for-character. It
+changed nothing and reported the real cause.
+
+Had it done what I asked, it would have rewritten three tests to accept
+`refuses == False` — permanently disabling the guarantee that a fabric which
+moved mid-read cannot produce a causal finding. The evidence-epoch layer exists
+for that one property. **I would have shipped its removal, in a commit whose
+message said I was repairing tests after a fixture refresh.**
+
+Two fixes, both proven:
+
+* **A signal handler** converting SIGTERM/SIGINT into an exception, so `finally`
+  unwinds. Verified by killing a real run mid-mutation: nothing left dirty.
+* **A refusal to start** when any mutation target already differs from HEAD.
+  Belt to the handler's braces — SIGKILL catches no handler, and starting a run
+  on an already-mutated file would restore it to the *wrong* original. Verified
+  by planting a mutation: `REFUSING TO START`, exit 1.
+
+> A tool that edits source to test it must treat "I was killed" as a case it
+> handles, not an accident that happens to it. And when a failure appears beside
+> a large unrelated change, the adjacency is a coincidence generator: it supplies
+> a plausible cause for free, and the plausible cause is what stops you looking.
+
+The wider lesson is about the instruction I gave. I told the agent the tests were
+fixture casualties — my diagnosis, stated as context. It was only free to find
+the truth because the brief also said *"if a test cannot be honestly updated, say
+so and leave it failing for me to decide."* **Without that clause the correct
+outcome was unreachable**, because doing the assigned task well and getting the
+right answer were opposites.

@@ -1,5 +1,5 @@
 
-Wed Jul 29 11:59:12.161 UTC
+Wed Aug 19 14:08:07.023 UTC
 Capability codes:
 	(R) Router, (B) Bridge, (T) Telephone, (C) DOCSIS Cable Device
 	(W) WLAN Access Point, (P) Repeater, (S) Station, (O) Other

@@ -1,5 +1,5 @@
 
-Wed Jul 29 11:59:10.670 UTC
+Wed Aug 19 14:08:05.063 UTC
 
                Intf       Intf        LineP              Encap  MTU        BW
                Name       State       State               Type (byte)    (Kbps)

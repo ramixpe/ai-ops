@@ -1,5 +1,5 @@
 
-Wed Jul 29 12:00:42.910 UTC
+Wed Aug 19 14:10:12.297 UTC
 
 SR-TE policy database
 ---------------------
@@ -7,7 +7,7 @@ SR-TE policy database
 Color: 10, End-point: 10.255.0.13
   Name: srte_c_10_ep_10.255.0.13
   Status:
-    Admin: up  Operational: up for 15:35:18 (since Jul 28 20:25:23.937)
+    Admin: up  Operational: up for 1d09h (since Aug 18 05:00:08.295)
   Candidate-paths:
     Preference: 100 (configuration) (active)
       Name: srte_c_10_ep_10.255.0.13
@@ -20,7 +20,7 @@ Color: 10, End-point: 10.255.0.13
           SID[0]: 16003
           SID[1]: 16013
   Attributes:
-    Binding SID: 28126
+    Binding SID: 24031
     Forward Class: Not Configured
     Steering labeled-services disabled: no
     Steering BGP disabled: no
@@ -31,7 +31,7 @@ Color: 10, End-point: 10.255.0.13
 Color: 20, End-point: 10.255.0.13
   Name: srte_c_20_ep_10.255.0.13
   Status:
-    Admin: up  Operational: down for 15:37:27 (since Jul 28 20:23:15.690)
+    Admin: up  Operational: down for 5d20h (since Aug 13 17:17:47.792)
   Candidate-paths:
     Preference: 100 (configuration) (inactive)
       Name: srte_c_20_ep_10.255.0.13

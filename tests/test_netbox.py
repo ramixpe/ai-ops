@@ -135,11 +135,16 @@ def test_p1_p2_is_a_mutually_confirmed_cable(monkeypatch):
     assert cable.interface_b == "GigabitEthernet0/0/0/0"
 
 
-def test_pe2_isolated_at_t0_is_a_device_and_ip_with_no_cables(monkeypatch):
-    """topology.py's own docstring: PE2 is 0/0 at t0/t1 -- isolated at the
-    link layer, not absent from the fabric, and still carries a BGP
-    router-id. The record set must show the same shape: a device and an IP
-    address, zero cables touching it."""
+def test_pe2_is_no_longer_isolated_at_t0_and_has_two_cables(monkeypatch):
+    """B-591 (2026-08-19 refresh): PE2 was this fabric's isolation case for
+    the life of the project -- 0/0, cabled to nobody in either LLDP or
+    IS-IS -- and topology.py's docstring said so directly. That is no longer
+    true: PE2 now shows live IS-IS adjacencies to P1 and P3, LLDP-confirmed
+    on both ends (cross-checked against the raw fixture text: P1's table
+    names PE2 on Gi0/0/0/3 with PE2's port as Gi0/0/0/0, P3's names PE2 on
+    Gi0/0/0/3 with PE2's port as Gi0/0/0/1, and PE2's own table mirrors both
+    back). The record set must show the same shape: a device and an IP
+    address, now with two cables touching it, not zero."""
 
     evidence = _evidence_by_device(monkeypatch, label="t0")
 
@@ -147,8 +152,15 @@ def test_pe2_isolated_at_t0_is_a_device_and_ip_with_no_cables(monkeypatch):
 
     assert "PE2" in {d.name for d in records.devices}
     assert any(ip.device == "PE2" for ip in records.ip_addresses)
-    touching_pe2 = [c for c in records.cables if "PE2" in (c.device_a, c.device_b)]
-    assert touching_pe2 == []
+    touching_pe2 = {
+        (c.device_a, c.interface_a, c.device_b, c.interface_b)
+        for c in records.cables
+        if "PE2" in (c.device_a, c.device_b)
+    }
+    assert touching_pe2 == {
+        ("P1", "GigabitEthernet0/0/0/3", "PE2", "GigabitEthernet0/0/0/0"),
+        ("P3", "GigabitEthernet0/0/0/3", "PE2", "GigabitEthernet0/0/0/1"),
+    }
 
 
 def test_bgp_vpnv4_peers_corrects_the_stale_pe4_no_bgp_claim(monkeypatch):

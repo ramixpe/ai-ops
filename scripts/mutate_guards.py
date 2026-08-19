@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import pathlib
 import shutil
+import signal
 import subprocess
 import sys
 
@@ -370,6 +371,32 @@ MUTATIONS = [
      '            )\n',
      '        pass\n',
      "test_cannot_compare_without_a_reason_is_rejected"),
+    # B-110/B-111. Counted before mutating (OBS-191): the anchor occurs exactly
+    # once in flows.py. Without this branch, `flow_for("l3vpn_service")` and
+    # `flow_for("topology")` still raise `NotImplementedError` -- the generic
+    # "pending design" fallback also names the object type in its repr, so a
+    # test that only checked the exception type or `match=object_type` would
+    # not notice the mutation at all. What the mutation actually removes is
+    # each refusal's *specific* reason (the VRF-collection-surface gap, the
+    # audit/learn-topology pointers) -- exactly what
+    # `test_l3vpn_service_is_refused_not_merely_unbuilt` asserts is present.
+    ("B-110-B-111", "a REFUSED_OBJECT_TYPES flow raises its own specific "
+     "reason, not the generic pending-design fallback that would otherwise "
+     "still fire (and still name the object type) with none of the reasoning",
+     "src/agent_nettools/flows.py",
+     "    if object_type in REFUSED_OBJECT_TYPES:",
+     "    if False and object_type in REFUSED_OBJECT_TYPES:",
+     "test_l3vpn_service_is_refused_not_merely_unbuilt"),
+    ("B-511-PROBE", "the probe generator's exclusion filter actually removes "
+     "reserved addresses, rather than the candidate pool merely happening "
+     "not to include one (B-511/OBS-195: a fabrication probe whose answer is "
+     "written down anywhere is a retrieval test; the generator exists so a "
+     "leaked identifier is impossible, which depends on this filter, not on "
+     "luck)",
+     "scripts/generate_probe_identifier.py",
+     "    return [str(ip) for ip in network.hosts() if str(ip) not in reserved]\n",
+     "    return [str(ip) for ip in network.hosts()]\n",
+     "test_unused_hosts_excludes_reserved_and_keeps_everything_else"),
 ]
 
 
@@ -440,6 +467,62 @@ def resolve_guard_tests(symbol: str) -> list[str]:
     return sorted(f for f in r.stdout.split() if f.endswith(".py"))
 
 
+def _restore_on_signal() -> None:
+    """Convert SIGTERM/SIGINT into an exception so `run_one`'s `finally` runs.
+
+    `try/finally` unwinds on an exception. It does **not** unwind on a signal:
+    Python's default SIGTERM handler terminates the process immediately, so a
+    mutation in flight is never restored and the source file is left broken.
+
+    That is not hypothetical. On 2026-08-19 a gate command wrapped this script
+    in a 10-minute timeout; the suite had grown past 8 minutes, `timeout` sent
+    SIGTERM mid-mutation, and `epoch.py` was left with `Coherence.refuses`
+    hardcoded to `return False` -- the mutation, committed to the working tree.
+    Three unrelated `test_epoch.py` tests then failed, and the obvious reading
+    was "the fixture refresh broke them". An agent sent to fix those tests
+    correctly refused, diagnosed the real cause, and reported it instead of
+    weakening the assertions to match corrupted source (OBS-300).
+
+    **The failure mode is the danger, not the interruption.** A killed run
+    leaves no error, no log line, and no clue -- only unrelated tests failing
+    for a reason that points somewhere else entirely.
+    """
+
+    def _raise(signum, _frame):
+        raise KeyboardInterrupt(f"interrupted by signal {signum}")
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, _raise)
+
+
+def assert_no_leftover_mutation() -> None:
+    """Refuse to start if a mutation target already differs from HEAD.
+
+    Belt to the signal handler's braces: if a previous run was killed in a way
+    no handler could catch (SIGKILL, power loss), the tree still holds its
+    mutation. Starting a fresh run on top of that would mutate an already
+    mutated file and restore it to the *wrong* original.
+    """
+
+    targets = sorted({m[2] for m in MUTATIONS})
+    dirty = []
+    for rel in targets:
+        proc = subprocess.run(["git", "diff", "--quiet", "HEAD", "--", rel],
+                              cwd=REPO, capture_output=True)
+        if proc.returncode == 1:
+            dirty.append(rel)
+    if dirty:
+        raise SystemExit(
+            "REFUSING TO START: these mutation targets differ from HEAD:\n  "
+            + "\n  ".join(dirty)
+            + "\n\nIf you have uncommitted work in them, commit or stash it first.\n"
+            "If a previous run was killed mid-mutation, `git diff` them -- a\n"
+            "leftover mutation is usually a single line reverting a guard\n"
+            "(OBS-300). Restore before running, or this run will mutate an\n"
+            "already-mutated file and restore it to the wrong original."
+        )
+
+
 def run_one(ident, what, path, old, new, symbol) -> dict:
     if path in FROZEN:
         raise SystemExit(f"REFUSED: {path} is frozen by BUILD-PLAN §0.5")
@@ -480,6 +563,9 @@ def run_one(ident, what, path, old, new, symbol) -> dict:
 
 
 def main(argv: list[str]) -> int:
+
+    _restore_on_signal()
+    assert_no_leftover_mutation()
     wanted = set(argv[1:])
     selected = [m for m in MUTATIONS if not wanted or m[0] in wanted]
 

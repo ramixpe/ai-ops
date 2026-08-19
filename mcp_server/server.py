@@ -1273,10 +1273,20 @@ def investigate_lab_session(
                 For ``isis_adjacency`` and ``ldp_session`` the subject is
                 the LOCAL interface the adjacency forms over, e.g.
                 "GigabitEthernet0/0/0/2" -- not the neighbour's name.
-                ``device_health`` is deliberately NOT a flow: device
-                health is an aggregation over independent signals, not a
-                dependency descent, so it has no lowest-broken-layer to
-                report. Use ``assess_lab_device_health`` for that.
+                Three object types are deliberately NOT flows, each for its
+                own measured reason, and each names what to use instead:
+                ``device_health`` is an aggregation over independent signals
+                rather than a dependency descent, so it has no
+                lowest-broken-layer to report -- use
+                ``assess_lab_device_health``. ``l3vpn_service`` has no
+                VRF-scoped collection surface in this build, so a ladder built
+                from what is observable would report every rung healthy while
+                a route-target leak went unexplained -- use
+                ``check_lab_bgp_vpnv4_neighbors`` and the per-device checks.
+                ``topology`` is an aggregation too, already answered at the
+                right granularity -- use ``check_lab_lldp_neighbors`` per
+                device, or ``get_lab_netbox_topology`` for the mutually
+                confirmed cabling.
 
     Read ``finding`` first. Values you will see:
 

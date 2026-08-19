@@ -89,18 +89,29 @@ def test_p1_pe2_is_both_an_lldp_and_an_isis_edge(monkeypatch):
     assert isis.state == "Up"
 
 
-def test_pe2_is_isolated_at_t0_zero_edges_but_still_a_node(monkeypatch):
-    """topology.py's own docstring: PE2 is 0/0 at t0/t1 -- isolated at the link
-    layer, not absent from the fabric. The graph must show the same shape: a
-    node with degree zero, not a missing node."""
+def test_pe2_is_no_longer_isolated_at_t0_degree_four_not_zero(monkeypatch):
+    """B-591 (2026-08-19 refresh): PE2 was this fabric's isolation case for
+    the life of the project -- topology.py's docstring said 0/0 at t0/t1,
+    isolated at the link layer but not absent from the fabric. That is no
+    longer true: PE2 now carries live IS-IS adjacencies to P1 and P3, and LLDP
+    confirms both links from both ends, so the graph carries one `isis` and
+    one `lldp` edge per link -- four edges touching PE2, not zero. The node
+    itself was never missing either way; what changed is its degree."""
 
     evidence = _evidence_by_device(monkeypatch, label="t0")
 
     graph = build_graph(evidence)
 
     assert "PE2" in {node.name for node in graph.nodes}
-    touching_pe2 = [e for e in graph.edges if "PE2" in (e.device_a, e.device_b)]
-    assert touching_pe2 == []
+    touching_pe2 = {
+        (e.protocol, e.device_a, e.device_b) for e in graph.edges if "PE2" in (e.device_a, e.device_b)
+    }
+    assert touching_pe2 == {
+        ("isis", "P1", "PE2"),
+        ("isis", "P3", "PE2"),
+        ("lldp", "P1", "PE2"),
+        ("lldp", "P3", "PE2"),
+    }
 
 
 def test_isis_broken_pe3_p2_is_lldp_only(monkeypatch):

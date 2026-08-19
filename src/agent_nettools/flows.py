@@ -456,11 +456,12 @@ UNIVERSAL_FINDINGS = frozenset(
 # --------------------------------------------------------------------------- #
 
 #: The seven object types, per D5. Four are implemented (`FLOWS`, below).
-#: `l3vpn_service` and `topology` are declared-but-not-yet-built stubs so the
-#: registry's shape is fixed without pretending coverage exists (B-110, B-111).
-#: `device_health` is a third kind of entry: investigated (B-108) and
-#: deliberately refused as a flow, permanently rather than provisionally --
-#: see the block comment beside `flow_for`, below the registry, for why.
+#: The other three -- `device_health`, `l3vpn_service`, `topology` -- were
+#: each investigated and refused (B-108, B-110, B-111), not merely left
+#: unbuilt: `REFUSED_OBJECT_TYPES` carries a distinct reason for each. As of
+#: B-110/B-111 there is no third state left in this registry -- every
+#: declared object type is now either built or refused with evidence; see
+#: the block comments above `FLOWS`, below, for each refusal's reasoning.
 OBJECT_TYPES: tuple[str, ...] = (
     "interface",
     "isis_adjacency",
@@ -835,6 +836,163 @@ LDP_SESSION_FLOW = Flow(
 # healthy?", and the documented correct answer is `assess_lab_device_health`,
 # not the descent tool.
 
+
+# --- l3vpn_service (B-110) --------------------------------------------------
+#
+# Investigated, not skipped -- and refused, though on a different axis than
+# device_health's. Q-004 settled the naming scheme (`<pe>:<vrf>`, OBS-035) and
+# `docs/build/discovery-l3vpn.md`'s live captures (2026-08-15) confirm this
+# fabric runs a genuine L3VPN service: three VRFs across four PEs (CUSTA on
+# PE1/PE3, CUSTB on PE2/PE4, SHARED-SVCS on PE1 only), real RT import/export
+# policy, and MP-BGP VPNv4 Established with non-zero prefixes on RR1 and all
+# four PEs (OBS-183, 2026-08-19 -- the reason `bgp_vpnv4` shipped as an intent
+# at all). The service is real. The flow is refused anyway, because this
+# build cannot observe it at the granularity its own settled subject names.
+#
+# No VRF-scoped collection surface exists, and this agent cannot create one
+# ------------------------------------------------------------------------
+# `platforms.PLATFORM_INTENTS["cisco_xr"]` and
+# `templates.PLATFORM_TEMPLATES["cisco_xr"]` were read in full rather than
+# assumed. Neither contains a VRF-qualified command of any kind -- no `show
+# vrf`, no `show route vrf <vrf> <prefix>`, no `show bgp vpnv4 unicast vrf
+# <vrf> ...`, no `show ip interface vrf <vrf> brief`. `templates.py`'s `route`
+# template renders `show route {prefix}` with no VRF qualifier at all, so it
+# reads the *default* routing table -- never a VRF's own. The one VPNv4-shaped
+# intent that does exist, `bgp_vpnv4` (`show bgp vpnv4 unicast summary`), is
+# device-wide: one row per iBGP peer, the same session and FSM `bgp_session`'s
+# own top rung already reads under a different AFI. `platforms.py`'s own
+# comment beside it says so directly -- "a second rung reading this intent
+# would not be a new dependency hypothesis (OBS-167) -- it would be the same
+# Established/not-Established fact under a different AFI, which is
+# corroboration, not a gate" -- and that reasoning applies exactly as hard to
+# a rung inside a *different* flow's ladder as it does inside `bgp_session`'s
+# own. Confirmed against `tests/fixtures/`: the only VPNv4-shaped capture on
+# any device is `show-bgp-vpnv4-unicast-summary.txt`, and its content is the
+# same aggregate per-neighbour session view for every VRF the box carries --
+# it cannot tell CUSTA's traffic from CUSTB's.
+#
+# `platforms.py` and `templates.py` are also outside this agent's ownership
+# this wave -- a different agent owns them, concurrently -- so even setting
+# the evidence above aside, there is no file this agent may edit to add a
+# VRF-scoped command. B-437 requires the evidence (a live-verified command
+# plus a captured broken-VRF fixture) to exist *before* a rung is written, not
+# after, and there was no live-lab access in this session either, so nothing
+# could be captured to close the gap even were the file open.
+#
+# The subject cannot even be checked for existence
+# --------------------------------------------------
+# `subject_present` (B-459) asks the *device*, not a document, whether the
+# named object exists -- and there is no command that lists a PE's VRFs at
+# all. `<pe>:<vrf>`'s existence could only be answered from
+# `discovery-l3vpn.md`'s static table, which would make it a second,
+# unverified source of the same fact a device's own evidence should answer --
+# exactly the failure `graph.py`'s docstring warns about, and one this fabric
+# already paid for once (OBS-103/B-435): an authored source of topology
+# disagreeing with the evidence, for a reason that turned out to be
+# resolvable only because the evidence was read directly instead of trusted
+# by proxy.
+#
+# What IS observable does not discriminate by VRF, and that is not a minor gap
+# ------------------------------------------------------------------------------
+# The CE-facing physical interface (`GigabitEthernet0/0/0/2` on every PE, per
+# `discovery-l3vpn.md` §2) is fully observable today with zero new commands --
+# but its up/down state is exactly what the existing `interface` flow already
+# reports, under a name that carries no VRF at all. A ladder built only from
+# what is collectible would produce the **identical** verdict for `PE1:CUSTA`
+# and `PE1:SHARED-SVCS`, because nothing collected distinguishes them: the
+# ladder cannot see the thing its own subject names.
+#
+# And the fabric's own documented failure mode would be invisible to it.
+# `discovery-l3vpn.md` §1 calls SHARED-SVCS "a service whose reachability
+# depends on RT policy rather than on the protocol stack" and says outright
+# that "the `bgp_session` descent's ladder ... would find every rung healthy
+# and still not explain a leak failure, because the fault would live in RT
+# import/export." Every rung this build could construct today (VPNv4 session
+# state, a physical interface) is protocol-stack evidence -- the exact kind
+# that document names as blind to this fabric's actual L3VPN fault. A ladder
+# that reports `all_layers_healthy` on a genuinely broken RT-leak service is
+# not a weak flow -- it is `checks.py`'s own nightmare case, "silent
+# degradation behind a green flag," shipped as this flow's headline behaviour
+# rather than caught as an edge case.
+#
+# Contingent, not permanent. Unlike device_health's structural mismatch
+# (aggregation vs. descent, true regardless of what evidence exists),
+# l3vpn_service's refusal is against *this build's current collection
+# surface*. Revisit condition: a VRF-scoped command exists, verified live and
+# captured with a broken-VRF fixture (per this file's `Flow` docstring and
+# B-437's separating-case requirement), and the RT-policy blind spot above is
+# either closed by a config-axis read or explicitly accepted as this flow's
+# known ceiling rather than discovered by an operator the hard way.
+
+
+# --- topology (B-111) -------------------------------------------------------
+#
+# Investigated, not skipped -- and refused, on D5's own test rather than on a
+# collection-surface gap. The backlog row's stated blocker ("the fabric's
+# LLDP data is self-contradictory, so this one must report disagreement
+# rather than assert links") is stale: OBS-103/B-435 found the apparent
+# inconsistency was a hostname-resolution artefact -- P1 ran the configured
+# hostname `LEAF05_DHCP_SERVER` at capture time, so both ends of the LLDP
+# exchange were telling the truth and the mismatch was between LLDP's
+# device-reported names and the inventory's labels, corrected structurally by
+# `topology.hostname_map`/`resolve_device`. That correction removes the
+# *original* reason this item waited; it does not supply a dependency
+# hypothesis to build a ladder from. The deeper question is whether
+# "topology" is an object with a lowest-broken-rung at all, and every framing
+# tried says no.
+#
+# D5's test: "is this an object, or a symptom of one?" `design-thinking.md`
+# itself answers this before a ladder is even sketched -- its own D5 table
+# lists `get_topology(scope)` under "Relationships, multi-device flows": a
+# query that returns a graph, not a protocol with a health FSM. There is no
+# "topology session" that is Established or not, Up or not, the way every
+# other flow's top rung reads one. "Topology" names the *shape* of the
+# network, and a shape is queried, not diagnosed.
+#
+# Three concrete framings were tried against that test, not assumed away:
+#
+# 1. **Per-link** ("does this interface's discovered neighbour match
+#    reality"). This is `isis_adjacency`'s existing two-rung ladder,
+#    unchanged. LLDP is already read there, inside `checks.isis_neighbor_up`,
+#    as corroboration for exactly this reason -- and LLDP was *refused* as a
+#    standalone rung by B-107/OBS-167 because it does not gate IS-IS adjacency
+#    formation. A `topology` flow asserting "the fabric needs LLDP-vs-IS-IS
+#    agreement" over the same evidence would be that refused hypothesis,
+#    repeated under a new flow's name rather than corrected.
+# 2. **Fabric-wide** (LLDP disagreements, neighbours not in the inventory,
+#    zero-adjacency devices). This is an aggregation over independent
+#    per-link facts -- one link's LLDP/IS-IS agreement says nothing about any
+#    other link's -- which is B-108's shape exactly: ordering independent
+#    facts into rungs manufactures a causal claim the evidence does not
+#    support. And it is already served, at the *right* granularity (the whole
+#    fabric, not one subject), by modules this agent does not own and must
+#    not duplicate: `topology.build_anomaly_report` (`nettools
+#    learn-topology`'s three anomaly classes), `audit.py`'s cross-device
+#    consistency rules (`nettools audit`, B-477 -- "the fabric judged against
+#    itself"), and `graph.py`'s pure LLDP/IS-IS graph projection -- a
+#    library-level module, not yet its own CLI/MCP surface, but exactly the
+#    shape `design-thinking.md`'s own D5 table names for this question
+#    (`get_topology(scope)`) -- which deliberately keeps the two protocols'
+#    edges apart rather than merging them into one "link is up" fact (see its
+#    own docstring, and `test_isis_broken_pe3_p2_is_lldp_only`).
+# 3. **Device-pair reachability** ("can device A reach device B"). This
+#    re-derives rungs `bgp_session` already owns -- `route_present`,
+#    `isis_adjacency` (device-wide), `interface_state` (PATH-scoped,
+#    `EACH_PATH_INTERFACE`/`ANY_HEALTHY`) -- without adding a genuine
+#    top-layer object above them. `route_present` already *is* the complete
+#    answer to "is there a path"; a `topology` flow reading the same intents
+#    to ask the same question under a new name adds a label, not a dependency
+#    hypothesis, and fails B-437 point 1 (a stated assertion that the layer
+#    above cannot work unless this one does) for lack of a layer above to
+#    state it about.
+#
+# Contingent on the same terms as l3vpn_service's refusal, not permanent: if a
+# future protocol genuinely gated on cross-device topology agreement in a way
+# none of `isis_adjacency`/`bgp_session`/`ldp_session` already reads, that
+# would be a new rung on one of those ladders (framing 1's territory), or
+# grounds to revisit this refusal with a real separating case -- not evidence
+# that "topology" itself was the missing object.
+
 FLOWS: Mapping[str, Flow] = {
     "bgp_session": BGP_SESSION_FLOW,
     "interface": INTERFACE_FLOW,
@@ -856,6 +1014,47 @@ _DEVICE_HEALTH_REFUSAL = (
     "'is DEVICE ok' from the same evidence this flow would have collected."
 )
 
+#: Same pattern as `_DEVICE_HEALTH_REFUSAL` -- see the `l3vpn_service (B-110)`
+#: comment block above `FLOWS` for the full reasoning this summarises.
+_L3VPN_SERVICE_REFUSAL = (
+    "'l3vpn_service' is deliberately not a flow (B-110: investigated and "
+    "refused, not merely unbuilt -- see the comment block above FLOWS in "
+    "flows.py for the full reasoning). The naming scheme is settled "
+    "(`<pe>:<vrf>`, Q-004/OBS-035) and this fabric runs a real L3VPN service "
+    "-- three VRFs, real RT-leak policy, see docs/build/discovery-l3vpn.md -- "
+    "but this build has no VRF-scoped collection surface at all: no `show "
+    "vrf`, no VRF-qualified route or interface command, and the one VPNv4 "
+    "intent that exists (`bgp_vpnv4`) is device-wide, already read by "
+    "`bgp_session`'s own top rung under a different AFI (OBS-183). Without a "
+    "VRF-scoped command, neither the subject's own existence nor any rung "
+    "beneath it can be told apart per VRF, and even the protocol-stack "
+    "evidence this build could collect would report a fabric-documented "
+    "RT-policy failure (SHARED-SVCS) as healthy. Read "
+    "docs/build/discovery-l3vpn.md for what this fabric actually carries; "
+    "there is currently no tool surface that investigates a specific VRF's "
+    "service."
+)
+
+#: Same pattern again -- see the `topology (B-111)` comment block above
+#: `FLOWS` for the full reasoning this summarises.
+_TOPOLOGY_REFUSAL = (
+    "'topology' is deliberately not a flow (B-111: investigated and refused, "
+    "not merely unbuilt -- see the comment block above FLOWS in flows.py for "
+    "the full reasoning). 'Topology' names the shape of the network, not a "
+    "protocol with a lowest broken rung to descend: a per-link framing "
+    "duplicates `isis_adjacency`'s existing ladder (LLDP corroborates there "
+    "already, and was refused as its own rung by B-107/OBS-167); a "
+    "fabric-wide framing is an aggregation over independent per-link facts "
+    "(B-108's shape again), already served by `nettools audit` and "
+    "`nettools learn-topology`'s anomaly report; and a device-pair "
+    "reachability framing re-derives rungs `bgp_session` already owns "
+    "(`route_present`, `isis_adjacency`, `interface_state`) without a new "
+    "dependency above them. Use `nettools audit` for fabric consistency, "
+    "`nettools learn-topology` for the LLDP/IS-IS anomaly report, or the "
+    "`bgp_session`/`isis_adjacency`/`ldp_session` flows for a specific "
+    "protocol's dependency chain."
+)
+
 
 #: Object types that are deliberately REFUSED rather than merely unbuilt,
 #: mapped to the reason. Public and enumerable so a *surface* (the CLI, the MCP
@@ -865,8 +1064,14 @@ _DEVICE_HEALTH_REFUSAL = (
 #: when the truth is that the name is right and the answer is "use this other
 #: thing" (measured 2026-08-19 -- the refusal existed in `flow_for` and the CLI
 #: could not reach it, so the operator saw the generic error. OBS-186/OBS-187).
+#:
+#: As of B-110/B-111 this dict's keys plus `FLOWS`' keys cover every entry in
+#: `OBJECT_TYPES` -- there is no third, "pending" object type left in the
+#: registry (`test_every_declared_object_type_is_built_or_refused` pins it).
 REFUSED_OBJECT_TYPES: dict[str, str] = {
     "device_health": _DEVICE_HEALTH_REFUSAL,
+    "l3vpn_service": _L3VPN_SERVICE_REFUSAL,
+    "topology": _TOPOLOGY_REFUSAL,
 }
 
 
@@ -875,31 +1080,33 @@ def flow_for(object_type: str) -> Flow:
 
     A declared-but-unimplemented object type raises rather than returning
     ``None``, so a caller cannot quietly treat "no flow" as "nothing wrong".
-    ``device_health`` is a distinct case of this: not unimplemented, but
-    refused -- see ``_DEVICE_HEALTH_REFUSAL``.
+    Three of the seven declared types are distinct cases of this: not
+    unimplemented, but refused -- see ``REFUSED_OBJECT_TYPES``. As of
+    B-110/B-111 every declared object type not in ``FLOWS`` is in
+    ``REFUSED_OBJECT_TYPES``, so the ``flow is None`` branch below is
+    unreachable today; it is kept as a defensive fallback for an eighth
+    object type declared before it is designed, the same "declared, not yet
+    decided" state ``l3vpn_service`` and ``topology`` held until this round.
     """
 
     if object_type not in OBJECT_TYPES:
-        # Lead with what is USABLE. The full OBJECT_TYPES vocabulary lists five
-        # declared-but-unimplemented flows, and a caller (or a retrying model)
-        # shown that list will try one of them next and hit NotImplementedError
-        # -- two errors where one suffices (operator walkthrough 2026-08-18,
-        # stumble 9). The implemented set answers the actual question.
+        # Lead with what is USABLE. A caller (or a retrying model) shown the
+        # full OBJECT_TYPES vocabulary will try one of the unbuildable ones
+        # next and hit another exception -- two errors where one suffices
+        # (operator walkthrough 2026-08-18, stumble 9). The implemented set
+        # answers the actual question.
         implemented = sorted(name for name, flow in FLOWS.items() if flow is not None)
         raise KeyError(
             f"unknown object type {object_type!r}; implemented flows are "
-            f"{implemented} (declared but not yet implemented: "
-            f"{sorted(set(OBJECT_TYPES) - set(implemented))})"
+            f"{implemented} (refused, not unbuilt: {sorted(REFUSED_OBJECT_TYPES)})"
         )
-    if object_type == "device_health":
-        raise NotImplementedError(_DEVICE_HEALTH_REFUSAL)
+    if object_type in REFUSED_OBJECT_TYPES:
+        raise NotImplementedError(REFUSED_OBJECT_TYPES[object_type])
     flow = FLOWS.get(object_type)
     if flow is None:
         raise NotImplementedError(
-            f"the {object_type!r} flow is declared but not implemented yet "
-            "(implemented: bgp_session, interface, isis_adjacency, "
-            "ldp_session; l3vpn_service and topology are backlog items "
-            "B-110 and B-111; device_health is refused, not unbuilt -- see "
-            "OBJECT_TYPES' docstring)"
+            f"the {object_type!r} flow is declared in OBJECT_TYPES but has no "
+            "FLOWS entry and no REFUSED_OBJECT_TYPES entry -- it is pending "
+            "design, not yet built and not yet refused"
         )
     return flow

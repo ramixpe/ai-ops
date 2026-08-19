@@ -91,15 +91,29 @@ def _healthy_evidence(**overrides: dict) -> dict:
 
 
 def test_ground_truth_severity_map_matches_fixtures(monkeypatch):
-    """Measured real state (see the phase spec / fixture files), not hypothetical:
+    """Measured real state (see the phase spec / fixture files), not hypothetical.
 
-    - PE2 and PE4 are the only two devices with zero IS-IS adjacencies, and
-      both have a baseline that records that as "expected" -- the fabric is
-      broken and the baseline blesses it. Role invariants must still flag it.
-    - RR1 has two Idle BGP peers (10.255.0.12, 10.255.0.14); PE2 has one Idle
-      peer (10.255.0.31); everything else is Established or absent.
-    - PE1 has two admin-up/line-down subinterfaces and one down SR-TE policy;
-      PE3 has one admin-up/line-down subinterface. No other device has either.
+    `t0`/`t1` were fully re-captured live 2026-08-19 (B-516: the prior `t0` was
+    internally inconsistent -- its isis/lldp/bgp/version files were three
+    weeks stale relative to the rest of the label) and every `expected:`
+    isis_adjacencies baseline in ``inventory/lab.yaml`` re-derived against the
+    fresh capture except PE3's, deliberately left alone (B-465/B-496):
+
+    - PE2 and PE4, once isolated, are now fully repaired: 2 IS-IS adjacencies
+      each, matching their re-derived baseline and PE1/RR1's pattern, and both
+      now carry an Established BGP session (0 prefixes, this lab's norm).
+    - P2 and PE3 both show `isis_adjacency_count_drift` as a `warning` -- the
+      one fault still live in this fabric (B-496: PE3's Gi0/0/0/0 is
+      IS-IS-enabled but has no ipv4 address, so no adjacency forms on either
+      end of the P2<->PE3 link). PE3's baseline was deliberately *not*
+      rewritten to match its current broken count, so the drift rule keeps
+      catching it every run instead of the baseline quietly blessing it.
+    - RR1's four BGP peers are all Established with 0 prefixes (`info`); none
+      is Idle any more.
+    - PE1 has one admin-up/line-down subinterface (Gi0/0/0/2.300 -- its sibling
+      Gi0/0/0/2.400 no longer exists on the device at all) and one down SR-TE
+      policy; PE3 has the same single line-down subinterface. No other device
+      has either.
     """
 
     evidence = _evidence_by_device(monkeypatch)
@@ -109,16 +123,16 @@ def test_ground_truth_severity_map_matches_fixtures(monkeypatch):
     severities = {name: verdict["severity"] for name, verdict in result["devices"].items()}
     assert severities == {
         "P1": "ok",
-        "P2": "ok",
+        "P2": "warning",
         "P3": "ok",
         "P4": "ok",
         "PE1": "warning",
-        "PE2": "critical",
+        "PE2": "info",
         "PE3": "warning",
-        "PE4": "critical",
-        "RR1": "critical",
+        "PE4": "info",
+        "RR1": "info",
     }
-    assert result["severity"] == "critical"
+    assert result["severity"] == "warning"
 
     # No fixture at t0 fails to parse, so nothing should ever land in
     # "unevaluated" -- a silently-skipped intent would be a distinct bug from
@@ -127,40 +141,63 @@ def test_ground_truth_severity_map_matches_fixtures(monkeypatch):
         assert verdict["unevaluated"] == []
 
 
-def test_pe2_findings_are_isolation_session_down_and_suspicious_baseline(monkeypatch):
+def test_pe2_is_repaired_only_bgp_no_prefixes_remains(monkeypatch):
+    """Was isolation + a down session + suspicious_baseline before B-465/B-516;
+    PE2 is now fully repaired (2 IS-IS adjacencies, matching its re-derived
+    baseline) and its only remaining finding is this lab's universal
+    zero-prefixes info note."""
+
     evidence = _evidence_by_device(monkeypatch)
 
     verdict = evaluate_device(evidence["PE2"], _device_from_inventory("PE2"))
 
     rules = {finding["rule"] for finding in verdict["findings"]}
-    assert rules == {"isis_isolated", "bgp_session_down", "suspicious_baseline"}
-    down = next(f for f in verdict["findings"] if f["rule"] == "bgp_session_down")
-    assert down["subject"] == "10.255.0.31"
-    assert down["severity"] == "critical"
+    assert rules == {"bgp_no_prefixes"}
+    assert verdict["severity"] == "info"
 
 
-def test_pe4_findings_are_isolation_process_absent_and_suspicious_baseline(monkeypatch):
+def test_pe4_is_repaired_and_now_has_an_active_default_bgp_process(monkeypatch):
+    """Was isolation + no active BGP process + suspicious_baseline before
+    B-465/B-516. PE4 is now fully repaired at the IS-IS layer (2 adjacencies,
+    matching its re-derived baseline) and its default-AF BGP process, believed
+    inactive by an earlier (B-504) comment in inventory/lab.yaml written from
+    this same stale fixture data, is genuinely active: an Established session
+    to RR1, up for 5d19h in the live capture -- so `bgp_process_absent` does
+    not fire either."""
+
     evidence = _evidence_by_device(monkeypatch)
 
     verdict = evaluate_device(evidence["PE4"], _device_from_inventory("PE4"))
 
     rules = {finding["rule"] for finding in verdict["findings"]}
-    assert rules == {"isis_isolated", "bgp_process_absent", "suspicious_baseline"}
+    assert rules == {"bgp_no_prefixes"}
+    assert verdict["severity"] == "info"
 
 
-def test_rr1_findings_include_both_idle_sessions(monkeypatch):
+def test_rr1_findings_are_now_four_established_zero_prefix_peers(monkeypatch):
+    """Was two Idle sessions (PE2, PE4) before B-465/B-516; both are repaired,
+    so no `bgp_session_down` finding remains -- only the lab-wide zero-prefixes
+    info note, once per peer."""
+
     evidence = _evidence_by_device(monkeypatch)
 
     verdict = evaluate_device(evidence["RR1"], _device_from_inventory("RR1"))
 
-    down_subjects = {
-        f["subject"] for f in verdict["findings"] if f["rule"] == "bgp_session_down"
+    rules = {finding["rule"] for finding in verdict["findings"]}
+    assert rules == {"bgp_no_prefixes"}
+    assert "bgp_session_down" not in rules
+    no_prefix_subjects = {
+        f["subject"] for f in verdict["findings"] if f["rule"] == "bgp_no_prefixes"
     }
-    assert down_subjects == {"10.255.0.12", "10.255.0.14"}
-    assert verdict["severity"] == "critical"
+    assert no_prefix_subjects == {"10.255.0.11", "10.255.0.12", "10.255.0.13", "10.255.0.14"}
+    assert verdict["severity"] == "info"
 
 
-def test_pe1_findings_are_two_line_down_subinterfaces_one_sr_policy_and_info(monkeypatch):
+def test_pe1_findings_are_one_line_down_subinterface_one_sr_policy_and_info(monkeypatch):
+    """Was two line-down subinterfaces before B-516's re-capture; Gi0/0/0/2.400
+    no longer exists on the device at all (not merely down), so only
+    Gi0/0/0/2.300 remains."""
+
     evidence = _evidence_by_device(monkeypatch)
 
     verdict = evaluate_device(evidence["PE1"], _device_from_inventory("PE1"))
@@ -171,24 +208,57 @@ def test_pe1_findings_are_two_line_down_subinterfaces_one_sr_policy_and_info(mon
 
     assert {f["subject"] for f in by_rule["interface_admin_up_line_down"]} == {
         "Gi0/0/0/2.300",
-        "Gi0/0/0/2.400",
     }
     assert {f["subject"] for f in by_rule["sr_policy_down"]} == {"20:10.255.0.13"}
     assert by_rule["bgp_no_prefixes"][0]["severity"] == "info"
     assert verdict["severity"] == "warning"
-    assert verdict["counts"] == {"critical": 0, "warning": 3, "info": 1}
+    assert verdict["counts"] == {"critical": 0, "warning": 2, "info": 1}
 
 
-def test_core_routers_are_clean(monkeypatch):
-    """P1-P4 all have non-zero IS-IS adjacencies matching their baseline, no BGP
-    process (fine for role core), and no interface/SR anomalies."""
+def test_pe3_shows_the_confirmed_b496_fault_as_drift_not_a_baked_in_baseline(monkeypatch):
+    """PE3 is the one device B-465 deliberately did not re-baseline: it has a
+    real, still-open fault (B-496 -- Gi0/0/0/0 is IS-IS-enabled but has no
+    ipv4 address, so no adjacency forms to P2). Writing PE3's current broken
+    count (1) into `expected:` would make `isis_adjacency_count_drift` fall
+    silent forever; leaving the baseline at its pre-fault value (2) means the
+    rule reports the fault -- correctly as `warning`, since 1 is *below* 2 --
+    on every run instead."""
 
     evidence = _evidence_by_device(monkeypatch)
 
-    for name in ("P1", "P2", "P3", "P4"):
+    verdict = evaluate_device(evidence["PE3"], _device_from_inventory("PE3"))
+
+    rules = {finding["rule"] for finding in verdict["findings"]}
+    assert rules == {"bgp_no_prefixes", "interface_admin_up_line_down", "isis_adjacency_count_drift"}
+    drift = next(f for f in verdict["findings"] if f["rule"] == "isis_adjacency_count_drift")
+    assert drift["severity"] == "warning"
+    assert drift["expected"] == 2
+    assert drift["actual"] == 1
+    assert verdict["severity"] == "warning"
+
+
+def test_core_routers_are_clean_except_p2_which_shows_the_b496_fault(monkeypatch):
+    """P1, P3, P4 all have 5 IS-IS adjacencies exactly matching their re-derived
+    baseline, no BGP process (fine for role core), and no interface/SR
+    anomalies. P2 is the one core router touching the B-496 fault (it is the
+    other end of the down PE3 link): 4 adjacencies against a baseline of 5, so
+    `isis_adjacency_count_drift` correctly fires as `warning` rather than
+    reading as clean."""
+
+    evidence = _evidence_by_device(monkeypatch)
+
+    for name in ("P1", "P3", "P4"):
         verdict = evaluate_device(evidence[name], _device_from_inventory(name))
         assert verdict["severity"] == "ok", (name, verdict["findings"])
         assert verdict["findings"] == []
+
+    p2_verdict = evaluate_device(evidence["P2"], _device_from_inventory("P2"))
+    assert p2_verdict["severity"] == "warning"
+    p2_rules = {f["rule"] for f in p2_verdict["findings"]}
+    assert p2_rules == {"isis_adjacency_count_drift"}
+    drift = next(f for f in p2_verdict["findings"] if f["rule"] == "isis_adjacency_count_drift")
+    assert drift["expected"] == 5
+    assert drift["actual"] == 4
 
 
 def _device_from_inventory(name: str) -> Device:

@@ -96,29 +96,49 @@ def test_manifest_sizes_are_pinned_within_a_band_that_catches_a_doubling(mc):
     report = mc.measure_both_manifests()
     classic = report["classic"]
     staged = report["staged"]
+    baseline = report["pinned_baseline"]
 
     # Structural: only moves on a deliberate change to which tools exist.
     assert classic["tool_count"] >= 23
     assert staged["tool_count"] == 6
 
-    # Measured today: classic 31,669 chars / 31 tools, staged 4,723 / 6. The
-    # ceiling was last raised (30,000) for B-512's Loki/Prometheus tools and
-    # had drifted stale by the time this task's own two NetBox read tools
-    # (get_lab_netbox_inventory/get_lab_netbox_topology) pushed the real,
-    # measured figure past it -- a genuine, reviewed capability addition
-    # whose descriptions deliberately carry non-negotiable "derived, not
-    # authoritative" safety framing (OBS-112/MCP §14: the description IS the
-    # reasoning surface a model acts on), not prose bloat. Re-banded rather
-    # than loosened without limit: 34,000 sits well below a doubling of
-    # today's own baseline (~63,338) and well above normal docstring
-    # editing, so a regression shaped like MCP-EXPERIMENT.md §10's real
-    # +86% jump (5,961 -> 11,107 on the old, smaller description-only
-    # measure) still fails here instead of quietly shipping.
-    assert 12_000 <= classic["manifest_chars"] <= 34_000, (
+    # B-518: classic is NOT checked against a fixed absolute band any more.
+    # It went 20,117 (B-501) -> 31,669 (B-518) chars as real tool waves
+    # landed (B-508's protocol-coverage checks, B-512's Loki/Prometheus
+    # tools, this task's own NetBox read tools) -- a genuine, reviewed
+    # capability addition each time, not bloat, and an absolute ceiling had
+    # already needed raising once (30,000 -> 34,000) before this task even
+    # started, with more tool waves landing in sibling worktrees as this
+    # sentence is written. A ceiling that must be manually bumped every time
+    # a real tool is added is the wrong instrument -- it either lags behind
+    # legitimate growth (false failures) or gets loosened so far it stops
+    # catching anything.
+    #
+    # The RELATIONSHIP does not have that problem: classic must stay within
+    # a band AROUND the latest pinned snapshot (`CLASSIC_MANIFEST_SNAPSHOTS`
+    # in measure_context.py), wide enough to absorb several more legitimate
+    # tool waves (a doubling from here would be ~63,000) but narrow enough
+    # to still catch a regression shaped like MCP-EXPERIMENT.md §10's real
+    # +86% jump. When growth is real and reviewed, someone re-pins by
+    # appending a new snapshot -- the same append-only discipline
+    # FINDINGS.md/BACKLOG.md already use -- and the band moves with it,
+    # deliberately, instead of by a bare number edited in this file.
+    floor = baseline["manifest_chars"] * 0.5
+    ceiling = baseline["manifest_chars"] * 2.0
+    assert floor <= classic["manifest_chars"] <= ceiling, (
         f"classic manifest is {classic['manifest_chars']} chars, outside "
-        "[12000, 34000] -- if it grew, check whether it roughly doubled "
-        "(see MCP-EXPERIMENT.md Sec10) before assuming this is routine"
+        f"[{floor:.0f}, {ceiling:.0f}] -- a band around the pinned baseline "
+        f"{baseline['label']} ({baseline['manifest_chars']} chars). If this "
+        "grew from real tool additions, re-pin by appending a new entry to "
+        "CLASSIC_MANIFEST_SNAPSHOTS; if it roughly doubled with nothing "
+        "reviewed to explain it, this is MCP-EXPERIMENT.md Sec10 again."
     )
+
+    # staged, unlike classic, IS the right kind of surface for an absolute
+    # ceiling: it is deliberately small and curated (6 tools, B-479), so a
+    # number that grows means staged itself grew, not "the world added a
+    # tool" -- the relationship-vs-absolute distinction this task drew for
+    # classic runs the other way here on purpose.
     assert 2_500 <= staged["manifest_chars"] <= 8_000, (
         f"staged manifest is {staged['manifest_chars']} chars, outside [2500, 8000]"
     )
@@ -131,6 +151,12 @@ def test_the_staged_surface_is_independently_measured_under_half_classic(mc):
     *complete* wire payload (schema + annotations included) -- see
     `manifest_report`'s docstring for why that is a different, larger
     number than description-only.
+
+    Checked against BOTH ratios `measure_both_manifests` reports (B-518):
+    the live one, because it is still a true fact about what a client pays
+    right now, and the pinned one, because that is the one the "under half"
+    CLAIM is actually about -- a claim a live, ever-growing classic manifest
+    cannot settle on its own (see the previous test's comment).
     """
 
     report = mc.measure_both_manifests()
@@ -139,12 +165,126 @@ def test_the_staged_surface_is_independently_measured_under_half_classic(mc):
 
     assert classic_chars > 0 and staged_chars > 0  # not a vacuous 0/0
     assert staged_chars < classic_chars
-    ratio = report["staged_over_classic_ratio"]
-    assert ratio < 0.5, (
-        f"staged/classic = {ratio:.3f} -- the under-half claim does not "
-        "hold once the JSON schema and annotations are counted, not just "
-        "the descriptions"
+
+    live_ratio = report["staged_over_classic_ratio"]
+    assert live_ratio < 0.5, (
+        f"staged/classic (live) = {live_ratio:.3f} -- the under-half claim "
+        "does not hold today once the JSON schema and annotations are "
+        "counted, not just the descriptions"
     )
+
+    pinned_ratio = report["staged_over_pinned_baseline_ratio"]
+    baseline = report["pinned_baseline"]
+    assert pinned_ratio < 0.5, (
+        f"staged/classic (vs pinned baseline {baseline['label']}, "
+        f"{baseline['manifest_chars']} chars) = {pinned_ratio:.3f} -- the "
+        "under-half claim does not hold against the snapshot it was "
+        "actually verified against"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# B-518 -- the ratio must not flatter staged for classic's growth.
+# --------------------------------------------------------------------------- #
+#
+# B-501 measured the classic manifest at 20,117 chars and B-479's staged-vs-
+# classic ratio (0.235) was checked against that number. By B-518 classic had
+# grown to 31,669 chars -- real tool waves, not bloat -- and the staged/classic
+# ratio computed against a LIVE classic would have quietly IMPROVED through
+# every one of them, because staged's own size never moved. `manifest_ratios`
+# is the pure function `measure_both_manifests` now delegates to; these tests
+# exercise it directly with synthetic numbers, so the flattery bug and its fix
+# are provable without a real MCP server, in milliseconds.
+
+
+def test_manifest_ratios_reports_both_absolute_sizes_beside_every_ratio(mc):
+    """The self-describing property B-518 asked for: a caller reading only
+    the ratio field still has, right beside it, both surfaces' absolute
+    sizes and which classic manifest (live or pinned) produced each ratio.
+    """
+
+    result = mc.manifest_ratios(staged_chars=4_723, classic_chars=31_669)
+
+    assert result["staged_chars"] == 4_723
+    assert result["classic_chars"] == 31_669
+    assert result["staged_over_classic_ratio"] == pytest.approx(4_723 / 31_669)
+
+    baseline = result["pinned_baseline"]
+    assert baseline["label"] and baseline["captured"] and baseline["manifest_chars"] > 0
+    assert result["staged_over_pinned_baseline_ratio"] == pytest.approx(
+        4_723 / baseline["manifest_chars"]
+    )
+    assert result["classic_chars_grown_since_pinned_baseline"] == 31_669 - baseline["manifest_chars"]
+
+
+def test_the_pinned_ratio_does_not_move_when_classic_grows_with_nothing_reviewed(mc):
+    """The exact regression B-518 named: 'left alone, that ratio improves
+    every time we add a tool -- flattering the staged surface for doing
+    nothing.' Simulates a tool wave landing (classic grows, staged does not)
+    and shows the LIVE ratio does exactly that, while the PINNED ratio --
+    computed against the fixed snapshot, not whatever classic is today --
+    does not move at all. This is the property that makes growth
+    undetectable-as-improvement impossible, not just documented against.
+    """
+
+    baseline_chars = mc.CLASSIC_MANIFEST_SNAPSHOTS[-1]["manifest_chars"]
+    staged_chars = 4_723
+
+    before = mc.manifest_ratios(staged_chars=staged_chars, classic_chars=baseline_chars)
+    # A tool wave lands: classic grows by 50%, staged is untouched.
+    after = mc.manifest_ratios(staged_chars=staged_chars, classic_chars=int(baseline_chars * 1.5))
+
+    # The live ratio DOES improve -- this is the bug, reproduced on purpose,
+    # so the fix below is proven against a real failure mode and not a straw
+    # man.
+    assert after["staged_over_classic_ratio"] < before["staged_over_classic_ratio"], (
+        "if this fails, the live ratio stopped being flattered by classic's "
+        "growth -- which would be good, but means this test's premise has "
+        "changed and it should be revisited, not just re-asserted the other way"
+    )
+
+    # The pinned ratio does NOT move: both measurements were taken against
+    # the same fixed baseline, so it reports the exact same number before
+    # and after the simulated tool wave -- staged did not get better, and
+    # this is the number that says so.
+    assert before["staged_over_pinned_baseline_ratio"] == after["staged_over_pinned_baseline_ratio"]
+    assert after["classic_chars_grown_since_pinned_baseline"] > 0, (
+        "the growth-since-baseline figure must reflect the simulated growth, "
+        "so a reader is told classic moved even though the pinned ratio alone "
+        "would not show it"
+    )
+
+
+def test_classic_growing_alone_never_changes_the_pinned_baseline_reported(mc):
+    """Anti-vacuity companion: proves `pinned_baseline` itself is the SAME
+    dict regardless of what `classic_chars` is passed in -- if it silently
+    tracked the live number instead of the fixed snapshot, the previous
+    test's core claim (the pinned ratio does not move) would be vacuously
+    true for the wrong reason (both sides recomputing the same live value).
+    """
+
+    small = mc.manifest_ratios(staged_chars=100, classic_chars=1_000)
+    large = mc.manifest_ratios(staged_chars=100, classic_chars=1_000_000)
+
+    assert small["pinned_baseline"] == large["pinned_baseline"] == mc.CLASSIC_MANIFEST_SNAPSHOTS[-1]
+
+
+def test_the_classic_manifest_snapshot_history_is_append_only_in_shape(mc):
+    """Pins the append-only convention itself (like FINDINGS.md/BACKLOG.md):
+    every entry states its own label/date/count, and later entries do not
+    overwrite earlier ones -- `manifest_ratios` always reads the LATEST
+    entry, but history stays visible for anyone diffing this file over time.
+    """
+
+    snapshots = mc.CLASSIC_MANIFEST_SNAPSHOTS
+    assert len(snapshots) >= 2, "the whole point is a history, not one number"
+    labels = [s["label"] for s in snapshots]
+    assert len(labels) == len(set(labels)), "each snapshot needs a distinct label"
+    for entry in snapshots:
+        assert entry["manifest_chars"] > 0 and entry["tool_count"] > 0 and entry["captured"]
+    # Growth across the recorded history is real, not a copy-paste of the
+    # same number under a new label.
+    assert snapshots[-1]["manifest_chars"] >= snapshots[0]["manifest_chars"]
 
 
 def test_the_full_wire_manifest_counts_more_than_descriptions_alone(mc):

@@ -33,32 +33,57 @@ def _evidence_by_device(monkeypatch, label: str = "t0") -> dict[str, dict]:
 
 
 def test_derive_expected_matches_the_fixtures(monkeypatch):
+    """B-590: re-measured against the 2026-08-19 lab refresh.
+
+    The old numbers pinned here (``P1: 2``, ``P2: 4``, ``P3: 1``, ``P4: 3``,
+    ``PE1/PE3: {isis: 1/2, bgp: 1}``, ``PE2: {isis: 0, bgp: 1}``, ``PE4: {isis:
+    0}``, ``RR1: {isis: 1, bgp: 4}``) came from a ``t0``/``t1`` capture that was
+    itself internally inconsistent -- most files dated 2026-07-29 while a few
+    in the same label directory had been refreshed live, so the fabric those
+    numbers described never existed at any single instant. The 2026-08-19
+    refresh recaptured every command in one pass, and the fabric it actually
+    describes now is healthier and more connected than the stale one: P1/P3/P4
+    each carry 5 live IS-IS adjacencies, P2 carries 4, PE1/PE2/PE4/RR1 carry 2,
+    and PE3 carries 1 -- and PE4, which previously answered "% BGP instance
+    'default' not active" (see the test below), now runs an active default-AF
+    session to RR1 as well as its VPNv4 one.
+    """
+
     evidence = _evidence_by_device(monkeypatch)
 
     derived = derive_expected(evidence)
 
     assert derived == {
-        "P1": {"isis_adjacencies": 2},
+        "P1": {"isis_adjacencies": 5},
         "P2": {"isis_adjacencies": 4},
-        "P3": {"isis_adjacencies": 1},
-        "P4": {"isis_adjacencies": 3},
-        "PE1": {"isis_adjacencies": 1, "bgp_peers": 1},
-        "PE2": {"isis_adjacencies": 0, "bgp_peers": 1},
-        "PE3": {"isis_adjacencies": 2, "bgp_peers": 1},
-        "PE4": {"isis_adjacencies": 0},
-        "RR1": {"isis_adjacencies": 1, "bgp_peers": 4},
+        "P3": {"isis_adjacencies": 5},
+        "P4": {"isis_adjacencies": 5},
+        "PE1": {"isis_adjacencies": 2, "bgp_peers": 1},
+        "PE2": {"isis_adjacencies": 2, "bgp_peers": 1},
+        "PE3": {"isis_adjacencies": 1, "bgp_peers": 1},
+        "PE4": {"isis_adjacencies": 2, "bgp_peers": 1},
+        "RR1": {"isis_adjacencies": 2, "bgp_peers": 4},
     }
 
 
 def test_devices_with_no_bgp_process_have_no_bgp_peers_key(monkeypatch):
-    """P1-P4 and PE4 answer '% BGP instance not active': absent, never zero."""
+    """P1-P4 answer '% BGP instance not active': absent, never zero.
+
+    B-590: PE4 dropped out of this set on 2026-08-19 -- its default AF now
+    runs an active session to RR1 (``show bgp summary`` no longer replies "%
+    BGP instance 'default' not active"), on top of the VPNv4 session
+    ``test_bgp_vpnv4_peers_corrects_the_stale_pe4_no_bgp_claim`` in
+    test_netbox.py already covered. The remaining four are still P-routers
+    that speak IS-IS only.
+    """
 
     evidence = _evidence_by_device(monkeypatch)
 
     derived = derive_expected(evidence)
 
-    for name in ("P1", "P2", "P3", "P4", "PE4"):
+    for name in ("P1", "P2", "P3", "P4"):
         assert "bgp_peers" not in derived[name]
+    assert derived["PE4"]["bgp_peers"] == 1
 
 
 # --------------------------------------------------------------------------- #
@@ -99,16 +124,52 @@ def test_the_three_hostnames_are_this_fabric_s_own_devices(monkeypatch):
     assert find_neighbors_not_in_inventory(evidence) == {}
 
 
-def test_the_hostname_map_carries_both_spellings(monkeypatch):
+def test_the_hostname_map_now_carries_only_inventory_labels(monkeypatch):
+    """B-590: the three renamed hosts this test used to pin are gone.
+
+    As of the 2026-08-19 refresh, P1/P3/PE4 all report their own inventory
+    label as their configured hostname (no more ``LEAF05_DHCP_SERVER`` /
+    ``Lab-leaf01`` / ``SDWAN-Edge01`` -- see the B-435 section comment above
+    for what those were). ``hostname_map`` built from real evidence now has
+    nothing to alias: every key is just a casefolded inventory name mapping to
+    itself. The behavioral contract this used to pin against real fixtures --
+    that a device's *configured* hostname resolves too, not only its label --
+    still exists and is still worth testing; it just has no live fixture left
+    to exercise it, so ``test_a_fabricated_alias_still_resolves_both_spellings``
+    below covers it synthetically, the same move already made for
+    ``find_lldp_disagreements``/``find_neighbors_not_in_inventory`` in this
+    file.
+    """
+
     evidence = _evidence_by_device(monkeypatch)
 
     mapping = topology.hostname_map(evidence)
 
-    assert topology.resolve_device("LEAF05_DHCP_SERVER", mapping) == "P1"
-    assert topology.resolve_device("Lab-leaf01", mapping) == "P3"
-    assert topology.resolve_device("SDWAN-Edge01", mapping) == "PE4"
+    assert mapping == {name.casefold(): name for name in evidence}
+    assert topology.resolve_device("LEAF05_DHCP_SERVER", mapping) is None
+    assert topology.resolve_device("Lab-leaf01", mapping) is None
+    assert topology.resolve_device("SDWAN-Edge01", mapping) is None
     assert topology.resolve_device("P1", mapping) == "P1"
-    assert topology.resolve_device("lab-LEAF01", mapping) == "P3"  # case-insensitive
+    assert topology.resolve_device("p1", mapping) == "P1"  # case-insensitive
+    assert topology.resolve_device("NotAThing", mapping) is None
+
+
+def test_a_fabricated_alias_still_resolves_both_spellings():
+    """The companion to the test above -- without it, a regression that broke
+    hostname aliasing entirely would have zero coverage now that no real
+    fixture carries one."""
+
+    evidence = _fabricated(
+        {"A": [], "B": []},
+        hostnames={"B": "bee"},
+    )
+
+    mapping = topology.hostname_map(evidence)
+
+    assert topology.resolve_device("bee", mapping) == "B"
+    assert topology.resolve_device("BEE", mapping) == "B"  # case-insensitive
+    assert topology.resolve_device("B", mapping) == "B"  # the label still works too
+    assert topology.resolve_device("A", mapping) == "A"
     assert topology.resolve_device("NotAThing", mapping) is None
 
 
@@ -214,52 +275,75 @@ def test_a_device_whose_facts_did_not_parse_is_not_assumed_aligned():
     assert set(find_neighbors_not_in_inventory(evidence)) == {"bee"}
 
 
-def test_zero_adjacency_devices_are_pe2_and_pe4(monkeypatch):
-    """PE2 is isolated at the link layer entirely (0/0). PE4 has an LLDP
-    neighbor but zero IS-IS adjacencies -- a different failure shape, reported
-    with both counts so the two are not conflated."""
+def test_no_device_has_zero_adjacencies_after_the_2026_08_19_refresh(monkeypatch):
+    """B-590: PE2 and PE4 were this fabric's headline isolation case for the
+    life of the project -- PE2 fully isolated (0 LLDP, 0 IS-IS), PE4 with an
+    LLDP neighbor but no IS-IS adjacency. Neither is true any more: PE2 now
+    carries 2 live IS-IS adjacencies (to P1 and P3, confirmed by LLDP on both)
+    and PE4 carries 2 as well. The live fabric has nobody left at zero, on
+    either count -- this is the correct, measured answer for what the lab
+    looks like today, not a loosened assertion.
+
+    The *detector's* ability to catch a zero-adjacency device still needs
+    coverage now that no real fixture exercises it --
+    ``test_the_detector_still_catches_a_synthetic_zero_adjacency_device``
+    below is that coverage, built the same way B-435's synthetic guards were.
+    """
 
     evidence = _evidence_by_device(monkeypatch)
+
+    assert find_zero_adjacency_devices(evidence) == []
+
+
+def test_the_detector_still_catches_a_synthetic_zero_adjacency_device():
+    """The companion to the test above. Without it, a regression that broke
+    zero-adjacency detection entirely would have no coverage now that the
+    real fabric no longer has a case to catch."""
+
+    evidence = _fabricated({
+        "A": [],  # 0 LLDP neighbors, and _fabricated gives every device 1 ISIS record.
+        "B": [{"local_interface": "Gi0/0/0/0", "neighbor": "A", "neighbor_interface": "Gi0/0/0/0"}],
+    })
+    evidence["A"]["isis"]["data"]["parsed"]["records"] = []  # A also has 0 IS-IS adjacencies
 
     zero = find_zero_adjacency_devices(evidence)
     by_device = {entry["device"]: entry for entry in zero}
 
-    assert set(by_device) == {"PE2", "PE4"}
-    assert by_device["PE2"] == {"device": "PE2", "lldp_neighbors": 0, "isis_adjacencies": 0}
-    assert by_device["PE4"] == {"device": "PE4", "lldp_neighbors": 1, "isis_adjacencies": 0}
-
-
-def test_pe2_has_a_bgp_router_id_despite_zero_adjacencies(monkeypatch):
-    """The isolation is a link-layer fact, not a BGP one -- PE2 still has an
-    active BGP process with one (idle) peer toward RR1."""
-
-    evidence = _evidence_by_device(monkeypatch)
-
-    derived = derive_expected(evidence)
-
-    assert derived["PE2"]["bgp_peers"] == 1
-    assert derived["PE2"]["isis_adjacencies"] == 0
+    assert set(by_device) == {"A"}
+    assert by_device["A"] == {"device": "A", "lldp_neighbors": 0, "isis_adjacencies": 0}
 
 
 def test_report_surfaces_all_four_anomaly_classes(monkeypatch):
+    """B-590: as of 2026-08-19 all three classes are empty on this fabric.
+
+    B-435's two were naming artefacts, already resolved when this test was
+    last touched. The third -- PE2/PE4's zero-adjacency isolation -- was the
+    one anomaly that "always mattered" (the previous comment here's own
+    words), and the 2026-08-19 refresh resolved that one too:
+    ``test_no_device_has_zero_adjacencies_after_the_2026_08_19_refresh`` above
+    measures it directly. This test's job is narrower now -- confirming the
+    *report* renders an all-clean fabric correctly rather than omitting a
+    section or hiding a stale count -- which is still worth pinning on its
+    own, since ``format_anomaly_report`` always runs and is the only signal an
+    operator gets (see its own docstring).
+    """
+
     evidence = _evidence_by_device(monkeypatch)
 
     report = build_anomaly_report(evidence)
 
-    # B-435: two of the classes are empty on this fabric now, and that is the
-    # correct answer -- both were naming artefacts. The remaining anomaly is
-    # real and is the one that always mattered.
     assert report["lldp_disagreements"] == []
     assert report["neighbors_not_in_inventory"] == {}
-    zero_devices = {entry["device"] for entry in report["zero_adjacency_devices"]}
-    assert zero_devices == {"PE2", "PE4"}
+    assert report["zero_adjacency_devices"] == []
 
     text = format_anomaly_report(report)
-    assert "PE2" in text and "PE4" in text
-    # The report still renders when a class is empty, rather than omitting the
-    # heading -- an absent section reads as "not checked", not "nothing found".
+    # The report still renders every heading when its class is empty, rather
+    # than omitting it -- an absent section reads as "not checked", not
+    # "nothing found".
+    assert "LLDP disagreements (0)" in text
     assert "LLDP neighbors not in inventory (0)" in text
-    assert "PE2" in text and "PE4" in text
+    assert "Devices with zero adjacencies (0)" in text
+    assert text.count("\n  none") == 3
 
 
 def test_update_expected_in_yaml_writes_derived_counts(tmp_path, monkeypatch):
@@ -295,7 +379,10 @@ def test_update_expected_in_yaml_writes_derived_counts(tmp_path, monkeypatch):
     import yaml
 
     written = yaml.safe_load(out.read_text(encoding="utf-8"))
-    assert written["devices"][0]["expected"] == {"isis_adjacencies": 2}
+    # B-590: P1 now measures 5 live IS-IS adjacencies (was 2 on the stale
+    # 2026-07-29 capture) -- this asserts on `derived`, computed above from
+    # the same fixtures, so it tracks whatever the fabric currently is.
+    assert written["devices"][0]["expected"] == {"isis_adjacencies": 5}
     # The source is untouched: reading from source, writing to out.
     original = yaml.safe_load(source.read_text(encoding="utf-8"))
     assert original["devices"][0]["expected"] == {"isis_adjacencies": 999}

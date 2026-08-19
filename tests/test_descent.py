@@ -329,14 +329,17 @@ def test_acceptance_isis_adjacency_survives_the_coherence_re_read():
 # backfilling those older labels with today's live LDP data would mix two
 # different points in time inside one label, which is worse than the two
 # labels this flow actually has). That means fewer rows than the
-# isis_adjacency table above, and one of them (P3's `Gi0/0/0/2`, marked below)
-# is honest about a real consequence of that same age gap in the *other*
-# direction: `t0`/`t1`'s own `interfaces`/`isis` captures are three weeks
-# older than today's live LDP capture, and P3 grew a working link since then
-# that its old `interfaces brief` snapshot still calls `admin-down`. The flow
-# reports exactly what each rung's own evidence says -- that is the point of
-# a rung reading only its own declared section -- so this is pinned rather
-# than hidden.
+# isis_adjacency table above.
+#
+# **B-592, 2026-08-19 refresh.** The row this comment used to describe here
+# (P3's `Gi0/0/0/2`, then `no_fault_on_path`) was itself a symptom of the
+# *previous* capture's own inconsistency, not a real fact about the fabric:
+# that capture's `ldp`/`ldp_discovery` commands had been taken live while its
+# `interfaces`/`isis` commands were three weeks stale, so the interface rung
+# still called the port `admin-down` from before the link existed. A single
+# consistent pass on 2026-08-19 recaptured everything in the fabric at once,
+# and with `interfaces brief` no longer lying about that port, the row now
+# reads `all_layers_healthy`, like the other same-shape rows above it.
 # --------------------------------------------------------------------------- #
 
 
@@ -368,14 +371,14 @@ def test_acceptance_isis_adjacency_survives_the_coherence_re_read():
         # A loopback carries no LDP Hello at all -- link-local multicast has
         # nothing to attach to. The module's absence-is-unevaluated rule.
         ("PE1", "Lo0", "t0", "undetermined"),
-        # P3's Gi0/0/0/2: LDP reports an Oper session to P2 (real, captured
-        # live 2026-08-19), while the *interface* rung reads `t0`'s own
-        # `interfaces brief` capture -- three weeks old (2026-07-29) -- which
-        # still shows that port admin-down from before this link existed.
-        # `no_fault_on_path`: the symptom rung is healthy, the interface rung
-        # is broken, and they disagree because they are reading two different
-        # points in time, not because either rung is wrong about what it read.
-        ("P3", "Gi0/0/0/2", "t0", "no_fault_on_path"),
+        # B-592 (2026-08-19 refresh): P3's Gi0/0/0/2 now reads healthy on both
+        # rungs. LDP reports an Oper session to P2, and `interfaces brief`
+        # (recaptured live in the same pass) now shows the port up/up rather
+        # than the admin-down state a three-week-stale capture used to carry
+        # here -- see the section comment above. Previously pinned as
+        # `no_fault_on_path`; that finding described the old capture's own
+        # internal inconsistency, not a fact about the fabric.
+        ("P3", "Gi0/0/0/2", "t0", "all_layers_healthy"),
     ],
 )
 def test_acceptance_ldp_session_through_investigate_pins_every_measured_case(
@@ -400,12 +403,21 @@ def test_acceptance_ldp_session_through_investigate_pins_every_measured_case(
 @pytest.mark.parametrize(
     ("device", "subject", "label", "expected_finding"),
     [
-        # PE3's Gi0/0/0/0 carries a real IS-IS adjacency to P2 in every label
-        # this fabric captured with no fault injected: `healthy`, and the two
-        # real lab captures `t0`/`t1` taken ~90s apart (CLAUDE.md).
+        # PE3's Gi0/0/0/0 carries a real IS-IS adjacency to P2 on `healthy`,
+        # the synthetic no-fault-injected label -- unaffected by the
+        # 2026-08-19 refresh, which only touched `t0`/`t1`.
         ("PE3", "Gi0/0/0/0", "healthy", "all_layers_healthy"),
-        ("PE3", "Gi0/0/0/0", "t0", "all_layers_healthy"),
-        ("PE3", "Gi0/0/0/0", "t1", "all_layers_healthy"),
+        # B-592 (2026-08-19 refresh): `t0`/`t1` used to agree with `healthy`
+        # here too, but the live lab's own B-496 fault (below) is not
+        # intermittent -- it is present in *every* live capture taken since,
+        # including these two. LLDP still confirms P2 is cabled on this port
+        # (both ends), the interface itself is up, and there is still no
+        # IS-IS adjacency -- the same `cause_not_localised` shape `isis-broken`
+        # pins on purpose, now measured on the live labels instead of only a
+        # constructed one. This is not something to normalise away: B-496 is
+        # real and still open in the lab.
+        ("PE3", "Gi0/0/0/0", "t0", "cause_not_localised"),
+        ("PE3", "Gi0/0/0/0", "t1", "cause_not_localised"),
         # PE2's Gi0/0/0/0 is admin-down on `broken` -- the interface rung
         # explains the isis_adjacency rung's silence, so the walk localises.
         ("PE2", "Gi0/0/0/0", "broken", "interface_line_down"),

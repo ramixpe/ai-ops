@@ -103,9 +103,14 @@ def test_device_health_is_refused_not_merely_unbuilt():
     claim the evidence does not support (see the block comment above `FLOWS`
     in `flows.py`).
 
-    Both still raise `NotImplementedError`, so a caller cannot tell "refused"
-    from "not yet built" by exception type alone -- but the message must, so a
-    human (or a retrying model) reading it does not wait for B-108 to land.
+    All three refused object types raise `NotImplementedError`, so a caller
+    cannot tell "refused" from "not yet built" by exception type alone -- but
+    the message must, so a human (or a retrying model) reading it does not
+    wait for something that will never land. See
+    `test_l3vpn_service_is_refused_not_merely_unbuilt` and
+    `test_topology_is_refused_not_merely_unbuilt` for the other two, and
+    `test_every_declared_object_type_is_built_or_refused` for the registry-wide
+    invariant this trio establishes.
     """
 
     with pytest.raises(NotImplementedError) as excinfo:
@@ -115,12 +120,98 @@ def test_device_health_is_refused_not_merely_unbuilt():
     assert "nettools health" in message
     assert "assess_lab_device_health" in message
 
-    # Contrast: a genuinely pending stub does NOT carry this message -- the
-    # two must read differently, or the distinction this test exists to pin
-    # is not actually visible to a caller.
-    with pytest.raises(NotImplementedError) as pending:
+    # Positive control (OBS-181): the refusal is not the module's default
+    # behaviour. A flow that is genuinely built still resolves normally and
+    # carries none of device_health's own replacement pointers.
+    resolved = flows.flow_for("bgp_session")
+    assert resolved.object_type == "bgp_session"
+    assert "assess_lab_device_health" not in str(resolved)
+
+    # Distinctiveness: the three refusals must not be one canned message
+    # wearing three names -- each names its own reason and replacement.
+    assert "vrf" not in message.lower()
+    assert "nettools audit" not in message
+
+
+def test_l3vpn_service_is_refused_not_merely_unbuilt():
+    """B-110. Q-004/OBS-035 settled the naming (`<pe>:<vrf>`) and
+    `docs/build/discovery-l3vpn.md` confirms this fabric runs a real L3VPN
+    service (three VRFs, real RT-leak policy, MP-BGP VPNv4 Established with
+    non-zero prefixes everywhere, per OBS-183). The flow is refused anyway, on
+    a different axis than device_health's: this build has no VRF-scoped
+    collection surface at all -- verified directly against
+    `platforms.PLATFORM_INTENTS` and `templates.PLATFORM_TEMPLATES` rather
+    than assumed, see the `l3vpn_service (B-110)` comment block above `FLOWS`
+    in `flows.py` -- so neither `subject_present` nor any rung below it could
+    tell one VRF's evidence from another's, or from no VRF at all.
+    """
+
+    with pytest.raises(NotImplementedError) as excinfo:
         flows.flow_for("l3vpn_service")
-    assert "nettools health" not in str(pending.value)
+    message = str(excinfo.value)
+    assert "l3vpn_service" in message
+    assert "vrf" in message.lower()
+    assert "discovery-l3vpn.md" in message
+
+    # Positive control: this is not "every flow is refused" -- an implemented
+    # flow still resolves, and carries none of l3vpn_service's own wording.
+    resolved = flows.flow_for("interface")
+    assert resolved.object_type == "interface"
+    assert "vrf" not in str(resolved).lower()
+
+    # Distinctiveness against the other two refusals.
+    assert "nettools health" not in message
+    assert "nettools audit" not in message
+
+
+def test_topology_is_refused_not_merely_unbuilt():
+    """B-111. The backlog row's stated blocker ("LLDP data is
+    self-contradictory") was corrected by OBS-103/B-435 -- the disagreement
+    was a hostname-resolution artefact, not a real one -- so that is not why
+    this is refused. It is refused because no framing tried survives D5's
+    "object, or symptom of one?" test: a per-link framing duplicates
+    `isis_adjacency`'s existing ladder (LLDP is already read there as
+    corroboration and was itself refused as a standalone rung by B-107); a
+    fabric-wide framing is an aggregation already served by `nettools
+    audit`/`nettools learn-topology`, the B-108 shape again; and a
+    device-pair framing re-derives rungs `bgp_session` already owns
+    (`route_present`, `isis_adjacency`, `interface_state`) without a new
+    top-layer object. See the `topology (B-111)` comment block above `FLOWS`
+    in `flows.py` for the full reasoning.
+    """
+
+    with pytest.raises(NotImplementedError) as excinfo:
+        flows.flow_for("topology")
+    message = str(excinfo.value)
+    assert "topology" in message
+    assert "nettools audit" in message
+    assert "nettools learn-topology" in message
+
+    # Positive control: an implemented flow still resolves and carries none
+    # of topology's own wording.
+    resolved = flows.flow_for("isis_adjacency")
+    assert resolved.object_type == "isis_adjacency"
+    assert "nettools audit" not in str(resolved)
+
+    # Distinctiveness against the other two refusals.
+    assert "nettools health" not in message
+    assert "vrf" not in message.lower()
+
+
+def test_every_declared_object_type_is_built_or_refused():
+    """As of B-110/B-111, the registry no longer has a third state.
+    `l3vpn_service` and `topology` used to be "declared but not yet designed"
+    stubs alongside `device_health`'s refusal; both were investigated this
+    round and refused too, on their own evidence. So every one of the seven
+    `OBJECT_TYPES` is now either built (`FLOWS`) or refused
+    (`REFUSED_OBJECT_TYPES`), and `flow_for` can no longer tell a caller "wait
+    for it" -- only "here" or "here is why not, and here is what to use
+    instead".
+    """
+
+    assert set(flows.FLOWS) | set(flows.REFUSED_OBJECT_TYPES) == set(flows.OBJECT_TYPES)
+    assert set(flows.FLOWS).isdisjoint(flows.REFUSED_OBJECT_TYPES)
+    assert set(flows.REFUSED_OBJECT_TYPES) == {"device_health", "l3vpn_service", "topology"}
 
 
 @pytest.mark.parametrize(

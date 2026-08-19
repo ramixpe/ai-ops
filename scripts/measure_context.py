@@ -95,6 +95,36 @@ os.environ.setdefault("DEVICE_PASSWORD", "test-password")
 # 1. The MCP manifest — both surfaces, the real wire-serialised size.
 # --------------------------------------------------------------------------- #
 
+# B-518: the classic manifest is measured LIVE, by importing whatever tools
+# are registered right now — which is exactly right for "what does a client
+# pay today", and exactly wrong for "did staged get better", because a ratio
+# computed against a live, ever-growing classic improves every time a tool is
+# added, for doing nothing: staged's own size never moves. B-501 measured
+# 20,117 chars / 23 tools; by the time B-518 was filed the same live call
+# reported 31,669 / 31 — three more tool waves (B-508's protocol-coverage
+# checks, B-512's Loki/Prometheus tools, this task's own NetBox read tools),
+# every one a real, reviewed capability addition, none of it "staged got
+# leaner". Left alone, `staged_over_classic_ratio` below would have quietly
+# improved through every one of those waves and nothing would have said so.
+#
+# The fix is this history: append-only, like FINDINGS.md/BACKLOG.md — a new
+# entry is added when someone deliberately re-measures and re-pins, never a
+# silent edit of the one before it. `measure_both_manifests` reports staged
+# against BOTH the live classic number (what a client pays right now) and
+# the LATEST pinned snapshot here (what "under half" was actually verified
+# against, and the fixed point a doubling-class regression is judged
+# relative to) — labelled so neither number can be mistaken for the other,
+# and the live-vs-pinned delta is reported explicitly rather than left for a
+# reader to notice by subtracting two numbers from two different reports.
+CLASSIC_MANIFEST_SNAPSHOTS: tuple[dict[str, Any], ...] = (
+    {"label": "B-501", "captured": "2026-08-18", "manifest_chars": 20_117, "tool_count": 23,
+     "note": "first measurement of the complete wire payload"},
+    {"label": "B-518", "captured": "2026-08-19", "manifest_chars": 31_669, "tool_count": 31,
+     "note": "re-pinned after B-508/B-512/the NetBox read tools grew classic "
+             "+57% since B-501, none of it bloat -- see this constant's own "
+             "comment above"},
+)
+
 
 def _reload_server(surface: str | None):
     """Import (or reload) `mcp_server.server` with `NETTOOLS_MCP_SURFACE` set.
@@ -156,6 +186,45 @@ def manifest_report(server_module: Any) -> dict[str, Any]:
     }
 
 
+def manifest_ratios(staged_chars: int, classic_chars: int) -> dict[str, Any]:
+    """The two ratios B-518 asks for, plus both surfaces' own absolute sizes
+    and the pinned baseline they are each computed from — pure, so it is
+    testable with synthetic numbers and does not need a real MCP server
+    loaded to prove the self-describing property holds.
+
+    ``staged_over_classic_ratio`` moves with WHATEVER classic is right now —
+    correct for "what does a client pay today", wrong for "did staged
+    improve", because it improves on its own every time a tool is added
+    (B-518's own finding). ``staged_over_pinned_baseline_ratio`` is computed
+    against the latest entry in :data:`CLASSIC_MANIFEST_SNAPSHOTS` instead —
+    a fixed point that only moves when someone deliberately appends a new
+    snapshot, so it cannot be flattered by classic's growth. Both are
+    returned together, alongside the raw chars each was computed from
+    (``classic_chars``/``staged_chars``/``pinned_baseline``), so a caller
+    that only prints one ratio number still has everything needed to tell
+    which manifest produced it — the self-describing property B-518 asked
+    for.
+    """
+
+    baseline = CLASSIC_MANIFEST_SNAPSHOTS[-1]
+    live_ratio = staged_chars / classic_chars if classic_chars else None
+    baseline_chars = baseline["manifest_chars"]
+    pinned_ratio = staged_chars / baseline_chars if baseline_chars else None
+
+    return {
+        "classic_chars": classic_chars,
+        "staged_chars": staged_chars,
+        "staged_over_classic_ratio": live_ratio,
+        "pinned_baseline": baseline,
+        "staged_over_pinned_baseline_ratio": pinned_ratio,
+        # How far the LIVE classic manifest has already moved from the fixed
+        # point the pinned ratio is judged against — the number a reader
+        # needs to tell "staged got better" from "classic just got bigger"
+        # apart without computing it themselves.
+        "classic_chars_grown_since_pinned_baseline": classic_chars - baseline_chars,
+    }
+
+
 def measure_both_manifests() -> dict[str, Any]:
     """Classic and staged manifests, measured back to back, env restored after.
 
@@ -175,8 +244,19 @@ def measure_both_manifests() -> dict[str, Any]:
             os.environ["NETTOOLS_MCP_SURFACE"] = original
         _reload_server(original)
 
-    ratio = staged["manifest_chars"] / classic["manifest_chars"] if classic["manifest_chars"] else None
-    return {"classic": classic, "staged": staged, "staged_over_classic_ratio": ratio}
+    ratios = manifest_ratios(staged["manifest_chars"], classic["manifest_chars"])
+    return {
+        "classic": classic,
+        "staged": staged,
+        # Kept at the top level, unchanged shape, for every existing caller
+        # (this script's own printer, test_context_window_measurement.py's
+        # earlier assertions) that already reads `staged_over_classic_ratio`
+        # straight off this dict.
+        "staged_over_classic_ratio": ratios["staged_over_classic_ratio"],
+        "pinned_baseline": ratios["pinned_baseline"],
+        "staged_over_pinned_baseline_ratio": ratios["staged_over_pinned_baseline_ratio"],
+        "classic_chars_grown_since_pinned_baseline": ratios["classic_chars_grown_since_pinned_baseline"],
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -504,9 +584,29 @@ def _print_human_report(report: dict[str, Any]) -> None:
             f"  {surface:7s}: {r['tool_count']:2d} tools, {r['manifest_chars']:6d} chars "
             f"(description-only: {r['description_only_chars']} chars)"
         )
-    ratio = m["staged_over_classic_ratio"]
-    print(f"  staged/classic ratio: {ratio:.3f}  "
-          f"({'UNDER HALF -- B-479 claim holds' if ratio and ratio < 0.5 else 'NOT under half'})\n")
+    # B-518: never a bare ratio -- both absolute sizes and which classic
+    # manifest (live, or the pinned snapshot) produced each one, printed
+    # right beside it, so growth cannot be misread as improvement.
+    live_ratio = m["staged_over_classic_ratio"]
+    baseline = m["pinned_baseline"]
+    pinned_ratio = m["staged_over_pinned_baseline_ratio"]
+    grown = m["classic_chars_grown_since_pinned_baseline"]
+    print(
+        f"  staged/classic ratio, LIVE classic ({m['classic']['manifest_chars']} chars, "
+        f"measured just now): {live_ratio:.3f}  "
+        f"({'UNDER HALF' if live_ratio and live_ratio < 0.5 else 'NOT under half'})"
+    )
+    print(
+        f"  staged/classic ratio, PINNED baseline {baseline['label']} "
+        f"({baseline['manifest_chars']} chars, captured {baseline['captured']}): "
+        f"{pinned_ratio:.3f}  "
+        f"({'UNDER HALF -- B-479 claim holds against this snapshot' if pinned_ratio and pinned_ratio < 0.5 else 'NOT under half'})"
+    )
+    if grown:
+        pct = grown / baseline["manifest_chars"] * 100 if baseline["manifest_chars"] else 0.0
+        print(f"  classic has grown {grown:+d} chars ({pct:+.1f}%) since the pinned baseline was captured\n")
+    else:
+        print("  classic is unchanged since the pinned baseline was captured\n")
 
     print("Report prompt (report.v2, RR1 -> 10.255.0.12, bgp_session)")
     for label, r in report["report_prompt"].items():
