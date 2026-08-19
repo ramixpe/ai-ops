@@ -1452,3 +1452,58 @@ looks like a diagnosis. Latency is a real cost; this is worth paying it for.
 sensible clarifying question" from "noticed the premise was false" — e4b scored
 a pass for the former. A future set needs a question whose premise is wrong in a
 way that only checking reveals. Filed as B-514.
+
+### §14b — "dig please": the temporal axis used in anger, two hours after it shipped
+
+One-word follow-up on the SR-TE policy §14 flagged. qwen ran eight tools
+unprompted, including **`get_lab_interface_rate_history`** — the first use by any
+model of the Prometheus axis, registered roughly two hours earlier.
+
+**The reasoning is the best this build has seen from a model.** The decisive move
+was a differential: PE1 holds two SR-TE policies to the *same* endpoint
+(10.255.0.13), colour-10 **up** with a binding SID and colour-20 **down** with
+none. From that it concluded the fault cannot be the endpoint, the route or the
+IGP — because a working policy to the same endpoint proves those work — so it is
+specific to colour-20's own candidate path. A control that was already in the
+data, noticed and used.
+
+It also derived the loopback pattern (PE1=.11, PE2=.12, PE3=.13) from three
+independent observations and *verified* that 10.255.0.13 is PE3 rather than
+assuming it.
+
+**It used history to REJECT a hypothesis, which is the harder direction.** It
+spotted that the colour-20 policy has been down ~5d17h and that PE3's
+Gi0/0/0/2 carries a single carrier transition of roughly the same age, queried a
+week of `carrier_transitions` rate, and set the lead aside:
+
+> *"it's flat at zero, i.e. no ongoing flapping, just that one past event…
+> flagging it only so you know I checked."*
+
+**The zeros were real, and that is the whole point.** The envelope carried
+`records_returned: 130`, `series_known: null`, `rate_per_second: 0.0` — 130
+genuine samples, and the existence check never fired because data was present
+(case 1 of the four). A model reading a *measured* zero and a model reading an
+empty response write the same sentence; only one of them is entitled to. That
+distinction is the reason `metrics_prometheus.py` was built the way it was
+(OBS-188), and this is the first time it mattered outside a test — invisibly,
+which is how it should work.
+
+**It named the limitation precisely, and in doing so did our backlog grooming.**
+
+> *"The one thing I can't do with the tools here is read the colour-20 policy's
+> candidate path / segment list — `check_lab_sr_policies` only exposes
+> policy-level state… I can confidently say *that* the candidate path doesn't
+> resolve, but I can't name *which* SID or segment is the broken one."*
+
+That is correct, it is a real gap in our surface, and it identifies the exact
+missing command (`show segment-routing traffic-eng policy <id> detail`). Filed as
+B-515. Note the shape: the model could not reach the answer, said so, and named
+what would let it — rather than producing a plausible SID. That is the behaviour
+premise-refusal predicts, appearing in a second, unrelated place.
+
+**What it says about the build.** Every good move here rests on something the
+deterministic layer supplied: the two-policy comparison came from parsed SR
+records, the temporal rejection from coverage-qualified samples, the endpoint
+identification from cross-referenced parsed fields. The model contributed
+inference, not facts — which is exactly the division the architecture is built
+to enforce, observed working end to end for the first time.
