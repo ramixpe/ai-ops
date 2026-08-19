@@ -86,7 +86,7 @@
 >
 > ### Backlog
 > **138 rows** — 77 DONE, 15 OPEN, 28 DEFERRED, 14 BLOCKED, 2 OUT-OF-SCOPE,
-> 1 CLOSED-AS-MEASURED, 1 CLOSED-AS-REFUSED. FINDINGS.md holds **187**
+> 1 CLOSED-AS-MEASURED, 1 CLOSED-AS-REFUSED. FINDINGS.md holds **188**
 > observations.
 >
 > ### The diagrams are now true
