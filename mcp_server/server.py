@@ -127,6 +127,46 @@ def _mcp_active_probes_allowed() -> bool:
     return value in _MCP_ACTIVE_PROBES_TRUTHY
 
 
+# B-113: eight call sites below used to spell out this same five-key dict
+# literal (the shape `boundary.py` already names as matching
+# `network_tools._safe_error`'s) rather than calling one function that states
+# it. Not a second place invariant 4 is enforced, and no diff to
+# `_register_sanitized_tool`: `sanitize()` still runs exactly once, in the
+# registration decorator, on whatever this (or anything else) returns.
+
+
+def _envelope(
+    tool_name: str, device: Any, status: str, data: dict, errors: list | None = None
+) -> dict:
+    """The dict shape every hand-built tool result in this file returns."""
+
+    return {
+        "tool": tool_name,
+        "device": device,
+        "status": status,
+        "data": data,
+        "errors": list(errors) if errors else [],
+    }
+
+
+def _error_envelope(tool_name: str, device: Any, message: str) -> dict:
+    """`_envelope`'s shorthand for the common case: one error, no data."""
+
+    return _envelope(tool_name, device, "error", {}, [message])
+
+
+def _device_name_from_call(call_args: tuple, call_kwargs: dict) -> Any:
+    """``device_name``, read positionally or by keyword -- shared by
+    `_active_probes_refused`/`_external_sources_refused` below, both of
+    which are called with every current gated tool's first argument.
+    """
+
+    device_name = call_kwargs.get("device_name")
+    if device_name is None and call_args:
+        device_name = call_args[0]
+    return device_name
+
+
 def _active_probes_refused(tool_name: str, call_args: tuple, call_kwargs: dict) -> dict:
     """The envelope returned in place of calling an active-probe tool.
 
@@ -141,27 +181,20 @@ def _active_probes_refused(tool_name: str, call_args: tuple, call_kwargs: dict) 
 
     Every current active-probe tool (`get_lab_ping`, `get_lab_traceroute`,
     `probe_lab`) takes `device_name` first, positionally or by keyword, so
-    it is read the same way here rather than duplicated per tool.
+    it is read the same way here rather than duplicated per tool -- via
+    `_device_name_from_call`, shared with `_external_sources_refused` below.
     """
 
-    device_name = call_kwargs.get("device_name")
-    if device_name is None and call_args:
-        device_name = call_args[0]
-
-    return {
-        "tool": tool_name,
-        "device": device_name,
-        "status": "error",
-        "data": {},
-        "errors": [
-            f"{tool_name}: Active probes (ping/traceroute) are disabled for "
-            "the MCP surface: NETTOOLS_MCP_ALLOW_ACTIVE_PROBES is not set to "
-            "a truthy value. Set NETTOOLS_MCP_ALLOW_ACTIVE_PROBES=true (or 1) "
-            "to allow an MCP client to generate ping/traceroute traffic; this "
-            "is independent of NETTOOLS_ALLOW_ACTIVE_PROBES, which still "
-            "gates the CLI and every other caller, and defaults to enabled."
-        ],
-    }
+    return _error_envelope(
+        tool_name,
+        _device_name_from_call(call_args, call_kwargs),
+        f"{tool_name}: Active probes (ping/traceroute) are disabled for "
+        "the MCP surface: NETTOOLS_MCP_ALLOW_ACTIVE_PROBES is not set to "
+        "a truthy value. Set NETTOOLS_MCP_ALLOW_ACTIVE_PROBES=true (or 1) "
+        "to allow an MCP client to generate ping/traceroute traffic; this "
+        "is independent of NETTOOLS_ALLOW_ACTIVE_PROBES, which still "
+        "gates the CLI and every other caller, and defaults to enabled.",
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -237,27 +270,20 @@ def _external_sources_refused(tool_name: str, call_args: tuple, call_kwargs: dic
     no-op, never "an unclassified error". Every current external-source tool
     (`get_lab_logs`, `get_lab_interface_rate_history`,
     `get_lab_isis_adjacency_history`) takes `device_name` first, so it is
-    read the same way here rather than duplicated per tool.
+    read the same way here rather than duplicated per tool -- via
+    `_device_name_from_call`, shared with `_active_probes_refused` above.
     """
 
-    device_name = call_kwargs.get("device_name")
-    if device_name is None and call_args:
-        device_name = call_args[0]
-
-    return {
-        "tool": tool_name,
-        "device": device_name,
-        "status": "error",
-        "data": {},
-        "errors": [
-            f"{tool_name}: external evidence sources are disabled for the MCP "
-            f"surface: {NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES_ENV} is set to a "
-            "falsy value. Set "
-            f"{NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES_ENV}=true (or 1) -- the "
-            "default -- to allow an MCP client to query Loki/Prometheus for "
-            "historical evidence; this tool never reaches a device."
-        ],
-    }
+    return _error_envelope(
+        tool_name,
+        _device_name_from_call(call_args, call_kwargs),
+        f"{tool_name}: external evidence sources are disabled for the MCP "
+        f"surface: {NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES_ENV} is set to a "
+        "falsy value. Set "
+        f"{NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES_ENV}=true (or 1) -- the "
+        "default -- to allow an MCP client to query Loki/Prometheus for "
+        "historical evidence; this tool never reaches a device.",
+    )
 
 
 _TOOL_ACCEPTS_ANNOTATIONS = "annotations" in inspect.signature(FastMCP.tool).parameters
@@ -629,13 +655,7 @@ def get_lab_sr_policy_detail(device_name: str, policy_id: str) -> dict:
     try:
         color, endpoint = split_sr_policy_id(policy_id)
     except TemplateValidationError as exc:
-        return {
-            "tool": "get_lab_sr_policy_detail",
-            "device": device_name,
-            "status": "error",
-            "data": {},
-            "errors": [str(exc)],
-        }
+        return _error_envelope("get_lab_sr_policy_detail", device_name, str(exc))
 
     return run_template(device_name, "sr_policy_detail", color=color, endpoint=endpoint)
 
@@ -858,16 +878,14 @@ def _diff_against(tool_name: str, device_name: str, previous: dict | None) -> di
     """
 
     current = collect_evidence(device_name)
-    result: dict[str, Any] = {
-        "tool": tool_name,
-        "device": device_name,
-        "status": "success",
-        "data": {"snapshot_path": None, "has_previous": previous is not None, "diff": None},
-        "errors": [],
+    data: dict[str, Any] = {
+        "snapshot_path": None,
+        "has_previous": previous is not None,
+        "diff": None,
     }
     if previous is not None:
-        result["data"]["diff"] = diff_evidence(previous, current)
-    return result
+        data["diff"] = diff_evidence(previous, current)
+    return _envelope(tool_name, device_name, "success", data)
 
 
 @_read_only_tool()
@@ -924,13 +942,9 @@ def assess_lab_device_health(device_name: str) -> dict:
     result = evaluate_fabric({device_name: evidence})
     verdict = result["devices"].get(device_name)
     if verdict is None:
-        return {
-            "tool": "assess_lab_device_health",
-            "device": device_name,
-            "status": "error",
-            "data": {},
-            "errors": [f"{device_name} is not in the lab inventory."],
-        }
+        return _error_envelope(
+            "assess_lab_device_health", device_name, f"{device_name} is not in the lab inventory."
+        )
     return verdict
 
 
@@ -1035,35 +1049,23 @@ def _coverage_payload(coverage: Any) -> dict[str, Any]:
     }
 
 
-def _with_loki_coverage(envelope: dict, device_name: str) -> dict:
-    """Attach `logs_loki.coverage_from_loki`'s absence-is-not-zero verdict.
+def _with_coverage(
+    envelope: dict, device_name: str, coverage_fn: Callable[[dict, str], Any]
+) -> dict:
+    """Attach a `coverage.Coverage` absence-is-not-zero verdict to ``envelope``.
 
-    Computed HERE, in the MCP tool, not inside `logs_loki.py` itself:
-    `coverage_from_loki`'s own docstring names its caller as "a downstream,
-    wide-step consumer" that "calls this once it has decided the window is
-    relevant" and is explicit that the adapter module itself never calls it.
-    This tool is that consumer -- the adapter stays read-side-only, per its
-    own "expose the adapter, do not consume it in a descent" instruction.
+    B-113: `_with_loki_coverage`/`_with_prometheus_coverage` merged --
+    identical except which adapter's coverage function they called, now
+    `coverage_fn`. Computed HERE, in the MCP tool, not inside `logs_loki.py`/
+    `metrics_prometheus.py`: both adapters' own docstrings name their caller
+    as "a downstream, wide-step consumer" and say the adapter itself never
+    calls it -- the adapters stay read-side-only, per their own "expose the
+    adapter, do not consume it in a descent" instruction.
     """
 
     parsed = envelope.get("data", {}).get("parsed")
     if isinstance(parsed, dict):
-        envelope["data"]["coverage"] = _coverage_payload(
-            logs_loki.coverage_from_loki(parsed, device_name)
-        )
-    return envelope
-
-
-def _with_prometheus_coverage(envelope: dict, device_name: str) -> dict:
-    """`_with_loki_coverage`'s twin for `metrics_prometheus.
-    coverage_from_prometheus_history` -- same reasoning, same non-rung
-    consumer."""
-
-    parsed = envelope.get("data", {}).get("parsed")
-    if isinstance(parsed, dict):
-        envelope["data"]["coverage"] = _coverage_payload(
-            metrics_prometheus.coverage_from_prometheus_history(parsed, device_name)
-        )
+        envelope["data"]["coverage"] = _coverage_payload(coverage_fn(parsed, device_name))
     return envelope
 
 
@@ -1095,7 +1097,7 @@ def get_lab_logs(device_name: str, since_seconds: int = 3600, limit: int = 200) 
     envelope = logs_loki.run_named_query(
         "logs_for_device", device=device_name, since_seconds=since_seconds, limit=limit
     )
-    return _with_loki_coverage(envelope, device_name)
+    return _with_coverage(envelope, device_name, logs_loki.coverage_from_loki)
 
 
 @_external_source_tool()
@@ -1139,7 +1141,7 @@ def get_lab_interface_rate_history(
         since_seconds=since_seconds,
         step_seconds=step_seconds,
     )
-    return _with_prometheus_coverage(envelope, device_name)
+    return _with_coverage(envelope, device_name, metrics_prometheus.coverage_from_prometheus_history)
 
 
 @_external_source_tool()
@@ -1174,7 +1176,7 @@ def get_lab_isis_adjacency_history(
         since_seconds=since_seconds,
         step_seconds=step_seconds,
     )
-    return _with_prometheus_coverage(envelope, device_name)
+    return _with_coverage(envelope, device_name, metrics_prometheus.coverage_from_prometheus_history)
 
 
 @_external_source_tool()
@@ -1209,7 +1211,7 @@ def get_lab_ldp_session_history(
         since_seconds=since_seconds,
         step_seconds=step_seconds,
     )
-    return _with_prometheus_coverage(envelope, device_name)
+    return _with_coverage(envelope, device_name, metrics_prometheus.coverage_from_prometheus_history)
 
 
 @_external_source_tool()
@@ -1244,7 +1246,7 @@ def get_lab_device_uptime_history(
         since_seconds=since_seconds,
         step_seconds=step_seconds,
     )
-    return _with_prometheus_coverage(envelope, device_name)
+    return _with_coverage(envelope, device_name, metrics_prometheus.coverage_from_prometheus_history)
 
 
 # --------------------------------------------------------------------------- #
@@ -1451,13 +1453,9 @@ def list_lab_tickets(limit: int = TICKET_LIST_DEFAULT_LIMIT, include_closed: boo
     """
 
     tickets = list_tickets(limit=limit, include_closed=include_closed)
-    return {
-        "tool": "list_lab_tickets",
-        "device": None,
-        "status": "success",
-        "data": {"tickets": tickets, "count": len(tickets)},
-        "errors": [],
-    }
+    return _envelope(
+        "list_lab_tickets", None, "success", {"tickets": tickets, "count": len(tickets)}
+    )
 
 
 @_read_only_tool()
@@ -1498,23 +1496,21 @@ def read_lab_ticket(run_id: str) -> dict:
 
     found = read_ticket_by_run_id(run_id)
     if found is None:
-        return {
-            "tool": "read_lab_ticket",
-            "device": None,
-            "status": "success",
-            "data": {
+        return _envelope(
+            "read_lab_ticket",
+            None,
+            "success",
+            {
                 "found": False,
                 "hint": "no ticket matches this run_id; call list_lab_tickets to see recent tickets",
             },
-            "errors": [],
-        }
-    return {
-        "tool": "read_lab_ticket",
-        "device": (found.get("header") or {}).get("device"),
-        "status": "success",
-        "data": {"found": True, "ticket": found},
-        "errors": [],
-    }
+        )
+    return _envelope(
+        "read_lab_ticket",
+        (found.get("header") or {}).get("device"),
+        "success",
+        {"found": True, "ticket": found},
+    )
 
 
 @_read_only_tool()
