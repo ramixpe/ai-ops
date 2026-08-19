@@ -295,11 +295,25 @@ def main(argv: list[str]) -> int:
 
     # Every mutation restored, and the frozen files still frozen.
     print()
+    # A frozen file's baseline may MOVE, but only with recorded sign-off (§0.5
+    # takes additions only). Re-pinning keeps the guard live at the new blob
+    # instead of retiring it; `tests/test_frozen_files.py` carries the same
+    # table and the reason each baseline moved.
+    REPINNED = {
+        # platforms.py: B-109's ldp/ldp_discovery intents, operator sign-off
+        # 2026-08-19. Additive; the frozen safety TESTS pass unedited against it.
+        "src/agent_nettools/platforms.py": "09c389352da489e9d8a43e0a8aeadfbb3458724d",
+    }
     for f in sorted(FROZEN):
-        base = sh(f"git rev-parse {BASELINE_COMMIT}:{f}").stdout.strip()
+        expected = REPINNED.get(f) or sh(f"git rev-parse {BASELINE_COMMIT}:{f}").stdout.strip()
         head = sh(f"git rev-parse HEAD:{f}").stdout.strip()
-        if base != head:
-            raise SystemExit(f"FROZEN FILE CHANGED: {f}")
+        if expected != head:
+            raise SystemExit(
+                f"FROZEN FILE CHANGED: {f}\n"
+                "  §0.5 takes ADDITIONS ONLY, with operator sign-off. If this is\n"
+                "  authorised, add it to REPINNED here and to tests/test_frozen_files.py\n"
+                "  with who approved it and why. If not, revert."
+            )
     dirty = sh("git status --porcelain").stdout.strip()
     if dirty:
         print("  WARNING — working tree is not clean after the pass:")

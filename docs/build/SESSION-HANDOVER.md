@@ -2,46 +2,54 @@
 
 > **OVERNIGHT RUN — 2026-08-18 into 2026-08-19. Read this first.**
 >
-> The tree is **green and fully pushed** at every point below: 2302 passed /
-> 24 skipped, lint clean, 23/23 mutation guards, four frozen files byte-identical
-> to `6629a2c`. Tests went **2229 → 2302** overnight.
+> Green and fully pushed at every step: **2382 passed / 24 skipped**, lint clean,
+> **24/24 mutation guards**, frozen files intact (see the re-pin note below).
+> Tests went **2229 → 2382** overnight.
 >
-> **Stage 2 landed, in order:** M0 doc retirement (2 deleted, 9 archived, every
-> reference repaired) · M1 the ticket flight recorder, built AND wired into
-> `investigate` · M2 four dockerised services (n8n, NetBox, neo4j, Redis) all
-> running healthy · M3a the neo4j topology collector · M5 the Loki adapter, the
-> first evidence source that is not a router · M7 acceptance tests pinning
-> `isis_adjacency` across all five fixture labels.
+> ### Landed
+> M0 doc retirement · M1 the ticket flight recorder (built **and** wired) ·
+> M2 four dockerised services, all healthy · M3a the neo4j topology collector ·
+> M5 the Loki adapter (first non-router evidence source) · M8 the context-window
+> measurement · **B-109 the `ldp_session` flow** · a sanity round · an
+> adversarial bug hunt · a MiniMax M3 live model test.
 >
-> **In flight as of this note:** M4 (epoch-aware cache — SPIKE FIRST, may
-> correctly conclude there is nothing safe to cache until the config axis
-> exists) and M8 (context-window measurement).
+> ### In flight
+> M3b the NetBox collector; the sanity round's four remaining defects
+> (`--quiet` vs config warnings, interface-name canonicalisation, `make help`,
+> and documenting ledger/ticket/new flows).
 >
 > ### Ready to test this morning
-> * `nettools investigate …` now writes a **ticket** per run under
->   `$NETTOOLS_TICKET_DIR` (default `tickets/`, gitignored) — question as asked,
->   per-device session counts, finding, cause, coherence, outcome `unknown`
->   until a human judges it.
-> * `nettools ledger summary` / `ledger verdict <id> …` — and the id is now
->   printed by `investigate`, which it previously promised and did not do.
-> * `isis_adjacency` flow against the real PE3↔P2 break.
-> * Four services on the `stage2` compose profile in `/home/rami/network_lab`.
+> * `nettools investigate` writes a **ticket** per run (question as asked,
+>   session counts, finding, cause, coherence, outcome `unknown` until judged).
+> * `nettools ledger summary` / `ledger verdict <id>` — and the id is printed.
+> * **Three flows**: `bgp_session`, `interface`, `isis_adjacency`, `ldp_session`.
+> * Four services on the `stage2` compose profile.
+> * `scripts/measure_context.py` — the manifest/prompt/evidence cost, measured.
 >
-> ### Four things waiting on the operator
-> 1. **LDP sign-off** — `ldp_session` cannot be built without adding a command
->    to FROZEN `platforms.py`. Safety-boundary change; needs an explicit yes.
-> 2. **`NEO4J_PASSWORD`** — absent from the lab `.env`; the container runs on a
->    compose default and no live write was attempted. Set one, or confirm.
-> 3. **Two LM Studio questions** — the PE3 IS-IS question (no lab window) and
->    Q1 (needs round 6). Both models, fresh session each.
-> 4. **Round 6** — deliberately not run overnight; the injector would have left
->    a fault on the fabric unattended.
+> ### Waiting on the operator
+> 1. **Two LM Studio questions** — the PE3 IS-IS one (no lab window) and Q1
+>    (needs round 6). Both models, fresh session each.
+> 2. **Round 6** — not run overnight by design; the injector would leave a fault
+>    on the fabric unattended.
+> 3. **Rotate the lab device password** — during the sanity round an agent
+>    printed it into its own scratch transcript. Verified NOT in the repo, any
+>    commit, or the working tree (`.env` is gitignored), so this is hygiene
+>    rather than an incident.
 >
-> ### Three of my own mistakes, found and fixed overnight
-> OBS-169 a hole in the ticket's degrade-safe guarantee · OBS-171 a silent
-> ticket-recording bug my own broad `except` was hiding · OBS-172 **113
-> test-generated tickets committed** by `git add -A`, now removed, gitignored,
-> and prevented by an autouse conftest fixture.
+> ### Frozen-file baseline moved, once, with sign-off
+> `platforms.py` gained the `ldp`/`ldp_discovery` intents (operator-approved).
+> Rather than drop it from the frozen set, both `tests/test_frozen_files.py` and
+> `scripts/mutate_guards.py` **re-pin it at the new blob with the sign-off
+> recorded**, so an unauthorised edit still fails tomorrow. The frozen safety
+> *tests* remain byte-identical and pass **unedited**.
+>
+> ### Six defects found and fixed overnight, four of them mine
+> OBS-169 ticket degrade-safe hole · OBS-171 a silent ticket bug my own broad
+> `except` hid · OBS-172 **113 test tickets committed** by `git add -A` ·
+> OBS-176 **a crafted subject could forge a human verdict** (found by the bug
+> hunt, reproduced by me) · OBS-177 **I reverted that security fix while merging**
+> — caught only because the guard count read 23 where I expected 24 ·
+> plus two renderer bugs that printed confident, useless output.
 
 # Session Handover
 

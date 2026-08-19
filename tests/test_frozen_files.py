@@ -19,9 +19,29 @@ _BASELINE = "6629a2c"
 _FROZEN = (
     "tests/test_safety.py",
     "tests/test_template_security.py",
-    "src/agent_nettools/platforms.py",
     "src/agent_nettools/templates.py",
 )
+
+#: Frozen files whose baseline has MOVED, each with the sign-off that moved it.
+#:
+#: A frozen file is not immutable — §0.5 permits ADDITIONS with explicit
+#: operator sign-off, and refuses everything else. Recording the new blob here
+#: keeps the guard live at the new baseline instead of deleting it: an
+#: unauthorised edit still fails tomorrow. Deleting the row would have been the
+#: easy fix and the wrong one.
+#:
+#: Each entry: path -> (blob sha, what was authorised, when).
+_REPINNED: dict[str, tuple[str, str, str]] = {
+    "src/agent_nettools/platforms.py": (
+        "09c389352da489e9d8a43e0a8aeadfbb3458724d",
+        "B-109: added the `ldp` and `ldp_discovery` intents and their two "
+        "`show mpls ldp ...` commands to cisco_xr. Additive: the only line "
+        "rewritten is the INTENT_ORDER tuple literal, which cannot be extended "
+        "in place. tests/test_safety.py and test_template_security.py pass "
+        "UNEDITED against it, which is the guarantee that actually matters.",
+        "operator sign-off, 2026-08-19",
+    ),
+}
 
 
 def _repo_root() -> Path:
@@ -49,4 +69,30 @@ def test_frozen_file_is_byte_identical_to_the_baseline(path):
         "additions only, never a relaxed validator. If the change is genuinely "
         "additive and necessary, HALT and get explicit sign-off before "
         "updating this test's baseline."
+    )
+
+
+@pytest.mark.parametrize("path", sorted(_REPINNED))
+def test_a_repinned_frozen_file_still_matches_its_authorised_baseline(path):
+    """A frozen file whose baseline moved is still frozen — at the new blob.
+
+    The alternative was to drop it from the frozen list once the operator
+    approved an addition, which would have retired the guard permanently in
+    exchange for one authorised change. This keeps it: the next unauthorised
+    edit to platforms.py fails exactly as before.
+    """
+
+    expected, reason, signoff = _REPINNED[path]
+    root = _repo_root()
+    result = subprocess.run(["git", "rev-parse", f"HEAD:{path}"],
+                            cwd=root, capture_output=True, text=True)
+    if result.returncode != 0:
+        pytest.skip(f"cannot resolve HEAD:{path}")
+
+    assert result.stdout.strip() == expected, (
+        f"{path} changed from its re-pinned baseline.\n"
+        f"That baseline was authorised by: {signoff}\n"
+        f"for: {reason}\n"
+        "§0.5 takes ADDITIONS ONLY, with sign-off. If this change is authorised, "
+        "update _REPINNED and say who approved it and why. If it is not, revert."
     )
