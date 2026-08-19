@@ -342,7 +342,25 @@ _UNSCANNED = (".venv", ".claude/worktrees")
 
 
 def _in_scope(p: pathlib.Path) -> bool:
-    text = str(p)
+    """True if ``p`` (always a descendant of `REPO`, via `REPO.rglob`) is
+    bytecode this run may purge or must treat as stale if found.
+
+    Checked against the path **relative to `REPO`**, not the absolute path.
+    Every agent runs this script from inside its own worktree, so `REPO`
+    itself (the script's own `parent.parent`) already lives under
+    `.claude/worktrees/<name>/`. Matching `_UNSCANNED` against the absolute
+    path meant every result ever found -- all descendants of `REPO`, so all
+    inheriting `REPO`'s own ancestry -- contained the substring
+    `.claude/worktrees` and was excluded: 0 of 470 `__pycache__` directories
+    measured in-scope in a real worktree run (2026-08-19). That made
+    `purge_pycache` and `assert_no_stale_bytecode` silent no-ops on every run
+    that matters, reintroducing defect 2 above under the one condition this
+    harness actually runs in. Relative to `REPO`, `.claude/worktrees` appears
+    only when a scan started from a *main* checkout descends into a *nested,
+    different* worktree -- exactly the case the exclusion is for -- never
+    merely because `REPO` itself happens to sit under one.
+    """
+    text = str(p.relative_to(REPO))
     return not any(skip in text for skip in _UNSCANNED)
 
 

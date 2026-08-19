@@ -6484,3 +6484,68 @@ has nothing to report.
 
 Filed as B-519: audit every parameter that accepts an interface name and
 canonicalise at entry, rather than waiting for the fifth instance.
+
+---
+
+## OBS-203 · B-513 · My fix for a race made the harness poison its own build cache
+
+OBS-189 scoped `mutate_guards.py`'s bytecode purge to skip `.claude/worktrees`,
+because purging another agent's live worktree is a race I had just tripped over.
+Correct reasoning, wrong implementation: the check matched a **substring of the
+absolute path**, and every agent runs the script *from inside its own worktree* —
+so `REPO` itself lives under `.claude/worktrees/<name>/`, every descendant
+inherits that ancestry, and everything was excluded.
+
+Measured: **0 of 470** `__pycache__` directories in scope during a real worktree
+run. `purge_pycache()` and `assert_no_stale_bytecode()` both became silent
+no-ops, in the only environment the harness actually runs in.
+
+**The consequence was not "no purge", it was active contamination.** Each guard
+mutates a source file, runs pytest in a subprocess, and restores. If the mutate
+and restore land inside one filesystem mtime tick, Python cannot tell the
+restored file from the mutated one and keeps the **mutated** `.pyc`. The purge
+exists precisely to remove it. With the purge disabled, that stale bytecode sat
+in `src/agent_nettools/__pycache__/` and was picked up by the *next*, entirely
+unrelated `pytest` run.
+
+Measured hit rates immediately after a guard run: **B-456 → 10/20 (50%)**,
+poisoning `descent.py` and failing
+`test_each_member_set_carries_its_own_aggregation`; **B-446-LATENCY-DEDUP →
+13/30 (43%)**, poisoning `epoch.py` and failing exactly the two `test_epoch.py`
+tests reported. Only *fast* guards do it — a slow one like B-436 (~19s) crosses
+an mtime tick and self-heals.
+
+That explains the symptom precisely: "flaky, no code change, confirmed via `git
+stash`." `__pycache__` is gitignored, so `git stash` proves the *source* is
+unchanged while saying nothing about what Python will actually execute. **The
+investigation was right that nothing had changed and wrong that nothing was
+different.**
+
+Three things worth keeping:
+
+**1. A fix for a race can be worse than the race.** The race purged files a
+sibling agent was using — annoying, self-correcting. The fix disabled a
+correctness guarantee everywhere, silently, and manufactured failures in
+unrelated tests hours later. I shipped it with a comment explaining why it was
+safe.
+
+**2. Substring matching on paths is a trap when the root can move.** `"x" in
+str(path)` reads as "is this under x" and means "does x appear anywhere in this
+string, including the part I do not control". Relative to `REPO` it is now a
+statement about structure rather than about where the checkout happens to live.
+
+**3. The flakiest thing in the repo was the flake detector.** ~1,000 plain pytest
+invocations, up to 60-way concurrency, reproduced nothing. The failure only
+appeared *after running the guard harness*, which is why every timing and
+ordering hypothesis came back clean. When a flake refuses to reproduce under
+load, stop varying the test and start asking what else touched the tree.
+
+Fixed, regression-tested (`tests/test_mutate_guards.py` pins `_in_scope` against
+the real `REPO`, including the sibling-worktree case the exclusion exists for),
+and verified where it counts: three consecutive full-suite runs immediately after
+a guard run, zero failures — previously the exact trigger.
+
+**B-456's guard was never vacuous** — it caught its mutation 14/14 across the
+investigation. But a HOLDS verdict *could* have been printed while contamination
+the harness should have caught simply had not fired yet. Post-fix: four full
+33-guard runs, 33/33 every time.
