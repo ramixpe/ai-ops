@@ -11,7 +11,7 @@ PATHS_FILES = [
 for _f in PATHS_FILES:
     facts.assert_file_exists(_f, "d3.py's five egress paths")
 
-W, H = 1580, 990
+W, H = 1580, 1006
 s = Svg(W, H)
 header(s, "The trust boundary — how device text reaches a model",
        "An unauthenticated attacker can write into device output: a syslog line, a BGP reset reason, an interface description. "
@@ -109,20 +109,24 @@ PATHS = [
  ("agent_loop.py", "tool results → messages", "nettools agent", "PROJECTED", GREEN, GREENBG,
   "Every tool result is projected before it is appended to the conversation."),
  ("mcp_server/boundary.py", "sanitize() on registration", "every MCP tool, both surfaces", "WAS THE GAP", RED, REDBG,
-  "Withheld raw `commands` — but passed free text UNMARKED. Found 2026-08-18 by two independent reviewers. Fixed: B-481."),
+  ("Withheld raw `commands` — but passed free text UNMARKED. Found 2026-08-18 by two independent reviewers. Fixed: B-481.",
+   "B-512 later added a THIRD registration class (Loki/Prometheus/NetBox/neo4j tools, diagram 9) — inherited unchanged.")),
 ]
 cy = ay + 12
 for mod, fn, what, verdict, col, bg, note in PATHS:
-    s.rect(48, cy, W - 96, 52, fill=bg if col == RED else "#ffffff", stroke="#f0bfb8" if col == RED else LINE, rx=9)
-    s.rect(48, cy, 4, 52, fill=col, rx=2)
+    note_lines = note if isinstance(note, tuple) else (note,)
+    h = 52 + (16 if len(note_lines) > 1 else 0)
+    s.rect(48, cy, W - 96, h, fill=bg if col == RED else "#ffffff", stroke="#f0bfb8" if col == RED else LINE, rx=9)
+    s.rect(48, cy, 4, h, fill=col, rx=2)
     s.text(72, cy + 22, mod, size=12.5, family=MONO, weight="600")
     s.text(72, cy + 40, fn, size=10.8, family=MONO, fill=FAINT)
     s.text(330, cy + 22, what, size=11.8, fill=INK)
-    s.text(330, cy + 40, note, size=10.8, fill=MUTED)
+    for i, ln in enumerate(note_lines):
+        s.text(330, cy + 40 + i * 15, ln, size=10.8, fill=MUTED)
     bw = w_sans(verdict, 11) + 26
     s.rect(W - 48 - bw - 12, cy + 15, bw, 22, fill=col, rx=11)
     s.text(W - 48 - bw / 2 - 12, cy + 30, verdict, size=11, fill="#fff", weight="700", anchor="middle")
-    cy += 58
+    cy += h + 6
 
 # ---------------- the honest residual ----------------
 cy += 6

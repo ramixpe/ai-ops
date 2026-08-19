@@ -837,3 +837,395 @@ def raw_prose_chars_for_walkthrough() -> int:
             for output in commands.values():
                 total += len(output)
     return total
+
+
+# --------------------------------------------------------------------------
+# mcp_server.server — the third registration class (B-512): tools that reach
+# an external evidence store (Loki, Prometheus, NetBox, neo4j) instead of a
+# lab device. Added for d8/d9, and used to correct d1/d3/d4/d7's now-stale
+# "two kinds of tool" framing.
+# --------------------------------------------------------------------------
+
+
+@functools.lru_cache(maxsize=1)
+def classic_mcp_external_source_tools() -> tuple[str, ...]:
+    """Classic-surface tool names registered via ``_external_source_tool()``.
+
+    Same detection method `classic_mcp_probe_tools()` already uses for the
+    active-probe class: FastMCP's own ``annotations.title`` reads "EXTERNAL
+    SOURCE — ..." only for tools that decorator wraps (server.py's
+    ``_external_source_tool``), so this is a real signal, not a name guess.
+    """
+    server = importlib.import_module("mcp_server.server")
+    tools = server.mcp._tool_manager.list_tools()
+    return tuple(
+        t.name
+        for t in tools
+        if t.annotations and t.annotations.title and "EXTERNAL SOURCE" in t.annotations.title
+    )
+
+
+def classic_mcp_tool_class_counts() -> dict[str, int]:
+    """How the classic surface's tools split across all three registration
+    classes. Mutually exclusive by construction — every tool is registered
+    through exactly one of `_read_only_tool`/`_active_probe_tool`/
+    `_external_source_tool` — so ``read_only`` is derived by subtraction
+    rather than a fourth independent scan needing its own annotation check.
+    """
+    total = len(classic_mcp_tools())
+    probe = len(classic_mcp_probe_tools())
+    external = len(classic_mcp_external_source_tools())
+    return {
+        "total": total,
+        "read_only": total - probe - external,
+        "active_probe": probe,
+        "external_source": external,
+    }
+
+
+# --------------------------------------------------------------------------
+# Non-device evidence adapters — logs_loki.py / metrics_prometheus.py /
+# netbox.py / graph.py. Each is a named-query allowlist over an external
+# service, `templates.py`'s discipline carried to a query language with no
+# allowlist of its own — so its length is exactly as measurable as
+# `approved_command_counts()` already is for device commands.
+# --------------------------------------------------------------------------
+
+
+def evidence_source_query_counts() -> dict[str, int]:
+    from agent_nettools import graph, logs_loki, metrics_prometheus, netbox
+
+    return {
+        "loki": len(logs_loki.LOKI_QUERIES),
+        "prometheus": len(metrics_prometheus.PROMETHEUS_QUERIES),
+        "netbox": len(netbox.NETBOX_READ_QUERIES),
+        "neo4j": len(graph.NEO4J_READ_QUERIES),
+    }
+
+
+@functools.lru_cache(maxsize=1)
+def prometheus_metric_count() -> int:
+    """The metric-name count `metrics_prometheus.py`'s own module docstring
+    records from its 2026-08-19 live re-verification against this lab's
+    Prometheus.
+
+    Parsed out of that docstring rather than queried live here, for the same
+    reason `backlog_rows()` parses `BACKLOG.md` instead of re-deriving it: a
+    diagram generator must run offline, and this is a recorded measurement —
+    a property of the tree's text — not something this process can re-check
+    without a reachable Prometheus.
+    """
+    text = (SRC / "metrics_prometheus.py").read_text()
+    m = re.search(r"(\d[\d,]*) metric names", text)
+    if not m:
+        raise SystemExit(
+            "facts.prometheus_metric_count: the metric-name count is no "
+            "longer stated in metrics_prometheus.py's module docstring — "
+            "update the parser or the source."
+        )
+    return int(m.group(1).replace(",", ""))
+
+
+@functools.lru_cache(maxsize=1)
+def neo4j_graph_counts() -> dict[str, int]:
+    """Node/relationship counts `graph.py`'s own module comment records from
+    the 2026-08-19 live write-and-verify against this lab's neo4j container.
+    Parsed, not re-queried live — see `prometheus_metric_count()`.
+    """
+    text = (SRC / "graph.py").read_text()
+    m = re.search(r"populated\s+(\d+)\s+nodes\s+and\s+(\d+)\s*\n?#?\s*relationships", text)
+    if not m:
+        raise SystemExit(
+            "facts.neo4j_graph_counts: the node/relationship count is no "
+            "longer stated in graph.py — update the parser or the source."
+        )
+    return {"nodes": int(m.group(1)), "relationships": int(m.group(2))}
+
+
+@functools.lru_cache(maxsize=1)
+def netbox_fabric_counts() -> dict[str, int]:
+    """Device/interface/IP/cable counts `FINDINGS.md` records from the
+    2026-08-19 live NetBox population (B-509).
+
+    Parsed the same way `findings_count()` already reads that file.
+    FINDINGS.md is append-only, so a past entry's own numbers are stable
+    under a regeneration even though the file keeps growing — the same
+    property that makes `findings_count()` itself safe to pin.
+    """
+    text = (DOCS_BUILD / "FINDINGS.md").read_text()
+    m = re.search(
+        r"NetBox now holds (\d+) devices, (\d+) interfaces, "
+        r"(\d+) IP addresses and (\d+) cables",
+        text,
+    )
+    if not m:
+        raise SystemExit(
+            "facts.netbox_fabric_counts: the NetBox population line is no "
+            "longer stated in FINDINGS.md — update the parser or the source."
+        )
+    return {
+        "devices": int(m.group(1)),
+        "interfaces": int(m.group(2)),
+        "ip_addresses": int(m.group(3)),
+        "cables": int(m.group(4)),
+    }
+
+
+# --------------------------------------------------------------------------
+# Structural "who actually imports this" checks — parsed from each file's
+# AST import statements, not grepped for the bare module name, so a
+# docstring or comment that merely *mentions* a module (as
+# `session_memory.py`'s does for `config_diff`) is never mistaken for a real
+# dependency. Used to state, and enforce, that `reasoning_gate.py` and
+# `config_diff.py` are built and tested but not yet wired into a live
+# investigation — a diagram claiming that fails loudly the day it stops
+# being true instead of quietly going stale.
+# --------------------------------------------------------------------------
+
+
+def _module_importers(module_name: str, roots: tuple[Path, ...]) -> tuple[str, ...]:
+    importers: list[str] = []
+    for root in roots:
+        for p in sorted(root.rglob("*.py")):
+            if p.stem == module_name:
+                continue
+            try:
+                tree = ast.parse(p.read_text())
+            except SyntaxError:
+                continue
+            found = False
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom) and node.module and node.module.split(".")[-1] == module_name:
+                    found = True
+                elif isinstance(node, ast.Import):
+                    for alias in node.names:
+                        if alias.name.split(".")[-1] == module_name:
+                            found = True
+            if found:
+                importers.append(str(p.relative_to(REPO_ROOT)))
+    return tuple(importers)
+
+
+@functools.lru_cache(maxsize=1)
+def reasoning_gate_consumers() -> tuple[str, ...]:
+    """Every file under ``src/``/``mcp_server/`` (tests excluded — this
+    scans only ``SRC``/``MCP``) that imports `reasoning_gate.py` — empty
+    today. B-103, the narrowing pass that would call `parse_decision`
+    against a live descent, has not been built; see that module's own
+    docstring ("Wiring either into a live investigation is a separate,
+    later task").
+    """
+    return _module_importers("reasoning_gate", (SRC, MCP))
+
+
+@functools.lru_cache(maxsize=1)
+def config_diff_consumers() -> tuple[str, ...]:
+    """Every file under ``src/``/``mcp_server/`` that imports
+    `config_diff.py` — empty today. See that module's own "Not a rung"
+    section: the reconciliation is deliberately not called from
+    `flows.py`/`checks.py`/`investigation.py`/`cli.py`/the MCP surface.
+
+    `config_section.py` (the parsers `config_diff.py` reads) is a different
+    claim and is *not* checked here — it is imported by `template_parsers.py`,
+    and its two templates are real and callable (through `nettools agent`'s
+    generic template tool only — neither has its own CLI subcommand or MCP
+    tool, shown as such in 04-capabilities.svg); only the comparison in
+    `config_diff.py` itself is unwired.
+    """
+    return _module_importers("config_diff", (SRC, MCP))
+
+
+# --------------------------------------------------------------------------
+# config_section.py / config_diff.py — the config axis (B-104) and the
+# intent-vs-observed diff (B-106).
+# --------------------------------------------------------------------------
+
+
+def config_axis_summary() -> dict:
+    from agent_nettools import config_diff, config_section
+
+    return {
+        "templates": tuple(name for _platform, name in config_section.CONFIG_TEMPLATE_PARSERS.keys()),
+        "diff_functions": tuple(sorted(n for n in dir(config_diff) if n.startswith("diff_"))),
+        "outcomes": tuple(sorted(config_diff.OUTCOMES)),
+    }
+
+
+# --------------------------------------------------------------------------
+# reasoning_gate.py — the two shapes, code-enumerated candidate kinds
+# --------------------------------------------------------------------------
+
+
+@functools.lru_cache(maxsize=1)
+def reasoning_gate_candidate_kinds() -> tuple[str, ...]:
+    """The candidate ``kind`` literals `reasoning_gate.py` actually
+    constructs — parsed from its own source rather than imported and called,
+    since (unlike `flows.FLOWS`) there is no already-built registry object to
+    introspect: each kind is a literal first argument to one of three
+    private, per-kind helper functions.
+    """
+    text = (SRC / "reasoning_gate.py").read_text()
+    kinds = tuple(re.findall(r'Candidate\("(\w+)"', text))
+    if not kinds:
+        raise SystemExit(
+            "facts.reasoning_gate_candidate_kinds: no Candidate(\"kind\", ...) "
+            "constructions found — reasoning_gate.py changed shape; update the parser."
+        )
+    return kinds
+
+
+# --------------------------------------------------------------------------
+# grounding.py / model_egress.py — the verification and projection tables
+# --------------------------------------------------------------------------
+
+
+def grounding_check_names() -> tuple[str, ...]:
+    from agent_nettools import grounding
+
+    return tuple(sorted(n for n in dir(grounding) if n.startswith("check_")))
+
+
+def model_egress_table_sizes() -> dict[str, int]:
+    from agent_nettools import model_egress
+
+    return {
+        "raw_text_keys": len(model_egress.RAW_TEXT_KEYS),
+        "free_text_fields": len(model_egress.FREE_TEXT_FIELDS),
+        "error_kinds": len(model_egress.ERROR_KINDS),
+    }
+
+
+# --------------------------------------------------------------------------
+# event_routing.py / event_watch.py — deterministic event-to-flow routing
+# --------------------------------------------------------------------------
+
+
+def event_routing_table_sizes() -> dict[str, int]:
+    from agent_nettools import event_routing
+
+    return {
+        "mnemonic": len(event_routing.MNEMONIC_FLOW_TABLE),
+        "alertname": len(event_routing.ALERTNAME_FLOW_TABLE),
+    }
+
+
+# --------------------------------------------------------------------------
+# admission.py — per-device / per-fabric concurrency gate defaults
+# --------------------------------------------------------------------------
+
+
+def admission_defaults() -> dict[str, int]:
+    from agent_nettools import admission
+
+    return {
+        "per_device": admission.DEFAULT_MAX_CONCURRENT_PER_DEVICE,
+        "fabric": admission.DEFAULT_MAX_CONCURRENT_FABRIC,
+    }
+
+
+# --------------------------------------------------------------------------
+# incident_correlation.py — the three correlation bases, strongest first,
+# and how many co-occurrence-shaped heuristics are refused outright
+# --------------------------------------------------------------------------
+
+
+def incident_correlation_summary() -> dict:
+    from agent_nettools import incident_correlation as ic
+
+    return {
+        "bases": (ic.BASIS_SAME_CAUSE, ic.BASIS_SAME_SUBJECT, ic.BASIS_SAME_DEVICE),
+        "excluded_count": len(ic.EXCLUDED_CORRELATIONS),
+    }
+
+
+# --------------------------------------------------------------------------
+# docs/design/interfaces.md — the staged human-interaction ladder
+# --------------------------------------------------------------------------
+
+_STAGE_ROW_RE = re.compile(
+    r"^\|\s*\*\*([^*]+)\*\*\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|$",
+    re.MULTILINE,
+)
+
+
+@functools.lru_cache(maxsize=1)
+def interaction_ladder() -> tuple[tuple[str, str, str], ...]:
+    """(stage, interface, direction) for every row of interfaces.md's own
+    ladder table — e.g. ``("Stage 3", "Inline approve / reject on a
+    proposal", "Bidirectional")``. Parsed like `backlog_rows()` parses
+    BACKLOG.md: a markdown table this project already maintains by hand is a
+    property of the tree, not something to re-type here.
+    """
+    text = (REPO_ROOT / "docs" / "design" / "interfaces.md").read_text()
+    if "## The ladder" not in text or "## What already exists" not in text:
+        raise SystemExit(
+            "facts.interaction_ladder: interfaces.md's '## The ladder' "
+            "section markers moved or were reworded — update the parser."
+        )
+    section = text.split("## The ladder", 1)[1].split("## What already exists", 1)[0]
+    rows = tuple(
+        (m.group(1).strip(), m.group(2).strip(), m.group(3).strip())
+        for m in _STAGE_ROW_RE.finditer(section)
+    )
+    if not rows:
+        raise SystemExit(
+            "facts.interaction_ladder: no rows parsed from interfaces.md's "
+            "ladder table — its format changed; update the parser."
+        )
+    return rows
+
+
+# --------------------------------------------------------------------------
+# docs/build/BACKLOG.md — the Stage 3 write-path table (B-301..B-307), every
+# one of them DEFERRED until an identity provider exists. This is the
+# measured evidence for the event-loop diagram's "where it stops" panel.
+# Read-only, like `backlog_rows()`/`findings_count()` above — BACKLOG.md is
+# owned by another track and is never written here.
+# --------------------------------------------------------------------------
+
+_WRITE_PATH_ITEM_RE = re.compile(
+    r"^\|\s*\*\*(B-30[1-7])\*\*\s*\|\s*\*\*([^*]+)\*\*",
+    re.MULTILINE,
+)
+
+
+@functools.lru_cache(maxsize=1)
+def write_path_backlog() -> tuple[tuple[str, str], ...]:
+    """(id, item) for B-301..B-307 under BACKLOG.md's "Stage 3 — standard
+    procedures" heading — "The write path. Everything here is gated on
+    identity, and identity does not exist yet."
+
+    Fails loudly, rather than rendering a stale claim, in two distinct ways:
+    if the seven rows cannot be found at all (the section moved or was
+    reworded), and if any one of them is no longer `DEFERRED` in
+    `backlog_rows()` (the write path started moving) — the second check is
+    exactly the situation where this diagram's central honesty claim would
+    need a human's re-review before it may regenerate silently.
+    """
+    text = (DOCS_BUILD / "BACKLOG.md").read_text()
+    marker = "# Stage 3"
+    idx = text.find(marker)
+    if idx == -1:
+        raise SystemExit(
+            "facts.write_path_backlog: BACKLOG.md's 'Stage 3' section "
+            "heading is missing — update the parser or the source."
+        )
+    section = text[idx : idx + 4000]
+    rows = tuple(_WRITE_PATH_ITEM_RE.findall(section))
+    expected_ids = tuple(f"B-30{n}" for n in range(1, 8))
+    if tuple(r[0] for r in rows) != expected_ids:
+        raise SystemExit(
+            f"facts.write_path_backlog: expected rows {expected_ids}, parsed "
+            f"{tuple(r[0] for r in rows)} — BACKLOG.md's Stage 3 table changed; "
+            "update the diagram and this parser together."
+        )
+    statuses = {i: base for i, base, _q in backlog_rows()}
+    not_deferred = [i for i in expected_ids if statuses.get(i) != "DEFERRED"]
+    if not_deferred:
+        raise SystemExit(
+            f"facts.write_path_backlog: {not_deferred} are no longer DEFERRED "
+            "in BACKLOG.md — the write path has moved. This diagram's "
+            "'gated on identity, nothing built' framing needs a human review "
+            "before it may regenerate silently over that change."
+        )
+    return rows

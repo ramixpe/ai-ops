@@ -53,6 +53,8 @@ DIAGRAMS = (
     ("d5.py", "05-current-state.svg"),
     ("d6.py", "06-descent.svg"),
     ("d7.py", "07-stage2-architecture.svg"),
+    ("d8.py", "08-event-loop.svg"),
+    ("d9.py", "09-model-boundary.svg"),
 )
 
 
@@ -145,3 +147,11 @@ def test_key_facts_appear_in_the_committed_svgs():
 
     cmd_counts = facts.approved_command_counts()
     assert f"cisco_xr {cmd_counts['cisco_xr']}" in svg_text("01-repo-anatomy.svg")
+
+    tool_classes = facts.classic_mcp_tool_class_counts()
+    assert f"one of {tool_classes['total']} registered MCP tools" in svg_text("09-model-boundary.svg")
+
+    write_path = facts.write_path_backlog()
+    for wid, _item in write_path:
+        assert wid in svg_text("08-event-loop.svg")
+        assert "DEFERRED" in svg_text("08-event-loop.svg")

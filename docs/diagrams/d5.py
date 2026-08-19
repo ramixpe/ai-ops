@@ -26,18 +26,19 @@ STAGES = [("Part 0", "setup, frozen\nbaseline", "done"),
           ("Reviews", "3 external + a 5-lens\nholistic review", "done"),
           ("Lab window", "round 8b · round 6 + Q1\nMCP re-test", "now"),
           ("Publication", "the ai-ops repo", "next"),
-          ("Part 2 · MVP-1", "config axis, more flows,\nmulti-turn", "later")]
+          ("Part 2 · MVP-1", "event loop: built (8) · config axis,\nreasoning gate: built, unwired (9)", "partial")]
 seg = (W - 96) / len(STAGES)
 for i, (name, sub, st) in enumerate(STAGES):
     x = 48 + i * seg
-    col = {"done": GREEN, "now": AMBER, "next": BLUE, "later": FAINT}[st]
-    bg = {"done": GREENBG, "now": AMBERBG, "next": BLUEBG, "later": "#ffffff"}[st]
+    col = {"done": GREEN, "now": AMBER, "next": BLUE, "later": FAINT, "partial": TEAL}[st]
+    bg = {"done": GREENBG, "now": AMBERBG, "next": BLUEBG, "later": "#ffffff", "partial": TEALBG}[st]
     s.rect(x, jy, seg - 12, 66, fill=bg, stroke=col, rx=9,
            dash="4 3" if st == "later" else None)
     s.text(x + 16, jy + 24, name, size=13, weight="700", fill=col)
     for j, ln in enumerate(sub.split("\n")):
         s.text(x + 16, jy + 42 + j * 14, ln, size=10.5, fill=MUTED)
-    mark = {"done": "✓ complete", "now": "◆ you are here", "next": "→ next", "later": "planned"}[st]
+    mark = {"done": "✓ complete", "now": "◆ you are here", "next": "→ next", "later": "planned",
+            "partial": "◐ unwired"}[st]
     s.text(x + seg - 26, jy + 24, mark, size=10.5, fill=col, weight="700", anchor="end")
     if i < len(STAGES) - 1:
         s.line(x + seg - 11, jy + 33, x + seg - 2, jy + 33, stroke="#c6c6c0", sw=1.5)

@@ -18,9 +18,16 @@ guard_n = facts.guard_count()
 lab_devices = facts.lab_devices()
 facts.assert_contains("src/agent_nettools/network_tools.py", r"def _netmiko_send_commands",
                        "d1.py's TRANSPORT box code pointer")
+config_axis = facts.config_axis_summary()
+config_diff_consumers = facts.config_diff_consumers()
+if config_diff_consumers:
+    raise SystemExit(
+        f"d1.py: config_diff.py now has live consumers {config_diff_consumers} — "
+        "the 'unwired' pill label below is stale; update it before regenerating."
+    )
 ROLE_LABEL = {"core": "core", "edge": "edge", "route-reflector": "reflector"}
 
-W, H = 1580, 1000
+W, H = 1580, 1210
 s = Svg(W, H)
 header(s, "ios-xr-nettools — repo anatomy",
        f"{facts.fmt(facts.src_lines())} lines of source + {facts.fmt(facts.mcp_lines())} in the MCP server · "
@@ -57,25 +64,36 @@ LAYERS = [
          d="composes a diagnosis out of already-parsed facts — never out of device text",
          p=[("investigation.py", f"{facts.fmt(SL('investigation.py'))} · drives the descent"),
             ("checks.py", f"{facts.fmt(SL('checks.py'))} · per-role health rules"),
+            ("health.py", f"{facts.fmt(SL('health.py'))} · fabric verdicts, silences"),
             ("audit.py", f"{facts.fmt(SL('audit.py'))} · {audit_rule_count} fabric-vs-itself rules"),
             ("fabric_analysis.py", facts.fmt(SL('fabric_analysis.py'))),
             ("knowledge.py", f"{facts.fmt(SL('knowledge.py'))} · grep, not RAG"),
             ("output.py", f"{facts.fmt(SL('output.py'))} · json | table | summary")]),
-    dict(t="DETERMINISTIC CORE", n="3", c=BLUEBG, sc="#b9d0f4", tc=BLUE,
+    dict(t="OPERATIONS", n="3", c=TEALBG, sc="#a7d6d0", tc=TEAL,
+         d="closes the loop around an investigation — none of it a dependency descent (diagram 8)",
+         p=[("event_watch.py", f"{facts.fmt(SL('event_watch.py'))} · polls Loki, groups by root cause"),
+            ("admission.py", f"{facts.fmt(SL('admission.py'))} · per-device/fabric concurrency gate"),
+            ("ticket.py", f"{facts.fmt(SL('ticket.py'))} · append-only flight recorder"),
+            ("ownership.py", f"{facts.fmt(SL('ownership.py'))} · declared who-gets-told table"),
+            ("incident_correlation.py", f"{facts.fmt(SL('incident_correlation.py'))} · 3 bases, strongest first")]),
+    dict(t="DETERMINISTIC CORE", n="4", c=BLUEBG, sc="#b9d0f4", tc=BLUE,
          d="NO MODEL CALL, EVER — if this layer ever needs one, something above it was designed wrong",
          p=[("descent.py", f"{facts.fmt(SL('descent.py'))} · lowest broken rung wins"),
             ("flows.py", f"{facts.fmt(SL('flows.py'))} · {declared_flow_count} declared / {implemented_flow_count} implemented"),
             ("epoch.py", f"{facts.fmt(SL('epoch.py'))} · one observation window"),
             ("grounding.py", f"{facts.fmt(SL('grounding.py'))} · citation + chain + containment"),
+            ("reasoning_gate.py", f"{facts.fmt(SL('reasoning_gate.py'))} · built, not yet wired (diagram 9)"),
+            ("config_section.py", f"{facts.fmt(SL('config_section.py'))} · {len(config_axis['templates'])} templates, configured intent"),
+            ("config_diff.py", f"{facts.fmt(SL('config_diff.py'))} · {len(config_axis['diff_functions'])} fields, {len(config_axis['outcomes'])} outcomes, unwired"),
             ("topology.py", facts.fmt(SL('topology.py'))), ("interface_kind.py", facts.fmt(SL('interface_kind.py')))]),
-    dict(t="EVIDENCE & PARSING", n="4", c="#ffffff", sc=LINE, tc=INK,
+    dict(t="EVIDENCE & PARSING", n="5", c="#ffffff", sc=LINE, tc=INK,
          d="the only code in the repository that reads raw device text",
          p=[("network_tools.py", f"{facts.fmt(SL('network_tools.py'))} · the one transport chokepoint"),
             ("parsers.py", facts.fmt(SL('parsers.py'))), ("template_parsers.py", facts.fmt(SL('template_parsers.py'))),
             ("evidence_store.py", f"{facts.fmt(SL('evidence_store.py'))} · json | sqlite"),
             ("log_window.py", facts.fmt(SL('log_window.py'))),
             ("fixtures.py", f"{facts.fmt(SL('fixtures.py'))} · {facts.fmt(facts.fixture_stats()['captures'])} captures, replay offline")]),
-    dict(t="SAFETY BOUNDARY", n="5", c=REDBG, sc="#f0bfb8", tc=RED,
+    dict(t="SAFETY BOUNDARY", n="6", c=REDBG, sc="#f0bfb8", tc=RED,
          d="checked BEFORE credentials load and BEFORE a socket opens — both files frozen since the pre-build baseline",
          p=[("platforms.py", f"{facts.fmt(SL('platforms.py'))} · FROZEN · exact-match frozenset", dict(stroke="#e0a79e")),
             ("templates.py", f"{facts.fmt(SL('templates.py'))} · FROZEN · canonicalise by reconstruction", dict(stroke="#e0a79e"))],
@@ -85,6 +103,7 @@ LAYERS = [
 ]
 
 y = 126
+_layer_mid_y = {}  # layer title -> vertical centre, for the model-branch arrows below
 for L in LAYERS:
     rows = layout(L["p"], SPINE_W - 34)
     bh = 46 + len(rows) * 34 + (22 if L.get("foot") else 0)
@@ -99,6 +118,7 @@ for L in LAYERS:
     if L.get("foot"):
         s.text(SPINE_X + 20, ry + 8, L["foot"], size=11.5, fill=RED)
     nexty = y + bh
+    _layer_mid_y[L["t"]] = (y + nexty) / 2
     if L is not LAYERS[-1]:
         s.line(SPINE_X + SPINE_W / 2, nexty + 2, SPINE_X + SPINE_W / 2, nexty + 16,
                stroke="#bcbcb6", sw=1.6, marker="arw")
@@ -106,7 +126,7 @@ for L in LAYERS:
 
 # transport + devices
 s.rect(SPINE_X, y, SPINE_W, 44, fill="#ffffff", stroke=LINE, rx=12)
-s.badge(SPINE_X + 26, y + 22, "6", col="#55555a")
+s.badge(SPINE_X + 26, y + 22, "7", col="#55555a")
 s.text(SPINE_X + 46, y + 21, "TRANSPORT", size=13.5, weight="700", ls="0.9")
 s.text(SPINE_X + 46 + w_sans("TRANSPORT", 13.5) * 1.16 + 9 * 0.9 + 20, y + 21,
        "netmiko over SSH · one login per device per observation window, not one per question", size=11.8, fill=MUTED)
@@ -133,7 +153,7 @@ for d, role in lab_devices:
 ry = 126
 s.rect(RAIL_X, ry, RAIL_W, 300, fill=PURPBG, stroke="#d5c6f5", rx=12)
 s.text(RAIL_X + 20, ry + 26, "THE MODEL SIDE", size=13.5, weight="700", fill=PURPLE, ls="0.9")
-s.text(RAIL_X + 20, ry + 46, "A branch off layers 2 and 4 — never in the answer path.",
+s.text(RAIL_X + 20, ry + 46, "A branch off layers 2 and 5 — never in the answer path.",
        size=11.5, fill=MUTED)
 s.text(RAIL_X + 20, ry + 63, "No model call happens unless you ask for one.", size=11.5,
        fill=PURPLE, weight="600")
@@ -163,13 +183,13 @@ s.text(RAIL_X + 20, ry + 26, "THE FOUR INVARIANTS", size=13.5, weight="700", ls=
 s.text(RAIL_X + 20, ry + 45, "Everything else is a feature. These are the build.", size=11.3, fill=MUTED)
 iy = ry + 66
 INV = [("1", "Platform resolves credential-free.",
-        "lab.platform_for() reads static data only, so the\nallowlist check can happen before any secret loads.", "5"),
+        "lab.platform_for() reads static data only, so the\nallowlist check can happen before any secret loads.", "6"),
        ("2", "The allowlist is checked before credentials.",
-        "Ordering is load-bearing: a bad command never\nreaches the network, and never costs a login.", "5"),
+        "Ordering is load-bearing: a bad command never\nreaches the network, and never costs a login.", "6"),
        ("3", "No command is built by interpolation.",
-        "A prefix/address/name is parsed into a typed object\nand the command re-rendered from its canonical form.", "5"),
+        "A prefix/address/name is parsed into a typed object\nand the command re-rendered from its canonical form.", "6"),
        ("4", "No unparsed device text reaches a model.",
-        "Structural, not filtered: prompt_library never holds\nthe text. Five egress paths, all projected.", "2/4")]
+        "Structural, not filtered: prompt_library never holds\nthe text. Five egress paths, all projected.", "2/5")]
 for n, title, body, layer in INV:
     s.badge(RAIL_X + 32, iy + 4, n, col=RED if n != "4" else PURPLE, r=10)
     s.text(RAIL_X + 50, iy + 8, title, size=11.8, weight="650")
@@ -181,12 +201,17 @@ s.text(RAIL_X + 20, ry + 348,
        f"Each is pinned by a test that fails when the guard is removed ({guard_n}/{guard_n} verified).",
        size=10.8, fill=GREEN)
 
-# branch arrow from spine layer 2 to the model rail
-s.path(f"M {SPINE_X + SPINE_W + 2} 250 H {RAIL_X - 8}", stroke=PURPLE, sw=1.5, dash="4 4", marker="arwp")
-s.path(f"M {SPINE_X + SPINE_W + 2} 600 H {RAIL_X - 8}", stroke=PURPLE, sw=1.5, dash="4 4", marker="arwp")
+# branch arrows from the spine to the model rail — from the actual vertical
+# centre of ANSWER LAYER and EVIDENCE & PARSING, wherever the spine's own
+# layer count put them this run, not a pixel offset frozen from an older
+# layer count.
+s.path(f"M {SPINE_X + SPINE_W + 2} {_layer_mid_y['ANSWER LAYER']:.1f} H {RAIL_X - 8}",
+       stroke=PURPLE, sw=1.5, dash="4 4", marker="arwp")
+s.path(f"M {SPINE_X + SPINE_W + 2} {_layer_mid_y['EVIDENCE & PARSING']:.1f} H {RAIL_X - 8}",
+       stroke=PURPLE, sw=1.5, dash="4 4", marker="arwp")
 
 s.text(48, H - 26,
-       "Read down the spine: a question enters at the top, becomes an answer in layer 3, and only layers 4–6 ever touch a device. "
+       "Read down the spine: a question enters at the top, becomes an answer in layer 4, and only layers 5–7 ever touch a device. "
        "The model branch hangs off the side — it restates conclusions, it never reaches them.",
        size=12, fill=MUTED)
 s.save("01-repo-anatomy.svg")

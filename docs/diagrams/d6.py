@@ -12,7 +12,7 @@ def _rung_word(name):
     n = rung_counts[name]
     return f"{name} — {n} rung" + ("" if n == 1 else "s")
 
-W, H = 1580, 1010
+W, H = 1580, 1040
 s = Svg(W, H)
 header(s, "How a diagnosis is reached",
        "Three tiers of composition, and one deterministic walk. The model picks from menus and fills in blanks — it never writes a rung, a command, or a conclusion.",
@@ -49,14 +49,41 @@ TIERS = [
    "templates re-render every argument from a typed object"],
   "There is no run_command(). This is the floor everything stands on."),
 ]
+_TIER_TEXT_MAXW = LW - 66 - 24  # box width, minus the left text inset and a right margin
+
+
+def _wrap_mono(text, size, maxw):
+    """Wrap ``text`` at `` · `` boundaries so no rendered line exceeds ``maxw``.
+
+    These lines are always ``"N things: a · b · c"`` lists whose item count is
+    a measured fact, not a literal -- as a flow/intent/template vocabulary
+    grows, the line grows with it, so wrapping has to be computed here rather
+    than sized once for today's counts.
+    """
+    if w_mono(text, size) <= maxw:
+        return [text]
+    parts = text.split(" · ")
+    wrapped, cur = [], parts[0]
+    for part in parts[1:]:
+        candidate = cur + " · " + part
+        if w_mono(candidate, size) <= maxw:
+            cur = candidate
+        else:
+            wrapped.append(cur)
+            cur = part
+    wrapped.append(cur)
+    return wrapped
+
+
 ty = 148
 for num, name, col, bg, lead, lines, foot in TIERS:
-    h = 112 + len(lines) * 18
+    wrapped_lines = [wl for ln in lines for wl in _wrap_mono(ln, 11, _TIER_TEXT_MAXW)]
+    h = 112 + len(wrapped_lines) * 17
     s.rect(LX, ty, LW, h, fill=bg, stroke=col, rx=11)
     s.text(LX + 22, ty + 32, num, size=21, weight="700", fill=col, family=MONO)
     s.text(LX + 66, ty + 30, name, size=14.5, weight="700", fill=col, ls="0.6")
     s.text(LX + 66, ty + 50, lead, size=11.5, fill=INK)
-    for i, ln in enumerate(lines):
+    for i, ln in enumerate(wrapped_lines):
         s.text(LX + 66, ty + 74 + i * 17, ln, size=11, family=MONO, fill=MUTED)
     s.line(LX + 22, ty + h - 30, LX + LW - 22, ty + h - 30, stroke=col, sw=0.6, dash="3 3")
     s.text(LX + 22, ty + h - 12, foot, size=10.9, fill=col, weight="600")

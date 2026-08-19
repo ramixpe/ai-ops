@@ -233,7 +233,7 @@ Read these before changing anything in the investigation layer.
 | [docs/build/HOLISTIC-REVIEW.md](docs/build/HOLISTIC-REVIEW.md) | **The 2026-08-18 five-perspective review.** Two security defects fixed (B-481/B-482), 18 UX fixes, the two-lens-convergence meta-finding (OBS-156) |
 | [docs/archive/PEER-REVIEW-BRIEF.md](docs/archive/PEER-REVIEW-BRIEF.md) | **Give this to a reviewer.** What to read, what is already known wrong, where to attack |
 | [docs/build/OPERATOR-RUNBOOK.md](docs/build/OPERATOR-RUNBOOK.md) | Step by step for the outstanding lab work |
-| [docs/diagrams/](docs/diagrams/) | **Seven SVGs of the system as built** — layer stack, one call end to end, the trust boundary, capabilities, current state, the descent, the Stage 2 architecture. Generated from the tree; regenerate, never hand-edit — `docs/diagrams/facts.py` measures every number, `tests/test_diagrams.py` fails if a diagram no longer matches its own regeneration |
+| [docs/diagrams/](docs/diagrams/) | **Nine SVGs of the system as built** — layer stack, one call end to end, the trust boundary, capabilities, current state, the descent, Stage 2, **the event-driven loop** (and where it stops), and **the model boundary** (what a model may and may not do, with each enforcement point named). Generated from the tree and byte-pinned; regenerate, never hand-edit. Two carry self-invalidating guards: `d8` refuses to regenerate if any Stage-3 write-path row stops being DEFERRED, `d9` if `reasoning_gate` gains a live caller |
 | [docs/README.md](docs/README.md) | Map of the docs tree and reading order |
 
 **Non-negotiable while the build plan is active:** `tests/test_safety.py` and

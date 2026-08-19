@@ -3,12 +3,17 @@ from svgkit import *
 
 _flows = facts.flows_summary()
 _lab_devices = facts.lab_devices()
+_neo4j = facts.neo4j_graph_counts()
+_netbox = facts.netbox_fabric_counts()
+_prom_metrics = facts.prometheus_metric_count()
+_evq = facts.evidence_source_query_counts()
+_tool_classes = facts.classic_mcp_tool_class_counts()
 
 W, H = 1720, 1130
 s = Svg(W, H)
 header(s, "Stage 2 — the SOTA application",
-       "As decided 2026-08-18: one MCP hub, the wide→narrow gradient, an epoch-aware cache — and an observability stack that turned out to already exist, verified by live query.",
-       "decided · not yet built")
+       "As decided 2026-08-18, corrected against what shipped: no separate hub — a third MCP registration class — but the observability, NetBox and neo4j reads are now real.",
+       "decided 2026-08-18 · partially built since")
 
 # ---- legend ----
 lx = 48
@@ -39,11 +44,11 @@ s.text(360, y1 + 103, "harness — capability is not monotonic.", size=11.2, fil
 
 s.line(632, y1 + 59, 670, y1 + 59, stroke="#a8a8a2", sw=1.6, marker="arw")
 
-s.rect(674, y1, 300, 118, fill=BLUEBG, stroke="#b9d0f4", rx=12)
-s.text(694, y1 + 28, "THE NEW MCP HUB", size=13, weight="700", fill=BLUE, ls="0.8")
-s.pill(694, y1 + 40, "BUILD NOW", None, fill="#fff", stroke=BLUE, tcol=BLUE, h=20, size=10.5)
-s.text(694, y1 + 82, "One surface over every backend.", size=11.2, fill=MUTED)
-s.text(694, y1 + 100, "Menu = the wide→narrow gradient.", size=11.2, fill=BLUE, weight="600")
+s.rect(674, y1, 300, 118, fill=GREENBG, stroke="#b9dcc5", rx=12)
+s.text(694, y1 + 28, "THE MCP SERVER — not a separate hub", size=13, weight="700", fill=GREEN, ls="0.6")
+s.pill(694, y1 + 40, "BUILT", None, fill="#fff", stroke=GREEN, tcol=GREEN, h=20, size=10.5)
+s.text(694, y1 + 82, f"One surface, {_tool_classes['total']} tools, 3 registration classes.", size=11.2, fill=MUTED)
+s.text(694, y1 + 100, "The gradient is diagram 9's MAY/MAY NOT, not a menu here.", size=10.6, fill=GREEN, weight="600")
 
 # other doors, under the operator
 s.rect(48, y1 + 132, 584, 58, fill=GREENBG, stroke="#b9dcc5", rx=10)
@@ -89,17 +94,22 @@ BK = [
  ("nettools", "BUILT", GREEN, GREENBG,
   [f"{len(facts.cli_subcommands())} commands · {len(facts.classic_mcp_tools())} MCP tools · {len(_flows['implemented'])} flows",
    "descent, grounding, epoch, ledger", "the deterministic diagnostic core"]),
- ("n8n", "BUILD NOW", BLUE, BLUEBG,
-  ["spin up docker; first flow list next", "wide steps + ALL side-effects", "flows declared, reviewed like code"]),
- ("neo4j", "BUILD NOW", BLUE, BLUEBG,
-  # CDP is confirmed off this fabric (OBS-183: "% CDP is not enabled"
-  # everywhere; it speaks LLDP instead) -- a v1 collector has nothing to read
-  # from it.
-  ["DERIVED, never authored", "v1: script collects LLDP/ISIS", "ontology enrichment later (planned)"]),
- ("NetBox inventory", "BUILD NOW", BLUE, BLUEBG,
-  ["collector script feeds it from net", "then a NetBox MCP -> LM Studio", "derived, not authored — like neo4j"]),
- ("documentation", "BUILD NOW", BLUE, BLUEBG,
-  ["grep/normal DB now — decided", "vector DB only when measured", "citations must survive retrieval"]),
+ ("event loop", "BUILT", GREEN, GREENBG,
+  # Correction against what actually shipped: no n8n deployment exists in
+  # this repo (checked -- no docker-compose, no n8n code). The wide-step +
+  # side-effect logic n8n was meant to hold was built directly instead
+  # (diagram 8). n8n stays A valid choice for the operator's own scheduler,
+  # never a dependency this repo introduces.
+  ["event_routing.py + event_watch.py: wide step", "admission.py + ticket.py: gate + recorder",
+   "n8n/cron/systemd all still fine — diagram 8"]),
+ ("neo4j", "BUILT", GREEN, GREENBG,
+  [f"{_neo4j['nodes']} nodes, {_neo4j['relationships']} relationships — live",
+   "DERIVED from parsed LLDP+IS-IS evidence", f"{_evq['neo4j']} read query: get_lab_graph_topology"]),
+ ("NetBox inventory", "BUILT", GREEN, GREENBG,
+  [f"{_netbox['devices']} devices, {_netbox['interfaces']} interfaces, {_netbox['cables']} cables — live",
+   "derived, not authored — like neo4j", f"{_evq['netbox']} read queries, gated (B-512)"]),
+ ("documentation", "BUILT", GREEN, GREENBG,
+  ["grep/normal DB now — decided, shipped", "search_lab_knowledge, no vector DB", "citations survive retrieval: path:line"]),
 ]
 bw = (W - 96 - 4 * 14) / 5
 for i, (name, chip, col, bg, lines) in enumerate(BK):
@@ -134,10 +144,10 @@ for j, ln in enumerate([
 # observability — LIVE
 ox = 632
 s.rect(ox, y4, W - ox - 48, 172, fill=TEALBG, stroke="#a7d6d0", rx=12)
-s.text(ox + 20, y4 + 26, "OBSERVABILITY — DISCOVERED LIVE TODAY, ACCESS VERIFIED", size=12.5, weight="700", fill=TEAL, ls="0.6")
+s.text(ox + 20, y4 + 26, "OBSERVABILITY — DISCOVERED LIVE, NOW READ THROUGH 3 MCP TOOLS", size=12.5, weight="700", fill=TEAL, ls="0.6")
 rows = [
- ("syslog-ng 4.5", ".101:514", "all 9 routers logging", "→ Loki 2.9.8", ".103:3100", "host/severity labels"),
- ("gNMI → telegraf", "gnmic:7890", "streaming telemetry", "→ Prometheus", ".102:9090", "337 metrics live now"),
+ ("syslog-ng 4.5", ".101:514", f"all {len(_lab_devices)} routers logging", "→ Loki 2.9.8", ".103:3100", "host/severity labels"),
+ ("gNMI → telegraf", "gnmic:7890", "streaming telemetry", "→ Prometheus", ".102:9090", f"{facts.fmt(_prom_metrics)} metrics live"),
  ("Grafana 10.4", ".104:3000", "dashboards over both", "Alertmanager", ".105:9093", "route-event's live peer"),
 ]
 ry = y4 + 50
@@ -149,8 +159,8 @@ for a, ai, an, b, bi, bn in rows:
     s.text(ox + 610, ry, bi, size=10, family=MONO, fill=FAINT)
     s.text(ox + 700, ry, bn, size=10.3, fill=MUTED)
     ry += 22
-s.text(ox + 20, ry + 8, "Already flowing: IS-IS neighbour state (holdtime, uptime, adj-SIDs) and interface counters —", size=10.6, fill=TEAL, weight="600")
-s.text(ox + 20, ry + 24, "the utilisation / CPU / packet-drop HISTORY of the temporal axis exists before we build a line of it.", size=10.6, fill=TEAL, weight="600")
+s.text(ox + 20, ry + 8, "No longer just flowing — now READ: get_lab_logs, get_lab_interface_rate_history,", size=10.6, fill=TEAL, weight="600")
+s.text(ox + 20, ry + 24, "get_lab_isis_adjacency_history, get_lab_ldp_session_history, get_lab_device_uptime_history (B-512).", size=10.6, fill=TEAL, weight="600")
 s.text(ox + 20, ry + 44, "History is evidence about a WINDOW; a verdict is about an instant. Absence of a sample is never zero.", size=10.3, fill=MUTED)
 
 # =============== ROW 5: the fabric ===============
@@ -174,8 +184,8 @@ y6 = y5 + 88
 s.rect(48, y6, 1000, 158, fill="#1b1b1f", rx=12)
 s.text(68, y6 + 26, "DECIDED 2026-08-18", size=12.5, weight="700", fill="#e9e9e6", ls="0.8")
 for j, ln in enumerate([
-  "Option C, wide→narrow gradient · side-effects only behind flows · nobody on top — MCP is a hub",
-  "Cache is epoch-aware · neo4j is derived (v1: LLDP/CDP/ISIS collector script) · doc store: grep now, vector only when measured",
+  "Option C, wide→narrow gradient · side-effects only behind flows · shipped as a 3rd MCP registration class, not a new hub",
+  "Cache is epoch-aware, still to build · neo4j + NetBox are derived and now BUILT (LLDP/IS-IS collector) · doc store: grep, shipped",
   "GRACE is the prompt discipline (RACE vs P.E.N.E closed) · measure-first: seal a prediction, score the menu with the eval harness",
   "Juniper out of scope · push to GitHub at every milestone · retire stale docs at milestone 0 (evidence-class documents stay)",
 ]):

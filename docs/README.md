@@ -88,7 +88,7 @@ ios-xr-nettools/
 │   ├── EVALUATION-METHODOLOGY-REVIEW.md  External review C
 │   ├── EXPERT-PEER-REVIEW-2026-08-17.md  External review: architecture, safety, security, roadmap (P0-P3)
 │   ├── DEEP-REVIEW-2026-08-17.md       Verifies the review above at source; B-467, the sanitisation gap
-│   ├── diagrams/                       Six SVGs of the system as built — layer stack, one call
+│   ├── diagrams/                       Nine SVGs of the system as built — layer stack, one call
 │   │   │                               end to end, trust boundary, capabilities, current state,
 │   │   │                               the descent — plus the Stage 2 architecture SVG. Generated
 │   │   │                               from the tree by d1.py…d7.py; regenerate, never hand-edit

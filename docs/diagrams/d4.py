@@ -5,13 +5,14 @@ cli_subcommands = facts.cli_subcommands()
 classic_tools = facts.classic_mcp_tools()
 staged_tools = facts.staged_mcp_tools()
 probe_tools = set(facts.classic_mcp_probe_tools())
+external_tools = set(facts.classic_mcp_external_source_tools())
 intents = facts.cisco_xr_intents()
 lab_devices = facts.lab_devices()
 templates = facts.cisco_xr_templates()
 flows = facts.flows_summary()
 settings_n = facts.settings_count()
 
-W, H = 1580, 940
+W, H = 1580, 1000
 s = Svg(W, H)
 header(s, "What it can actually do",
        f"{len(cli_subcommands)} CLI subcommands · {len(classic_tools)} MCP tools on the classic surface, "
@@ -24,7 +25,8 @@ lx = 48
 for label, col, bg in [("works offline (fixtures or local state)", GREEN, GREENBG),
                        ("needs a reachable device", "#55555a", "#ffffff"),
                        ("calls a model — opt-in, never default", PURPLE, PURPBG),
-                       ("generates traffic (gated)", AMBER, AMBERBG)]:
+                       ("generates traffic (gated)", AMBER, AMBERBG),
+                       ("reaches Loki/Prometheus/NetBox/neo4j, not a device (gated)", TEAL, TEALBG)]:
     s.rect(lx, 116, 13, 13, fill=bg, stroke=col, rx=3)
     s.text(lx + 20, 127, label, size=11.2, fill=MUTED)
     lx += w_sans(label, 11.2) + 46
@@ -69,21 +71,32 @@ y += group(LX, y, LW, "ASK ONE DEVICE A QUESTION", f"the {len(intents)} collecti
 
 _TEMPLATE_DISPLAY = {"route": "route", "bgp_neighbor": "bgp-neighbor", "interface": "interface",
                      "logging": "logging", "ping": "ping", "traceroute": "traceroute",
-                     "config_isis": "config-isis", "config_interface": "config-interface",
+                     "config_isis": "config_isis", "config_interface": "config_interface",
                      "sr_policy_detail": "sr-policy"}
 _TEMPLATE_ARGS = {"route": "DEVICE PREFIX", "bgp_neighbor": "DEVICE ADDRESS", "interface": "DEVICE NAME",
                   "logging": "DEVICE --count N", "ping": "sends ICMP", "traceroute": "sends UDP",
-                  "config_isis": "DEVICE — B-104", "config_interface": "DEVICE NAME — B-104",
                   "sr_policy_detail": "DEVICE COLOR:ENDPOINT — B-515"}
-lookup_rows = [(_TEMPLATE_DISPLAY[n], _TEMPLATE_ARGS[n], "live") for n in templates["lookups"]]
+# config_isis/config_interface (B-104) are real templates -- they parse, and
+# tests exercise them -- but neither has its own CLI subcommand or MCP tool
+# (checked against cli.build_parser() and mcp_server.server directly; see
+# facts.config_diff_consumers()'s sibling check for config_diff.py's own,
+# stricter unwired claim). The only registered caller that can select a
+# template BY NAME at all is run_lab_template's enum, inside `nettools
+# agent` -- so today these are reachable through a model's tool choice, or
+# not at all, never through a human typing a dedicated subcommand.
+_CLI_ONLY_TEMPLATES = {n for n in templates["lookups"] if _TEMPLATE_DISPLAY[n] in cli_subcommands}
+_AGENT_ONLY_TEMPLATES = [n for n in templates["lookups"] if n not in _CLI_ONLY_TEMPLATES]
+lookup_rows = [(_TEMPLATE_DISPLAY[n], _TEMPLATE_ARGS[n], "live") for n in templates["lookups"] if n in _CLI_ONLY_TEMPLATES]
 probe_rows = [(_TEMPLATE_DISPLAY[n], _TEMPLATE_ARGS[n], "probe") for n in templates["probes"]]
+agent_only_rows = [(_TEMPLATE_DISPLAY[n], "via nettools agent's tool loop only — no subcommand", "model") for n in _AGENT_ONLY_TEMPLATES]
 y += group(LX, y, LW, "LOOK UP ONE OBJECT", "validated parameterised templates — the argument is re-rendered, never interpolated",
-    lookup_rows + probe_rows, LW - 34) + 14
+    lookup_rows + probe_rows + agent_only_rows, LW - 34) + 14
 
 y += group(LX, y, LW, "DIAGNOSE", "the part that answers 'why', not just 'what'", [
     ("investigate", "the deterministic descent", "off"), ("health", "role-aware verdicts", "off"),
     ("audit", f"{facts.audit_rule_count()} fabric-vs-itself rules", "off"), ("learn-topology", "derive expected state", "off"),
     ("diff", "vs latest or golden", "live"), ("flaps", "oscillation across history", "off"),
+    ("ledger", "diagnosis accuracy, human-recorded", "off"),
 ], LW - 34) + 14
 
 y += group(LX, y, LW, "EVIDENCE OVER TIME", "snapshots are the memory this tool reasons against", [
@@ -104,7 +117,9 @@ y += group(LX, y, LW, "OPS PLUMBING", "how it plugs into the rest of a NOC", [
 
 # ---------------- right rail: MCP ----------------
 ry = 148
-s.rect(RX, ry, RW, 470, fill="#ffffff", stroke=LINE, rx=11)
+n_rows = -(-len(classic_tools) // 2)  # ceil div — the list wraps at 2 columns regardless of count
+_mcp_box_h = 88 + n_rows * 15 + 14 + 22 + 10 + len(staged_tools) * 17 + 30 + 16
+s.rect(RX, ry, RW, _mcp_box_h, fill="#ffffff", stroke=LINE, rx=11)
 s.text(RX + 18, ry + 26, "THE MCP SURFACES", size=12.5, weight="700", ls="0.8")
 s.text(RX + 18, ry + 45, "Two, deliberately — selected by NETTOOLS_MCP_SURFACE,", size=10.9, fill=MUTED)
 s.text(RX + 18, ry + 60, "because collapsing to one would destroy the A/B that", size=10.9, fill=MUTED)
@@ -113,9 +128,8 @@ s.text(RX + 18, ry + 75, "measures whether a small model selects better from it.
 s.rect(RX + 16, ry + 88, RW - 32, 22, fill=SLATEBG, rx=6)
 s.text(RX + 26, ry + 103, f"classic — {len(classic_tools)} tools  (the default)", size=11.5, weight="650", family=MONO)
 ty = ry + 126
-n_rows = -(-len(classic_tools) // 2)  # ceil div — the list wraps at 2 columns regardless of count
 for i, t_ in enumerate(classic_tools):
-    col = AMBER if t_ in probe_tools else MUTED
+    col = AMBER if t_ in probe_tools else (TEAL if t_ in external_tools else MUTED)
     s.text(RX + 26 + (0 if i % 2 == 0 else 216), ty + (i // 2) * 15, "· " + t_,
            size=10.2, family=MONO, fill=col)
 ty += n_rows * 15 + 14
@@ -146,7 +160,7 @@ for name in staged_tools:
 s.text(RX + 26, ty + 8, "One tool per stage of an investigation, not one per", size=10.3, fill=MUTED)
 s.text(RX + 26, ty + 22, "function — mirroring how an engineer actually moves.", size=10.3, fill=MUTED)
 
-ry += 490
+ry += _mcp_box_h + 20
 s.rect(RX, ry, RW, 214, fill="#ffffff", stroke=LINE, rx=11)
 s.text(RX + 18, ry + 26, "EXIT CODES — ONE SCHEME", size=12.5, weight="700", ls="0.8")
 s.text(RX + 18, ry + 45, "computed from the full result before rendering, so", size=10.9, fill=MUTED)
