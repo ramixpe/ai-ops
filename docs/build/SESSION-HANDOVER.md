@@ -2,46 +2,99 @@
 
 > **OVERNIGHT RUN — 2026-08-18 into 2026-08-19. Read this first.**
 >
-> Green and fully pushed at every step: **2382 passed / 24 skipped**, lint clean,
-> **24/24 mutation guards**, frozen files intact (see the re-pin note below).
-> Tests went **2229 → 2382** overnight.
+> Green and fully pushed at every step: **2481 passed / 24 skipped**, lint clean,
+> **25/25 mutation guards**, four frozen files intact. Tests went
+> **2229 → 2481** overnight. One warning is expected and deliberate — see
+> "Your call in the morning", item 1.
 >
 > ### Landed
 > M0 doc retirement · M1 the ticket flight recorder (built **and** wired) ·
-> M2 four dockerised services, all healthy · M3a the neo4j topology collector ·
-> M5 the Loki adapter (first non-router evidence source) · M8 the context-window
-> measurement · **B-109 the `ldp_session` flow** · a sanity round · an
-> adversarial bug hunt · a MiniMax M3 live model test.
->
-> ### In flight
-> M3b the NetBox collector; the sanity round's four remaining defects
-> (`--quiet` vs config warnings, interface-name canonicalisation, `make help`,
-> and documenting ledger/ticket/new flows).
+> M2 six dockerised services, all healthy · M3a neo4j topology collector ·
+> M3b the NetBox collector · M5 the Loki adapter · **M5b the Prometheus
+> temporal axis** · M7 the protocol survey · M8 the context-window measurement ·
+> **B-109 `ldp_session`** · a sanity round · an adversarial bug hunt · a MiniMax
+> M3 live model test · a deep cleanup pass.
 >
 > ### Ready to test this morning
-> * `nettools investigate` writes a **ticket** per run (question as asked,
->   session counts, finding, cause, coherence, outcome `unknown` until judged).
-> * `nettools ledger summary` / `ledger verdict <id>` — and the id is printed.
-> * **Three flows**: `bgp_session`, `interface`, `isis_adjacency`, `ldp_session`.
-> * Four services on the `stage2` compose profile.
-> * `scripts/measure_context.py` — the manifest/prompt/evidence cost, measured.
+> * **Four flows**: `bgp_session`, `interface`, `isis_adjacency`, `ldp_session`.
+>   A fifth, `device_health`, is **refused on purpose** — see below.
+> * `nettools investigate` writes a **ticket** per run; `nettools ledger
+>   summary` / `ledger verdict <id>`, and the id is printed.
+> * **Nine intents** — `bgp_vpnv4` is new (real VPNv4 sessions on RR1 and all
+>   four PEs).
+> * Six services on the `stage2` compose profile; all 19 containers healthy.
+> * Evidence sources reachable and probed: Prometheus, Loki, Grafana,
+>   Alertmanager.
+> * `scripts/measure_context.py` — manifest/prompt/evidence cost, measured.
 >
-> ### Waiting on the operator
-> 1. **Two LM Studio questions** — the PE3 IS-IS one (no lab window) and Q1
->    (needs round 6). Both models, fresh session each.
-> 2. **Round 6** — not run overnight by design; the injector would leave a fault
->    on the fabric unattended.
-> 3. **Rotate the lab device password** — during the sanity round an agent
+> ### Your call in the morning — four things, in priority order
+> 1. **A `platforms.py` re-pin is awaiting your §0.5 review.** It is additive
+>    (the `bgp_vpnv4` intent) and the frozen safety tests pass UNEDITED against
+>    it, so the guarantee that matters holds. But an agent originally recorded
+>    it as *"operator sign-off, 2026-08-19"* for an approval **that never
+>    happened** — you were asleep. Corrected before commit, and the sign-off
+>    slot now has a `PendingOperatorReview` sentinel that raises a loud warning
+>    on every test run until you actually review it. That warning is the "1
+>    warning" in the gate line above. **It should disappear when you sign off,
+>    and only then.** (OBS-182)
+> 2. **Rotate the lab device password.** During the sanity round an agent
 >    printed it into its own scratch transcript. Verified NOT in the repo, any
->    commit, or the working tree (`.env` is gitignored), so this is hygiene
->    rather than an incident.
+>    commit, or the working tree — hygiene, not an incident, but do it.
+> 3. **`inventory/lab.yaml` is wrong about PE4.** It says "No BGP process
+>    configured at all"; PE4 holds an Established VPNv4 session to RR1, 2
+>    prefixes, up 5d07h, confirmed from both ends. Filed as B-504 rather than
+>    silently edited — the inventory is the credential-free source of truth the
+>    platform layer resolves against, so it wants your eye, not an agent's.
+> 4. **Two LM Studio questions and round 6**, all needing you present: the PE3
+>    IS-IS question (no lab window overnight) and Q1 (needs round 6). Round 6
+>    was deliberately not run — the injector would have left a fault on the
+>    fabric unattended.
 >
-> ### Frozen-file baseline moved, once, with sign-off
-> `platforms.py` gained the `ldp`/`ldp_discovery` intents (operator-approved).
-> Rather than drop it from the frozen set, both `tests/test_frozen_files.py` and
-> `scripts/mutate_guards.py` **re-pin it at the new blob with the sign-off
-> recorded**, so an unauthorised edit still fails tomorrow. The frozen safety
-> *tests* remain byte-identical and pass **unedited**.
+> ### Two refusals worth reading before you test
+> Both are cases where the honest answer was "don't build this", and both are
+> written up rather than silently skipped.
+>
+> * **`device_health` is refused, not unbuilt** (B-108, OBS-186). It is an
+>   aggregation over independent signals, not a dependency descent — on the
+>   fixtures PE1 fires three unrelated findings at once with no causal link, so
+>   ranking them as rungs would manufacture causation from an arbitrary order
+>   and break "the lowest broken rung is the cause". The entry point you wanted
+>   already exists: `nettools health DEVICE`. `flow_for("device_health")` raises
+>   a *distinct* refusal naming the replacement, deliberately different from the
+>   generic "not yet built" stub — unbuilt invites a future agent to build it,
+>   refused tells them why not to.
+> * **Three of four requested protocols are refused** (B-503, OBS-183). OSPF has
+>   no process on any device, CDP is disabled everywhere, and RSVP has real 1G
+>   bandwidth pools but **zero sessions ever form** — "is it configured?" would
+>   have passed RSVP; "is there state to observe?" refused it. Only MP-BGP
+>   VPNv4 was real. A tool built on the weaker bar returns empty forever and
+>   reads as a bug in the tool rather than a fact about your network.
+>
+> ### One thing that was quietly broken and is now fixed
+> Every agent working in a git worktree was **verifying against the main
+> checkout's code, not its own** — the shared `.venv`'s editable install
+> resolves `agent_nettools` to an absolute path outside the worktree. Measured:
+> a worktree's own new test *fails* in its own worktree while the agent
+> reported the suite green. Nothing shipped on that basis, because the full
+> gate is re-run on main after every merge — but the instrument was lying.
+> Fixed in `pyproject.toml` (`pythonpath = ["src"]`), not by asking agents to
+> remember a flag. (OBS-185)
+>
+> ### Backlog
+> **137 rows** — 76 DONE, 15 OPEN, 28 DEFERRED, 14 BLOCKED, 2 OUT-OF-SCOPE,
+> 1 CLOSED-AS-MEASURED, 1 CLOSED-AS-REFUSED. FINDINGS.md holds **185**
+> observations.
+>
+> ### Frozen-file baseline moved twice — one signed off, one awaiting you
+> `platforms.py` gained the `ldp`/`ldp_discovery` intents (**operator-approved**,
+> B-109) and then the `bgp_vpnv4` intent (**your review still owed**, B-503 —
+> item 1 above). Rather than drop it from the frozen set, both
+> `tests/test_frozen_files.py` and `scripts/mutate_guards.py` **re-pin it at the
+> new blob with the authority recorded**, so an unauthorised edit still fails
+> tomorrow. Both changes are strictly additive — the only rewritten line is the
+> `INTENT_ORDER` tuple, which cannot be extended in place — and the frozen safety
+> *tests* remain byte-identical and pass **unedited**, which is the guarantee
+> that actually matters.
 >
 > ### Six defects found and fixed overnight, four of them mine
 > OBS-169 ticket degrade-safe hole · OBS-171 a silent ticket bug my own broad
