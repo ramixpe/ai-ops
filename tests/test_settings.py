@@ -444,6 +444,26 @@ def test_main_prints_config_warning_to_stderr_for_a_malformed_value(monkeypatch,
     assert "NETTOOLS_COMMAND_RETRIES" in captured.err
 
 
+def test_main_suppresses_config_warning_with_quiet(monkeypatch, capsys):
+    """--quiet's contract is 'suppress all output; only the exit code
+    carries the outcome' -- the config-warning banner is output too, so it
+    must not survive --quiet, on any subcommand that carries the flag."""
+
+    import sys
+
+    from agent_nettools import cli
+
+    _clear_all_settings(monkeypatch)
+    monkeypatch.setattr(cli, "load_dotenv", lambda *a, **k: None)
+    monkeypatch.setenv("NETTOOLS_COMMAND_RETRIES", "twice")
+    monkeypatch.setattr(sys, "argv", ["nettools", "version", "--quiet"])
+
+    assert cli.main() == cli.EXIT_OK  # still never fails startup over it
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert captured.out == ""
+
+
 def test_main_prints_no_config_warning_on_a_clean_environment(monkeypatch, capsys):
     import sys
 

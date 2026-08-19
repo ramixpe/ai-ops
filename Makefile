@@ -19,109 +19,84 @@ KEEP_COUNT ?= 20
         fabric-bgp route bgp-neighbor interface logging ping traceroute \
         analyze analyze-fabric agent demo diff capture learn-topology health health-fixtures \
         baseline-pin baseline-show flaps evidence-prune metrics version mcp inspect \
-        docker-build clean
+        docker-build clean audit audit-fixtures config-check route-event
 
-help:
+# Self-maintaining: derived from the "## description" comment each target
+# below carries, in the order they appear in this file, rather than a
+# hand-copied second list -- a hand-maintained list drifts out of sync with
+# the targets it describes (it did: audit/audit-fixtures/config-check/
+# route-event existed and worked for a full wave before help mentioned any
+# of them). Add a target, give it a trailing "##" comment, and it appears
+# here for free; a target with no "##" comment is intentionally left off
+# (there is currently none such). $(MAKEFILE_LIST) rather than a literal
+# `Makefile` so this keeps working if the file is ever split/included.
+help:  ## Show this help message
 	@echo "IOS-XR Read-Only Network Tools"
 	@echo ""
 	@echo "Common commands (activate the venv first):"
-	@echo "  make setup         Create venv and install the package (dev+llm extras)"
-	@echo "  make test          Run unit tests"
-	@echo "  make lint          Run Ruff"
-	@echo "  make inventory     List devices without credentials"
-	@echo "  make facts         Facts on PE1 (or DEVICE=name)"
-	@echo "  make interfaces    Interface status on PE1 (or DEVICE=name)"
-	@echo "  make bgp           BGP summary on PE1 (or DEVICE=name)"
-	@echo "  make lldp          LLDP neighbors on PE1 (or DEVICE=name)"
-	@echo "  make isis          IS-IS neighbors on PE1 (or DEVICE=name)"
-	@echo "  make sr            SR-TE policies on PE1 (or DEVICE=name)"
-	@echo "  make fabric-bgp    BGP summary across the whole inventory"
-	@echo "  make route         Look up a route (DEVICE=name PREFIX=10.0.0.0/24)"
-	@echo "  make bgp-neighbor  Look up a BGP neighbor (DEVICE=name ADDRESS=...)"
-	@echo "  make interface     Look up an interface (DEVICE=name NAME=...)"
-	@echo "  make logging       Show recent log lines (DEVICE=name COUNT=...)"
-	@echo "  make ping          Ping from a device (DEVICE=name ADDRESS=...); active probe"
-	@echo "  make traceroute    Traceroute from a device (DEVICE=name ADDRESS=...); active probe"
-	@echo "  make analyze       Collect evidence and analyze with the selected LLM"
-	@echo "  make analyze-fabric  Analyze the whole fabric together (cross-device correlation)"
-	@echo "  make agent         Ask the bounded tool-calling agent a question (QUESTION=...; Anthropic only)"
-	@echo "  make demo          Run the narrated agent demo (or DEVICE=name)"
-	@echo "  make diff          Diff evidence against the last snapshot (or DEVICE=name)"
-	@echo "  make capture       Recapture test fixtures from the whole lab"
-	@echo "  make learn-topology  Derive expected topology from fixtures and update inventory/lab.yaml"
-	@echo "  make health        Evaluate health verdicts across the whole fabric (live)"
-	@echo "  make health-fixtures  Evaluate health verdicts against the committed t0 fixtures"
-	@echo "  make baseline-pin  Pin a golden snapshot (or DEVICE=name)"
-	@echo "  make baseline-show Print a device's pinned golden snapshot (or DEVICE=name)"
-	@echo "  make flaps         Detect oscillating fields in snapshot history (or DEVICE=name)"
-	@echo "  make evidence-prune  Prune old snapshots (KEEP_DAYS=$(KEEP_DAYS) KEEP_COUNT=$(KEEP_COUNT))"
-	@echo "  make metrics       Report operational metrics (JSON; ARGS=--format=prometheus for text exposition)"
-	@echo "  make version       Print the installed nettools version"
-	@echo "  make mcp           Start the MCP server over stdio"
-	@echo "  make inspect       Smoke-test the MCP server (or DEVICE=name)"
-	@echo "  make docker-build  Build the MCP server container image"
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  make %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-setup:
+setup:  ## Create venv and install the package (dev+llm extras)
 	$(PYTHON) -m venv .venv
 	. .venv/bin/activate && python -m pip install --upgrade pip && pip install -e ".[dev,llm]"
 
-test:
+test:  ## Run unit tests
 	pytest -q
 
-lint:
+lint:  ## Run Ruff
 	ruff check .
 
-inventory:
+inventory:  ## List devices without credentials
 	nettools inventory
 
-facts:
+facts:  ## Facts on PE1 (or DEVICE=name)
 	nettools facts $(DEVICE)
 
-interfaces:
+interfaces:  ## Interface status on PE1 (or DEVICE=name)
 	nettools interfaces $(DEVICE)
 
-bgp:
+bgp:  ## BGP summary on PE1 (or DEVICE=name)
 	nettools bgp $(DEVICE)
 
-lldp:
+lldp:  ## LLDP neighbors on PE1 (or DEVICE=name)
 	nettools lldp $(DEVICE)
 
-isis:
+isis:  ## IS-IS neighbors on PE1 (or DEVICE=name)
 	nettools isis $(DEVICE)
 
-sr:
+sr:  ## SR-TE policies on PE1 (or DEVICE=name)
 	nettools sr $(DEVICE)
 
-fabric-bgp:
+fabric-bgp:  ## BGP summary across the whole inventory
 	nettools fabric bgp
 
 # Validated, parameterized command templates (Phase 5). See CLAUDE.md,
 # "Validated, parameterized command templates". ping/traceroute generate
 # traffic (active probes) and are gated by NETTOOLS_ALLOW_ACTIVE_PROBES.
-route:
+route:  ## Look up a route (DEVICE=name PREFIX=10.0.0.0/24)
 	nettools route $(DEVICE) $(PREFIX)
 
-bgp-neighbor:
+bgp-neighbor:  ## Look up a BGP neighbor (DEVICE=name ADDRESS=...)
 	nettools bgp-neighbor $(DEVICE) $(ADDRESS)
 
-interface:
+interface:  ## Look up an interface (DEVICE=name NAME=...)
 	nettools interface $(DEVICE) $(NAME)
 
-logging:
+logging:  ## Show recent log lines (DEVICE=name COUNT=...)
 	nettools logging $(DEVICE) --count $(COUNT)
 
-ping:
+ping:  ## Ping from a device (DEVICE=name ADDRESS=...); active probe
 	nettools ping $(DEVICE) $(ADDRESS)
 
-traceroute:
+traceroute:  ## Traceroute from a device (DEVICE=name ADDRESS=...); active probe
 	nettools traceroute $(DEVICE) $(ADDRESS)
 
-analyze:
+analyze:  ## Collect evidence and analyze with the selected LLM
 	nettools analyze $(DEVICE)
 
 # Phase 6: cross-device correlation over the whole fabric's evidence + Phase 4
 # health verdicts, instead of one device at a time.
-analyze-fabric:
+analyze-fabric:  ## Analyze the whole fabric together (cross-device correlation)
 	nettools analyze --fabric
 
 # Phase 6: bounded, read-only tool-calling agent loop. Anthropic only -- see
@@ -129,69 +104,69 @@ analyze-fabric:
 # Gated since B-488: `nettools agent` is the one command where a model
 # chooses its own tools and writes its own answer, which is the opposite
 # of what the rest of this tool claims. Set NETTOOLS_ENABLE_AGENT=1 to opt in.
-agent:
+agent:  ## Ask the bounded tool-calling agent a question (QUESTION=...; Anthropic only)
 	nettools agent "$(QUESTION)"
 
-demo:
+demo:  ## Run the narrated agent demo (or DEVICE=name)
 	nettools demo $(DEVICE)
 
-diff:
+diff:  ## Diff evidence against the last snapshot (or DEVICE=name)
 	nettools diff $(DEVICE)
 
 # Recaptures both halves of the quiet-fabric pair. Review the git diff by eye
 # before committing: fixtures are permanent once pushed.
-capture:
+capture:  ## Recapture test fixtures from the whole lab
 	nettools capture --all --label t0
 	sleep 75
 	nettools capture --all --label t1
 
 # Derives expected/ blocks from the committed t0 fixtures and prints the
 # fabric anomaly report; pass ARGS=--live to derive from a live collection.
-learn-topology:
+learn-topology:  ## Derive expected topology from fixtures and update inventory/lab.yaml
 	nettools learn-topology $(ARGS)
 
 # Deterministic health verdicts (see CLAUDE.md, "Phase 4"). Exit codes:
 # 0 ok/info, 1 warning, 2 critical.
-health:
+health:  ## Evaluate health verdicts across the whole fabric (live)
 	nettools health --all
 
-health-fixtures:
+health-fixtures:  ## Evaluate health verdicts against the committed t0 fixtures
 	nettools health --all --from-fixtures
 
-baseline-pin:
+baseline-pin:  ## Pin a golden snapshot (or DEVICE=name)
 	nettools baseline pin $(DEVICE)
 
-baseline-show:
+baseline-show:  ## Print a device's pinned golden snapshot (or DEVICE=name)
 	nettools baseline show $(DEVICE)
 
-flaps:
+flaps:  ## Detect oscillating fields in snapshot history (or DEVICE=name)
 	nettools flaps $(DEVICE)
 
 # Retention/prune (Phase 7): deletes timestamped snapshots outside the
 # retention window (never the pinned golden snapshot), against whichever
 # NETTOOLS_EVIDENCE_BACKEND selects.
-evidence-prune:
+evidence-prune:  ## Prune old snapshots (KEEP_DAYS=30 KEEP_COUNT=20 by default)
 	nettools evidence prune --keep-days $(KEEP_DAYS) --keep-count $(KEEP_COUNT)
 
 # Phase 8: operational metrics (per-device collection outcomes/latency/retries,
 # health verdict counts by severity). In-memory only unless
 # NETTOOLS_METRICS_FILE is set -- see .env.example.
-metrics:
+metrics:  ## Report operational metrics (JSON; ARGS=--format=prometheus for text exposition)
 	nettools metrics $(ARGS)
 
-version:
+version:  ## Print the installed nettools version
 	nettools version
 
-mcp:
+mcp:  ## Start the MCP server over stdio
 	nettools-mcp
 
-inspect:
+inspect:  ## Smoke-test the MCP server (or DEVICE=name)
 	nettools inspect $(DEVICE)
 
-docker-build:
+docker-build:  ## Build the MCP server container image
 	docker build -t ios-xr-nettools-mcp .
 
-clean:
+clean:  ## Remove caches and build artifacts
 	rm -rf .pytest_cache .ruff_cache build *.egg-info src/*.egg-info
 	find . -path ./.venv -prune -o -name __pycache__ -type d -print0 | xargs -0 rm -rf
 

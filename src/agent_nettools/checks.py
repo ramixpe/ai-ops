@@ -1001,10 +1001,21 @@ def _read_interface_observation(
             key = evidence_key(device, template_key_name)
             return (admin_state, line_state, counters), (key,), None
 
+    from .interface_kind import same_interface
+
     bulk_section, bulk_bail = require_parsed(evidence, "interfaces", subject=name)
     if bulk_section is not None:
         for record in parsed_records(bulk_section):
-            if record.get("interface") == name:
+            # Matched through interface_kind.canonical (OBS-117's fix,
+            # reused rather than a second normaliser -- see
+            # interface_exists() above) so a long-form subject (`--flow
+            # interface GigabitEthernet0/0/0/2.300`) still finds the
+            # short-form record `show interfaces brief` stores
+            # (`Gi0/0/0/2.300`), same as `interface_exists` already does for
+            # the subject-presence check. Exact `==` here previously fell
+            # through to "no record of interface ... in 'interfaces'"
+            # (unevaluated) even though the interface plainly exists.
+            if same_interface(record.get("interface") or "", name):
                 key = evidence_key(device, "interfaces", name)
                 return (record.get("admin_state"), record.get("line_protocol"), None), (key,), None
         return None, (), unevaluated(

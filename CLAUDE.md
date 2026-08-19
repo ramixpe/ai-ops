@@ -36,11 +36,18 @@ validated parameterized templates) take an additional value
 across every device instead of one at a time; `nettools agent "QUESTION"
 [--device D] [--max-iterations N] [--time-budget SECONDS]` (Phase 6,
 Anthropic only) runs a bounded, read-only tool-calling loop.
-`nettools investigate DEVICE SUBJECT [--flow bgp_session] [--from-fixtures
-[--label LABEL]] [--no-model]` (MVP-0) runs the deterministic dependency
-descent and reports the lowest broken rung plus its causal chain;
+`nettools investigate DEVICE SUBJECT [--flow bgp_session|interface|
+isis_adjacency|ldp_session] [--from-fixtures [--label LABEL]] [--no-model]`
+(MVP-0, `--flow` set widened by B-107/B-109 -- `device_health`, B-108, is
+still OPEN) runs the deterministic
+dependency descent and reports the lowest broken rung plus its causal chain;
 `--from-fixtures` replays committed captures and needs no lab, credentials or
-API key. `nettools evidence prune --keep-days N --keep-count M [--device D]` and
+API key. Every run appends what it diagnosed to the diagnosis accuracy
+ledger (`nettools ledger summary` / `nettools ledger verdict DIAGNOSIS_ID
+confirmed_correct|incorrect|unknown [--by NAME]`, B-485 -- the tool records
+what it diagnosed, only a human records whether it was right) and writes a
+per-run ticket, an append-only Markdown flight recorder, to `NETTOOLS_TICKET_DIR`
+(default `./tickets`; B-446). `nettools evidence prune --keep-days N --keep-count M [--device D]` and
 `nettools evidence history [DEVICE]` (Phase 7) manage stored snapshots
 against whichever backend `NETTOOLS_EVIDENCE_BACKEND` selects.
 `nettools metrics [--format json|prometheus] [--quiet]` (Phase 8) reports
@@ -63,7 +70,8 @@ the full env surface (`LLM_PROVIDER`, `NETTOOLS_LOG`, `NETTOOLS_EVIDENCE_DIR`,
 `NETTOOLS_BANNER_TIMEOUT_SECONDS`, `NETTOOLS_COMMAND_RETRIES`,
 `NETTOOLS_RETRY_BACKOFF_SECONDS`, `NETTOOLS_EVIDENCE_BACKEND`,
 `NETTOOLS_LOG_MAX_BYTES`, `NETTOOLS_LOG_BACKUP_COUNT`,
-`NETTOOLS_CREDENTIAL_PROVIDER`, `NETTOOLS_ACTOR`, `NETTOOLS_METRICS_FILE`).
+`NETTOOLS_CREDENTIAL_PROVIDER`, `NETTOOLS_ACTOR`, `NETTOOLS_METRICS_FILE`,
+`NETTOOLS_DIAGNOSIS_LEDGER_FILE`, `NETTOOLS_TICKET_DIR`).
 
 ## Architecture
 

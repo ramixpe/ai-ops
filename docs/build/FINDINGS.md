@@ -5259,3 +5259,39 @@ Also worth recording plainly: this is the second time in one session that a
 green suite hid a reverted guarantee, and both times the mutation harness — not
 the tests — was what noticed. A test suite verifies that code works. It does not
 verify that the code you think you have is the code you have.
+
+## OBS-178 · Sanity round · A "no answer" where a real diagnosis existed, one match site behind the check that was right
+
+`nettools investigate PE1 GigabitEthernet0/0/0/2.300 --flow interface` returned
+`undetermined`, exit 2 — *"no record of interface … in 'interfaces'"* — while
+the identical fault under the short spelling `Gi0/0/0/2.300` returned
+`interface_line_down`. Both name the same port. The sibling
+`nettools interface DEVICE NAME` template accepts either.
+
+**The near-miss is the interesting part.** `interface_exists` — the
+subject-presence check — already used `interface_kind.same_interface()`
+correctly. The bug was **one match site behind it**: `_read_interface_
+observation`'s bulk-table fallback compared `record.get("interface") == name`
+exactly, against records that store the short form. So the flow confirmed the
+subject existed and then failed to find it.
+
+**It silently affected three flows**, not one: `interface`, `isis_adjacency` and
+`ldp_session` all share `interface_state`. Two of those shipped in the last
+twenty-four hours on top of a defect neither introduced.
+
+**And the two-spelling problem has bitten this codebase before** — B-477's MTU
+audit rule failed its own synthetic test on exactly this, which is why
+`interface_kind.canonical()` exists as *the* declared resolver. The fix reuses
+it; a second normaliser would have been the actual mistake.
+
+The failure mode is the one worth naming: **a wrong "I cannot tell" where a
+correct answer was available.** It is quieter than a wrong answer and reads as
+honest caution — the descent said `undetermined`, which is exactly what it
+should say when it truly cannot judge. Nothing in the output distinguished
+"this interface does not exist" from "I looked for it under the wrong name".
+
+Found by driving the CLI as a human would, with the long-form name a human
+would paste from `show running-config`. No unit test would have produced that
+input, because every fixture stores the short form — the corpus was uniform in
+precisely the dimension the match discriminates on (§0.12), for the third time
+this week.

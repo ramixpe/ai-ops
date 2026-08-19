@@ -805,6 +805,33 @@ def test_interface_state_evidence_keys_are_non_empty_for_a_conclusive_verdict(mo
     assert result.evidence_keys
 
 
+def test_interface_state_bulk_fallback_matches_long_form_subject_against_short_form_record(
+    monkeypatch,
+):
+    """`nettools interface DEVICE NAME` accepts both spellings; the
+    `investigate ... --flow interface` descent must too. `show interfaces
+    brief` stores the short form (`Gi0/0/0/2.300`, PE1's healthy-fixture
+    line-down interface -- see the OBS-044 test above); a long-form subject
+    (`GigabitEthernet0/0/0/2.300`) must still find that record in the bulk
+    fallback, matched through `interface_kind.canonical` exactly as
+    `interface_exists` already matches it for the subject-presence check
+    (OBS-117) -- not a second normaliser. No per-interface template section
+    is added here, so this exercises the bulk fallback specifically: before
+    the fix, exact `==` there fell through to "no record of interface ... in
+    'interfaces'" (unevaluated) for this exact subject on this exact
+    fixture, even though `interface_exists` already knew it existed.
+    """
+
+    evidence = _fixture_evidence(monkeypatch, "PE1", label="healthy")
+    result = checks.interface_state(evidence, "GigabitEthernet0/0/0/2.300")
+    assert result.status == checks.BROKEN
+    assert "no record of interface" not in result.reason
+    assert result.reason == (
+        "interface GigabitEthernet0/0/0/2.300 is not up "
+        "(admin_state='up', line_state='down')"
+    )
+
+
 # --------------------------------------------------------------------------- #
 # B-430 -- the device's own account of why, read at last
 # --------------------------------------------------------------------------- #

@@ -275,6 +275,16 @@ nettools investigate <device> <subject> [--flow bgp_session]
                                         [--format json|table|summary] [--quiet]
 ```
 
+`--flow` selects which dependency ladder to descend; the subject's shape
+depends on which one:
+
+| `--flow` | subject | e.g. |
+|---|---|---|
+| `bgp_session` | a peer's IPv4 address, as `show bgp summary` lists it | `10.255.0.12` |
+| `interface` | an interface name, as the device spells it (either form) | `Gi0/0/0/0` or `GigabitEthernet0/0/0/0` |
+| `isis_adjacency` | a local interface name | `Gi0/0/0/0` |
+| `ldp_session` | a local interface name | `Gi0/0/0/0` |
+
 ### Free-text flow selection (B-112)
 
 `--flow` names the object type directly, but a caller does not have to know
@@ -979,6 +989,37 @@ nettools config show|check                     # every env var's effective value
 
 `examples/` wires these into n8n or systemd — plumbing only; the boundary rule inside
 that directory's README is part of the design, not a suggestion.
+
+## Diagnosis accuracy ledger and the ticket flight recorder
+
+Two ways every `investigate` run is recorded, for different audiences:
+
+```bash
+nettools ledger summary                                # counts by outcome
+                                                        # (confirmed_correct/
+                                                        # incorrect/unknown),
+                                                        # by source, by
+                                                        # trustworthy. Exit 0.
+nettools ledger verdict <diagnosis-id> confirmed_correct --by alice --note "checked live"
+                                                        # a human's judgement
+                                                        # of one diagnosis
+```
+
+`investigate` appends **what** it diagnosed (device, subject, flow, finding,
+cause, trustworthy) to the ledger on its own, every run, and prints the
+`diagnosis-id` `ledger verdict` needs; only a human appends **whether it was
+right** (B-485 — there is no verb that lets the tool score itself). Set
+`NETTOOLS_DIAGNOSIS_LEDGER_FILE` to a path to persist it as newline-delimited
+JSON across runs; unset (the default), diagnoses are recorded in memory only
+and nothing accumulates once the process exits.
+
+Separately, every `investigate` run writes a **ticket** — one append-only
+Markdown file per interaction, the escalation-grade run bundle a human can
+paste into a real ticketing system (B-446): a header, a section per device
+interaction, and a section for the final answer, each a fenced JSON block
+appended as the run progresses. Unlike the ledger this has a real default
+rather than being opt-in: it always writes, to `./tickets` in the working
+directory unless `NETTOOLS_TICKET_DIR` points somewhere else.
 
 ## Licence and contributing
 

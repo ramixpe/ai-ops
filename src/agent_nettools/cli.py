@@ -1712,15 +1712,34 @@ def main() -> int:
     # Two lookups so .env is found both from the current directory upward and
     # next to an editable install of the package.
     load_dotenv(find_dotenv(usecwd=True)) or load_dotenv()
+    parser = build_parser()
+    args = parser.parse_args()
     # B-476/P2-02: report-only. Warn loudly on a malformed/out-of-range env
     # value instead of silently falling back to a default -- but never fail
     # startup over it. Failing closed on a bad value is the settings-model
     # rewire's job (see settings.py's module docstring), not this
     # validator's; this only makes the problem visible.
+    #
+    # Printed after parse_args() (moved from before it), deliberately: this
+    # banner must honor --quiet ("suppress all output; only the exit code
+    # carries the outcome" -- module docstring above), and --quiet is a
+    # per-subcommand argparse flag we cannot read before parsing finishes.
+    # A pre-scan of sys.argv for "--quiet"/"-q" was the alternative and was
+    # rejected: it cannot distinguish a subcommand that has no --quiet at all
+    # (analyze/agent/demo/capture/learn-topology/inspect) from one that does,
+    # and it risks matching those tokens inside a positional value (e.g. an
+    # `investigate` SUBJECT sentence, B-112) rather than an actual flag. Using
+    # the parsed args.quiet reuses the same getattr(args, "quiet", False)
+    # idiom _print_info() already uses below, so a subcommand without
+    # --quiet still gets the warning -- it has no way to ask for silence, so
+    # none is manufactured for it. The warning is still emitted on every
+    # subcommand that has one, still never blocks startup, and still prints
+    # before the command's own output -- only its position relative to
+    # argparse's own parsing moved, not its content or default visibility.
+    quiet = getattr(args, "quiet", False)
     for problem in settings.validate_environment():
-        print(f"# config warning: {problem}", file=sys.stderr)
-    parser = build_parser()
-    args = parser.parse_args()
+        if not quiet:
+            print(f"# config warning: {problem}", file=sys.stderr)
     try:
         return args.func(args)
     except InventoryError as exc:
