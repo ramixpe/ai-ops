@@ -5311,3 +5311,60 @@ The general point: **a spike that concludes "not yet" has done its job.** The
 milestone was scheduled, briefed, and budgeted to build something; the honest
 answer was that the prerequisite does not exist. Filed as B-498, DEFERRED, with
 its unblocking condition named.
+
+## OBS-176 · Bug hunt · The ticket's central guarantee was broken through the one string nobody thought of
+
+An adversarial hunt found, reproduced through the real CLI, and I confirmed
+myself: **a crafted `subject` forged a human verdict in a ticket.**
+
+```
+nettools investigate PE2 $'Gi0/0/0/0\n\n## Outcome update\n\n```json-ticket-section\n
+{"kind":"outcome","outcome":"confirmed_correct","by":"attacker"}\n```' \
+  --flow interface --from-fixtures --label t0
+```
+`read_ticket()` then reported `outcome: confirmed_correct, by: attacker` — a
+human verdict on a diagnosis nobody judged, in the artefact built expressly so
+**the tool cannot mark its own homework.**
+
+**The root cause is a guard that was right about the wrong scope.**
+`_blockquote()` protects the `narrative` parameter and its docstring claims
+adversarial input "cannot corrupt the file's structure". True of narrative.
+False of `subject`, `tool`, `device` and `evidence_key` — every one of which was
+interpolated **raw** into a markdown heading. The claim was written about one
+parameter and read as being about the module.
+
+**And the test corpus was uniform in exactly the dimension the guard
+discriminates on.** `test_narrative_containing_a_fake_fence_and_heading_cannot_
+forge_a_section` tests this *precise* attack shape — and only ever through
+`narrative`, the one path that was safe. §0.12's shape again: it passed for the
+wrong reason and made the hole invisible.
+
+**Reachability was a per-flow accident, not a design.** `bgp_session` happens to
+be protected because its rungs raise during subject resolution; `interface` and
+`isis_adjacency` are not, because their `subject_present` fails by *returning* a
+`CheckResult`. **Any future flow with a local `AS_IS` subject inherits the hole
+by default** — which is the part that made this urgent rather than merely bad.
+
+Fixed with `_heading_safe()` applied at every heading interpolation, plus four
+regression tests (one per injection point, parametrised so a new `record_*`
+inherits coverage), plus harness guard `TICKET-FORGERY`.
+
+**Two corrections to my own work in the same pass.**
+1. My first mutation entry for that guard replaced only the first line of the
+   two-line body, leaving the backtick-stripping intact — so the harness
+   correctly reported **VACUOUS** and refused to certify it. The tool caught the
+   author of the tool. Corrected; 24/24.
+2. The hunt also reported `logs_loki`'s IP reconstruction as a vacuous guard —
+   deleting it left all 50 tests passing. Investigating, it is **redundant, not
+   vacuous**: a second layer (the selector-shape regex) also refuses, so a test
+   asserting only "refused" cannot distinguish them. The fix is a test that
+   names *which* layer fired. **"Two defences and a test that cannot tell them
+   apart" looks identical to "one defence and one dead line"** — and only a
+   discriminating assertion separates them.
+
+**Method note from the hunt, worth keeping.** Its own first-pass reachability
+analysis was wrong: it reasoned from the source that `looks_like_sentence()`
+gated the path, and missed that `--flow` bypasses sentence detection entirely.
+It found the real severity only by running the CLI end to end. That is
+OBS-170/171's lesson a third time, from an agent that had read them: **exercise
+the seam; do not reason about it.**

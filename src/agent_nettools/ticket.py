@@ -285,6 +285,35 @@ def _blockquote(text: str) -> str:
     return "\n".join((f"> {line}" if line else ">") for line in lines) + "\n"
 
 
+def _heading_safe(text: str) -> str:
+    """Flatten a caller-supplied string so it cannot forge document structure.
+
+    `_blockquote` protects the NARRATIVE parameter, and its docstring claims
+    adversarial input "cannot corrupt the file's structure". That claim was
+    true of narrative and **false of every other caller string that reaches a
+    heading** -- `subject`, `tool`, `device`, `evidence_key` -- each of which
+    was interpolated raw into a markdown heading line.
+
+    Measured, not theorised (adversarial bug hunt, 2026-08-19): a subject
+    carrying embedded newlines, a `## Outcome update` heading and a
+    `json-ticket-section` fence produced a ticket whose `read_ticket()` outcome
+    was `{"outcome": "confirmed_correct", "by": "attacker-via-cli"}`. A forged
+    human verdict, on a diagnosis nobody judged, in the artefact whose entire
+    purpose is that **the tool cannot mark its own homework**. Reachable
+    through the real CLI, on any flow whose `subject_present` fails by
+    returning rather than raising.
+
+    A heading is one line by definition, so the fix is to make it one line:
+    newlines and carriage returns become spaces, and a leading backtick run is
+    neutralised. Nothing is dropped -- the value stays readable and the
+    authoritative copy is in the JSON block below the heading, where it is
+    already quoted by `json.dumps`.
+    """
+
+    flat = " ".join(str(text).splitlines())
+    return flat.replace("`", "'").strip() or "(empty)"
+
+
 def _slug(text: str) -> str:
     """Filesystem-safe stem for the ticket filename's subject component.
 
@@ -386,7 +415,7 @@ def _claim_path(directory: Path, stamp: str, slug: str, header_text_parts: dict[
         try:
             persisted, warning = _write_block(
                 candidate, "x",
-                heading=f"# Ticket: {header_text_parts['subject']}\n\n",
+                heading=f"# Ticket: {_heading_safe(header_text_parts['subject'])}\n\n",
                 fence_info=_HEADER_FENCE_INFO,
                 data=header_text_parts,
             )
@@ -469,7 +498,7 @@ class Ticket:
         with self._lock:
             persisted, warning = _write_block(
                 self.path, "a",
-                heading=f"## {title}\n\n",
+                heading=f"## {_heading_safe(title)}\n\n",
                 fence_info=_SECTION_FENCE_INFO,
                 data=data,
                 narrative=narrative,

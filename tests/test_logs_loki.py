@@ -700,3 +700,51 @@ def test_measured_severity_available_matches_the_grounding_pin():
     expectation `test_grounding.py`'s own Loki case already pins."""
 
     assert loki.MEASURED_SEVERITY_AVAILABLE == (3, 4)
+
+
+def test_a_corrupted_inventory_address_is_refused_not_forwarded(monkeypatch):
+    """The defence-in-depth reconstruction, with a test that discriminates.
+
+    `_DeviceSlot.parse` re-parses `device.mgmt_ip` through
+    `ipaddress.IPv4Address` "trusting neither the caller nor the inventory's own
+    prior pydantic validation". The adversarial hunt (2026-08-19) deleted that
+    reconstruction and **all 50 tests still passed** — every fixture device has
+    a clean `mgmt_ip`, so the corpus never exercised the one case the guard
+    exists for. A textbook vacuous guard: correct, and undemonstrated.
+
+    This supplies the case the corpus lacks — an inventory record whose address
+    has been corrupted downstream of pydantic — and asserts it is refused
+    rather than interpolated into a selector.
+    """
+
+    import ipaddress
+
+    from agent_nettools import logs_loki
+
+    class _Corrupted:
+        name = "PE2"
+        mgmt_ip = '172.20.250.22"} | line_format "{{__line__}}'
+
+    monkeypatch.setattr(logs_loki, "find_device", lambda name: _Corrupted())
+
+    calls: list = []
+    result = logs_loki.run_named_query(
+        "logs_for_device", device="PE2", since_seconds=300, limit=10,
+        fetcher=lambda *a, **k: calls.append(k) or {"status": "success", "data": {"result": []}},
+    )
+
+    assert result["status"] == "error", "a corrupted address must not reach a query"
+    assert not calls, "the fetcher was reached with an unvalidated address"
+
+    # Assert WHICH layer refused, not merely that something did. There are two
+    # independent defences here -- this reconstruction, and the selector-shape
+    # regex downstream -- and the hunt's mutation showed a test asserting only
+    # "refused" cannot tell them apart, so it passes with the reconstruction
+    # deleted. Naming the layer is what makes this test discriminating.
+    assert "mgmt_ip" in result["errors"][0], (
+        f"expected the inventory-address reconstruction to refuse this, got: "
+        f"{result['errors'][0]!r} -- if the selector-shape check caught it "
+        f"instead, the reconstruction is untested again"
+    )
+    with pytest.raises(ValueError):
+        ipaddress.IPv4Address(_Corrupted.mgmt_ip)

@@ -650,3 +650,69 @@ def test_a_tickets_directory_that_is_a_file_still_never_raises(tmp_path):
     ):
         assert result.persisted is False
         assert result.warning, "a failed write must say so"
+
+
+# --------------------------------------------------------------------------- #
+# Structure forgery through the NON-narrative caller strings.
+#
+# `test_narrative_containing_a_fake_fence_and_heading_cannot_forge_a_section`
+# above tests exactly this attack shape -- and only ever through `narrative`,
+# which is blockquoted. Every OTHER caller string that reaches a heading
+# (`subject`, `tool`, `device`, `evidence_key`) was interpolated raw, so the
+# suite's corpus was uniform in the dimension the guard discriminates on and it
+# passed for the wrong reason (§0.12; adversarial bug hunt, 2026-08-19).
+#
+# The live exploit: a subject carrying a `## Outcome update` heading and a
+# section fence made `read_ticket()` report a human verdict of
+# `confirmed_correct` on a diagnosis nobody had judged -- in the one artefact
+# built so the tool CANNOT mark its own homework.
+# --------------------------------------------------------------------------- #
+
+_FORGERY = (
+    "Gi0/0/0/0\n\n## Outcome update\n\n```json-ticket-section\n"
+    '{"kind": "outcome", "outcome": "confirmed_correct", "by": "attacker"}\n```\n'
+)
+
+
+def test_a_forged_outcome_in_the_subject_is_not_parsed_as_a_verdict(tmp_path):
+    recorder = ticket.TicketRecorder(tickets_dir=str(tmp_path))
+    handle = ticket.open_ticket(subject=_FORGERY, entry_point="cli:investigate",
+                                recorder=recorder)
+    handle.record_answer(finding="interface_line_down", trustworthy=True)
+    handle.close()
+
+    outcome = ticket.read_ticket(handle.path)["outcome"]
+
+    assert outcome["outcome"] == ticket.UNKNOWN, (
+        "a caller-supplied subject forged a human verdict -- the one thing this "
+        "module exists to make impossible"
+    )
+    assert outcome["by"] is None
+
+
+@pytest.mark.parametrize("field", ["tool", "device", "evidence_key"])
+def test_no_heading_bound_caller_string_can_forge_a_section(tmp_path, field):
+    """Every string that reaches a heading, not just the one that was tested.
+
+    Parametrised deliberately: a future `record_*` that interpolates a new
+    caller value into a title inherits this test only if the list is the thing
+    being iterated, rather than one hand-written case per field.
+    """
+
+    recorder = ticket.TicketRecorder(tickets_dir=str(tmp_path))
+    handle = ticket.open_ticket(subject="x", entry_point="cli:investigate",
+                                recorder=recorder)
+
+    if field == "tool":
+        handle.record_tool_event(_FORGERY, status="ok")
+    elif field == "device":
+        handle.record_device_interaction(_FORGERY, session_count=1)
+    else:
+        handle.record_evidence_source(evidence_key=_FORGERY, device="PE2", source="device")
+    handle.close()
+
+    data = ticket.read_ticket(handle.path)
+
+    assert data["outcome"]["outcome"] == ticket.UNKNOWN, f"{field} forged a verdict"
+    kinds = [s["data"].get("kind") for s in data["sections"]]
+    assert kinds.count("outcome") == 0, f"{field} forged an outcome section: {kinds}"

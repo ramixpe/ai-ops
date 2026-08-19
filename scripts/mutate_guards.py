@@ -65,6 +65,12 @@ BASELINE_COMMIT = "6629a2c"
 #: that identifies the guard's test. The symbol is what `tests/` is searched for -- never
 #: the module name, never a filename.
 MUTATIONS = [
+    ("TICKET-FORGERY", "a caller string cannot forge a ticket section or verdict",
+     "src/agent_nettools/ticket.py",
+     '    flat = " ".join(str(text).splitlines())\n    return flat.replace("`", "\'").strip() or "(empty)"\n',
+     '    return str(text)\n',
+     "test_a_forged_outcome_in_the_subject_is_not_parsed_as_a_verdict"),
+
     ("TICKET-DEGRADE", "a ticket write failure never fails an investigation",
      "src/agent_nettools/ticket.py",
      '        if open_mode == "x":\n            raise\n',
