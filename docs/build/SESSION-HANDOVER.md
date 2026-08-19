@@ -1,3 +1,48 @@
+# Session handover
+
+> **OVERNIGHT RUN — 2026-08-18 into 2026-08-19. Read this first.**
+>
+> The tree is **green and fully pushed** at every point below: 2302 passed /
+> 24 skipped, lint clean, 23/23 mutation guards, four frozen files byte-identical
+> to `6629a2c`. Tests went **2229 → 2302** overnight.
+>
+> **Stage 2 landed, in order:** M0 doc retirement (2 deleted, 9 archived, every
+> reference repaired) · M1 the ticket flight recorder, built AND wired into
+> `investigate` · M2 four dockerised services (n8n, NetBox, neo4j, Redis) all
+> running healthy · M3a the neo4j topology collector · M5 the Loki adapter, the
+> first evidence source that is not a router · M7 acceptance tests pinning
+> `isis_adjacency` across all five fixture labels.
+>
+> **In flight as of this note:** M4 (epoch-aware cache — SPIKE FIRST, may
+> correctly conclude there is nothing safe to cache until the config axis
+> exists) and M8 (context-window measurement).
+>
+> ### Ready to test this morning
+> * `nettools investigate …` now writes a **ticket** per run under
+>   `$NETTOOLS_TICKET_DIR` (default `tickets/`, gitignored) — question as asked,
+>   per-device session counts, finding, cause, coherence, outcome `unknown`
+>   until a human judges it.
+> * `nettools ledger summary` / `ledger verdict <id> …` — and the id is now
+>   printed by `investigate`, which it previously promised and did not do.
+> * `isis_adjacency` flow against the real PE3↔P2 break.
+> * Four services on the `stage2` compose profile in `/home/rami/network_lab`.
+>
+> ### Four things waiting on the operator
+> 1. **LDP sign-off** — `ldp_session` cannot be built without adding a command
+>    to FROZEN `platforms.py`. Safety-boundary change; needs an explicit yes.
+> 2. **`NEO4J_PASSWORD`** — absent from the lab `.env`; the container runs on a
+>    compose default and no live write was attempted. Set one, or confirm.
+> 3. **Two LM Studio questions** — the PE3 IS-IS question (no lab window) and
+>    Q1 (needs round 6). Both models, fresh session each.
+> 4. **Round 6** — deliberately not run overnight; the injector would have left
+>    a fault on the fabric unattended.
+>
+> ### Three of my own mistakes, found and fixed overnight
+> OBS-169 a hole in the ticket's degrade-safe guarantee · OBS-171 a silent
+> ticket-recording bug my own broad `except` was hiding · OBS-172 **113
+> test-generated tickets committed** by `git add -A`, now removed, gitignored,
+> and prevented by an autouse conftest fixture.
+
 # Session Handover
 
 **2026-08-18.** Branch `feat/investigation-layer`. Tree green — the exact test count
