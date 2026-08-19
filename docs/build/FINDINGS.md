@@ -6703,3 +6703,56 @@ original prompt list was built: nothing measured showed a need for it. Scope fro
 a document rather than from evidence is the mistake B-105 and B-503 were both
 refused for this week, and refusing it a third time is the row working as
 intended.
+
+---
+
+## OBS-390 · Guards · A mutation guard went vacuous because the fabric changed, not the code
+
+The 46th guard would not hold. B-435 pins *"LLDP device IDs resolve before
+comparison"* by mutating
+
+```python
+if resolve_device(neighbor, mapping) is None:      ->      if neighbor not in evidence_by_device:
+```
+
+and asserting a test notices. It stopped noticing.
+
+The cause is not in `topology.py`. It is that P1, P3 and PE4 used to report
+configured hostnames different from their inventory labels —
+`LEAF05_DHCP_SERVER`, `Lab-leaf01`, `SDWAN-Edge01` — and the 2026-08-19 fixture
+refresh found all three now report their own labels. With no alias left in the
+corpus, `resolve_device(n)` and `n in evidence_by_device` return the same answer
+for every row, and the mutation is undetectable.
+
+**The guard was protecting a real property and stopped, silently, because the
+world stopped providing a counterexample.** Nobody edited the code, the test, or
+the guard. A green 46/46 would have been reported for a guarantee that had
+quietly lost its coverage.
+
+This is the mirror image of OBS-370, from the same afternoon. There, a guarantee
+was enforced on one field of three and the other two were never enumerated. Here,
+a guarantee was enforced correctly and the *data* that made enforcement
+observable disappeared. Both produce the same artefact: a check that passes and
+means less than it says.
+
+Fixed by pinning the guard to a **synthetic** alias instead of a fixture one —
+`bee` is B's configured hostname and is deliberately not a key in the evidence
+dict, so a version comparing the raw name reports B as foreign and the test
+fails. Plus an anti-vacuity companion proving a genuinely foreign neighbour is
+still reported, since "resolve everything" would otherwise pass the first test.
+Re-pointed, re-run: **HOLDS**.
+
+The same move the fixture refresh already forced elsewhere — `test_topology.py`
+and `test_flows.py` both gained `_fabricated` companions this week for exactly
+this reason. It is worth stating as a rule:
+
+> A guard whose mutation is only observable against live-captured data is a
+> guard with an expiry date nobody set. When the fixture is the thing that makes
+> the difference visible, the property needs a synthetic case too — not instead
+> of the real one, beside it.
+
+And the reason this was found at all: the guard count moved from 45/46 to a
+number that did not match, in a session where several agents were adding guards.
+**A count is a weak signal and it was the only one available** — the per-guard
+detail had been lost to a killed run. Worth making the harness report its
+verdicts durably rather than only to stdout.

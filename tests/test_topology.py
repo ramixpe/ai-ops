@@ -386,3 +386,43 @@ def test_update_expected_in_yaml_writes_derived_counts(tmp_path, monkeypatch):
     # The source is untouched: reading from source, writing to out.
     original = yaml.safe_load(source.read_text(encoding="utf-8"))
     assert original["devices"][0]["expected"] == {"isis_adjacencies": 999}
+
+
+def test_an_aliased_neighbour_is_not_reported_as_foreign():
+    """B-435's real guard: a neighbour naming a device by its CONFIGURED
+    hostname rather than its inventory label must resolve, not be reported as
+    outside the inventory.
+
+    This exists because B-435's original guard went **vacuous** on 2026-08-19.
+    It pinned `test_the_three_hostnames_are_this_fabric_s_own_devices`, which
+    ran against real fixtures where P1/P3/PE4 reported aliases
+    (`LEAF05_DHCP_SERVER`, `Lab-leaf01`, `SDWAN-Edge01`). The fixture refresh
+    found those devices now report their own labels -- so `resolve_device(n)`
+    and `n in evidence_by_device` began returning the same answer for every
+    row, and the mutation became undetectable. **The guard stopped protecting
+    anything because the fabric changed, not because the code did** (OBS-390).
+
+    A synthetic alias restores the distinction permanently: `bee` is B's
+    configured hostname and is not a key in the evidence dict, so a version
+    that compares the raw name reports B as foreign and this test fails.
+    """
+
+    evidence = _fabricated(
+        {"A": [{"neighbor": "bee", "local_interface": "Gi0/0/0/0"}], "B": []},
+        hostnames={"B": "bee"},
+    )
+
+    assert find_neighbors_not_in_inventory(evidence) == {}
+
+
+def test_a_genuinely_foreign_neighbour_is_still_reported():
+    """Anti-vacuity companion (OBS-181). The test above would also pass if the
+    check were removed entirely and everything resolved. A neighbour that is
+    genuinely not this fabric's must still be reported."""
+
+    evidence = _fabricated(
+        {"A": [{"neighbor": "some-other-router", "local_interface": "Gi0/0/0/0"}], "B": []},
+        hostnames={"B": "bee"},
+    )
+
+    assert find_neighbors_not_in_inventory(evidence) != {}

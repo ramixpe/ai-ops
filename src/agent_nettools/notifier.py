@@ -55,6 +55,36 @@ the URL path Telegram's API requires, and **never appears in a log line, an
 audit record, an exception message, or a repr** -- `_redact` is applied to
 every string that can reach any of those, and a test asserts the token is
 absent from all of them.
+
+Silence (B-483) -- narrower here than in ``health.py``
+--------------------------------------------------------
+``health.py``'s rule for a silenced finding is "reported differently, never
+vanished" -- a report keeps every finding, tagged. This module's rule is
+different, and deliberately narrower, because paging is a different kind of
+artifact from a report: there is exactly one channel per call, and the whole
+job of :func:`notify` is deciding whether to use it. When the caller passes
+``silence=`` (a :class:`SilenceNotice`, built from a `health.Silence` that
+matched), :func:`notify` **does not attempt delivery** -- paging during a
+window the operator already knows about is precisely the "screaming that is
+correct and useless" B-483 exists to stop. The returned record says so
+plainly (``"silenced": True``, with the reason/who/until alongside it)
+rather than looking like the default-provider no-op, so a caller printing a
+note (as the CLI does, on stderr) can say "silenced (<reason>), not sent"
+instead of the ambiguous "did nothing".
+
+Ownership routing (B-484)
+----------------------------
+:func:`notify_owner` executes a routing *decision* ``ownership.py`` already
+made -- it never makes one. ``owner.channel``'s sentinel
+(``ownership.DEFAULT_CHANNEL``) means "unchanged": resolve the provider from
+``NETTOOLS_NOTIFIER``/env exactly as :func:`notify` already does, so a table
+that only declares the default owner behaves identically to having no table
+at all. Any other channel is ``"<provider>:<destination>"`` --
+``TelegramNotifier``'s ``chat_ids=`` constructor override is what makes a
+per-owner destination possible without a per-owner environment variable, and
+that override defaults to ``None`` (fall back to `TELEGRAM_CHAT_ID`) so
+nothing about :func:`notify`'s existing behaviour changes for a caller that
+never touches ownership at all.
 """
 
 from __future__ import annotations
@@ -64,7 +94,10 @@ import os
 import urllib.error
 import urllib.request
 from abc import ABC, abstractmethod
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Sequence
+
+from .ownership import DEFAULT_CHANNEL, Owner
 
 __all__ = [
     "DEFAULT_NOTIFIER",
@@ -73,10 +106,12 @@ __all__ = [
     "NotifierError",
     "Notifier",
     "NoOpNotifier",
+    "SilenceNotice",
     "TelegramNotifier",
     "get_notifier",
     "known_notifiers",
     "notify",
+    "notify_owner",
     "render_report_text",
 ]
 
@@ -187,6 +222,28 @@ def render_report_text(report: dict, *, device: str, subject: str, finding: str)
     return "\n".join(lines)
 
 
+@dataclass(frozen=True)
+class SilenceNotice:
+    """What :func:`notify` needs to know a finding is silenced, and nothing else.
+
+    Deliberately not `health.Silence` itself and not a bare dict: a
+    purpose-built shape holding exactly these four fields is the same
+    reasoning ``test_the_notifier_cannot_receive_an_evidence_bundle`` (T-035)
+    already applies to :func:`notify`'s own signature -- what this module can
+    receive is bounded by what the type can hold, not by a filter someone has
+    to remember to apply. `health.find_silence` returns the fuller `Silence`
+    (which also carries `device`/`rule`/`subject` -- the matching criteria);
+    a caller wiring this in constructs a `SilenceNotice` from the matched
+    `Silence` once matching has already happened, so this module never needs
+    to know how a silence was matched, only that one was.
+    """
+
+    id: str
+    reason: str
+    created_by: str
+    expires_at: str  # already-rendered text (Silence.as_dict()'s own ISO string)
+
+
 # --------------------------------------------------------------------------- #
 # Providers
 # --------------------------------------------------------------------------- #
@@ -234,12 +291,21 @@ class TelegramNotifier(Notifier):
     name = "telegram"
     api_base = "https://api.telegram.org"
 
-    def __init__(self, *, opener=None) -> None:
+    def __init__(self, *, opener=None, chat_ids: Sequence[str] | None = None) -> None:
         # `opener` exists so tests drive this without a network and without
         # monkeypatching urllib globally. Production leaves it None.
         self._opener = opener or urllib.request.urlopen
+        # `chat_ids` (B-484): an explicit destination override, for
+        # `notify_owner` routing one owner's message to that owner's own
+        # chat(s) without needing a dedicated environment variable per owner.
+        # `None` (the default) falls back to `TELEGRAM_CHAT_ID` exactly as
+        # before -- nothing about direct `TelegramNotifier()` construction
+        # changes.
+        self._chat_ids_override = list(chat_ids) if chat_ids is not None else None
 
     def _chat_ids(self) -> list[str]:
+        if self._chat_ids_override is not None:
+            return self._chat_ids_override
         raw = os.getenv(TELEGRAM_CHAT_ENV, "")
         return [part.strip() for part in raw.split(",") if part.strip()]
 
@@ -331,23 +397,42 @@ def notify(
     device: str,
     subject: str,
     finding: str,
+    silence: SilenceNotice | None = None,
     notifier: Notifier | None = None,
 ) -> dict[str, Any]:
     """Deliver one report, best-effort. **Never raises.**
 
     This is the only function the investigation path should call. Returns a
     small record of what happened -- ``{"attempted", "provider", "ok",
-    "error"}`` -- so a caller can log the outcome without needing to catch
-    anything. `error` is redacted.
+    "error", "silenced", "silence"}`` -- so a caller can log the outcome
+    without needing to catch anything. `error` is redacted.
 
     Note the signature: there is **no parameter an evidence bundle could arrive
     in**. That is the egress bound, and it is a property of this function's
-    shape rather than of anyone remembering to strip something.
+    shape rather than of anyone remembering to strip something. ``silence``
+    does not weaken that: see :class:`SilenceNotice`'s own docstring for why
+    it cannot carry one either.
+
+    B-483. ``silence`` (built from a `health.Silence` that matched this
+    finding) makes delivery a deliberate no-op: the record reports
+    ``"silenced": True`` and ``"ok": True`` without ever calling a provider's
+    ``send``. See the module docstring's "Silence" section for why that is
+    the right amount of suppression for a paging channel, and why it is a
+    narrower rule than `health.py`'s "never vanish from the report".
     """
 
     record: dict[str, Any] = {
         "attempted": False, "provider": None, "ok": False, "error": None,
+        "silenced": False, "silence": None,
     }
+    if silence is not None:
+        record["silenced"] = True
+        record["silence"] = {
+            "id": silence.id, "reason": silence.reason,
+            "created_by": silence.created_by, "expires_at": silence.expires_at,
+        }
+        record["ok"] = True
+        return record
     try:
         target = notifier or get_notifier()
     except NotifierError as exc:
@@ -367,4 +452,68 @@ def notify(
         record["ok"] = True
     except Exception as exc:  # noqa: BLE001 -- delivery is never fatal
         record["error"] = _redact(f"{exc.__class__.__name__}: {exc}")
+    return record
+
+
+# --------------------------------------------------------------------------- #
+# Ownership routing (B-484): execute a decision `ownership.py` already made.
+# --------------------------------------------------------------------------- #
+
+
+def notify_owner(
+    report: dict,
+    owner: Owner,
+    *,
+    device: str,
+    subject: str,
+    finding: str,
+    silence: SilenceNotice | None = None,
+) -> dict[str, Any]:
+    """:func:`notify`, routed to one :class:`ownership.Owner`. **Never raises.**
+
+    Interprets ``owner.channel`` (see the module docstring's "Ownership
+    routing" section): the sentinel :data:`ownership.DEFAULT_CHANNEL` defers
+    to :func:`notify` unchanged; anything else must be
+    ``"telegram:<chat id(s)>"`` -- the only real provider this module ships
+    (see "Providers" above) -- and a channel this build cannot interpret is a
+    delivery failure recorded in ``error``, exactly like a transport failure,
+    never a raise and never a silent drop.
+
+    The returned record adds ``"owner": owner.name`` to :func:`notify`'s own
+    shape, so a caller fanning this out over several owners (a primary plus
+    an escalation target) can tell the records apart.
+    """
+
+    if silence is not None:
+        return {
+            "attempted": False, "provider": None, "ok": True, "error": None,
+            "silenced": True,
+            "silence": {
+                "id": silence.id, "reason": silence.reason,
+                "created_by": silence.created_by, "expires_at": silence.expires_at,
+            },
+            "owner": owner.name,
+        }
+
+    if owner.channel == DEFAULT_CHANNEL:
+        record = notify(report, device=device, subject=subject, finding=finding)
+        record["owner"] = owner.name
+        return record
+
+    provider, _, destination = owner.channel.partition(":")
+    chat_ids = [c.strip() for c in destination.split(",") if c.strip()]
+    if provider != "telegram" or not chat_ids:
+        return {
+            "attempted": False, "provider": None, "ok": False,
+            "error": (
+                f"owner {owner.name!r} names channel {owner.channel!r}, which this "
+                f"build cannot deliver to (only 'telegram:<chat id(s)>' and "
+                f"{DEFAULT_CHANNEL!r} are implemented)"
+            ),
+            "silenced": False, "silence": None, "owner": owner.name,
+        }
+
+    target = TelegramNotifier(chat_ids=chat_ids)
+    record = notify(report, device=device, subject=subject, finding=finding, notifier=target)
+    record["owner"] = owner.name
     return record

@@ -18,6 +18,7 @@ import urllib.error
 import pytest
 
 from agent_nettools import notifier as N
+from agent_nettools import ownership as O
 
 # --------------------------------------------------------------------------- #
 # helpers
@@ -98,7 +99,7 @@ def test_the_notifier_cannot_receive_an_evidence_bundle():
     import inspect
 
     params = set(inspect.signature(N.notify).parameters)
-    assert params == {"report", "device", "subject", "finding", "notifier"}
+    assert params == {"report", "device", "subject", "finding", "notifier", "silence"}
 
     send = set(inspect.signature(N.Notifier.send).parameters)
     assert send == {"self", "report", "subject", "device", "finding"}
@@ -385,3 +386,152 @@ def test_the_cli_hands_the_notifier_the_report_and_nothing_else(monkeypatch):
     # The evidence bundle's own keys, absent by construction.
     for leaked in ("commands", "parsed", "sections", "evidence", "data"):
         assert leaked not in report
+
+
+# --------------------------------------------------------------------------- #
+# Silence (B-483): delivery is a deliberate no-op, and it says so plainly
+# --------------------------------------------------------------------------- #
+
+
+def _notice(id="maint-1", reason="planned migration", created_by="rami",
+           expires_at="2026-08-20T00:00:00+00:00") -> N.SilenceNotice:
+    return N.SilenceNotice(id=id, reason=reason, created_by=created_by, expires_at=expires_at)
+
+
+def test_a_silenced_notify_never_attempts_delivery(monkeypatch):
+    capture = _Capture()
+    record = N.notify(_report(), device="RR1", subject="10.255.0.12",
+                      finding="interface_line_down",
+                      notifier=_telegram(monkeypatch, capture), silence=_notice())
+
+    assert record["ok"] is True
+    assert record["attempted"] is False
+    assert capture.requests == []
+
+
+def test_a_silenced_record_says_so_plainly_not_the_ambiguous_did_nothing(monkeypatch):
+    """The record must be distinguishable from the default-provider no-op --
+    a caller printing a note needs to say WHY nothing was sent."""
+
+    record = N.notify(_report(), device="RR1", subject="10.255.0.12",
+                      finding="x", silence=_notice(reason="planned migration"))
+
+    assert record["silenced"] is True
+    assert record["silence"]["reason"] == "planned migration"
+    assert record["silence"]["id"] == "maint-1"
+    assert record["silence"]["created_by"] == "rami"
+
+    unsilenced = N.notify(_report(), device="RR1", subject="10.255.0.12", finding="x")
+    assert unsilenced["silenced"] is False
+    assert unsilenced["silence"] is None
+    assert unsilenced != record
+
+
+def test_silence_takes_effect_even_under_a_real_provider_that_would_otherwise_send(monkeypatch):
+    """Silenced beats everything else -- even a fully configured, healthy
+    provider must not be called."""
+
+    capture = _Capture()
+    telegram = _telegram(monkeypatch, capture)
+    record = N.notify(_report(), device="RR1", subject="10.255.0.12", finding="x",
+                      notifier=telegram, silence=_notice())
+    assert record["provider"] is None  # never even resolved -- delivery was never approached
+    assert capture.requests == []
+
+
+def test_the_notifier_still_cannot_receive_an_evidence_bundle_via_silence():
+    """SilenceNotice's own shape is the guard: it has exactly four string
+    fields, none of which is a place a report/evidence bundle could hide."""
+
+    import dataclasses
+
+    fields = {f.name for f in dataclasses.fields(N.SilenceNotice)}
+    assert fields == {"id", "reason", "created_by", "expires_at"}
+
+
+# --------------------------------------------------------------------------- #
+# Ownership routing (B-484): notify_owner executes a decision, never makes one
+# --------------------------------------------------------------------------- #
+
+
+def test_notify_owner_with_the_default_channel_defers_to_notify_unchanged(monkeypatch):
+    monkeypatch.delenv(N.NOTIFIER_ENV, raising=False)
+    owner = O.Owner(name="noc", channel=O.DEFAULT_CHANNEL)
+
+    record = N.notify_owner(_report(), owner, device="RR1", subject="10.255.0.12",
+                            finding="x")
+
+    assert record["provider"] == "none"
+    assert record["owner"] == "noc"
+
+
+def test_notify_owner_routes_telegram_channel_to_its_own_destination(monkeypatch):
+    capture = _Capture()
+    monkeypatch.setenv(N.TELEGRAM_TOKEN_ENV, "SECRET-TOKEN-123")
+    # No TELEGRAM_CHAT_ID at all -- the owner's own channel must be used
+    # instead, never falling back to (or requiring) the env-wide allowlist.
+    monkeypatch.delenv(N.TELEGRAM_CHAT_ENV, raising=False)
+    monkeypatch.setattr(N.urllib.request, "urlopen", capture)
+    owner = O.Owner(name="net-eng", channel="telegram:999")
+
+    record = N.notify_owner(_report(), owner, device="RR1", subject="10.255.0.12",
+                            finding="interface_line_down")
+
+    assert record["ok"] is True
+    assert record["owner"] == "net-eng"
+    assert len(capture.requests) == 1
+    assert json.loads(capture.requests[0].data)["chat_id"] == "999"
+
+
+def test_notify_owner_reports_an_unimplemented_channel_as_a_delivery_error_not_a_raise():
+    owner = O.Owner(name="pager", channel="pagerduty:abc123")
+    record = N.notify_owner(_report(), owner, device="RR1", subject="10.255.0.12",
+                            finding="x")
+    assert record["ok"] is False
+    assert "pagerduty:abc123" in record["error"]
+    assert record["owner"] == "pager"
+
+
+def test_notify_owner_silenced_never_attempts_delivery_to_any_channel(monkeypatch):
+    capture = _Capture()
+    monkeypatch.setattr(N.urllib.request, "urlopen", capture)
+    owner = O.Owner(name="net-eng", channel="telegram:999")
+
+    record = N.notify_owner(_report(), owner, device="RR1", subject="10.255.0.12",
+                            finding="x", silence=_notice())
+
+    assert record["silenced"] is True
+    assert record["ok"] is True
+    assert capture.requests == []
+
+
+def test_resolve_ownership_then_notify_owner_end_to_end(monkeypatch):
+    """The whole B-484 loop: a table routes a finding to an owner, and that
+    owner's own channel actually receives it -- proving the pieces this
+    change built (ownership.py's decision, notifier.py's execution) connect,
+    without touching cli.py (owned elsewhere this session)."""
+
+    capture = _Capture()
+    monkeypatch.setenv(N.TELEGRAM_TOKEN_ENV, "SECRET-TOKEN-123")
+    monkeypatch.setattr(N.urllib.request, "urlopen", capture)
+
+    table = O.OwnershipTable(
+        rules=(O.OwnershipRule(name="edge", owner="noc", role="edge"),),
+        owners={
+            "noc": O.Owner(name="noc", channel="telegram:555"),
+            "net-eng": O.Owner(name="net-eng", channel="telegram:111"),
+        },
+        default_owner="net-eng",
+    )
+
+    routing = O.resolve_ownership(table, device="PE2", role="edge", finding="bgp_session_down")
+    assert routing.matched_rule == "edge"
+
+    records = [
+        N.notify_owner(_report(), owner, device="PE2", subject="10.255.0.12",
+                       finding="bgp_session_down")
+        for owner in routing.owners
+    ]
+    assert len(records) == 1
+    assert records[0]["ok"] is True
+    assert json.loads(capture.requests[0].data)["chat_id"] == "555"

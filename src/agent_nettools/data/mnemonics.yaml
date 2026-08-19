@@ -9,7 +9,57 @@
 # investigate_with is null where no implemented flow applies; it names the
 # flow and how to find the subject where one does. Kept consistent with
 # event_routing.MNEMONIC_FLOW_TABLE — a test asserts every mnemonic that
-# table routes also has an entry here.
+# table routes also has an entry here. investigate_with states whether a flow
+# applies to this mnemonic AT ALL (source-agnostic — true of the on-device
+# buffer, the raw syslog receiver, or Loki alike); it is not itself a
+# decision to auto-trigger anything.
+#
+# trigger (B-630, event_watch.py) is a SEPARATE, stricter question added
+# 2026-08-19: given what THIS fabric's live Loki feed actually carries, should
+# seeing this mnemonic there fire an investigation? investigate_with asks "is
+# there a flow this mnemonic could mean"; trigger asks "should a machine act
+# on it unattended, on this evidence, from this source, today" — the bar
+# B-201's operator stated as "indicates that flow's subject, not merely
+# correlates with trouble" (the same bar OBS-167 held LLDP to for IS-IS, and
+# OBS-183 held OSPF/RSVP/CDP to). A mnemonic can have a real investigate_with
+# and still carry trigger.fires: false — most of this table does, for three
+# structurally different reasons, each stated per entry:
+#   (a) it fires in steady state, not on fault — SECURITY-SSHD_SYSLOG_PRX-3
+#       is the measured, named example the operator's brief itself gives;
+#   (b) the flow it names needs a subject shape (a local interface, for
+#       isis_adjacency/ldp_session) the message text cannot supply, and this
+#       router is a pure function over message text alone — it does not walk
+#       topology to fill the gap (event_routing.py's own "the device never
+#       comes from message text" discipline, generalised: a subject that
+#       cannot be reconstructed from the text is not a subject, the same rule
+#       `event_routing._validated_subject` already applies);
+#   (c) it was never observed in Loki across all nine devices in the measured
+#       7-day window (2026-08-12T17:29Z–2026-08-19T17:29Z), so it fails the
+#       "derive the candidate list from what this fabric actually logs"
+#       instruction on the most basic ground: no evidence it reaches this
+#       source at all. B-206a (this file's SECURITY-SSHD_SYSLOG_PRX-6 note,
+#       logs_loki.MEASURED_SEVERITY_AVAILABLE) establishes only severities 3
+#       ("err") and 4 ("warning") are known to cross the pipeline, so a
+#       severity-5+ mnemonic's absence is expected, not surprising — but
+#       absence is not proof of exclusion either (Coverage's own discipline,
+#       coverage.py), so these stay a documented "not yet observed", not a
+#       claim the mnemonic can never reach Loki.
+# `measured` carries the number that grounds the verdict, per the operator's
+# instruction that a firing-rate claim needs the rate in the table, not just
+# an assertion. Every trigger.fires: true entry must have a non-null
+# investigate_with AND a matching event_routing.MNEMONIC_FLOW_TABLE entry —
+# tests/test_event_watch.py checks both directions and proves the check is
+# not vacuous (a synthetic fires:true entry with no table match is rejected
+# loudly, not silently ignored).
+#
+# Measurement method: `logs_loki.run_named_query("logs_for_device", ...)` —
+# the exact function `event_watch.py` itself calls — against all nine
+# devices, since_seconds=604800 (Loki's own 168h retention ceiling), limit
+# =1000. Four of nine devices (PE1/PE2/PE3/RR1) hit that 1000-line cap before
+# reaching 7 days back — SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL alone eats the
+# budget that fast on the noisiest devices (PE2's cap covered only 3.08
+# hours). That is itself part of the finding, not a measurement defect: see
+# that mnemonic's own entry below.
 
 - mnemonic: ROUTING-BGP-5-ADJCHANGE
   meaning: A BGP session changed state (the message says which peer and which way).
@@ -19,6 +69,23 @@
     - configuration change on either end (the message's reason text says which)
   investigate_with: {flow: bgp_session, subject_hint: the peer address in the message}
   severity_note: Severity 5 — informational framing for an event that is usually the incident.
+  trigger:
+    fires: false
+    reason: >
+      Not observed via Loki in the measured window, across all nine devices.
+      This is category (c): the on-device buffer confirms the mnemonic is
+      real and active on this fabric (tests/fixtures/cisco_xr/PE2/broken/
+      show-logging-last-200.txt has two occurrences), so its absence from
+      Loki is either "this fabric had no BGP transition in 7 days" or the
+      severity-5 platform gap (B-206a) — this measurement cannot tell the two
+      apart, and Coverage's own discipline says an absence claim over a
+      severity-gapped source proves neither. If this mnemonic is ever
+      observed live via Loki, it is the clearest fires:true candidate in this
+      table: MNEMONIC_FLOW_TABLE already extracts its subject correctly
+      (event_routing._ipv4_subject) and event_watch.py's dedup collapses
+      repeated ADJCHANGE lines for the SAME peer, so a flapping session would
+      not spam the operator once collapsed.
+    measured: 0 occurrences, all 9 devices, 2026-08-12 to 2026-08-19 (7d window).
 
 - mnemonic: ROUTING-ISIS-5-ADJCHANGE
   meaning: An IS-IS adjacency changed state.
@@ -26,8 +93,34 @@
     - the link went down (look for a LINK-3-UPDOWN seconds earlier)
     - hold time expired (~30s of lost hellos)
     - MTU mismatch — but note IOS-XR pads IIH hellos to the interface MTU by default, so a mismatch normally PREVENTS the adjacency forming rather than dropping an established one; the drop-after-forming case needs hello-padding disabled
-  investigate_with: null   # isis_adjacency flow is B-107, not yet implemented
+  # CORRECTED 2026-08-19: the isis_adjacency flow shipped (B-107; flows.py's
+  # ISIS_ADJACENCY_FLOW, confirmed live) — this entry's investigate_with was
+  # stale (previously null, citing "B-107, not yet implemented", from before
+  # that flow existed). Real message shape confirmed against
+  # tests/fixtures/cisco_xr/P1/broken/show-logging-last-200.txt: "ISIS
+  # (CORE): Adjacency to PE2 (GigabitEthernet0/0/0/3) (L2) Down, Holdtime
+  # expired" — the subject is the interface named in parentheses, matching
+  # isis_adjacency's own subject_schema (a local interface name). NOT wired
+  # into event_routing.MNEMONIC_FLOW_TABLE by this change: that table's
+  # extractors are built against `_INTERFACE`'s "Interface X," shape, which
+  # this message does not use (the interface sits in parens after the peer
+  # name), so routing it needs a new extractor — a distinct, untested piece
+  # of work out of scope for the Loki-trigger table this change is about, and
+  # moot for it anyway since trigger.fires is false below regardless.
+  investigate_with: {flow: isis_adjacency, subject_hint: the local interface named in parentheses in the message}
   severity_note: On this fabric BGP follows within its hold timer when the route is lost — measured 154s in round 1.
+  trigger:
+    fires: false
+    reason: >
+      Same category (c) as ROUTING-BGP-5-ADJCHANGE: not observed via Loki in
+      the measured window despite being real and active on this fabric
+      (on-device buffer confirms it). Severity 5, so B-206a's gap is the
+      likely explanation, unconfirmed. Also not in
+      event_routing.MNEMONIC_FLOW_TABLE (see the note above investigate_with)
+      — even if Loki carried it tomorrow, this specific gate would still say
+      false until that extractor is built and reviewed; this measurement
+      does not paper over that with a placeholder extractor.
+    measured: 0 occurrences, all 9 devices, 2026-08-12 to 2026-08-19 (7d window).
 
 - mnemonic: PKT_INFRA-LINK-3-UPDOWN
   meaning: Physical interface state change (layer 1/2).
@@ -37,6 +130,21 @@
     - far-end device restart
   investigate_with: {flow: interface, subject_hint: the interface named in the message}
   severity_note: Severity 3 — the lowest-layer event in most cascades; start here when several fire together.
+  trigger:
+    fires: false
+    reason: >
+      Category (c): not observed via Loki in the measured window, though real
+      and active on this fabric (fixtures show two occurrences on PE2 in one
+      incident). This is the strongest fires:true CANDIDATE in the whole
+      table once observed — it names an interface directly (genuinely
+      indicates the interface flow's subject, the bar OBS-167 set), its
+      severity digit (3) sits inside the measured Loki floor (err/warning),
+      and MNEMONIC_FLOW_TABLE already routes it correctly. It stays
+      fires:false here because "the bar is plausibly clearable" is not
+      "cleared" — this table is seeded from measurement, not from what ought
+      to work, and 0 observed occurrences is 0 observed occurrences. Revisit
+      the first time one is captured live via Loki.
+    measured: 0 occurrences, all 9 devices, 2026-08-12 to 2026-08-19 (7d window).
 
 - mnemonic: PKT_INFRA-LINEPROTO-5-UPDOWN
   meaning: Line protocol state change (layer 2 up/down, follows LINK).
@@ -44,6 +152,21 @@
     - always follows its LINK-3-UPDOWN; on its own, suspect keepalive/encap mismatch
   investigate_with: {flow: interface, subject_hint: the interface named in the message}
   severity_note: Paired with LINK-3 in the same second in every fixture occurrence.
+  trigger:
+    fires: false
+    reason: >
+      Category (c), same as LINK-3-UPDOWN, plus a second, independent reason:
+      this mnemonic's own severity_note records it as PAIRED with LINK-3 in
+      the same second in every fixture occurrence — the two are one physical
+      event, not two. event_watch.py's dedup collapses repeated lines of ONE
+      mnemonic+subject; it does NOT fuse two DIFFERENT mnemonics known to
+      co-occur (deliberately out of scope — see event_watch.py's module
+      docstring). Firing both would double-open an investigation for one
+      flap. If LINK-3-UPDOWN is ever promoted to fires:true, this entry
+      should very likely stay false FOR THAT REASON even after it starts
+      reaching Loki — LINK-3 is the earlier, lower-layer, sufficient trigger
+      — not re-derive the exclusion from scratch.
+    measured: 0 occurrences, all 9 devices, 2026-08-12 to 2026-08-19 (7d window).
 
 - mnemonic: PKT_INFRA-LINK-5-CHANGED
   meaning: Interface administrative state changed (shutdown / no shutdown).
@@ -51,6 +174,20 @@
     - a human (or an injector) configured it — correlate with MGBL-SYS-5-CONFIG_I
   investigate_with: {flow: interface, subject_hint: the interface named in the message}
   severity_note: Admin change, not failure — the correlation to a commit is the finding.
+  trigger:
+    fires: false
+    reason: >
+      Category (a), not (c) — this one would fail the bar even if Loki
+      carried it. Its own severity_note says it plainly: "admin change, not
+      failure". A deliberate `shutdown`/`no shutdown` is the operator's own
+      intent, the same shape SECURITY-SSHD_SYSLOG_PRX-3 fires on legitimate
+      management traffic and MGBL-SYS-5-CONFIG_I is excluded as the anchor
+      event rather than a fault (see that entry below). Triggering an
+      investigation every time an operator intentionally shuts an interface
+      teaches the same "ignore the ticket" lesson the SSH case does, just at
+      lower volume. Also not observed via Loki in the measured window
+      (severity 5, category (c) too, but (a) would exclude it regardless).
+    measured: 0 occurrences, all 9 devices, 2026-08-12 to 2026-08-19 (7d window).
 
 - mnemonic: MGBL-SYS-5-CONFIG_I
   meaning: A configuration session committed (who and from where in the message).
@@ -58,6 +195,14 @@
     - deliberate operator change — this is the anchor event for "what changed?"
   investigate_with: null
   severity_note: In every fixture incident the config commit is the first event of the causal chain.
+  trigger:
+    fires: false
+    reason: >
+      No flow applies (investigate_with is null): this mnemonic is the
+      CAUSE-side anchor a human correlates other events against, never
+      itself a broken-subject indicator — there is nothing to descend into.
+      Not observed via Loki in the measured window either (severity 5).
+    measured: 0 occurrences, all 9 devices, 2026-08-12 to 2026-08-19 (7d window).
 
 - mnemonic: MGBL-CONFIG-6-DB_COMMIT
   meaning: The configuration database committed (pairs with CONFIG_I).
@@ -65,6 +210,13 @@
     - same commit as the CONFIG_I beside it
   investigate_with: null
   severity_note: Redundant with CONFIG_I for correlation; keep the pair together in timelines.
+  trigger:
+    fires: false
+    reason: >
+      No flow applies, and severity 6 sits outside logs_loki's measured
+      floor (err/warning only) — structurally excluded from this source, not
+      merely absent from this sample.
+    measured: 0 occurrences, all 9 devices, 2026-08-12 to 2026-08-19 (7d window).
 
 - mnemonic: SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL
   meaning: SSH session activity (login accepted, session opened/closed).
@@ -72,6 +224,14 @@
     - management-plane access — on this fabric, overwhelmingly the collector itself
   investigate_with: null
   severity_note: 97% of this fabric's log volume (T-028). log_window attributes and removes it; treat a burst from an UNKNOWN source address differently from tooling noise.
+  trigger:
+    fires: false
+    reason: >
+      No flow applies, and severity 6 sits outside logs_loki's measured
+      floor — structurally excluded from Loki, unlike its sibling
+      SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL below, which the same pipeline
+      does carry (severity 3) and which is the volume problem.
+    measured: 0 occurrences, all 9 devices, 2026-08-12 to 2026-08-19 (7d window).
 
 - mnemonic: SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL
   meaning: SSH transport error (abrupt disconnect, kex failure).
@@ -80,6 +240,32 @@
     - a real failed access attempt — check the source address
   investigate_with: null
   severity_note: Severity 3 but usually self-inflicted here; OBS-064's noise-filter incident was about exactly this class.
+  trigger:
+    fires: false
+    reason: >
+      THE worked example the operator's own brief names: fires in steady
+      state, not on fault. Triggering on this would open an investigation
+      forever and teach everyone to ignore tickets. Same root cause
+      log_window.COLLECTOR_NOISE already attributes by source address
+      (172.20.250.1, a declared management host in
+      log_window.COLLECTOR_SOURCES): the lab controller's own polling
+      sessions closing non-interactively, not an attacker or a real fault.
+      No flow applies either way — this is management-plane noise, not a
+      protocol-session subject.
+    measured: >
+      981 occurrences, ALL 9 devices, 2026-08-12 to 2026-08-19 (7d window;
+      dominates every device's log volume — 83 to 140 occurrences per device).
+      100% of a 9-device sample of message text reads "Read error from remote
+      host 172.20.250.1 port N: Connection reset by peer" or the "Read error"
+      variant — always the same source address, the lab controller. Rate
+      varies by how recently each device was polled hard: the four P-routers
+      sit at 0.59-0.76/hour sustained across the full 7-day window; PE1
+      (whose query hit the 1000-line cap after only 15.7h) runs 8.9/hour; PE2
+      (capped after 3.1h) runs 35/hour during an active collection burst; RR1
+      (capped after 44.7h) sustains ~3/hour — matching the operator's own
+      cited measurement ("four in one hour") in the same order of magnitude.
+      This mnemonic alone is why 4 of 9 devices' 1000-line Loki query hit its
+      cap before reaching 7 days of history at all.
 
 - mnemonic: SYSDB-SYSDB-7-INFO
   meaning: Internal system database chatter tied to management sessions.
@@ -87,6 +273,12 @@
     - management-plane activity (every fixture occurrence names client 'exec' and /vty/)
   investigate_with: null
   severity_note: Debug-level; pure noise for fault work on this fabric.
+  trigger:
+    fires: false
+    reason: >
+      No flow applies, and severity 7 (the least severe level IOS-XR has)
+      sits outside logs_loki's measured floor — structurally excluded.
+    measured: 0 occurrences, all 9 devices, 2026-08-12 to 2026-08-19 (7d window).
 
 - mnemonic: PKT_INFRA-PQMON-6-QUEUE_DROP
   meaning: A punt/inject queue dropped packets on the RP.
@@ -94,6 +286,13 @@
     - control-plane bursts (protocol storms, heavy management traffic)
   investigate_with: null
   severity_note: Chronic-vs-burst matters more than the count — 8 spread over the corpus is background.
+  trigger:
+    fires: false
+    reason: >
+      No flow applies (device-wide punt/inject queue pressure, not scoped to
+      any interface/peer subject an implemented flow could descend on), and
+      severity 6 sits outside logs_loki's measured floor.
+    measured: 0 occurrences, all 9 devices, 2026-08-12 to 2026-08-19 (7d window).
 
 - mnemonic: ROUTING-BGP-5-NSR_STATE_CHANGE
   meaning: BGP non-stop-routing readiness changed.
@@ -101,3 +300,240 @@
     - session churn (NSR re-syncs after peer transitions)
   investigate_with: null
   severity_note: A follower event; correlate with the ADJCHANGE that caused it.
+  trigger:
+    fires: false
+    reason: >
+      No flow applies directly, and even if one did this would be the wrong
+      mnemonic to trigger on: its own severity_note says it is a FOLLOWER of
+      ROUTING-BGP-5-ADJCHANGE, the same causal event. Triggering both would
+      double-fire one root cause — event_watch.py's dedup collapses repeated
+      lines of one mnemonic+subject, not two distinct mnemonics known to
+      co-occur (see PKT_INFRA-LINEPROTO-5-UPDOWN's entry for the identical
+      shape on the interface side). Also not observed via Loki in the
+      measured window (severity 5).
+    measured: 0 occurrences, all 9 devices, 2026-08-12 to 2026-08-19 (7d window).
+
+# --------------------------------------------------------------------------- #
+# Below: eight mnemonics measured live via Loki 2026-08-19 (B-630) that had no
+# prior entry. Seeded the same way as every entry above — observed in this
+# fabric's own evidence, not imagined — this time the evidence is the T-028
+# corpus's successor: a fresh `logs_loki.run_named_query` sweep of all nine
+# devices rather than a fixture file. None clear the trigger bar; each is
+# excluded for its own stated, measured reason, per the operator's
+# instruction that exclusions are reviewed like inclusions.
+# --------------------------------------------------------------------------- #
+
+- mnemonic: IP-TCP-3-NOAUTH
+  meaning: >
+    A TCP packet arrived for a session configured to require authentication
+    (MD5/TCP-AO), but no key is programmed locally yet for that peer —
+    "Authentication info not programmed for the packet received from
+    <peer>:<port> to <local>:<port>".
+  typical_causes:
+    - a TCP-authenticated session (observed here: LDP, destination port 646) is being configured on one end before the other, so the peer's TCP SYNs arrive before the local key is programmed
+    - a stale/removed key on one side after a config change
+  investigate_with: null
+  severity_note: >
+    Severity 3 ("err"), matching logs_loki's measured floor — reaches Loki,
+    unlike most of this table. Confirmed the whole measured burst below is
+    port 646 (LDP's IANA port), not a generic TCP mnemonic firing for an
+    unrelated session.
+  trigger:
+    fires: false
+    reason: >
+      Category (b): the message names two TCP endpoints (loopback:port), and
+      the peer's address here (10.255.0.11) matches PE1's declared router_id
+      in inventory/lab.yaml exactly — a genuine, specific indicator that an
+      LDP TCP-auth mismatch exists between P1 and PE1. But ldp_session's
+      subject_schema (flows.py) is a LOCAL INTERFACE NAME, not a peer
+      address — this message names no interface, and event_routing.py's
+      subject extractors are pure functions over message text with no
+      topology lookup (the same "the device never comes from message text"
+      discipline, generalised: a subject this router would have to derive by
+      walking IS-IS/LDP adjacency data to find which interface reaches
+      10.255.0.11 is not a subject this message text supplies). Excluded not
+      because the correlation is weak — it is strong, and corroborated by
+      IP-TCP-3-BADAUTH and two MGBL-CONFIGCLI-3-COMMIT_FAILURE events in the
+      same window below — but because the required subject cannot be
+      constructed from this evidence class without adding device state this
+      router does not have.
+    measured: >
+      13 occurrences, P1 only, all 2026-08-19 03:40:30–03:57:35 UTC (one
+      17m5s burst, not steady state) — all "from 10.255.0.11:<ephemeral> to
+      10.255.0.1:646". Immediately preceded by MGBL-CONFIGCLI-3-COMMIT_FAILURE
+      on P1 (02:29, 02:35) and on PE1 (02:27, 02:45, 02:49) — consistent with
+      a failed attempt to configure matching LDP MD5 keys on both ends. One
+      root cause, thirteen lines: exactly the collapse-before-deciding case
+      event_watch.py's dedup is for (see its module docstring).
+
+- mnemonic: IP-TCP-3-BADAUTH
+  meaning: >
+    A TCP packet arrived carrying an MD5 digest that does not match the
+    locally configured key — "Invalid MD5 digest from <peer>:<port> to
+    <local>:<port> for vrf:<vrf>".
+  typical_causes:
+    - mismatched TCP MD5 keys between two ends of an authenticated session (observed here: LDP, port 646)
+    - a key rotated on one side and not the other
+  investigate_with: null
+  severity_note: Severity 3 ("err") — reaches Loki, same floor as IP-TCP-3-NOAUTH.
+  trigger:
+    fires: false
+    reason: >
+      Same category (b) exclusion as IP-TCP-3-NOAUTH, and the same
+      corroborating incident (identical peer pair P1↔PE1, same 18-minute
+      window) — the "key not programmed yet" and "key mismatched" faces of
+      one LDP-authentication misconfiguration. Excluded for the identical
+      structural reason: ldp_session needs a local interface subject this
+      message does not carry.
+    measured: >
+      2 occurrences, P1 only, 2026-08-19 03:52:42 and 03:52:56 UTC — inside
+      the same burst IP-TCP-3-NOAUTH measured above, same peer
+      (10.255.0.11:646).
+
+- mnemonic: ROUTING-ISIS-4-WD_METRIC_NOT_CONF
+  meaning: >
+    An interface advertises a wide IS-IS metric but the local level is
+    configured to generate narrow metrics, so IOS-XR substitutes the maximum
+    narrow value — a metric-STYLE configuration mismatch, names the interface.
+  typical_causes:
+    - metric-style narrow configured at the level while a neighbour or the topology carries a wide-style metric
+  investigate_with: null
+  severity_note: >
+    Severity 4 ("warning") — reaches Loki, matching the measured floor. Names
+    a specific interface (GigabitEthernet0/0/0/1 in the measured occurrences),
+    which is isis_adjacency's own subject shape — the one case in this table
+    where the subject IS mechanically extractable.
+  trigger:
+    fires: false
+    reason: >
+      Extractable subject, but the wrong signal: this is a standing
+      CONFIGURATION mismatch, not an adjacency-health indicator. IOS-XR
+      substitutes a value and moves on — the adjacency itself is unaffected
+      (the same "padding" logic ROUTING-ISIS-5-ADJCHANGE's own typical_causes
+      note for MTU: a mismatch here changes SPF cost math, it does not drop
+      or block the adjacency). It also re-logs on its own schedule while the
+      condition persists — measured 7 times over under 2 hours on the SAME
+      interface with no operator action in between, the smaller-scale version
+      of the SSH mnemonic's "fires in steady state" problem: triggering on
+      every re-log of an unfixed config choice teaches the same
+      ignore-the-ticket lesson.
+    measured: >
+      7 occurrences, PE1 only, 2026-08-19 02:10:05–03:56:21 UTC (irregular
+      spacing, 5m–46m apart — re-logged on topology recompute, not on a fixed
+      timer), all naming the same interface (GigabitEthernet0/0/0/1, level
+      L1) and identical text.
+
+- mnemonic: ROUTING-ISIS-3-FLEX_ALGO_DEF_CHANGED
+  meaning: An IS-IS Flex-Algorithm definition changed (priority, algorithm parameters).
+  typical_causes:
+    - a Flex-Algo configuration change committed somewhere in the level (the message names the originating System-ID, not necessarily this device)
+  investigate_with: null
+  severity_note: Severity 3 ("err") — reaches Loki.
+  trigger:
+    fires: false
+    reason: >
+      Names no interface or peer — the message identifies a Flex-Algo number
+      and an originating System-ID, device-wide within the IS-IS level, not a
+      per-subject signal any implemented flow descends on. Also
+      change-driven, the same category MGBL-SYS-5-CONFIG_I already carries
+      as the anchor rather than a fault: all three measured occurrences carry
+      the identical System-ID (0000.0000.0031), i.e. one definition change
+      propagating to every device in the level, not three independent
+      problems. No flow applies.
+    measured: >
+      3 occurrences (P2, P4, PE3 — one each), 2026-08-13 and 2026-08-18,
+      identical text modulo device — one config change flooding the level,
+      not steady state and not a fault, just spread thin.
+
+- mnemonic: ROUTING-FIB-4-RETRYDB_NONEMPTY
+  meaning: FIB objects have sat in the (IPv6) retry queue for at least N seconds.
+  typical_causes:
+    - transient RIB/FIB programming backlog, usually clearing on its own
+  investigate_with: null
+  severity_note: Severity 4 ("warning") — reaches Loki.
+  trigger:
+    fires: false
+    reason: >
+      Internal FIB/RIB programming bookkeeping — names no interface or peer,
+      and no implemented flow models "FIB retry backlog" (device_health was
+      investigated and refused per B-108 as an aggregation over independent
+      per-protocol signals, not a dependency descent; this is a level below
+      even that). No subject, no flow.
+    measured: >
+      3 occurrences, PE4 only, 2026-08-13 17:21:37–17:33:37 UTC (the SAME
+      object, escalating: "at least 120/240/480 seconds" every ~8-12
+      minutes) — a single still-unresolved backlog re-logging its own
+      duration, not three events.
+
+- mnemonic: HA-HA_CALL_HOME-4-SET_TAC_PROFILE_DEFAULT
+  meaning: >
+    Call-Home/Smart Licensing's built-in Cisco TAC profile was reset to its
+    default configuration (informational — the profile cannot be removed).
+  typical_causes:
+    - platform/licensing housekeeping, typically at boot or a licensing state change
+  investigate_with: null
+  severity_note: Severity 4 ("warning") — reaches Loki.
+  trigger:
+    fires: false
+    reason: >
+      Administrative/licensing platform housekeeping, identical text on both
+      occurrences — no interface, peer, or protocol session named, and no
+      flow in this build covers call-home/licensing state at all. Not a
+      fault signal on this fabric (the message itself states the removal
+      request was declined and defaults applied, i.e. nothing failed).
+    measured: 2 occurrences (P1, P3 — one each), 2026-08-18, identical text.
+
+- mnemonic: OS-SYSMGR-4-PROC_RESTART_NAME
+  meaning: A named process was restarted (the message states who requested it and from where).
+  typical_causes:
+    - an operator-requested restart via CLI (`process restart <name>`)
+    - sysmgr recovering a crashed process (would read differently — this fabric's one occurrence names an explicit requester)
+  investigate_with: null
+  severity_note: Severity 4 ("warning") — reaches Loki.
+  trigger:
+    fires: false
+    reason: >
+      The one measured occurrence is an explicit, named operator action
+      ("User clab (vty1) requested a restart of process isis") 11 seconds
+      before a ROUTING-ISIS-3-FLEX_ALGO_DEF_CHANGED on the SAME device — a
+      deliberate maintenance action, not a fault, the same category as
+      MGBL-SYS-5-CONFIG_I. It also names a PROCESS, not an interface or peer:
+      even setting the deliberate-action problem aside, there is no subject
+      an implemented flow's subject_schema could accept here — isis_adjacency
+      needs a local interface, and "the isis process" is device-wide. No flow
+      applies, and if it fired it would fire on legitimate maintenance.
+    measured: 1 occurrence, P2 only, 2026-08-18 04:13:28 UTC.
+
+- mnemonic: PKT_INFRA-PAKWATCH-2-DEPLETION_CATASTROPHIC
+  meaning: A packet-buffer resource pool hit 100% depletion ("PARTICLE HEADER" in the one measured occurrence).
+  typical_causes:
+    - sustained control-plane or data-plane packet load exhausting a specific buffer pool
+  investigate_with: null
+  severity_note: >
+    Severity 2 in the mnemonic's own digit ("critical" by IOS-XR's message
+    catalog) — the single most severe mnemonic measured in this whole sweep.
+    MEASURED ANOMALY, reported rather than silently reconciled:
+    logs_loki.MEASURED_SEVERITY_AVAILABLE declares only severities 3 ("err")
+    and 4 ("warning") cross this pipeline (B-206a), but this record's own
+    Loki `severity` label reads "crit" — a severity-2-equivalent event that
+    the declared ceiling says should not be here. Not corrected in this
+    change: logs_loki.py is out of scope for this task, and the safe
+    direction of the existing constant's error (understating what Loki
+    carries) is conservative, not dangerous — Coverage.gaps() only ever
+    over-reports a gap, never hides one. Flagged for a human to re-measure
+    and decide whether to widen MEASURED_SEVERITY_AVAILABLE; not touched here.
+  trigger:
+    fires: false
+    reason: >
+      Singleton, and severity-2 is genuinely serious — but names no
+      interface, peer, or protocol session, and no implemented flow models
+      device-wide resource exhaustion (device_health was investigated and
+      refused, B-108, for the same reason: an aggregation over independent
+      signals, not a dependency descent with a subject). Excluded on the same
+      structural ground as ROUTING-FIB-4-RETRYDB_NONEMPTY and
+      HA-HA_CALL_HOME-4-SET_TAC_PROFILE_DEFAULT above, not because it is
+      unimportant — it is the most severe single line this sweep found. A
+      device-wide resource alert is a real gap this table cannot close by
+      itself; it would need its own alerting path, not a flow subject, which
+      is outside what B-201's trigger table can decide.
+    measured: 1 occurrence, PE2 only, 2026-08-19 14:21:41 UTC.

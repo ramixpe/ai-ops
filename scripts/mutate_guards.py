@@ -159,7 +159,7 @@ MUTATIONS = [
      "src/agent_nettools/topology.py",
      "            if resolve_device(neighbor, mapping) is None:\n",
      "            if neighbor not in evidence_by_device:\n",
-     "test_the_three_hostnames_are_this_fabric_s_own_devices"),
+     "test_an_aliased_neighbour_is_not_reported_as_foreign"),
 
     ("B-461", "rungs are numbered in the report",
      "src/agent_nettools/render.py", '"{position}/{total} ', '"',
@@ -563,6 +563,96 @@ MUTATIONS = [
      "src/agent_nettools/grounding.py",
      "        .merge(check_no_invented_cause(report, descent))\n", "",
      "check_no_invented_cause"),
+    # ---- B-407: session memory. Two guards, both counted before mutating
+    # (OBS-191): each anchor string below occurs exactly once in
+    # session_memory.py (`grep -c`, confirmed before these entries were
+    # added). ----
+
+    ("SESSION-MEMORY-ID-VALIDATION", "a session id is validated against a "
+     "closed character set before it is ever joined into a filesystem path "
+     "-- the same path-traversal guard B-474/DEEP-REVIEW-2026-08-17 SS2.4 "
+     "requires of evidence_store's device names, applied to the new key",
+     "src/agent_nettools/session_memory.py",
+     '        raise ValueError(f"invalid session id for session memory storage: {session_id!r}")\n',
+     "        pass\n",
+     "invalid session id"),
+
+    ("SESSION-MEMORY-CANNOT-RECALL", "a cannot_recall RecallResult must "
+     "carry a reason, or a session store that could not be read silently "
+     "reads as a session that was never seen -- B-540's CANNOT_COMPARE "
+     "guard, one level up, for the new FOUND/NOT_FOUND/CANNOT_RECALL axis",
+     "src/agent_nettools/session_memory.py",
+     "        if self.outcome == CANNOT_RECALL and not self.reason:\n"
+     "            raise ValueError(\n"
+     '                "a cannot_recall RecallResult must carry a reason -- an absence with "\n'
+     '                "no explanation is indistinguishable from a session nobody checked"\n'
+     "            )\n",
+     "        pass\n",
+     "must carry a reason"),
+    # ---- B-483/B-484/B-486: maintenance windows, ownership routing, and
+    # cross-alert correlation (the ops-maturity backlog trio, OBS-360..369 /
+    # B-660..669). Three new guards, one per item, each pinning the exact
+    # property its module docstring calls out as the one that must never
+    # silently regress. Counted before adding these entries (OBS-191): each
+    # anchor string below occurs exactly once in its file (`grep -c`,
+    # 2026-08-19). ----
+
+    ("B-483-NEVER-VANISH", "a silenced finding stays in evaluate_device's "
+     "findings list, tagged, rather than being dropped -- the OBS-188/"
+     "OBS-202 'absence read as health' shape, in a feature built to silence "
+     "noise and therefore exactly where that shape would hide best",
+     "src/agent_nettools/health.py",
+     '            counts["silenced"] += 1\n',
+     '            counts["silenced"] += 1\n            continue\n',
+     "test_a_silenced_finding_stays_in_the_findings_list"),
+
+    ("B-484-NEVER-SILENT", "OwnershipTable refuses to construct with a "
+     "default_owner that is not a declared owner -- the precondition that "
+     "makes resolve_ownership's fallback ('nothing matched -> route to the "
+     "default') always produce at least one owner rather than an unmatched "
+     "finding silently reaching nobody",
+     "src/agent_nettools/ownership.py",
+     "        if self.default_owner not in self.owners:\n",
+     "        if False:\n",
+     "test_a_table_with_no_default_owner_declared_refuses_to_construct"),
+
+    ("B-486-NO-GUESSED-CAUSE", "correlate_by_cause excludes a diagnosis "
+     "from same-cause grouping when its cause_subject is unrecorded, rather "
+     "than treating the missing value as a wildcard that matches any other "
+     "diagnosis on the same device+rung -- the guard against silently "
+     "merging two distinct faults (e.g. two different interfaces on one "
+     "device) into one fabricated incident, which is the one failure mode "
+     "worse than under-correlating (see the module docstring)",
+     "src/agent_nettools/incident_correlation.py",
+     "        if d.cause_subject is None:\n",
+     "        if False:\n",
+     "test_an_unknown_cause_subject_is_excluded_never_treated_as_a_wildcard"),
+    # ---- B-630/B-201: the Loki trigger-intake watcher (event_watch.py).
+    # mnemonics.yaml's `trigger` field is reviewed knowledge, not caller
+    # input -- a reviewer approving `fires: true` for a mnemonic with no
+    # working event_routing.MNEMONIC_FLOW_TABLE extractor is the OBS-191
+    # shape inverted (a surface promising a capability that does not exist,
+    # rather than one that exists and is not named). validate_trigger_table
+    # is the guard that turns that review defect into a loud, immediate
+    # failure instead of a `fires: true` entry that silently never routes.
+    # Counted before adding this entry (OBS-191): the anchor string below
+    # occurs exactly once in event_watch.py (`grep -c`, 2026-08-19). Mutated
+    # to `if False:`, which disables ONLY this check -- the sibling
+    # investigate_with-null check three lines above stays live, so the
+    # mutation is not caught by that other branch; it is caught specifically
+    # because `test_fires_true_with_no_flow_table_entry_is_a_loud_error_not_
+    # a_silent_false` uses PKT_INFRA-LINK-5-CHANGED, whose investigate_with
+    # is non-null (a real interface flow applies) and which is deliberately
+    # absent from MNEMONIC_FLOW_TABLE -- the one case this specific line
+    # exists to catch. ----
+
+    ("B-630-TRIGGER-TABLE-GUARD", "validate_trigger_table raises when a "
+     "fires:true mnemonic has no matching event_routing.MNEMONIC_FLOW_TABLE "
+     "entry, rather than silently leaving it inert",
+     "src/agent_nettools/event_watch.py",
+     "        if mnemonic not in routable_mnemonics:\n",
+     "        if False:\n",
+     "test_fires_true_with_no_flow_table_entry_is_a_loud_error_not_a_silent_false"),
 ]
 
 
