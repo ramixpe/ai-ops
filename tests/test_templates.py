@@ -21,6 +21,7 @@ from agent_nettools.platforms import (
     supports_template,
     template_for,
 )
+from agent_nettools.templates import split_sr_policy_id
 
 
 def test_cisco_xr_templates_render_the_expected_commands():
@@ -40,6 +41,42 @@ def test_cisco_xr_templates_render_the_expected_commands():
         render_command("cisco_xr", "traceroute", address="10.255.0.31")
         == "traceroute 10.255.0.31"
     )
+    assert (
+        render_command("cisco_xr", "sr_policy_detail", color="20", endpoint="10.255.0.13")
+        == "show segment-routing traffic-eng policy color 20 endpoint ipv4 10.255.0.13 detail"
+    )
+
+
+def test_split_sr_policy_id_splits_the_caller_facing_identifier():
+    """B-515: the single "colour:endpoint" identifier `check_lab_sr_policies`'
+    own `policy` field reports splits into exactly the two values the
+    `sr_policy_detail` template declares."""
+
+    assert split_sr_policy_id("20:10.255.0.13") == ("20", "10.255.0.13")
+    # Positive control (OBS-181): a legitimate value from the OTHER real
+    # policy on this fabric works too, not just one hand-picked example.
+    assert split_sr_policy_id("10:10.255.0.13") == ("10", "10.255.0.13")
+
+
+@pytest.mark.parametrize(
+    "bad_id", ["", "20", "10.255.0.13", ":10.255.0.13", "20:"]
+)
+def test_split_sr_policy_id_refuses_a_malformed_identifier(bad_id):
+    with pytest.raises(TemplateValidationError):
+        split_sr_policy_id(bad_id)
+
+
+def test_split_sr_policy_id_output_still_passes_through_real_template_validation():
+    """Not a third gate that could disagree with the real one: whatever this
+    returns is still run through BoundedIntParam/IPv4AddressParam by
+    render_command, so a colour:endpoint-shaped string with an unsafe half
+    (e.g. an endpoint carrying a forbidden character) is still refused --
+    proven here by driving it straight through render_command, not asserted
+    from this function's own promise."""
+
+    color, endpoint = split_sr_policy_id("20:10.255.0.13; reload")
+    with pytest.raises(TemplateValidationError):
+        render_command("cisco_xr", "sr_policy_detail", color=color, endpoint=endpoint)
 
 
 def test_cisco_iosxe_templates_use_different_syntax_for_the_same_template_name():

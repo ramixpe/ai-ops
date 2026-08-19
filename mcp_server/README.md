@@ -16,6 +16,7 @@ environment (`DEVICE_USERNAME`, `DEVICE_PASSWORD`).
 - `check_lab_ldp_neighbors`
 - `check_lab_ldp_discovery`
 - `check_lab_sr_policies`
+- `get_lab_sr_policy_detail`
 - `check_lab_fabric`
 - `collect_lab_evidence`
 - `get_lab_route`
@@ -35,8 +36,11 @@ environment (`DEVICE_USERNAME`, `DEVICE_PASSWORD`).
 - `get_lab_logs`
 - `get_lab_interface_rate_history`
 - `get_lab_isis_adjacency_history`
+- `get_lab_ldp_session_history`
+- `get_lab_device_uptime_history`
 - `get_lab_netbox_inventory`
 - `get_lab_netbox_topology`
+- `get_lab_graph_topology`
 
 There is no shell, configuration tool, or generic command runner.
 
@@ -100,12 +104,44 @@ MCP-only gate:
 
 ### External-source tools: Loki and Prometheus (B-512)
 
-`get_lab_logs`, `get_lab_interface_rate_history`, and
-`get_lab_isis_adjacency_history` are the temporal evidence axis
+`get_lab_logs`, `get_lab_interface_rate_history`,
+`get_lab_isis_adjacency_history`, `get_lab_ldp_session_history` and
+`get_lab_device_uptime_history` are the temporal evidence axis
 (`stage-2-architecture.md` §2.4a) exposed as MCP tools: history read as
 *context*, never as a descent rung -- nothing in `flows.py`/`checks.py`/
 `investigation.py` imports these modules, and neither does this server file
-outside these three tool bodies.
+outside these five tool bodies.
+
+**`get_lab_ldp_session_history`/`get_lab_device_uptime_history` (B-530 TSDB
+survey).** `ldp_session_history` wraps LDP's own `ta_up_time_seconds`
+(seconds since a session last came up, one series per session) -- chosen
+over the two metrics an earlier draft of this survey named
+(`peer_holdtime`, session-protection `spht_remaining`/`sp_duration`) after
+measuring all three live: `peer_holdtime` is a static configured value
+(180s on every session on this fabric, never varying) and the
+session-protection pair reads a constant 0 everywhere because this fabric
+configures session protection nowhere -- neither would ever have shown a
+session degrading, the property this tool exists to surface.
+`device_uptime_history` wraps `system_time_uptime_uptime` and answers "did
+this device reboot, and when" -- nothing else in this build reads a
+device's own uptime. Both reuse `isis_adjacency_history`'s own flap-
+detection logic (a value that drops between samples means a reset/reboot)
+via one shared helper, `metrics_prometheus._samples_and_resets`, rather
+than a second implementation.
+
+**BGP metrics are still not exposed.** Re-verified live for this survey,
+not merely reasserted: every one of `Cisco_IOS_XR_ipv4_bgp_oper`'s 257
+metric names carries `reset_reason`/`peer_reset_reason` labels, and those
+labels took 8 and 2 distinct values (respectively) over Prometheus's
+retention window -- short protocol-code tokens, not prose, so the
+disqualifying property is not "free text" as originally characterised. It
+is that a label changing value at all means Prometheus stores multiple
+historical series per neighbor where every other query here has exactly
+one stable series per identity for its whole lifetime -- and this survey's
+existence/coverage machinery (`_series_known`, `records_available`) has no
+notion of "which of several matched series is the current one." See
+`metrics_prometheus.py`'s module docstring, "Why BGP is still not queried",
+for the full measurement.
 
 **Named queries only, always.** Each tool wraps exactly one entry from
 `logs_loki.LOKI_QUERIES` / `metrics_prometheus.PROMETHEUS_QUERIES`, with
@@ -199,15 +235,75 @@ cable when both ends' LLDP evidence mutually agreed at collection time (see
 `netbox.py`'s "Cabling" section) -- a one-sided or disagreeing report never
 becomes a NetBox `Cable` at all.
 
-**neo4j gets no read tool.** Checked live before building anything (2026-08-19,
-`docker exec ... cypher-shell` against the running container):
+### External-source tool: neo4j (B-517)
+
+`get_lab_graph_topology` is the fourth external source, the same
+`_external_source_tool` class and gate as the three above. It wraps
+`graph.NEO4J_READ_QUERIES["topology"]`, one fixed pair of Cypher statements
+(nodes, then edges) -- no filter parameter, no Cypher parameter, the same
+"the whole recorded graph fits one call" reasoning `get_lab_netbox_inventory`/
+`get_lab_netbox_topology` give for taking none either.
+
+Checked live before building anything: 2026-08-19, `docker exec ...
+cypher-shell` against the running container found the graph EMPTY --
 `MATCH (n) RETURN count(n)` and `MATCH ()-[r]->() RETURN count(r)` both
-returned `0`. A read tool over an empty graph would tell a model "no
+returned `0`. A read tool over an empty graph would have told a model "no
 topology exists" in a fabric that plainly has one -- worse than no tool at
-all (`graph.py`'s own docstring names the same derive-don't-author discipline
-NetBox follows; B-509 is this failure mode's precedent for NetBox itself,
-before that store had real data). If `graph.write_graph` is ever run for
-real, the read half belongs beside NetBox's, built the same way.
+all, B-509's precedent for NetBox itself before that store had real data. So
+no tool was built then. Credentials moved from the neo4j container's own
+`NEO4J_AUTH` into the gitignored `.env`, `graph.build_graph`/`graph.write_graph`
+were run against this lab's live evidence, and the write was verified two
+ways (`write_graph`'s own return value, and directly with `cypher-shell`):
+**9 nodes, 29 relationships.** This tool is the read half that comment said
+belonged here once the graph held real data.
+
+**Derived, never authoritative -- stated in the tool's own description, same
+as NetBox's.** The graph is a *projection* of this project's own parsed
+LLDP/IS-IS evidence (`stage-2-architecture.md` §2.3), replaced wholesale each
+time the collector runs, never a live read and never a second place topology
+gets typed in. `data.parsed.nodes` lists every device the graph has evidence
+for, **including one with zero edges on every protocol** -- a real and
+interesting shape (an isolated device), deliberately not hidden by an
+edges-only response. `data.parsed.edges` lists every LLDP or IS-IS adjacency
+separately, each carrying which `protocol` reported it; LLDP and IS-IS are
+**never merged into one edge**, because a link can be a clean LLDP edge with
+no IS-IS edge at all and merging them would erase that fact. Each edge's
+`interface_a`/`interface_b` is that end's own reported local interface, in
+whatever spelling that device used -- may differ in abbreviation from the
+other end's, or from another tool's report of the same port; see
+`interface_kind.canonical` before comparing it against one from a different
+source.
+
+### `get_lab_sr_policy_detail` (B-515)
+
+`check_lab_sr_policies` reports policy-level state only (colour, endpoint,
+admin/operational state, binding SID) -- enough to say a policy is down, not
+enough to say *why*. Measured live (MCP §14b, 2026-08-19): a model correctly
+diagnosed a down SR-TE policy as "no candidate path resolves" and then could
+not name which SID or segment list was involved, because nothing exposed the
+candidate-path detail the device already prints for
+`show segment-routing traffic-eng policy color <n> endpoint ipv4 <ip> detail`.
+
+`get_lab_sr_policy_detail(device_name, policy_id)` is that command, as a
+validated, parameterised template (`templates.PLATFORM_TEMPLATES['cisco_xr']
+['sr_policy_detail']`) rather than a static allowlist entry -- it takes one
+caller-supplied value. `policy_id` is `"<color>:<endpoint>"`, e.g.
+`"20:10.255.0.13"`, the exact shape `check_lab_sr_policies`' own `policy`
+field already reports for each row, so a value copied from that tool's
+output is a valid call here. It is split into the template's two declared
+parameters (`color`: `BoundedIntParam`, `endpoint`: `IPv4AddressParam` --
+both already-existing param types, not a new one) by
+`templates.split_sr_policy_id` before rendering; a malformed id is refused,
+classified, before any device is contacted.
+
+`data.parsed.records` holds the resolved SID stack, in order, for an
+Explicit candidate path over a valid segment list -- empty for a Dynamic
+path that has not resolved. `data.parsed.meta.last_error` (e.g. "No path
+found") is device-authored free text and crosses the boundary quoted, the
+same treatment `bgp_neighbor`'s `last_reset_reason` already gets.
+`data.parsed.meta.found` is `false` -- distinguishably from a transport
+error -- when this device has no policy at that colour/endpoint at all;
+IOS-XR answers a non-matching colour/endpoint with nothing, not an error.
 
 ### Snapshots, diffing, health, and flap detection (Phase 8)
 
@@ -240,7 +336,7 @@ symptom. Every verdict is code comparing parsed fields; **no model is involved
 and none is called**, and the report is rendered from the descent's own typed
 fields rather than written by one.
 
-It exists because the other tools (30 at last count — the list above is authoritative) answer *what is the state of X*, and
+It exists because the other tools (34 at last count — the list above is authoritative) answer *what is the state of X*, and
 the question an operator actually has is *why is this broken*. Answering that by
 calling six tools and reasoning over the results is exactly where a model
 invents a plausible chain; this returns one that was derived.
@@ -264,8 +360,9 @@ parameter degrades to the bare decorator instead of crashing the server).
 and a distinguishing `title` (`server.ACTIVE_PROBE_ANNOTATIONS_SUPPORTED`,
 B-473) -- see "Active probes" above. `get_lab_logs`/
 `get_lab_interface_rate_history`/`get_lab_isis_adjacency_history`/
-`get_lab_netbox_inventory`/`get_lab_netbox_topology` carry a distinguishing
-`title` of their own without `open_world_hint`
+`get_lab_ldp_session_history`/`get_lab_device_uptime_history`/
+`get_lab_netbox_inventory`/`get_lab_netbox_topology`/`get_lab_graph_topology`
+carry a distinguishing `title` of their own without `open_world_hint`
 (`server.EXTERNAL_SOURCE_ANNOTATIONS_SUPPORTED`, B-512) -- see "External-
 source tools" above.
 

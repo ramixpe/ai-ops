@@ -73,6 +73,7 @@ def test_build_parser_includes_every_documented_subcommand():
         "route",
         "bgp-neighbor",
         "interface",
+        "sr-policy",
         "logging",
         "ping",
         "traceroute",
@@ -943,3 +944,44 @@ def test_the_cli_usage_docstring_lists_every_implemented_flow():
     assert not missing, (
         f"flows implemented but absent from `nettools --help`: {missing}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# nettools sr-policy (B-515)
+# --------------------------------------------------------------------------- #
+
+
+def _sr_policy_args(policy_id: str):
+    return cli.build_parser().parse_args(["sr-policy", "PE1", policy_id, "--quiet"])
+
+
+def test_cmd_sr_policy_splits_the_policy_id_and_calls_run_template(monkeypatch):
+    captured = {}
+
+    def fake_run_template(device, template_name, **kwargs):
+        captured["device"] = device
+        captured["template_name"] = template_name
+        captured.update(kwargs)
+        return _envelope(tool="run_template", device=device)
+
+    monkeypatch.setattr(cli, "run_template", fake_run_template)
+
+    exit_code = cli._cmd_sr_policy(_sr_policy_args("20:10.255.0.13"))
+
+    assert captured == {
+        "device": "PE1", "template_name": "sr_policy_detail",
+        "color": "20", "endpoint": "10.255.0.13",
+    }
+    assert exit_code == cli.EXIT_OK
+
+
+def test_cmd_sr_policy_refuses_a_malformed_policy_id_before_calling_run_template(monkeypatch):
+    called = []
+    monkeypatch.setattr(
+        cli, "run_template", lambda *a, **k: called.append(1) or _envelope()
+    )
+
+    exit_code = cli._cmd_sr_policy(_sr_policy_args("not-a-valid-id"))
+
+    assert called == [], "run_template must never fire for a malformed policy id"
+    assert exit_code == cli.EXIT_WARNING

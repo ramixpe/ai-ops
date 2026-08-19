@@ -69,10 +69,12 @@ y += group(LX, y, LW, "ASK ONE DEVICE A QUESTION", f"the {len(intents)} collecti
 
 _TEMPLATE_DISPLAY = {"route": "route", "bgp_neighbor": "bgp-neighbor", "interface": "interface",
                      "logging": "logging", "ping": "ping", "traceroute": "traceroute",
-                     "config_isis": "config-isis", "config_interface": "config-interface"}
+                     "config_isis": "config-isis", "config_interface": "config-interface",
+                     "sr_policy_detail": "sr-policy"}
 _TEMPLATE_ARGS = {"route": "DEVICE PREFIX", "bgp_neighbor": "DEVICE ADDRESS", "interface": "DEVICE NAME",
                   "logging": "DEVICE --count N", "ping": "sends ICMP", "traceroute": "sends UDP",
-                  "config_isis": "DEVICE — B-104", "config_interface": "DEVICE NAME — B-104"}
+                  "config_isis": "DEVICE — B-104", "config_interface": "DEVICE NAME — B-104",
+                  "sr_policy_detail": "DEVICE COLOR:ENDPOINT — B-515"}
 lookup_rows = [(_TEMPLATE_DISPLAY[n], _TEMPLATE_ARGS[n], "live") for n in templates["lookups"]]
 probe_rows = [(_TEMPLATE_DISPLAY[n], _TEMPLATE_ARGS[n], "probe") for n in templates["probes"]]
 y += group(LX, y, LW, "LOOK UP ONE OBJECT", "validated parameterised templates — the argument is re-rendered, never interpolated",

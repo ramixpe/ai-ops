@@ -22,7 +22,7 @@ except ModuleNotFoundError:
     # MCP SDK < 2.0 exposed it as FastMCP.
     from mcp.server.fastmcp import FastMCP
 
-from agent_nettools import logs_loki, metrics_prometheus, netbox
+from agent_nettools import graph, logs_loki, metrics_prometheus, netbox
 from agent_nettools.health import evaluate_fabric
 from agent_nettools.inventory_model import load_inventory_file
 from agent_nettools.investigation import investigate
@@ -49,8 +49,10 @@ from agent_nettools.network_tools import (
     load_golden_snapshot,
     load_latest_snapshot,
     ping_device,
+    run_template,
     traceroute_device,
 )
+from agent_nettools.templates import TemplateValidationError, split_sr_policy_id
 
 # MCP clients (and `make mcp` / `nettools-mcp`) launch this server directly, so it
 # has to load .env itself — otherwise every tool fails on a missing
@@ -598,6 +600,45 @@ def check_lab_sr_policies(device_name: str) -> dict:
 
 
 @_read_only_tool()
+def get_lab_sr_policy_detail(device_name: str, policy_id: str) -> dict:
+    """Answers: *for one SR-TE policy, which segment list or SID is actually
+    in use -- or, if it is down, which candidate path did not resolve?*
+
+    Prefer this over `check_lab_sr_policies` when a policy's admin/operational
+    state and binding SID are not enough -- MCP §14b measured a model
+    correctly diagnose a down policy as "no candidate path resolves" from
+    `check_lab_sr_policies` alone and then be unable to name which SID or
+    segment list was involved, because that tool reports policy-level state
+    only. This does: `segment_list_name`/the SID stack (`data.parsed.
+    records`) for an Explicit candidate path that resolved; `last_error`
+    (e.g. "No path found") for a Dynamic one that did not.
+
+    ``policy_id`` is ``"<color>:<endpoint>"``, e.g. ``"20:10.255.0.13"`` --
+    the exact same shape `check_lab_sr_policies`' own `policy` field reports
+    for each row, so a value copied from that tool's output is a valid call
+    here. Refused, classified, before any device is contacted if it is not
+    that shape.
+
+    `data.parsed.found` is `false` -- distinguishably from a transport
+    error -- when this device has no policy at that color/endpoint at all;
+    IOS-XR answers a non-matching color/endpoint with nothing, not an error.
+    """
+
+    try:
+        color, endpoint = split_sr_policy_id(policy_id)
+    except TemplateValidationError as exc:
+        return {
+            "tool": "get_lab_sr_policy_detail",
+            "device": device_name,
+            "status": "error",
+            "data": {},
+            "errors": [str(exc)],
+        }
+
+    return run_template(device_name, "sr_policy_detail", color=color, endpoint=endpoint)
+
+
+@_read_only_tool()
 def check_lab_fabric(check: str = "bgp") -> dict:
     """Answers: *how does one thing look across every device at once?*
 
@@ -677,6 +718,18 @@ def get_lab_interface(device_name: str, name: str) -> dict:
     ``name`` is an interface name as the device spells it, e.g.
     "GigabitEthernet0/0/0/1", "Gi0/0/0/2.300" or "Loopback0". It is validated
     against an anchored charset, so it cannot carry shell or CLI syntax.
+
+    B-519 audit note: ``name`` is deliberately NOT canonicalised here. Unlike
+    a Prometheus label or a NetBox join key, it is rendered straight into a
+    device command (`show interfaces {name}`) that IOS-XR itself accepts in
+    either spelling -- confirmed live, 2026-08-19, against PE2: both
+    "Gi0/0/0/0" and "GigabitEthernet0/0/0/0" return the same record with
+    `status: success`. Rewriting it would only change which committed
+    fixture file `--from-fixtures` needs (`tests/fixtures/.../show-
+    interfaces-gi0-0-0-0.txt` is captured under the SHORT spelling), with no
+    comparison anywhere in this call path for the rewrite to fix. See
+    `tests/test_interface_canonicalization.py` for the full audit and why
+    this is an intentional exemption, not a missed site.
     """
 
     return get_interface(device_name, name)
@@ -1122,19 +1175,93 @@ def get_lab_isis_adjacency_history(
     return _with_prometheus_coverage(envelope, device_name)
 
 
+@_external_source_tool()
+def get_lab_ldp_session_history(
+    device_name: str, since_seconds: int = 3600, step_seconds: int = 60
+) -> dict:
+    """Answers: *has any of this device's LDP sessions flapped recently, even
+    though everything looks healthy right now?*
+
+    Prefer this over `check_lab_ldp_neighbors` when a problem is
+    intermittent -- a session that reset and came back looks clean in a
+    current-state read, the same reason `get_lab_isis_adjacency_history`
+    exists for IS-IS. This queries an external metrics store (Prometheus),
+    not the device: no SSH session is opened. One record per LDP session,
+    each carrying its ``ta_up_time_seconds`` sample history (seconds since
+    the session last came up) and a derived ``reset_count`` -- a drop
+    between consecutive samples means the session reset.
+
+    It will NOT tell you the CURRENT Up/Down state of a session that has
+    not been sampled since it last came up -- for that use
+    `check_lab_ldp_neighbors`. Check ``data.coverage`` before reporting zero
+    sessions as isolation: it distinguishes "this device genuinely has
+    none" from "the read failed".
+
+    ``since_seconds``/``step_seconds`` bound the sampled window and its
+    resolution, the same as `get_lab_interface_rate_history`.
+    """
+
+    envelope = metrics_prometheus.run_named_query(
+        "ldp_session_history",
+        device=device_name,
+        since_seconds=since_seconds,
+        step_seconds=step_seconds,
+    )
+    return _with_prometheus_coverage(envelope, device_name)
+
+
+@_external_source_tool()
+def get_lab_device_uptime_history(
+    device_name: str, since_seconds: int = 3600, step_seconds: int = 60
+) -> dict:
+    """Answers: *did this device reboot recently, and when?*
+
+    Prefer this to explain a fabric-wide event (every session on one device
+    resetting at once, a device that was briefly unreachable) as a reboot
+    rather than reasoning about it protocol by protocol -- nothing else in
+    this build reads the device's own uptime. This queries an external
+    metrics store (Prometheus), not the device: no SSH session is opened.
+
+    A single time series -- this device's own `system_time_uptime_uptime`
+    (seconds since boot) -- sampled every `step_seconds` over the last
+    `since_seconds`. A value that drops between consecutive samples means
+    the device rebooted; `data.parsed.meta.reboot_count`/`reboot_timestamps`
+    say how many times and when, within the window.
+
+    Check `data.coverage` before reporting an empty result as "unknown
+    whether it rebooted": it distinguishes a real scrape gap from this
+    series never having been observed at all.
+
+    ``since_seconds``/``step_seconds`` bound the sampled window and its
+    resolution, the same as `get_lab_interface_rate_history`.
+    """
+
+    envelope = metrics_prometheus.run_named_query(
+        "device_uptime_history",
+        device=device_name,
+        since_seconds=since_seconds,
+        step_seconds=step_seconds,
+    )
+    return _with_prometheus_coverage(envelope, device_name)
+
+
 # --------------------------------------------------------------------------- #
-# Job 3 (this task): NetBox as an external-source tool, the same third
-# registration class Loki/Prometheus already use -- two named reads
-# (`netbox.NETBOX_READ_QUERIES`), no filter/query/cypher parameter on either
-# tool, gated by the same NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES.
+# Job 3: NetBox as an external-source tool, the same third registration class
+# Loki/Prometheus already use -- two named reads (`netbox.NETBOX_READ_QUERIES`),
+# no filter/query/cypher parameter on either tool, gated by the same
+# NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES.
 #
-# neo4j gets NO tool here. Checked live (2026-08-19, docker exec cypher-shell
-# against the running neo4j container): `MATCH (n) RETURN count(n)` -> 0,
-# `MATCH ()-[r]->() RETURN count(r)` -> 0. Empty. A read tool over an empty
-# graph would tell a model "no topology exists" in a fabric that has one --
-# worse than no tool, B-509's own shape (an inventory tool over an empty
-# NetBox would have been worse than none). If graph.write_graph is ever run
-# for real, the read half belongs here, built the same way as NetBox's below.
+# neo4j (B-517): checked live 2026-08-19 (docker exec cypher-shell against the
+# running container) and found EMPTY -- `MATCH (n) RETURN count(n)` -> 0,
+# `MATCH ()-[r]->() RETURN count(r)` -> 0 -- so no tool was built then; a read
+# tool over an empty graph would tell a model "no topology exists" in a fabric
+# that has one, worse than no tool at all (B-509's own shape). Credentials
+# moved from the container's `NEO4J_AUTH` into the gitignored `.env`, the
+# collector (`graph.build_graph`/`graph.write_graph`) run against this lab's
+# live evidence, and the write verified both through its own return value and
+# directly with `cypher-shell`: 9 nodes, 29 relationships. `get_lab_graph_
+# topology`, below, is the read half that comment said belonged here once the
+# graph held real data -- built the identical way NetBox's two tools are.
 # --------------------------------------------------------------------------- #
 
 
@@ -1188,6 +1315,38 @@ def get_lab_netbox_topology() -> dict:
     """
 
     return netbox.run_named_read("cable_topology")
+
+
+@_external_source_tool()
+def get_lab_graph_topology() -> dict:
+    """Answers: *what does this fabric's topology graph record as adjacent to
+    what -- LLDP and IS-IS, kept separate?*
+
+    Prefer this over `check_lab_lldp_neighbors`/`check_lab_isis_neighbors`
+    for the FABRIC-WIDE picture from one call rather than one device's own
+    live view, device by device. This queries an external graph store
+    (neo4j), not a device: no SSH session is opened.
+
+    `data.parsed.nodes` lists every device this graph has evidence for --
+    including one with ZERO edges on every protocol, which is a real and
+    interesting shape (an isolated device), not something this read hides.
+    `data.parsed.edges` lists every LLDP or IS-IS adjacency; each edge's
+    `protocol` says which. LLDP and IS-IS are NEVER merged into one edge --
+    a link can be a clean LLDP edge with no IS-IS edge at all, and collapsing
+    the two would erase exactly that fact. `interface_a`/`interface_b` are
+    each end's OWN report of its local interface, as that device spells it
+    (may differ in abbreviation from the other end's or from another tool's
+    spelling of the same interface -- see `interface_kind.canonical` if you
+    need to compare it against one).
+
+    This graph is DERIVED from this project's own parsed LLDP/IS-IS evidence
+    by `graph.write_graph` and is NEVER authoritative about the live fabric:
+    it is a recording of what was last collected, replaced wholesale each
+    time the collector runs, not a live read. For current per-device state
+    prefer `check_lab_lldp_neighbors`/`check_lab_isis_neighbors`.
+    """
+
+    return graph.run_named_read("topology")
 
 
 # --------------------------------------------------------------------------- #
@@ -1313,6 +1472,19 @@ def investigate_lab_session(
 
     No model is called and no paraphrase is produced. The report is rendered
     from the descent's own typed fields.
+
+    B-519 audit note: for ``interface``/``isis_adjacency``/``ldp_session``
+    (`interface_kind.interface_scoped_flows()`), ``subject`` is deliberately
+    NOT canonicalised here, unlike the parameters this task DID fix
+    (`metrics_prometheus`'s Prometheus-label lookup). Every one of those
+    flows' descents uses `SubjectRule.AS_IS`: `subject` is rendered straight
+    into a per-rung `show interfaces {subject}` device command, which
+    IOS-XR accepts in either spelling (confirmed live), and is separately
+    matched by `checks.interface_exists` through `same_interface`, which
+    already tolerates either spelling on its own. Rewriting `subject` here
+    would fix no comparison and would only make `--from-fixtures` (whose
+    captures are keyed by the SHORT spelling) miss a file for a caller who
+    typed the long one. See `tests/test_interface_canonicalization.py`.
     """
 
     result = investigate(device, subject, flow=flow)

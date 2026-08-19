@@ -1715,3 +1715,164 @@ def test_a_fully_unarmed_socket_reads_as_unarmed():
 
     assert meta["socket_armed_read"] is False
     assert meta["socket_armed_write"] is False
+
+
+# --------------------------------------------------------------------------- #
+# cisco_xr: sr_policy_detail (B-515). No committed fixture exists for this
+# template (tests/fixtures/ is out of scope for this task) -- these are the
+# real command outputs captured LIVE 2026-08-19 against PE1, the only device
+# on this fabric with any SR-TE policy configured (verified: swept `sr` on
+# all nine devices, only PE1 has any). Reproduced here verbatim, including
+# the real trailing spaces IOS-XR prints on "Maximum SID Depth: 10 " and
+# "Path Accumulated Metric: 0 " -- not a typo.
+# --------------------------------------------------------------------------- #
+
+_SR_POLICY_DETAIL_UP = """
+Wed Aug 19 15:03:55.462 UTC
+
+SR-TE policy database
+---------------------
+
+Color: 10, End-point: 10.255.0.13
+  Name: srte_c_10_ep_10.255.0.13
+  Status:
+    Admin: up  Operational: up for 1d10h (since Aug 18 05:00:08.295)
+  Candidate-paths:
+    Preference: 100 (configuration) (active)
+      Name: srte_c_10_ep_10.255.0.13
+      Requested BSID: dynamic
+      Constraints:
+        Protection Type: protected-preferred
+        Maximum SID Depth: 10
+      Explicit: segment-list SL-VIA-P3 (valid)
+        Weight: 1, Metric Type: TE
+          SID[0]: 16003
+          SID[1]: 16013
+  LSPs:
+    LSP[0]:
+      LSP-ID: 25 policy ID: 1 (active)
+      Local label: 24030
+      State: Programmed
+      Binding SID: 24031
+  Attributes:
+    Binding SID: 24031
+    Forward Class: Not Configured
+    Steering labeled-services disabled: no
+    Steering BGP disabled: no
+    IPv6 caps enable: yes
+    Invalidation drop enabled: no
+    Max Install Standby Candidate Paths: 0
+"""
+
+_SR_POLICY_DETAIL_DOWN = """
+Wed Aug 19 15:00:21.898 UTC
+
+SR-TE policy database
+---------------------
+
+Color: 20, End-point: 10.255.0.13
+  Name: srte_c_20_ep_10.255.0.13
+  Status:
+    Admin: up  Operational: down for 5d21h (since Aug 13 17:17:47.792)
+  Candidate-paths:
+    Preference: 100 (configuration) (inactive)
+      Name: srte_c_20_ep_10.255.0.13
+      Requested BSID: dynamic
+      Constraints:
+        Protection Type: protected-preferred
+        Maximum SID Depth: 10
+      Dynamic (inactive)
+      Last error: No path found
+        Metric Type: LATENCY,   Path Accumulated Metric: 0
+  Attributes:
+    Forward Class: 0
+    Steering labeled-services disabled: no
+    Steering BGP disabled: no
+    IPv6 caps enable: no
+    Invalidation drop enabled: no
+    Max Install Standby Candidate Paths: 0
+"""
+
+# IOS-XR's own "nothing here" shape for a color/endpoint with no matching
+# policy: no error text at all, just its usual timestamp banner.
+_SR_POLICY_DETAIL_NOT_FOUND = """
+Wed Aug 19 15:00:31.352 UTC
+"""
+
+
+def test_sr_policy_detail_up_exposes_the_resolved_segment_list_and_sid_stack():
+    """The point of B-515: the SID stack a down-policy diagnosis needs to
+    name, and does not get from check_lab_sr_policies' policy-level fields."""
+
+    result = tp.parse_xr_sr_policy_detail(_SR_POLICY_DETAIL_UP)
+    meta = result["meta"]
+
+    assert meta["found"] is True
+    assert meta["policy"] == "10:10.255.0.13"
+    assert meta["admin_state"] == "up"
+    assert meta["operational_state"] == "up"
+    assert meta["candidate_path_type"] == "explicit"
+    assert meta["candidate_path_active"] is True
+    assert meta["segment_list_name"] == "SL-VIA-P3"
+    assert meta["segment_list_valid"] is True
+    assert meta["last_error"] is None
+    assert meta["binding_sid"] == "24031"
+    assert meta["lsp_state"] == "Programmed"
+    assert result["records"] == [
+        {"index": "0", "sid": "16003"},
+        {"index": "1", "sid": "16013"},
+    ]
+    assert meta["unaccounted_lines"] == []
+    assert meta["unparsed_rows"] == 0
+
+
+def test_sr_policy_detail_down_exposes_the_last_error_and_no_sids():
+    """MCP §14b's exact case: a model that could say "no candidate path
+    resolves" and not name why -- `last_error` is why."""
+
+    result = tp.parse_xr_sr_policy_detail(_SR_POLICY_DETAIL_DOWN)
+    meta = result["meta"]
+
+    assert meta["found"] is True
+    assert meta["policy"] == "20:10.255.0.13"
+    assert meta["operational_state"] == "down"
+    assert meta["candidate_path_type"] == "dynamic"
+    assert meta["candidate_path_active"] is False
+    assert meta["segment_list_name"] is None
+    assert meta["last_error"] == "No path found"
+    assert meta["binding_sid"] is None
+    assert meta["lsp_state"] is None
+    assert result["records"] == []
+    assert meta["unaccounted_lines"] == []
+    assert meta["unparsed_rows"] == 0
+
+
+def test_sr_policy_detail_absence_is_found_false_not_an_error():
+    """IOS-XR answers a non-matching color/endpoint with nothing, not an
+    error string -- `found: False` must be inferred from that absence,
+    the same "device's own honest nothing" shape parse_xr_bgp_neighbor's
+    "Neighbor not found"/parse_xr_route's "Network not in table" already
+    handle, just with no line to match against here."""
+
+    result = tp.parse_xr_sr_policy_detail(_SR_POLICY_DETAIL_NOT_FOUND)
+
+    assert result["meta"]["found"] is False
+    assert result["meta"]["policy"] is None
+    assert result["records"] == []
+    assert result["meta"]["unaccounted_lines"] == []
+
+
+def test_sr_policy_detail_last_error_is_declared_as_free_text():
+    """The MCP-boundary half of B-515: `last_error` must be quoted crossing
+    to a model, not left bare -- pinned here on the declaration
+    `mcp_server.boundary`/`model_egress` both read, not on the boundary
+    module itself (that is `tests/test_mcp_boundary.py`'s job)."""
+
+    from agent_nettools.model_egress import FREE_TEXT_FIELDS
+
+    assert ("sr_policy_detail", "last_error") in FREE_TEXT_FIELDS
+
+
+def test_sr_policy_detail_raises_for_genuinely_unrecognised_output():
+    with pytest.raises(parsers.ParseError):
+        tp.parse_xr_sr_policy_detail("garbage the device never actually prints")

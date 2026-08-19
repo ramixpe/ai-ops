@@ -536,6 +536,62 @@ SETTINGS: tuple[Setting, ...] = (
         "netbox",
         minimum=0.001,
     ),
+    # -- graph.py (B-517): the neo4j topology collector/reader. neo4j is
+    # DERIVED, never authored (stage-2-architecture.md §2.3) -- see the
+    # module docstring. `write_graph` (the operator-run collector) and
+    # `run_named_read` (behind get_lab_graph_topology, MCP) read the SAME
+    # four variables below -- never a second credential pair for the read
+    # half, the same discipline NETBOX_URL/NETBOX_TOKEN above follow.
+    # `graph._ENV_URI`/`_ENV_USER`/`_ENV_PASSWORD`/`_ENV_DATABASE` name these
+    # literally (`NEO4J_URI` etc.) rather than through an `*_ENV` indirection,
+    # which is why `tests/test_settings.py`'s source scan does not
+    # independently rediscover them the way it rediscovers
+    # NETTOOLS_NEO4J_TIMEOUT_SECONDS below -- declared here anyway, for the
+    # same reason every other credential this project reads is: `nettools
+    # config show` should list it.
+    Setting(
+        "NEO4J_URI", "string", None,
+        "neo4j Bolt URI, e.g. bolt://172.19.0.16:7687 (this lab's neo4j "
+        "container publishes no port to the host, so a host-run process "
+        "needs the container's own IP on the compose network, not a "
+        "hostname -- see .env.example for how to find it). No default is "
+        "offered -- guessing wrong means silently writing to, or reading "
+        "\"success\" from, the wrong database, worse than refusing to run.",
+        "graph",
+    ),
+    Setting(
+        "NEO4J_USER", "string", "neo4j",
+        "neo4j account name. Defaults to \"neo4j\" only because that is the "
+        "fixed, non-secret account name every stock neo4j deployment uses "
+        "-- the *password* is the secret, the username is not.",
+        "graph",
+    ),
+    Setting(
+        "NEO4J_PASSWORD", "secret", None,
+        "neo4j password. Read from the container's own NEO4J_AUTH (docker "
+        "inspect the neo4j container's Config.Env) -- never committed, "
+        "never logged, redacted from every exception message write_graph()/"
+        "run_named_read() can raise.",
+        "graph",
+        secret=True,
+    ),
+    Setting(
+        "NEO4J_DATABASE", "string", None,
+        "Optional non-default neo4j database name. Unset uses neo4j's own "
+        "default (\"neo4j\").",
+        "graph",
+    ),
+    Setting(
+        "NETTOOLS_NEO4J_TIMEOUT_SECONDS", "float", 10.0,
+        "Connection and read-transaction-retry timeout for one neo4j read "
+        "(graph.run_named_read, behind get_lab_graph_topology). Measured "
+        "2026-08-19: with no bound, the neo4j driver's own connect-retry "
+        "backoff left an unreachable-server call still retrying past 60s. "
+        "Same default as NETTOOLS_LOKI_TIMEOUT_SECONDS/"
+        "NETTOOLS_PROMETHEUS_TIMEOUT_SECONDS/NETTOOLS_NETBOX_TIMEOUT_SECONDS.",
+        "graph",
+        minimum=0.001,
+    ),
     # -- credential_resolver.py, via inventory/lab.yaml's credential group --
     # These three are the *conventional* names this lab's own inventory.yaml
     # configures (username_env/password_env/ssh_keyfile_env) -- see
@@ -568,8 +624,21 @@ SETTINGS: tuple[Setting, ...] = (
 # Python literal anywhere in the source tree. tests/test_settings.py treats
 # this set, not a blanket exemption, as the only allowed gap between the
 # source scan and SETTINGS.
+#
+# NEO4J_URI/NEO4J_USER/NEO4J_PASSWORD/NEO4J_DATABASE are here for a DIFFERENT
+# reason, not the YAML-indirection one above: graph.py reads them via
+# `os.environ.get(_ENV_URI)` where `_ENV_URI = "NEO4J_URI"` is a real Python
+# string literal, just named with the env-var-name word BEFORE `_ENV`
+# (`_ENV_URI`) rather than after it (`*_ENV`), the convention
+# `_RE_ENV_ASSIGN` below actually matches. Renaming graph.py's four constants
+# to fit the scanner would be changing working code to satisfy a test rather
+# than the other way around -- listed here instead, the same "known,
+# reviewed gap" this set already exists for.
 EXTERNAL_ONLY_KEYS: frozenset[str] = frozenset(
-    {"DEVICE_USERNAME", "DEVICE_PASSWORD", "DEVICE_SSH_KEYFILE"}
+    {
+        "DEVICE_USERNAME", "DEVICE_PASSWORD", "DEVICE_SSH_KEYFILE",
+        "NEO4J_URI", "NEO4J_USER", "NEO4J_PASSWORD", "NEO4J_DATABASE",
+    }
 )
 
 

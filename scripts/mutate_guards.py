@@ -397,6 +397,120 @@ MUTATIONS = [
      "    return [str(ip) for ip in network.hosts() if str(ip) not in reserved]\n",
      "    return [str(ip) for ip in network.hosts()]\n",
      "test_unused_hosts_excludes_reserved_and_keeps_everything_else"),
+    # ---- B-519: the interface-name canonicalisation audit. The four
+    # entry points below (`get_lab_interface`, `investigate_lab_session`,
+    # `nettools interface`, `nettools investigate`) were AUDITED and found
+    # to be EXEMPT -- see tests/test_interface_canonicalization.py's module
+    # docstring for why forwarding the caller's own spelling, unrewritten,
+    # is correct here (unlike the Prometheus label lookup OBS-202 already
+    # fixed). The guard worth mutation-testing is the opposite direction
+    # from every entry above: not "a protection is removed and a test
+    # notices", but "a rewrite is introduced where the audit deliberately
+    # left none, and a test notices that too" -- `.upper()` stands in for
+    # any such rewrite (including a well-intentioned `canonical(...)` call)
+    # without needing a new import the mutation would otherwise leave
+    # dangling. Counted before adding these entries (OBS-191): each anchor
+    # string below occurs exactly once in its file (`grep -c`, 2026-08-19),
+    # so each mutation targets the one call site it names, unambiguously. ----
+
+    ("B-519-MCP-INTERFACE", "get_lab_interface forwards the caller's "
+     "interface-name spelling unrewritten (audited EXEMPT: it renders "
+     "straight into a device command IOS-XR accepts in either spelling, "
+     "with no comparison on this path for a rewrite to fix)",
+     "mcp_server/server.py",
+     "    return get_interface(device_name, name)\n",
+     "    return get_interface(device_name, name.upper())\n",
+     "test_get_lab_interface_forwards_the_caller_spelling_unchanged"),
+
+    ("B-519-MCP-SUBJECT", "investigate_lab_session forwards the caller's "
+     "subject spelling unrewritten for interface/isis_adjacency/ldp_session "
+     "(audited EXEMPT: SubjectRule.AS_IS renders it straight into a device "
+     "command, and checks.interface_exists already tolerates either "
+     "spelling on its own via same_interface)",
+     "mcp_server/server.py",
+     "    result = investigate(device, subject, flow=flow)\n",
+     "    result = investigate(device, subject.upper(), flow=flow)\n",
+     "test_investigate_lab_session_forwards_the_subject_spelling_unchanged"),
+
+    ("B-519-CLI-INTERFACE", "nettools interface forwards the caller's "
+     "interface-name spelling unrewritten -- the CLI's own copy of the "
+     "get_lab_interface guard above",
+     "src/agent_nettools/cli.py",
+     "    result = get_interface(args.device, args.name)\n",
+     "    result = get_interface(args.device, args.name.upper())\n",
+     "test_cli_interface_forwards_the_caller_spelling_unchanged"),
+
+    ("B-519-CLI-SUBJECT", "nettools investigate forwards the caller's "
+     "subject spelling unrewritten -- the CLI's own copy of the "
+     "investigate_lab_session guard above",
+     "src/agent_nettools/cli.py",
+     "            args.device, subject, flow=flow, analyst=analyst, sender=sender\n",
+     "            args.device, subject.upper(), flow=flow, analyst=analyst, sender=sender\n",
+     "test_cli_investigate_forwards_the_subject_spelling_unchanged"),
+
+    # ---- B-517: neo4j read tool. GRAPH-DERIVED mirrors NETBOX-DERIVED above
+    # exactly, for the same reason: `get_lab_graph_topology`'s DESCRIPTION,
+    # not a module docstring nobody reads, is the reasoning surface a model
+    # acts on (OBS-112). Counted before adding this entry (OBS-191): the
+    # anchor string occurs exactly once in server.py (`python3 -c` string
+    # count, 2026-08-19). ----
+
+    ("GRAPH-DERIVED", "get_lab_graph_topology's description states the "
+     "graph is DERIVED from parsed device evidence and is never "
+     "authoritative about the live fabric -- OBS-112's lesson applied to "
+     "the third external-source tool",
+     "mcp_server/server.py",
+     "    This graph is DERIVED from this project's own parsed LLDP/IS-IS evidence\n"
+     "    by `graph.write_graph` and is NEVER authoritative about the live fabric:\n",
+     "    This graph\n"
+     "    by `graph.write_graph`:\n",
+     "test_get_lab_graph_topology_states_it_is_derived_not_authoritative"),
+
+    # ---- B-515: SR-TE policy detail. `templates.split_sr_policy_id` itself
+    # cannot be mutated here -- it lives in the FROZEN templates.py, and
+    # `run_one` above refuses to touch a FROZEN path (§0.5); its own
+    # guarantee is covered by tests/test_safety.py/test_template_security.py
+    # passing UNEDITED against the new template, verified separately. What
+    # CAN be (and is) mutated is the caller-side wiring in the two non-frozen
+    # files this task owns. Counted before adding these entries (OBS-191):
+    # both anchor strings occur exactly once in their file (`grep -c`,
+    # 2026-08-19). ----
+
+    ("B-515-SPLIT-CALLED", "get_lab_sr_policy_detail actually calls "
+     "templates.split_sr_policy_id to validate/split policy_id before "
+     "calling run_template, rather than forwarding the raw caller string",
+     "mcp_server/server.py",
+     "        color, endpoint = split_sr_policy_id(policy_id)\n",
+     "        color, endpoint = policy_id, policy_id\n",
+     "test_get_lab_sr_policy_detail_refuses_a_malformed_policy_id_classified_not_unclassified"),
+
+    ("B-515-FREE-TEXT-DECLARED", "sr_policy_detail's last_error is declared "
+     "as free text in FREE_TEXT_FIELDS, so it crosses the MCP boundary "
+     "quoted rather than bare -- the declaration itself, not the generic "
+     "quoting mechanism B-467-MCP above already guards",
+     "src/agent_nettools/model_egress.py",
+     '        ("sr_policy_detail", "last_error"),\n',
+     "",
+     "test_get_lab_sr_policy_detail_wraps_last_error_as_free_text_through_the_actual_registered_tool"),
+
+    # ---- B-530: the TSDB survey (ldp_session_history/device_uptime_
+    # history). The guard worth mutation-testing is the deliberate exclusion
+    # this survey's own argument rests on: LDP's series carries
+    # capabilities_received_description (free-text-shaped, "MP: Multi-
+    # Topology (MT)") and the shaper must never extract it. Counted before
+    # adding this entry (OBS-191): the anchor occurs exactly once in
+    # metrics_prometheus.py (`grep -c`, 2026-08-19). ----
+
+    ("B-530-LDP-NO-CAPABILITIES", "_shape_ldp_session_records never "
+     "extracts capabilities_received_description/_sent_description (the "
+     "two labels on the LDP series that read as free text) into the "
+     "record -- the specific exclusion the TSDB survey's own argument for "
+     "querying this family rests on",
+     "src/agent_nettools/metrics_prometheus.py",
+     '                "peer_state": metric.get("detailed_information_peer_state"),\n',
+     '                "peer_state": metric.get("detailed_information_peer_state"),\n'
+     '                "capabilities": metric.get("detailed_information_capabilities_received_description"),\n',
+     "test_an_unnamed_hostile_label_never_reaches_the_ldp_shaped_record"),
 ]
 
 
@@ -597,15 +711,24 @@ def main(argv: list[str]) -> int:
         # platforms.py). Additive both times; the frozen safety TESTS pass
         # unedited against it.
         "src/agent_nettools/platforms.py": "0a11cdc99d4b0d37c69e7845566bc32898dba96a",
-        # templates.py: B-104, the config axis (D16) -- two new templates,
-        # `config_isis` and `config_interface`, both section-scoped, neither
-        # an unqualified `show running-config` (pinned absent by
-        # tests/test_config_section.py, with a positive control per
-        # OBS-181). NOT operator sign-off -- see the matching
-        # PendingOperatorReview entry in tests/test_frozen_files.py for the
-        # full note; both slots must be kept in sync by hand, since this
-        # table is a plain literal and not imported from that test module.
-        "src/agent_nettools/templates.py": "256c7ecea84155a54a08686b56693721a5b3c73a",
+        # templates.py: B-104 (prior repin), the config axis (D16) -- two new
+        # templates, `config_isis` and `config_interface`, both
+        # section-scoped, neither an unqualified `show running-config`
+        # (pinned absent by tests/test_config_section.py, with a positive
+        # control per OBS-181). PLUS B-515 (this repin, same file, same
+        # additive discipline): one more template, `sr_policy_detail` --
+        # `show segment-routing traffic-eng policy color {color} endpoint
+        # ipv4 {endpoint} detail`, reusing the EXISTING BoundedIntParam/
+        # IPv4AddressParam types (not a new one, so
+        # tests/test_template_security.py's FROZEN `_VALID_BY_TYPE` table
+        # needs no edit) -- closes the gap MCP §14b measured: a model could
+        # say a down SR-TE policy had no resolving candidate path but not
+        # name which SID or segment list. NOT operator sign-off -- see the
+        # matching PendingOperatorReview entry in tests/test_frozen_files.py
+        # for the full note; both slots must be kept in sync by hand, since
+        # this table is a plain literal and not imported from that test
+        # module.
+        "src/agent_nettools/templates.py": "09b1b799472e57973b30afecd82a1f9fa45f797b",
     }
     for f in sorted(FROZEN):
         expected = REPINNED.get(f) or sh(f"git rev-parse {BASELINE_COMMIT}:{f}").stdout.strip()

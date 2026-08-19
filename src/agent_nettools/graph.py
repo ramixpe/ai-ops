@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from . import parsers, topology
@@ -404,3 +405,266 @@ def write_graph(
             return session.execute_write(_replace_graph_tx, graph)
     finally:
         driver.close()
+
+
+# --------------------------------------------------------------------------- #
+# run_named_read -- the read half (B-517). Same third-registration-class
+# shape `netbox.run_named_read` already established for `mcp_server/server.py`
+# (`_external_source_tool`): a fixed table of named queries, no caller-
+# supplied Cypher, gated by the same NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES.
+#
+# Run live 2026-08-19 against the container `docker inspect
+# sota-lab-platform-neo4j-1` names: `write_graph` populated 9 nodes and 29
+# relationships (5 P-ring/PE devices' worth of lldp+isis edges) -- verified
+# both through this module's own `write_graph` return value and directly with
+# `cypher-shell`. This tool is the read half B-509/B-517 refused to build
+# while the graph was empty (see the comment above
+# `get_lab_netbox_topology`/`get_lab_graph_topology` in mcp_server/server.py):
+# a model told "no topology exists" over an empty graph would have concluded
+# the fabric has none, worse than no tool at all.
+# --------------------------------------------------------------------------- #
+
+SOURCE_NEO4J = "neo4j"
+
+#: Bounds how long an unreachable neo4j can hold an MCP tool call open.
+#: Measured 2026-08-19: with no bound, the driver's own connect-retry backoff
+#: (1s, 2s, 3s, 9s, 13s, 27s, ...) left an unreachable-server call still
+#: retrying past 60s. Same default (10s) and env-var-with-no-hardcoded-
+#: fallback-URL discipline as `NETTOOLS_LOKI_TIMEOUT_SECONDS`/
+#: `NETTOOLS_PROMETHEUS_TIMEOUT_SECONDS`/`NETTOOLS_NETBOX_TIMEOUT_SECONDS`.
+#: Applied to both the initial connection and the read transaction's own
+#: retry budget, so a caller gets a classified error inside one bounded
+#: window rather than the driver's unbounded default retry loop.
+NEO4J_TIMEOUT_ENV = "NETTOOLS_NEO4J_TIMEOUT_SECONDS"
+DEFAULT_TIMEOUT_SECONDS = 10.0
+
+
+def _neo4j_timeout_seconds() -> float:
+    raw = os.environ.get(NEO4J_TIMEOUT_ENV, "").strip()
+    if not raw:
+        return DEFAULT_TIMEOUT_SECONDS
+    try:
+        value = float(raw)
+    except ValueError:
+        return DEFAULT_TIMEOUT_SECONDS
+    return value if value > 0 else DEFAULT_TIMEOUT_SECONDS
+
+#: The named-query table: a read query's identity IS its fixed Cypher, the
+#: same discipline `netbox.NETBOX_READ_QUERIES` uses for REST paths -- no
+#: caller-supplied Cypher parameter exists anywhere in this call path. ONE
+#: entry: this collector's whole graph is nine devices and a few dozen edges
+#: (`write_graph`'s own "not a strategy that scales past a lab" note) -- small
+#: enough to return in full every time, the same "no filter parameter nobody
+#: asked for" reasoning `netbox.py`'s own module comment gives for its two
+#: queries.
+#:
+#: Returns BOTH nodes and edges, deliberately, not edges alone: a device this
+#: collector saw but that reported zero adjacencies on every protocol is a
+#: real, interesting shape (`build_graph`'s own docstring: PE2, isolated at
+#: the link layer, in the committed fixtures). An edges-only read would make
+#: that device invisible rather than reporting it as isolated -- the
+#: absence-is-not-zero mistake OBS-202/OBS-193 made about an interface name
+#: not matching, one layer up, applied here to a device not appearing in any
+#: edge.
+NEO4J_READ_QUERIES: dict[str, tuple[str, str]] = {
+    "topology": (
+        f"MATCH (n:{NODE_LABEL}) RETURN n.name AS name, n.platform AS platform, "
+        f"n.configured_hostname AS configured_hostname ORDER BY n.name",
+        f"MATCH (a:{NODE_LABEL})-[r:{RELATIONSHIP_TYPE}]->(b:{NODE_LABEL}) "
+        f"RETURN a.name AS device_a, b.name AS device_b, r.protocol AS protocol, "
+        f"r.interface_a AS interface_a, r.interface_b AS interface_b, "
+        f"r.state AS state, r.observed_by AS observed_by "
+        f"ORDER BY r.protocol, a.name, b.name",
+    ),
+}
+
+
+def known_graph_read_queries() -> tuple[str, ...]:
+    return tuple(sorted(NEO4J_READ_QUERIES))
+
+
+class GraphReadError(ValueError):
+    """A named read query is unknown. Never raised out of
+    :func:`run_named_read` -- caught there and turned into a
+    ``status="error"`` envelope, `netbox.NetBoxReadError`'s exact
+    counterpart."""
+
+
+class GraphTransportError(Exception):
+    """The read from neo4j failed, or its response was not usable.
+    `netbox.NetBoxTransportError`'s exact counterpart -- not currently
+    raised (classification happens inline in :func:`run_named_read`, the
+    same way `logs_loki`'s HTTP-status branches do), kept as a named type so
+    a future split mirrors `netbox.py`'s shape rather than inventing one."""
+
+
+def _read_timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _read_base_envelope() -> dict[str, Any]:
+    """`netbox._read_base_envelope`'s shape, rebuilt locally for the same
+    reason that module's own docstring gives for not importing
+    `network_tools._base_result`: `network_tools.py` is out of scope for
+    edits, and `_base_result` is private. ``device`` is always ``None`` --
+    the whole graph is fabric-wide, never scoped to one device -- there is
+    no ``device_name`` parameter on :func:`run_named_read` to echo back."""
+
+    return {
+        "tool": "run_named_read",
+        "device": None,
+        "status": "success",
+        "timestamp": _read_timestamp(),
+        "source": SOURCE_NEO4J,
+        "data": {},
+        "errors": [],
+    }
+
+
+def _read_error_envelope(query_name: str, message: str) -> dict[str, Any]:
+    envelope = _read_base_envelope()
+    envelope["status"] = "error"
+    envelope["errors"].append(message)
+    envelope["data"] = {
+        "intent": query_name,
+        "query_name": query_name,
+        "parse_status": parsers.PARSE_FAILED,
+        "parsed": {
+            "nodes": [],
+            "edges": [],
+            "meta": {"node_count": 0, "edge_count": 0},
+        },
+    }
+    return envelope
+
+
+def _topology_read_tx(tx: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Run inside one READ transaction: both fixed queries, nodes then edges.
+
+    Each row is converted to a plain ``dict`` immediately -- a neo4j
+    ``Record`` is only valid for the lifetime of its transaction, and this
+    function's return value has to outlive that (it is read again after
+    ``session.execute_read`` returns, back in :func:`run_named_read`).
+    """
+
+    nodes_query, edges_query = NEO4J_READ_QUERIES["topology"]
+    nodes = [dict(record) for record in tx.run(nodes_query)]
+    edges = [dict(record) for record in tx.run(edges_query)]
+    return nodes, edges
+
+
+def run_named_read(
+    query_name: str,
+    *,
+    uri: str | None = None,
+    user: str | None = None,
+    password: str | None = None,
+    database: str | None = None,
+    driver_factory: Callable[[str, tuple[str, str]], Any] | None = None,
+) -> dict[str, Any]:
+    """The one read entry point. Never raises for a bad credential, an
+    unreachable neo4j, or a query neo4j itself rejects -- all three come back
+    as a ``status="error"`` envelope in the same shape a success uses, the
+    same contract `netbox.run_named_read`/`logs_loki.run_named_query` already
+    give their own callers.
+
+    The one exception this deliberately does NOT catch: the ``neo4j`` package
+    not being installed at all (a raw ``ModuleNotFoundError``) -- see
+    :func:`write_graph`'s own docstring and
+    ``test_write_graph_without_neo4j_installed_fails_at_the_call_not_the_
+    import`` in ``tests/test_graph.py``. That import happens outside the
+    ``try`` below for the identical reason: a missing OPTIONAL DEPENDENCY is
+    a deployment problem an operator should see directly, not a transient
+    read failure to classify and hide.
+
+    Credentials are read from the SAME ``NEO4J_URI``/``NEO4J_USER``/
+    ``NEO4J_PASSWORD``/``NEO4J_DATABASE`` :func:`write_graph` reads -- never a
+    second pair, and only from there; there is no default URI the way
+    `logs_loki._loki_url` has one, for the same reason :func:`write_graph`
+    offers none. Missing either the URI or the password produces
+    ``"Required environment variable is not set: ..."`` -- deliberately
+    worded to match `credential_resolver.py`'s own phrasing, the same
+    existing `mcp_server.boundary.ERROR_KINDS`/`agent_nettools.model_egress
+    .ERROR_KINDS` entry `netbox.run_named_read`'s own docstring reuses, so
+    this needs no new one either.
+
+    ``driver_factory`` is the identical seam :func:`write_graph` already
+    offers, reused rather than reinvented -- this function's own tests need
+    no ``neo4j`` package installed and no database running either.
+    """
+
+    if query_name not in NEO4J_READ_QUERIES:
+        return _read_error_envelope(
+            query_name,
+            f"unknown neo4j query {query_name!r}; valid: "
+            f"{', '.join(known_graph_read_queries())}",
+        )
+
+    resolved_uri = uri or os.environ.get(_ENV_URI)
+    resolved_user = user or os.environ.get(_ENV_USER) or _DEFAULT_USER
+    resolved_password = password or os.environ.get(_ENV_PASSWORD)
+    resolved_database = database or os.environ.get(_ENV_DATABASE)
+
+    missing = [
+        name
+        for name, value in ((_ENV_URI, resolved_uri), (_ENV_PASSWORD, resolved_password))
+        if not value
+    ]
+    if missing:
+        return _read_error_envelope(
+            query_name, f"Required environment variable is not set: {', '.join(missing)}"
+        )
+
+    if driver_factory is not None:
+        make_driver = driver_factory
+    else:
+        # Outside the try/except below, deliberately -- see this function's
+        # own docstring and write_graph's identical placement.
+        from neo4j import GraphDatabase
+
+        timeout = _neo4j_timeout_seconds()
+
+        def make_driver(target_uri: str, auth: tuple[str, str]) -> Any:
+            return GraphDatabase.driver(
+                target_uri,
+                auth=auth,
+                connection_timeout=timeout,
+                max_transaction_retry_time=timeout,
+            )
+
+    try:
+        driver = make_driver(resolved_uri, (resolved_user, resolved_password))
+        try:
+            session_kwargs = {"database": resolved_database} if resolved_database else {}
+            with driver.session(**session_kwargs) as session:
+                nodes, edges = session.execute_read(_topology_read_tx)
+        finally:
+            driver.close()
+    except Exception as exc:  # noqa: BLE001 - classified below by exception
+        # class name, never re-raised. No `neo4j.exceptions` import needed
+        # for this (and none is added at module scope, keeping the "only
+        # write_graph's own real-driver branch touches `neo4j`" property
+        # this module's docstring states) -- `type(exc).__name__` is enough
+        # to tell an authentication refusal from an unreachable server from
+        # anything else, the same string-classification idiom
+        # `mcp_server.boundary.ERROR_KINDS` already uses for netmiko's own
+        # exception text.
+        kind = type(exc).__name__
+        if kind == "AuthError":
+            return _read_error_envelope(query_name, f"neo4j authentication failed: {exc}")
+        if "ServiceUnavailable" in kind:
+            return _read_error_envelope(query_name, f"neo4j service unavailable: {exc}")
+        return _read_error_envelope(query_name, f"neo4j request failed: {exc}")
+
+    envelope = _read_base_envelope()
+    envelope["data"] = {
+        "intent": query_name,
+        "query_name": query_name,
+        "parse_status": parsers.PARSE_OK,
+        "parsed": {
+            "nodes": nodes,
+            "edges": edges,
+            "meta": {"node_count": len(nodes), "edge_count": len(edges)},
+        },
+    }
+    return envelope

@@ -29,9 +29,12 @@ QUESTION="..."` (**opt-in since B-488**: set `NETTOOLS_ENABLE_AGENT=1`; it exits
 `nettools audit` (fabric consistency), `nettools route-event` (event → flow
 routing), and `nettools config show|check` (settings validation) shipped in
 the 2026-08-18 OPS wave — `make audit|route-event|config-check` wrap them.
-`make route|bgp-neighbor|interface|logging|ping|traceroute` (Phase 5,
+`make route|bgp-neighbor|interface|sr-policy|logging|ping|traceroute` (Phase 5,
 validated parameterized templates) take an additional value
-(`PREFIX`/`ADDRESS`/`NAME`/`COUNT`), e.g. `nettools route PE1 10.255.0.31`.
+(`PREFIX`/`ADDRESS`/`NAME`/`POLICY_ID`/`COUNT`), e.g. `nettools route PE1
+10.255.0.31`. `sr-policy` (B-515) takes a `POLICY_ID` as `<colour>:<endpoint>`,
+e.g. `nettools sr-policy PE1 20:10.255.0.13` -- the candidate-path/SID detail
+`nettools sr`'s own `policy` field does not expose.
 `nettools analyze --fabric` (Phase 6) correlates evidence + health verdicts
 across every device instead of one at a time; `nettools agent "QUESTION"
 [--device D] [--max-iterations N] [--time-budget SECONDS]` (Phase 6,

@@ -27,6 +27,8 @@ from agent_nettools.graph import (
     GraphEdge,
     GraphNode,
     build_graph,
+    known_graph_read_queries,
+    run_named_read,
     write_graph,
 )
 from agent_nettools.lab import all_devices
@@ -342,6 +344,9 @@ class _FakeSession:
     def execute_write(self, fn, *args):
         return fn(self._tx, *args)
 
+    def execute_read(self, fn, *args):
+        return fn(self._tx, *args)
+
 
 class _FakeDriver:
     def __init__(self):
@@ -456,3 +461,211 @@ def test_write_graph_twice_produces_the_same_delete_then_recreate_sequence(monke
     second_run_queries = list(driver.tx.queries)
 
     assert first_run_queries == second_run_queries
+
+
+# --------------------------------------------------------------------------- #
+# run_named_read -- the read half (B-517), exercised the same way the writer
+# is: a fake driver, no neo4j package, no database. Live verification (9
+# nodes, 29 relationships against the real container) is recorded in
+# run_named_read's own module comment and is not re-asserted here -- this
+# file's whole convention is to need neither a lab nor a database.
+# --------------------------------------------------------------------------- #
+
+
+class _FakeReadTx:
+    """Answers `tx.run(query)` by matching which of the two fixed queries was
+    asked -- the nodes query starts ``MATCH (n:...``, the edges query starts
+    ``MATCH (a:...`` -- the same discrimination a real Cypher engine makes by
+    running the text, done here by matching its prefix instead."""
+
+    def __init__(self, node_rows, edge_rows):
+        self.node_rows = list(node_rows)
+        self.edge_rows = list(edge_rows)
+        self.queries: list[str] = []
+
+    def run(self, query, **params):
+        self.queries.append(query)
+        if query.strip().startswith(f"MATCH (n:{NODE_LABEL})"):
+            return list(self.node_rows)
+        assert query.strip().startswith(f"MATCH (a:{NODE_LABEL})"), (
+            f"unrecognised query, neither the nodes nor the edges query: {query!r}"
+        )
+        return list(self.edge_rows)
+
+
+class _FakeReadDriver:
+    def __init__(self, node_rows=(), edge_rows=()):
+        self.tx = _FakeReadTx(node_rows, edge_rows)
+        self.closed = False
+
+    def session(self, **kwargs):
+        return _FakeSession(self.tx, kwargs)
+
+    def close(self):
+        self.closed = True
+
+
+class _RaisingDriver:
+    """A driver whose `.session(...)` call itself fails -- stands in for a
+    real connection failure, which happens at the same point."""
+
+    def __init__(self, exc: Exception):
+        self._exc = exc
+        self.closed = False
+
+    def session(self, **kwargs):
+        raise self._exc
+
+    def close(self):
+        self.closed = True
+
+
+class AuthError(Exception):
+    """Stands in for `neo4j.exceptions.AuthError` by NAME, so
+    `run_named_read`'s ``type(exc).__name__`` classification can be exercised
+    without the optional `neo4j` package installed -- this file's whole point."""
+
+
+class ServiceUnavailable(Exception):
+    """`neo4j.exceptions.ServiceUnavailable`'s stand-in, same reason."""
+
+
+def test_known_graph_read_queries_names_topology():
+    assert known_graph_read_queries() == ("topology",)
+
+
+def test_run_named_read_unknown_query_is_an_error_envelope_not_an_exception():
+    result = run_named_read(
+        "bogus", uri="bolt://x:7687", user="neo4j", password="x",
+        driver_factory=lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("unreachable -- refused before a driver is ever made")
+        ),
+    )
+    assert result["status"] == "error"
+    assert "unknown neo4j query 'bogus'" in result["errors"][0]
+    assert "topology" in result["errors"][0]
+    assert result["data"]["parsed"] == {
+        "nodes": [], "edges": [], "meta": {"node_count": 0, "edge_count": 0},
+    }
+
+
+def test_run_named_read_missing_credentials_refuse_rather_than_default(monkeypatch):
+    monkeypatch.delenv("NEO4J_URI", raising=False)
+    monkeypatch.delenv("NEO4J_PASSWORD", raising=False)
+
+    result = run_named_read(
+        "topology",
+        driver_factory=lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("unreachable -- refused before a driver is ever made")
+        ),
+    )
+    assert result["status"] == "error"
+    assert "NEO4J_URI" in result["errors"][0]
+    assert "NEO4J_PASSWORD" in result["errors"][0]
+
+
+def test_run_named_read_topology_returns_nodes_and_edges_including_an_isolated_device():
+    """The point of returning nodes at all (not edges alone): a device with
+    zero adjacencies on every protocol must still be reported, not silently
+    absent -- `build_graph`'s own PE2-in-the-fixtures case, one layer up."""
+
+    node_rows = [
+        {"name": "A", "platform": "cisco_xr", "configured_hostname": "A"},
+        {"name": "B", "platform": "cisco_xr", "configured_hostname": "B"},
+        {"name": "ISOLATED", "platform": "cisco_xr", "configured_hostname": "ISOLATED"},
+    ]
+    edge_rows = [
+        {
+            "device_a": "A", "device_b": "B", "protocol": "lldp",
+            "interface_a": "Gi0/0/0/0", "interface_b": "Gi0/0/0/1",
+            "state": None, "observed_by": ["A", "B"],
+        },
+    ]
+    driver = _FakeReadDriver(node_rows=node_rows, edge_rows=edge_rows)
+
+    result = run_named_read(
+        "topology", uri="bolt://x:7687", user="neo4j", password="x",
+        driver_factory=lambda *a, **k: driver,
+    )
+
+    assert result["status"] == "success"
+    assert result["source"] == "neo4j"
+    assert result["device"] is None, "fabric-wide, never scoped to one device"
+    parsed = result["data"]["parsed"]
+    assert parsed["meta"] == {"node_count": 3, "edge_count": 1}
+    node_names = {n["name"] for n in parsed["nodes"]}
+    assert node_names == {"A", "B", "ISOLATED"}, (
+        "ISOLATED has no edge and must still appear in the nodes list"
+    )
+    assert parsed["edges"] == edge_rows
+    assert driver.closed is True
+
+
+def test_run_named_read_classifies_an_authentication_failure():
+    driver = _RaisingDriver(AuthError("bad credentials"))
+
+    result = run_named_read(
+        "topology", uri="bolt://x:7687", user="neo4j", password="wrong",
+        driver_factory=lambda *a, **k: driver,
+    )
+
+    assert result["status"] == "error"
+    assert result["errors"] == ["neo4j authentication failed: bad credentials"]
+
+
+def test_run_named_read_classifies_an_unreachable_server():
+    driver = _RaisingDriver(ServiceUnavailable("could not connect"))
+
+    result = run_named_read(
+        "topology", uri="bolt://x:7687", user="neo4j", password="x",
+        driver_factory=lambda *a, **k: driver,
+    )
+
+    assert result["status"] == "error"
+    assert result["errors"] == ["neo4j service unavailable: could not connect"]
+
+
+def test_run_named_read_classifies_anything_else_generically():
+    driver = _RaisingDriver(RuntimeError("something else entirely"))
+
+    result = run_named_read(
+        "topology", uri="bolt://x:7687", user="neo4j", password="x",
+        driver_factory=lambda *a, **k: driver,
+    )
+
+    assert result["status"] == "error"
+    assert result["errors"] == ["neo4j request failed: something else entirely"]
+
+
+def test_run_named_read_credentials_are_read_from_the_environment(monkeypatch):
+    monkeypatch.setenv("NEO4J_URI", "bolt://labnet-test:7687")
+    monkeypatch.setenv("NEO4J_USER", "neo4j")
+    monkeypatch.setenv("NEO4J_PASSWORD", "test-only-password")
+
+    captured = {}
+
+    def factory(uri, auth):
+        captured["uri"] = uri
+        captured["auth"] = auth
+        return _FakeReadDriver()
+
+    run_named_read("topology", driver_factory=factory)
+
+    assert captured["uri"] == "bolt://labnet-test:7687"
+    assert captured["auth"] == ("neo4j", "test-only-password")
+
+
+def test_run_named_read_without_neo4j_installed_fails_at_the_call_not_the_import():
+    """No `driver_factory` given, and no `neo4j` package installed: the
+    ImportError must happen inside `run_named_read`, never at module import --
+    the read half's exact counterpart to `write_graph`'s own guarantee,
+    tested the identical way just above."""
+
+    try:
+        run_named_read(
+            "topology", uri="bolt://example.invalid:7687", user="neo4j", password="x",
+        )
+    except ModuleNotFoundError as exc:
+        assert "neo4j" in str(exc)
+    else:
+        raise AssertionError("expected ModuleNotFoundError: neo4j is not installed in this venv")

@@ -198,7 +198,16 @@ def test_every_diagnostic_template_is_covered_by_the_audit():
 #: B-432's TCP signal spent the whole build in a rule labelled "socket
 #: bookkeeping" -- correctly declared, and filed as though the decision were
 #: permanent when it was only unexamined (OBS-100).
-EXPECTED_DEFERRED = 15
+#:
+#: 15 -> 27 (B-515): `sr_policy_detail`'s twelve NOT_NEEDED_YET rules --
+#: candidate-path constraints/weight/metric bookkeeping, the LSP block's own
+#: id/local-label, and the policy `Attributes:` block's forward-class/
+#: steering/IPv6/invalidation/standby-path fields. Each has real content and
+#: a stated reason it is not needed for THIS template's purpose (naming
+#: which SID/segment list a down policy is missing) -- reviewed, not a
+#: default; see `SR_POLICY_DETAIL_IGNORES` in template_parsers.py for each
+#: one's own comment.
+EXPECTED_DEFERRED = 27
 
 
 def _ignore_rules():

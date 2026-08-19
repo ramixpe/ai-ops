@@ -137,10 +137,12 @@ from .network_tools import (
     load_latest_snapshot,
     ping_device,
     prune_snapshots,
+    run_template,
     save_golden_snapshot,
     save_snapshot,
     traceroute_device,
 )
+from .templates import TemplateValidationError, split_sr_policy_id
 from .topology import (
     build_anomaly_report,
     derive_expected,
@@ -281,7 +283,37 @@ def _cmd_bgp_neighbor(args: argparse.Namespace) -> int:
 
 
 def _cmd_interface(args: argparse.Namespace) -> int:
+    # B-519 audit note: `args.name` is deliberately NOT canonicalised here.
+    # It renders straight into `show interfaces {name}`, which IOS-XR accepts
+    # in either spelling (confirmed live, 2026-08-19, against PE2) -- there is
+    # no comparison in this call path for a rewrite to fix, and rewriting it
+    # would only make `--from-fixtures`-style replay miss a file captured
+    # under the spelling the caller did not type (`tests/fixtures/` keys
+    # interface captures by the SHORT form). See
+    # tests/test_interface_canonicalization.py for the full audit.
     result = get_interface(args.device, args.name)
+    _emit(result, args)
+    return _envelope_exit(result)
+
+
+def _cmd_sr_policy(args: argparse.Namespace) -> int:
+    """B-515: which SID/segment list backs one SR-TE policy, or why it does
+    not have one. `args.policy_id` is "<color>:<endpoint>", e.g.
+    "20:10.255.0.13" -- the same shape `nettools sr` (check_sr_policies)'
+    own `policy` field reports, so a value copied from that output works
+    here."""
+
+    try:
+        color, endpoint = split_sr_policy_id(args.policy_id)
+    except TemplateValidationError as exc:
+        result = {
+            "tool": "sr_policy_detail", "device": args.device, "status": "error",
+            "data": {}, "errors": [str(exc)],
+        }
+        _emit(result, args)
+        return EXIT_WARNING
+
+    result = run_template(args.device, "sr_policy_detail", color=color, endpoint=endpoint)
     _emit(result, args)
     return _envelope_exit(result)
 
@@ -756,6 +788,18 @@ def _cmd_investigate(args: argparse.Namespace) -> int:
             )
     elif flow is None:
         flow = "bgp_session"  # the pre-B-112 default, unchanged
+
+    # B-519 audit note: `subject` is deliberately NOT canonicalised here for
+    # `interface`/`isis_adjacency`/`ldp_session`
+    # (`interface_kind.interface_scoped_flows()`). Every one of those flows'
+    # "interface" rung uses `SubjectRule.AS_IS`: `subject` is rendered
+    # straight into a `show interfaces {subject}` device command IOS-XR
+    # accepts in either spelling, and separately matched by
+    # `checks.interface_exists` through `same_interface`, which already
+    # tolerates either spelling on its own. Rewriting it here would fix no
+    # comparison and would only make `--from-fixtures` (captures keyed by
+    # the SHORT spelling) miss a file for a caller who typed the long one.
+    # See tests/test_interface_canonicalization.py for the full audit.
 
     try:
         result = investigate(
@@ -1329,6 +1373,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_interface.add_argument("name", help="Interface name, e.g. GigabitEthernet0/0/0/1.")
     _add_output_arguments(p_interface)
     p_interface.set_defaults(func=_cmd_interface)
+
+    p_sr_policy = sub.add_parser(
+        "sr-policy",
+        help="Look up one SR-TE policy's candidate path/SID detail (validated template).",
+    )
+    p_sr_policy.add_argument("device", help="Device name.")
+    p_sr_policy.add_argument(
+        "policy_id",
+        help='SR-TE policy id as "<color>:<endpoint>", e.g. "20:10.255.0.13" -- '
+        'the same shape `nettools sr`\'s own "policy" field reports.',
+    )
+    _add_output_arguments(p_sr_policy)
+    p_sr_policy.set_defaults(func=_cmd_sr_policy)
 
     p_logging = sub.add_parser(
         "logging", help="Show recent log lines (validated template)."

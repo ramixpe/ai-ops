@@ -41,6 +41,7 @@ from enum import Enum
 __all__ = [
     "AGGREGATE_PREFIXES",
     "canonical",
+    "interface_scoped_flows",
     "same_interface",
     "MANAGEMENT_PREFIXES",
     "PHYSICAL_PREFIXES",
@@ -195,3 +196,47 @@ def same_interface(left: str, right: str) -> bool:
     """Whether two names, **from the same device**, denote one interface."""
 
     return bool(left) and canonical(left) == canonical(right)
+
+
+def interface_scoped_flows() -> frozenset[str]:
+    """Which `flows.FLOWS` object types take an interface name as their subject.
+
+    **Derived from `flows.FLOWS` itself, never hand-maintained here.** Built
+    for the B-519 audit (OBS-202/OBS-193's "canonicalise at the door" review)
+    to answer, from code rather than from memory, "which flows' subject is an
+    interface name" -- `interface`, `isis_adjacency` and `ldp_session`, never
+    `bgp_session`. A second hand-copied literal tuple of flow names would be
+    exactly the failure mode this module's own docstring already warns about
+    ("a filter defined three times is three filters, agreeing by accident of
+    nobody having edited one") -- so instead of declaring the set, this reads
+    it off `Flow.subject_present`, which is already the flow's own
+    declaration of what kind of thing its subject is
+    (`_checks.interface_exists` for `interface`/`isis_adjacency`/
+    `ldp_session`; `_checks.bgp_peer_exists` for `bgp_session`).
+
+    **Not a call to make elsewhere canonicalise.** `tests/test_
+    interface_canonicalization.py` uses this to prove, for each of these
+    three flows, that `subject`'s SPELLING is deliberately left alone at the
+    `investigate_lab_session`/`_cmd_investigate` entry points -- unlike a
+    Prometheus label lookup, `subject` here is rendered `SubjectRule.AS_IS`
+    into a device command IOS-XR accepts in either spelling, and separately
+    matched by `checks.interface_exists` through `same_interface`, which
+    already tolerates either spelling on its own. See that test module's
+    docstring for the full reasoning this function exists to support.
+
+    Imports `flows`/`checks` locally rather than at module scope: this module
+    sits below both in the layer stack (`checks.py` and `flows.py` both import
+    `interface_kind`, not the reverse), and a top-of-file import would invert
+    that -- see CLAUDE.md's layer-stack note. A local import inside a function
+    body carries no such risk: by the time this is called, both modules are
+    already fully loaded.
+    """
+
+    from . import flows as _flows
+    from .checks import interface_exists as _interface_exists
+
+    return frozenset(
+        name
+        for name, flow in _flows.FLOWS.items()
+        if flow.subject_present is _interface_exists
+    )

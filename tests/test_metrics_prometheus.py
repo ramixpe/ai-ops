@@ -93,8 +93,18 @@ def _only_range(response: dict, *, calls: list | None = None):
 # --------------------------------------------------------------------------- #
 
 
-def test_exactly_two_queries_are_registered():
-    assert prom.known_prometheus_queries() == ("interface_rate_history", "isis_adjacency_history")
+def test_exactly_four_queries_are_registered():
+    """2 -> 4 (B-530 TSDB survey): ldp_session_history/device_uptime_history
+    joined interface_rate_history/isis_adjacency_history. BGP metrics are
+    deliberately still not here -- see the module docstring's "Why BGP is
+    still not queried" section."""
+
+    assert prom.known_prometheus_queries() == (
+        "device_uptime_history",
+        "interface_rate_history",
+        "isis_adjacency_history",
+        "ldp_session_history",
+    )
 
 
 def test_unknown_query_name_is_refused_and_the_fetcher_is_never_called():
@@ -480,6 +490,152 @@ def test_isis_adjacency_count_meta_reflects_multiple_series():
     assert meta["adjacency_count"] == 2
     assert meta["records_returned"] == 2  # one sample each
     assert meta["records_available"] is None  # unknown series count ahead of the call
+
+
+# --------------------------------------------------------------------------- #
+# 2b. ldp_session_history / device_uptime_history (B-530 TSDB survey)
+# --------------------------------------------------------------------------- #
+
+_LDP_METRIC = prom._LDP_UPTIME_METRIC
+_DEVICE_UPTIME_METRIC = prom._DEVICE_UPTIME_METRIC
+
+
+def test_ldp_session_records_carry_only_the_named_fields_and_the_slash_spelled_interface():
+    """`interface_name` must come from the SLASH-spelled label
+    (`..._data_interface`, "GigabitEthernet0/0/0/0"), never the
+    underscore-spelled sibling gNMI also exports for the same field
+    (`..._data_interface_name`, "GigabitEthernet0_0_0_0") -- a fifth
+    interface-spelling variant would be exactly what B-519's audit exists
+    to catch. Both are present on the fixture on purpose, with different
+    values, so picking the wrong one is not silently indistinguishable."""
+
+    values_up = [[1000, "3128"], [1015, "3248"], [1030, "3368"]]
+    series = {
+        "metric": {
+            "lsr_id": "10.255.0.1",
+            "ldp_nbr_ipv4_adj_info_adjacency_group_link_hello_data_interface": "GigabitEthernet0/0/0/0",
+            "ldp_nbr_ipv4_adj_info_adjacency_group_link_hello_data_interface_name": "GigabitEthernet0_0_0_0",
+            "detailed_information_peer_state": "Estab",
+            "source": "PE1",
+        },
+        "values": values_up,
+    }
+    response = _matrix_ok([series])
+    result = prom.run_named_query(
+        "ldp_session_history", device="PE1", since_seconds=60, step_seconds=15,
+        fetcher=_only_range(response),
+    )
+    [record] = result["data"]["parsed"]["records"]
+    assert record["lsr_id"] == "10.255.0.1"
+    assert record["interface_name"] == "GigabitEthernet0/0/0/0"
+    assert record["peer_state"] == "Estab"
+    assert [s["uptime_seconds"] for s in record["samples"]] == [3128, 3248, 3368]
+    assert record["reset_count"] == 0
+
+
+def test_ldp_session_flap_is_detected_as_an_uptime_reset():
+    values = [[1000, "500"], [1015, "515"], [1030, "10"], [1045, "25"]]
+    series = {"metric": {"lsr_id": "10.255.0.1"}, "values": values}
+    response = _matrix_ok([series])
+    result = prom.run_named_query(
+        "ldp_session_history", device="PE1", since_seconds=60, step_seconds=15,
+        fetcher=_only_range(response),
+    )
+    [record] = result["data"]["parsed"]["records"]
+    assert record["reset_count"] == 1
+    assert len(record["reset_timestamps"]) == 1
+
+
+def test_ldp_session_count_meta_reflects_multiple_series():
+    response = _matrix_ok(
+        [
+            {"metric": {"lsr_id": "10.255.0.1"}, "values": [[1000, "60"]]},
+            {"metric": {"lsr_id": "10.255.0.2"}, "values": [[1000, "120"]]},
+        ]
+    )
+    result = prom.run_named_query(
+        "ldp_session_history", device="PE1", since_seconds=60, step_seconds=15,
+        fetcher=_only_range(response),
+    )
+    meta = result["data"]["parsed"]["meta"]
+    assert meta["session_count"] == 2
+    assert meta["records_available"] is None  # unknown series count ahead of the call
+
+
+def test_an_unnamed_hostile_label_never_reaches_the_ldp_shaped_record():
+    """The LDP counterpart to the ISIS canary above -- and the specific,
+    real, measured field this module's docstring says was considered and
+    excluded: `capabilities_received_description`/`_sent_description`
+    (e.g. "MP: Multi-Topology (MT)")."""
+
+    hostile_metric = {
+        "lsr_id": "10.255.0.1",
+        "ldp_nbr_ipv4_adj_info_adjacency_group_link_hello_data_interface": "Gi0/0/0/0",
+        "detailed_information_peer_state": "Estab",
+        "detailed_information_capabilities_received_description": f"MP: Multi-Topology (MT) -- {_CANARY}",
+        "some_future_yang_leaf": _CANARY,
+    }
+    response = _matrix_ok([{"metric": hostile_metric, "values": [[1000, "60"]]}])
+    result = prom.run_named_query(
+        "ldp_session_history", device="PE1", since_seconds=60, step_seconds=15,
+        fetcher=_only_range(response),
+    )
+    assert _CANARY not in str(result)
+
+    projected = model_egress.project_envelope(result)
+    assert _CANARY not in str(projected)
+    sanitized = boundary.sanitize(result)
+    assert _CANARY not in str(sanitized)
+
+    # Non-vacuous companion: structured fields still survive.
+    [record] = result["data"]["parsed"]["records"]
+    assert record["lsr_id"] == "10.255.0.1"
+    assert record["peer_state"] == "Estab"
+
+
+def test_ldp_session_selector_shape_rejects_anything_but_the_exact_form():
+    query = prom.PROMETHEUS_QUERIES["ldp_session_history"]
+    assert query.selector_shape.fullmatch(f'{_LDP_METRIC}{{source="PE1"}}')
+    assert not query.selector_shape.fullmatch(f'{_LDP_METRIC}{{source="PE1", lsr_id="10.255.0.1"}}')
+    assert not query.selector_shape.fullmatch(f'{_LDP_METRIC}[60s]{{source="PE1"}}')
+
+
+def test_device_uptime_history_returns_a_flat_single_series_sample_list():
+    """Unlike isis/ldp's per-adjacency records, this is `interface_rate_
+    history`'s single-series shape: one device, one series, records are the
+    flat sample list directly."""
+
+    values = [[1000 + i * 60, str(1_334_000 + i * 60)] for i in range(5)]
+    response = _matrix_ok([{"metric": {"source": "PE1"}, "values": values}])
+    result = prom.run_named_query(
+        "device_uptime_history", device="PE1", since_seconds=240, step_seconds=60,
+        fetcher=_only_range(response),
+    )
+    records = result["data"]["parsed"]["records"]
+    assert [r["uptime_seconds"] for r in records] == [
+        1_334_000 + i * 60 for i in range(5)
+    ]
+    meta = result["data"]["parsed"]["meta"]
+    assert meta["records_available"] == 5  # exact-match, computed like interface_rate_history
+    assert meta["reboot_count"] == 0
+
+
+def test_device_uptime_history_detects_a_reboot():
+    values = [[1000, "500000"], [1060, "500060"], [1120, "30"], [1180, "90"]]
+    response = _matrix_ok([{"metric": {"source": "PE1"}, "values": values}])
+    result = prom.run_named_query(
+        "device_uptime_history", device="PE1", since_seconds=180, step_seconds=60,
+        fetcher=_only_range(response),
+    )
+    meta = result["data"]["parsed"]["meta"]
+    assert meta["reboot_count"] == 1
+    assert len(meta["reboot_timestamps"]) == 1
+
+
+def test_device_uptime_history_selector_shape_rejects_anything_but_the_exact_form():
+    query = prom.PROMETHEUS_QUERIES["device_uptime_history"]
+    assert query.selector_shape.fullmatch(f'{_DEVICE_UPTIME_METRIC}{{source="PE1"}}')
+    assert not query.selector_shape.fullmatch(f'{_DEVICE_UPTIME_METRIC}{{source="PE1; reload"}}')
 
 
 # --------------------------------------------------------------------------- #

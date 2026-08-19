@@ -1570,6 +1570,279 @@ def parse_xr_traceroute(output: str) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
+# cisco_xr: sr_policy_detail (B-515)
+# --------------------------------------------------------------------------- #
+#
+# ``show segment-routing traffic-eng policy color <n> endpoint ipv4 <ip>
+# detail`` -- the parameterized counterpart to the static ``sr`` intent's
+# unfiltered ``show segment-routing traffic-eng policy`` (parsers.parse_xr_sr).
+# That command already prints candidate-path and segment-list/SID detail for
+# EVERY policy; the gap B-515 closes is not the device's output, it is that
+# `parse_xr_sr`'s records stop at policy-level fields (color, endpoint, name,
+# admin/oper state, binding SID) and never extract the candidate path beneath
+# it -- so a model diagnosing a down policy could see THAT no candidate path
+# resolves and never see WHICH SID or segment list was involved (MCP §14b,
+# measured 2026-08-19: qwen correctly said "no candidate path resolves" for
+# PE1's colour-20 policy and then said it could not name which SID, because
+# the tool did not expose one). Filtering to one policy by color+endpoint
+# (rather than widening `parse_xr_sr` to extract this for every policy on the
+# device in one call) keeps this on the same "one caller-supplied value per
+# command" shape every other template already uses, and needs a validated
+# slot for the policy id -- see the two params below and
+# `mcp_server/server.py`'s `get_lab_sr_policy_detail` for how a caller's
+# single ``"20:10.255.0.13"`` identifier (the same shape `parse_xr_sr`'s own
+# ``policy`` field already reports) is split into them before this template
+# is ever reached.
+#
+# Verified live 2026-08-19 against PE1: an UP policy (colour 10) shows
+# ``Explicit: segment-list SL-VIA-P3 (valid)`` with two SIDs; a DOWN one
+# (colour 20) shows ``Dynamic (inactive)`` and ``Last error: No path found``,
+# with no segment list and no SIDs at all -- the exact fact the MCP §14b
+# model was missing. A color/endpoint with no matching policy answers with
+# ONLY the IOS-XR timestamp banner (no error text, no "% ..." line) -- the
+# device's own "nothing here" shape, handled as an honest ``found: False``
+# below, the same distinction `parse_xr_bgp_neighbor`'s ``reason`` makes for
+# "not active" vs. "not found".
+#
+# Indentation, not stripped away, is what disambiguates the one line shape
+# that repeats: the policy's own ``  Name: ...`` (2 spaces) and the candidate
+# path's own ``      Name: ...`` (6 spaces, always identical value on this
+# fabric so far) are the same text at two structural positions. Every other
+# template parser in this module strips leading whitespace before matching;
+# this one deliberately does not, so the position itself is the signal
+# instead of a second state flag threaded through an `elif` chain.
+
+_SR_DETAIL_COLOR_ENDPOINT = re.compile(r"^Color: (?P<color>\d+), End-point: (?P<endpoint>\S+)$")
+_SR_DETAIL_NAME = re.compile(r"^  Name: (?P<name>\S+)$")
+_SR_DETAIL_STATUS = re.compile(
+    r"^    Admin: (?P<admin_state>\S+)  Operational: (?P<operational_state>\S+)"
+    r"(?: for (?P<operational_duration>\S+) \(since (?P<operational_since>[^)]+)\))?$"
+)
+_SR_DETAIL_PREFERENCE = re.compile(
+    r"^    Preference: (?P<preference>\d+) \(configuration\) \((?P<active>active|inactive)\)$"
+)
+_SR_DETAIL_EXPLICIT = re.compile(
+    r"^      Explicit: segment-list (?P<segment_list>\S+) \((?P<segment_list_state>valid|invalid)\)$"
+)
+_SR_DETAIL_DYNAMIC = re.compile(r"^      Dynamic(?: \((?P<dynamic_state>active|inactive)\))?$")
+_SR_DETAIL_SID = re.compile(r"^ {10}SID\[(?P<index>\d+)\]: (?P<sid>\d+)$")
+_SR_DETAIL_LAST_ERROR = re.compile(r"^      Last error: (?P<last_error>.+)$")
+_SR_DETAIL_BINDING_SID = re.compile(r"^    Binding SID: (?P<binding_sid>\d+)$")
+# "detail"'s own addition over the bare filtered view: one programmed LSP
+# per resolved candidate path. "State" is the useful confirmation ("Programmed"
+# means the forwarding plane actually has this path, not just the control
+# plane) -- LSP-ID/Local label/the LSP's own duplicate Binding SID are not
+# (see the matching IgnoreRules below).
+_SR_DETAIL_LSP_STATE = re.compile(r"^      State: (?P<lsp_state>\S+)$")
+
+# Section 0.10 accounting for everything the fields above deliberately do not
+# extract yet -- has real content, no check has needed it so far (IgnoreKind.
+# NOT_NEEDED_YET), vs. pure structural headers this command repeats
+# (NO_EXTRACTABLE_FIELD, the default). Trailing-space variants
+# ("Maximum SID Depth: 10 ") are real, measured live, not a typo here.
+SR_POLICY_DETAIL_IGNORES: tuple[IgnoreRule, ...] = (
+    IgnoreRule(r"^SR-TE policy database$", "command's own section header"),
+    IgnoreRule(r"^-+$", "section header underline"),
+    IgnoreRule(r"^  Status:$", "section header"),
+    IgnoreRule(r"^  Candidate-paths:$", "section header"),
+    IgnoreRule(r"^  Attributes:$", "section header"),
+    IgnoreRule(r"^      Constraints:$", "section header"),
+    IgnoreRule(
+        r"^      Name: \S+$",
+        "the candidate path's own copy of the policy Name, always identical "
+        "to the 2-space-indented one already captured on this fabric",
+    ),
+    IgnoreRule(
+        r"^      Requested BSID: \S+$",
+        "not needed yet -- always \"dynamic\" on this fabric",
+        kind=IgnoreKind.NOT_NEEDED_YET,
+    ),
+    IgnoreRule(
+        r"^        Protection Type: \S+$",
+        "not needed yet -- protection scheme, not path identity",
+        kind=IgnoreKind.NOT_NEEDED_YET,
+    ),
+    IgnoreRule(
+        r"^        Maximum SID Depth: \d+\s*$",
+        "not needed yet -- a platform capability bound, not a fault signal",
+        kind=IgnoreKind.NOT_NEEDED_YET,
+    ),
+    IgnoreRule(
+        r"^        Weight: \d+, Metric Type: \S+$",
+        "not needed yet -- ECMP weight; this fabric has no multi-path SR-TE policy",
+        kind=IgnoreKind.NOT_NEEDED_YET,
+    ),
+    IgnoreRule(
+        r"^        Metric Type: \S+,\s+Path Accumulated Metric: \d+\s*$",
+        "not needed yet -- printed only for a Dynamic candidate path that "
+        "never resolved, so the metric is always 0",
+        kind=IgnoreKind.NOT_NEEDED_YET,
+    ),
+    IgnoreRule(
+        r"^    Forward Class: .+$", "not needed yet", kind=IgnoreKind.NOT_NEEDED_YET
+    ),
+    IgnoreRule(
+        r"^    Steering (labeled-services|BGP) disabled: \S+$",
+        "not needed yet",
+        kind=IgnoreKind.NOT_NEEDED_YET,
+    ),
+    IgnoreRule(
+        r"^    IPv6 caps enable: \S+$", "not needed yet", kind=IgnoreKind.NOT_NEEDED_YET
+    ),
+    IgnoreRule(
+        r"^    Invalidation drop enabled: \S+$",
+        "not needed yet",
+        kind=IgnoreKind.NOT_NEEDED_YET,
+    ),
+    IgnoreRule(
+        r"^    Max Install Standby Candidate Paths: \d+$",
+        "not needed yet",
+        kind=IgnoreKind.NOT_NEEDED_YET,
+    ),
+    # The "detail" keyword's own addition over the bare per-policy filter --
+    # measured live 2026-08-19 against PE1's UP policy (colour 10) only; the
+    # DOWN one (colour 20, never resolved a path) has no LSP at all, so this
+    # whole block is legitimately absent there, not a parser gap.
+    IgnoreRule(r"^  LSPs:$", "section header"),
+    IgnoreRule(r"^    LSP\[\d+\]:$", "section header"),
+    IgnoreRule(
+        r"^      LSP-ID: \d+ policy ID: \d+ \((active|inactive)\)$",
+        "not needed yet -- internal LSP bookkeeping id, not a fault signal",
+        kind=IgnoreKind.NOT_NEEDED_YET,
+    ),
+    IgnoreRule(
+        r"^      Local label: \d+$",
+        "not needed yet -- duplicate of Binding SID for this fabric's single-LSP policies",
+        kind=IgnoreKind.NOT_NEEDED_YET,
+    ),
+    IgnoreRule(
+        r"^      Binding SID: \d+$",
+        "the LSP's own copy of the policy's Binding SID, already captured "
+        "from the 4-space-indented Attributes line",
+    ),
+)
+
+_SR_POLICY_DETAIL_META_KEYS: tuple[str, ...] = (
+    "found",
+    "policy",
+    "color",
+    "endpoint",
+    "name",
+    "admin_state",
+    "operational_state",
+    "operational_duration",
+    "operational_since",
+    "candidate_path_preference",
+    "candidate_path_active",
+    "candidate_path_type",
+    "segment_list_name",
+    "segment_list_valid",
+    "last_error",
+    "binding_sid",
+    "lsp_state",
+)
+
+
+def _empty_sr_policy_detail_meta() -> dict[str, Any]:
+    meta: dict[str, Any] = dict.fromkeys(_SR_POLICY_DETAIL_META_KEYS)
+    meta["found"] = False
+    return meta
+
+
+def parse_xr_sr_policy_detail(output: str) -> dict[str, Any]:
+    """Parse ``show segment-routing traffic-eng policy color <n> endpoint
+    ipv4 <ip> detail``.
+
+    Two legitimate shapes: exactly one policy block (this device has a
+    policy at this color/endpoint), or none at all -- IOS-XR answers a
+    non-matching color/endpoint with nothing but its own timestamp banner,
+    no error text, so ``found: False`` is inferred from absence rather than
+    matched from a line. Never raises :class:`ParseError` for either shape;
+    only for output that is neither (genuinely unrecognised).
+
+    ``records`` holds the resolved SID stack, in order, when the active
+    candidate path is Explicit over a valid segment list -- empty for a
+    Dynamic path that has not resolved, which is exactly the case this
+    template exists to make visible rather than silently absent.
+    """
+
+    lines = [line for line in output.splitlines() if line.strip()]
+
+    meta = _empty_sr_policy_detail_meta()
+    consumed: list[str] = []
+    records: list[dict[str, Any]] = []
+
+    for line in lines:
+        if match := _SR_DETAIL_COLOR_ENDPOINT.match(line):
+            meta["found"] = True
+            meta["color"] = match["color"]
+            meta["endpoint"] = match["endpoint"]
+            meta["policy"] = f"{match['color']}:{match['endpoint']}"
+            consumed.append(line)
+        elif match := _SR_DETAIL_NAME.match(line):
+            meta["name"] = match["name"]
+            consumed.append(line)
+        elif match := _SR_DETAIL_STATUS.match(line):
+            meta["admin_state"] = match["admin_state"]
+            meta["operational_state"] = match["operational_state"]
+            if match["operational_duration"]:
+                meta["operational_duration"] = match["operational_duration"]
+                meta["operational_since"] = match["operational_since"]
+            consumed.append(line)
+        elif match := _SR_DETAIL_PREFERENCE.match(line):
+            meta["candidate_path_preference"] = match["preference"]
+            meta["candidate_path_active"] = match["active"] == "active"
+            consumed.append(line)
+        elif match := _SR_DETAIL_EXPLICIT.match(line):
+            meta["candidate_path_type"] = "explicit"
+            meta["segment_list_name"] = match["segment_list"]
+            meta["segment_list_valid"] = match["segment_list_state"] == "valid"
+            consumed.append(line)
+        elif match := _SR_DETAIL_DYNAMIC.match(line):
+            meta["candidate_path_type"] = "dynamic"
+            consumed.append(line)
+        elif match := _SR_DETAIL_SID.match(line):
+            records.append({"index": match["index"], "sid": match["sid"]})
+            consumed.append(line)
+        elif match := _SR_DETAIL_LAST_ERROR.match(line):
+            # Device-authored free text (the specific reason path computation
+            # failed, e.g. "No path found") -- NOT a fixed enum, so it is
+            # quoted crossing the MCP boundary the same way
+            # `bgp_neighbor`'s `last_reset_reason` already is. See
+            # `model_egress.FREE_TEXT_FIELDS`'s `("sr_policy_detail",
+            # "last_error")` entry.
+            meta["last_error"] = match["last_error"]
+            consumed.append(line)
+        elif match := _SR_DETAIL_BINDING_SID.match(line):
+            meta["binding_sid"] = match["binding_sid"]
+            consumed.append(line)
+        elif match := _SR_DETAIL_LSP_STATE.match(line):
+            meta["lsp_state"] = match["lsp_state"]
+            consumed.append(line)
+
+    if not meta["found"]:
+        # Unlike bgp_neighbor/route, there is no explicit "% ... not found"
+        # line to positively match for "no policy at this color/endpoint" --
+        # IOS-XR answers with nothing at all. So the two shapes are told
+        # apart by what account_lines still finds unclaimed: the legitimate
+        # case leaves only its own timestamp banner (already covered by
+        # XR_COMMON_IGNORES), genuinely unrecognised output leaves something
+        # real.
+        remaining = account_lines(output, consumed=consumed, ignores=SR_POLICY_DETAIL_IGNORES)
+        if remaining:
+            raise ParseError(
+                "output is neither a recognisable SR-TE policy detail block "
+                "nor IOS-XR's own 'no policy at this color/endpoint' shape "
+                "(a timestamp banner with no policy content)"
+            )
+
+    return finalize(
+        raw=output, meta=meta, records=records, consumed=consumed,
+        ignores=SR_POLICY_DETAIL_IGNORES,
+    )
+
+
+# --------------------------------------------------------------------------- #
 # The registry
 # --------------------------------------------------------------------------- #
 
@@ -1595,6 +1868,7 @@ TEMPLATE_PARSERS: dict[tuple[str, str], Callable[[str], dict[str, Any]]] = {
     ("cisco_xr", "logging"): parse_xr_logging,
     ("cisco_xr", "ping"): parse_xr_ping,
     ("cisco_xr", "traceroute"): parse_xr_traceroute,
+    ("cisco_xr", "sr_policy_detail"): parse_xr_sr_policy_detail,
     **CONFIG_TEMPLATE_PARSERS,
 }
 
@@ -1659,6 +1933,14 @@ TEMPLATE_VOLATILE_FIELDS: dict[tuple[str, str], frozenset[str]] = {
     # this template exists to surface, the same trap bgp_neighbor's
     # last_reset_reason and ping's success_pct/loss_pct avoid above.
     ("cisco_xr", "traceroute"): frozenset({"rtt_msec", "probes_lost"}),
+    # operational_duration/operational_since move on every capture of an
+    # unchanged, healthy (or unchanged, still-down) policy -- ordinary clock
+    # drift, not a signal. admin_state/operational_state/candidate_path_*/
+    # segment_list_*/last_error/binding_sid are deliberately NOT volatile:
+    # each is exactly the kind of state change (a path resolving, a segment
+    # list going invalid, a new last_error) this template exists to surface,
+    # the same trap bgp_neighbor's last_reset_reason avoids above.
+    ("cisco_xr", "sr_policy_detail"): frozenset({"operational_duration", "operational_since"}),
     **CONFIG_VOLATILE_FIELDS,
 }
 
@@ -1694,6 +1976,11 @@ TEMPLATE_RECORD_KEYS: dict[tuple[str, str], str | None] = {
     # identified by their next hop, but a traceroute's hops are identified
     # by their position in the path.
     ("cisco_xr", "traceroute"): "hop",
+    # The SID's position in the stack (0, 1, 2, ...) is the stable identity --
+    # a resolved candidate path's segment list is an ordered stack, not a set,
+    # so "index" (not "sid" itself) is what two captures of the same,
+    # unchanged path should match records by.
+    ("cisco_xr", "sr_policy_detail"): "index",
     **CONFIG_RECORD_KEYS,
 }
 

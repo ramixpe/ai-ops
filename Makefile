@@ -10,13 +10,14 @@ DEVICE ?= PE1
 PREFIX ?= 10.255.0.31
 ADDRESS ?= 10.255.0.31
 NAME ?= GigabitEthernet0/0/0/1
+POLICY_ID ?= 20:10.255.0.13
 COUNT ?= 20
 QUESTION ?= What, if anything, is wrong with the fabric right now?
 KEEP_DAYS ?= 30
 KEEP_COUNT ?= 20
 
 .PHONY: help setup test lint inventory facts interfaces bgp lldp isis sr \
-        fabric-bgp route bgp-neighbor interface logging ping traceroute \
+        fabric-bgp route bgp-neighbor interface sr-policy logging ping traceroute \
         analyze analyze-fabric agent demo diff capture learn-topology health health-fixtures \
         baseline-pin baseline-show flaps evidence-prune metrics version mcp inspect \
         docker-build clean audit audit-fixtures config-check route-event
@@ -81,6 +82,9 @@ bgp-neighbor:  ## Look up a BGP neighbor (DEVICE=name ADDRESS=...)
 
 interface:  ## Look up an interface (DEVICE=name NAME=...)
 	nettools interface $(DEVICE) $(NAME)
+
+sr-policy:  ## Look up an SR-TE policy's candidate path/SID detail (DEVICE=name POLICY_ID=colour:endpoint)
+	nettools sr-policy $(DEVICE) $(POLICY_ID)
 
 logging:  ## Show recent log lines (DEVICE=name COUNT=...)
 	nettools logging $(DEVICE) --count $(COUNT)

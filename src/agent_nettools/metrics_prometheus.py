@@ -33,16 +33,28 @@ not (§5 below):
   never trusting the caller's or the inventory's own prior validation, for
   the same "canonicalize by reconstruction, never pass-through" reason
   `logs_loki._DeviceSlot` gives.
-* **A single BGP neighbor series carries 192 labels**, including free-text
-  YANG leaves (`peer_reset_reason`, `reset_reason`) that mint a new series on
-  every state transition (discovery-alerting.md §3, "a cardinality smell").
-  This module does not query BGP metrics in v1 -- see §5, "what this module
-  chose not to build" in the PR description -- specifically *because* the
-  only two metric families it does query (IS-IS adjacency uptime,
-  `infra_statsd_oper` interface counters) were measured to carry **no
-  free-text label at all**, and this module is built to keep that true by
-  construction rather than by filtering after the fact (see "Why this module
-  needs zero new `FREE_TEXT_FIELDS` entries" below).
+* **A single BGP neighbor series carries ~150 labels**, including
+  `peer_reset_reason`/`reset_reason` (discovery-alerting.md §3, "a
+  cardinality smell"). This module does not query BGP metrics -- still
+  true after the B-530 TSDB survey added LDP and device-uptime history --
+  specifically *because* every metric family it does query (IS-IS adjacency
+  uptime, `infra_statsd_oper` interface counters, LDP session uptime,
+  device uptime) was measured to carry **no free-text label at all**, and
+  this module is built to keep that true by construction rather than by
+  filtering after the fact (see "Why this module needs zero new
+  `FREE_TEXT_FIELDS` entries" below). **The BGP argument was re-verified
+  live, not merely reasserted, for this survey -- see "Why BGP is still
+  not queried" further down**, which corrects the reasoning this bullet
+  used to give: querying live `/api/v1/label/reset_reason/values` found 8
+  distinct values (and 2 for `peer_reset_reason`) recorded over the
+  retention window, all short protocol-code tokens (`admin-shutdown`,
+  `peer-closed`, ...) -- **not obviously prose a model could be talked into
+  treating as an instruction**, so the disqualifying property is not
+  "free text" after all. It is that those values changing at all means
+  Prometheus is storing MULTIPLE historical series per neighbor for what
+  every other query in this module treats as one stable, lifelong series
+  per identity -- a real, different, and unsolved problem this survey does
+  not attempt to fix.
 
 The three hard requirements this module exists to satisfy (identical to
 `logs_loki.py`'s, restated because the "how" differs enough to be worth
@@ -85,32 +97,85 @@ Why this module needs zero new `FREE_TEXT_FIELDS` entries
 -----------------------------------------------------------
 `logs_loki.py` reuses `("logging", "text")`/`("logging", "code")` because a
 Loki record's free-text fields are unavoidable -- correlation needs the
-syslog line's own prose. This module's two named queries never construct a
-record that way: :func:`_shape_interface_rate_records` and
-:func:`_shape_isis_adjacency_records` each pull a **fixed, named, closed set**
-of label keys out of Prometheus's `metric` dict via `.get(...)` -- never
-`**metric`, never "everything this series happened to carry." A Prometheus
-series for either of this module's two metric families was measured live
-(2026-08-19) to carry only structured labels -- device/interface identifiers,
-YANG enum states (`neighbor_state`, `neighbor_circuit_type`), numeric values
--- never a description-shaped free-text leaf. So the free-text risk the build
-brief warns about ("a metric label value is device-authored... an interface
-description can appear in one") is real *in general* -- discovery-alerting.md
-§3 measured it on the BGP series this module does not touch -- and is closed
-here **structurally**, by never extracting a label this module has not named,
-rather than by wrapping a value after the fact. `test_an_unnamed_hostile_label_
-never_reaches_the_shaped_record` in the test suite is the canary: it injects
-an injection-shaped, prose-bearing label under a key neither shaper reads and
-asserts it is absent from the output, not merely wrapped.
+syslog line's own prose. None of this module's four named queries construct
+a record that way: :func:`_shape_interface_rate_records`,
+:func:`_shape_isis_adjacency_records`, :func:`_shape_ldp_session_records`
+and :func:`_shape_device_uptime_records` each pull a **fixed, named, closed
+set** of label keys out of Prometheus's `metric` dict via `.get(...)` --
+never `**metric`, never "everything this series happened to carry." A
+Prometheus series for each of this module's four metric families was
+measured live (2026-08-19, the LDP/uptime two as part of the B-530 TSDB
+survey) to carry only structured labels -- device/interface identifiers,
+YANG enum states (`neighbor_state`, `neighbor_circuit_type`, LDP's own
+`peer_state`), numeric values -- never a description-shaped free-text leaf.
+LDP's own series carries two labels that DO look free-text-shaped at first
+read (`capabilities_received_description`/`capabilities_sent_description`,
+e.g. `"MP: Multi-Topology (MT)"`) -- deliberately not extracted by
+:func:`_shape_ldp_session_records` even though they were considered, the
+same "extract only what was reviewed" discipline applied rather than
+assumed safe by pattern-matching against the isis/interface precedent. So
+the free-text risk the build brief warns about ("a metric label value is
+device-authored... an interface description can appear in one") is real *in
+general* -- discovery-alerting.md §3 measured it on the BGP series this
+module still does not touch, see "Why BGP is still not queried" below -- and
+is closed here **structurally**, by never extracting a label this module has
+not named, rather than by wrapping a value after the fact.
+`test_an_unnamed_hostile_label_never_reaches_the_shaped_record` in the test
+suite is the canary: it injects an injection-shaped, prose-bearing label
+under a key neither shaper reads and asserts it is absent from the output,
+not merely wrapped.
 
-If a future query needs a metric whose labels *do* carry free text (a BGP
-query reading `peer_reset_reason`, say), it must add `(query_name, field)` to
-`model_egress.FREE_TEXT_FIELDS` and `mcp_server/boundary.py`'s copy in the
-same commit, per the build's own instruction -- and per that same
-instruction, should prefer reusing an existing field name (`"text"`) over
-inventing a new one, for the reason `logs_loki.py`'s own "Field-name choice"
-section gives (`boundary.sanitize` matches by name alone, with no context
-scoping).
+If a future query needs a metric whose labels *do* carry free text, it must
+add `(query_name, field)` to `model_egress.FREE_TEXT_FIELDS` and
+`mcp_server/boundary.py`'s copy in the same commit, per the build's own
+instruction -- and per that same instruction, should prefer reusing an
+existing field name (`"text"`) over inventing a new one, for the reason
+`logs_loki.py`'s own "Field-name choice" section gives (`boundary.sanitize`
+matches by name alone, with no context scoping).
+
+Why BGP is still not queried (re-verified, B-530 TSDB survey)
+----------------------------------------------------------------
+Re-examined rather than reasserted, because "the module already says no to
+BGP" is not, by itself, still a reason once two more families have been
+added past the original two. Queried live 2026-08-19:
+`{__name__=~"Cisco_IOS_XR_ipv4_bgp_oper.*"}` returns series across all 257
+BGP metric names, and **every single one** carries `reset_reason` and
+`peer_reset_reason` as labels -- gNMI/telemetry export attaches every
+sibling leaf of a YANG table row to every metric derived from that row, so
+there is no metric NAME that is "the safe one"; the two fields are not a
+column a caller could ask to leave out of the request.
+
+That alone would not disqualify BGP -- this module's shape functions
+already extract only named labels, so *not calling* `.get("reset_reason")`
+in a hypothetical `bgp_session_history` shaper would keep those two labels
+out of the response, the same way `_shape_ldp_session_records` leaves
+`capabilities_*_description` out despite it being present on the series.
+Sampling the actual label VALUES is what disqualifies it:
+`/api/v1/label/reset_reason/values` returns 8 distinct values recorded over
+the retention window (`admin-shutdown`, `af-activated`, `af-deactivated`,
+`bgp-none`, `not-received`, `not-sent`, `peer-closed`,
+`rr-client-changed`); `peer_reset_reason` returns 2. Short protocol-code
+tokens, not prose -- so the earlier characterisation of these specifically
+as a *prompt-injection* risk does not hold up to this sampling, and is
+corrected here rather than repeated.
+
+What the 8-and-2 measurement DOES prove: these labels are not constant for
+a neighbor's whole lifetime the way `lsr_id`/`system_id`/`source` are for
+every family this module DOES query. A label that changes value means
+Prometheus opens a NEW series each time it changes and leaves the old one
+to go stale, un-scraped, still indexed. Every existence/coverage mechanism
+this module relies on (`_series_known`, `records_available`,
+`coverage_from_prometheus_history`'s four absence cases) is built on "one
+selector matches one stable series (or one stable series per adjacency),
+and a gap in it means a real gap" -- a BGP selector matching one neighbor
+would instead match however many of these churned, mostly-dead series still
+fall inside the query window, with no field in this module's existing
+vocabulary for "which of these several results is the CURRENT one" versus
+"an abandoned series from three resets ago." That is a different, harder
+problem than absence-vs-zero, this module has no mechanism for it today,
+and building one was out of scope for this survey -- so BGP metrics remain
+unqueried, for a corrected and re-verified reason rather than the original
+one.
 
 Absence is not zero -- the axis this module exists to get right
 -------------------------------------------------------------------
@@ -603,6 +668,41 @@ def _build_isis_adjacency_selector(resolved: Mapping[str, Any]) -> str:
     return '{0}{{source="{1}"}}'.format(_ISIS_UPTIME_METRIC, resolved["device"])
 
 
+def _samples_and_resets(values: list) -> tuple[list[dict[str, Any]], list[str]]:
+    """One Prometheus series' raw ``[[timestamp, value], ...]`` -> a typed
+    sample list plus the timestamps at which the value *dropped* between
+    consecutive samples.
+
+    Shared by every "seconds since this thing last came up" gauge this
+    module reads -- IS-IS `neighbor_uptime`, LDP `ta_up_time_seconds`
+    (B-530), and the device's own `system_time_uptime_uptime` (B-530): a
+    drop means exactly the same thing in each, it went down (or rebooted)
+    and came back, and it is otherwise indistinguishable from ordinary
+    counter growth. Extracted from `_shape_isis_adjacency_records` (B-530)
+    rather than reimplemented for the two new callers -- see that function's
+    own docstring and the two new ones below for what each calls a "reset"
+    (an adjacency flap; an LDP session flap; a reboot).
+    """
+
+    samples: list[dict[str, Any]] = []
+    reset_timestamps: list[str] = []
+    previous: float | None = None
+    for entry in values:
+        if not (isinstance(entry, (list, tuple)) and len(entry) == 2):
+            continue
+        ts, val = entry
+        try:
+            timestamp = datetime.fromtimestamp(float(ts), tz=timezone.utc).isoformat()
+            value = float(val)
+        except (TypeError, ValueError):
+            continue
+        samples.append({"timestamp": timestamp, "uptime_seconds": value})
+        if previous is not None and value < previous:
+            reset_timestamps.append(timestamp)
+        previous = value
+    return samples, reset_timestamps
+
+
 def _shape_isis_adjacency_records(
     result: list, resolved: Mapping[str, Any]
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -611,9 +711,10 @@ def _shape_isis_adjacency_records(
     derived flap signal -- `neighbor_uptime` is seconds-since-last-came-up,
     so a value that *drops* between consecutive samples means the adjacency
     reset (went down and came back), the "sudden drop" §2.4a asks history to
-    surface. Only a fixed, named set of label keys is ever read from
-    `series["metric"]` (never the whole dict) -- see the module docstring's
-    "why this module needs zero new FREE_TEXT_FIELDS entries" section.
+    surface (`_samples_and_resets`). Only a fixed, named set of label keys is
+    ever read from `series["metric"]` (never the whole dict) -- see the
+    module docstring's "why this module needs zero new FREE_TEXT_FIELDS
+    entries" section.
     """
 
     records: list[dict[str, Any]] = []
@@ -625,22 +726,7 @@ def _shape_isis_adjacency_records(
         metric = series.get("metric") if isinstance(series.get("metric"), dict) else {}
         values = series.get("values") if isinstance(series.get("values"), list) else []
 
-        samples: list[dict[str, Any]] = []
-        reset_timestamps: list[str] = []
-        previous: float | None = None
-        for entry in values:
-            if not (isinstance(entry, (list, tuple)) and len(entry) == 2):
-                continue
-            ts, val = entry
-            try:
-                timestamp = datetime.fromtimestamp(float(ts), tz=timezone.utc).isoformat()
-                uptime = float(val)
-            except (TypeError, ValueError):
-                continue
-            samples.append({"timestamp": timestamp, "uptime_seconds": uptime})
-            if previous is not None and uptime < previous:
-                reset_timestamps.append(timestamp)
-            previous = uptime
+        samples, reset_timestamps = _samples_and_resets(values)
 
         total_samples += len(samples)
         records.append(
@@ -659,6 +745,136 @@ def _shape_isis_adjacency_records(
         "records_returned": total_samples,
         "records_available": None,
         "adjacency_count": len(records),
+    }
+
+
+#: `Cisco_IOS_XR_mpls_ldp_oper:...ta_up_time_seconds{source="<device>"}` --
+#: device-wide, one series per LDP session (matches `_ISIS_UPTIME_METRIC`'s
+#: own "one selector, many adjacencies" shape). Chosen over the two metrics
+#: named in this survey's brief (`peer_holdtime`, session-protection
+#: `spht_remaining`/`sp_duration`) after measuring all three live 2026-08-19:
+#: `peer_holdtime` is the CONFIGURED hold timer (180s on every one of this
+#: fabric's 28 sessions, never varying -- static configuration, not a trend);
+#: `spht_remaining`/`sp_duration` are session-protection fields and this
+#: fabric configures session protection on zero sessions
+#: (`detailed_information_has_sp="false"` on all 28), so both read a
+#: constant 0 everywhere -- exposing either would look diagnostic and never
+#: actually vary. `ta_up_time_seconds` is LDP's own direct counterpart to
+#: `neighbor_uptime` -- seconds since this session last came up, genuinely
+#: live (measured: 2,885s to 511,698s across this fabric's real sessions) --
+#: and reuses the identical flap-detection shape `_shape_isis_adjacency_records`
+#: already established, via `_samples_and_resets`.
+_LDP_UPTIME_METRIC = (
+    "Cisco_IOS_XR_mpls_ldp_oper:mpls_ldp_global_active_default_vrf_neighbors_"
+    "neighbor_protocol_information_ta_up_time_seconds"
+)
+
+_LDP_SESSION_SHAPE = re.compile(
+    r'^' + re.escape(_LDP_UPTIME_METRIC) + r'\{source="[A-Za-z0-9_-]{1,32}"\}$'
+)
+
+
+def _build_ldp_session_selector(resolved: Mapping[str, Any]) -> str:
+    return '{0}{{source="{1}"}}'.format(_LDP_UPTIME_METRIC, resolved["device"])
+
+
+def _shape_ldp_session_records(
+    result: list, resolved: Mapping[str, Any]
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """`ldp_session_history`'s response shaper -- `_shape_isis_adjacency_
+    records`'s exact shape, one record per LDP session. `interface_name` is
+    read from the slash-spelled label (`..._data_interface`, e.g.
+    "GigabitEthernet0/0/0/0"), never the underscore-spelled sibling
+    (`..._data_interface_name`, "GigabitEthernet0_0_0_0") gNMI also exports
+    for the same field -- the slash form is the one every other tool in this
+    project treats as canonical (`interface_kind.canonical`'s own output
+    shape), and extracting the underscore one here would have been a FIFTH
+    interface-spelling variant, exactly what B-519's audit exists to catch.
+    `capabilities_received_description`/`capabilities_sent_description` (the
+    two labels on this series that read as free text, e.g. "MP: Multi-
+    Topology (MT)") are deliberately NOT extracted -- see the module
+    docstring's "why this module needs zero new FREE_TEXT_FIELDS entries".
+    """
+
+    records: list[dict[str, Any]] = []
+    total_samples = 0
+
+    for series in result:
+        if not isinstance(series, dict):
+            continue
+        metric = series.get("metric") if isinstance(series.get("metric"), dict) else {}
+        values = series.get("values") if isinstance(series.get("values"), list) else []
+
+        samples, reset_timestamps = _samples_and_resets(values)
+
+        total_samples += len(samples)
+        records.append(
+            {
+                "lsr_id": metric.get("lsr_id"),
+                "interface_name": metric.get(
+                    "ldp_nbr_ipv4_adj_info_adjacency_group_link_hello_data_interface"
+                ),
+                "peer_state": metric.get("detailed_information_peer_state"),
+                "samples": samples,
+                "reset_count": len(reset_timestamps),
+                "reset_timestamps": reset_timestamps,
+            }
+        )
+
+    return records, {
+        "records_returned": total_samples,
+        "records_available": None,
+        "session_count": len(records),
+    }
+
+
+#: `Cisco_IOS_XR_shellutil_oper:system_time_uptime_uptime{source="<device>"}`
+#: -- exactly one series per device (measured live 2026-08-19: nine series,
+#: one per fabric device, no other labels of interest), unlike
+#: isis/ldp's "one selector, many adjacencies" shape -- the exact-match,
+#: single-series shape `interface_rate_history` already has, so
+#: `records_available` is computed the same exact way that query's shaper
+#: does rather than left `None`.
+_DEVICE_UPTIME_METRIC = "Cisco_IOS_XR_shellutil_oper:system_time_uptime_uptime"
+
+_DEVICE_UPTIME_SHAPE = re.compile(
+    r'^' + re.escape(_DEVICE_UPTIME_METRIC) + r'\{source="[A-Za-z0-9_-]{1,32}"\}$'
+)
+
+
+def _build_device_uptime_selector(resolved: Mapping[str, Any]) -> str:
+    return '{0}{{source="{1}"}}'.format(_DEVICE_UPTIME_METRIC, resolved["device"])
+
+
+def _shape_device_uptime_records(
+    result: list, resolved: Mapping[str, Any]
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """`device_uptime_history`'s response shaper: exactly one series
+    (this device's own uptime counter), so records are the flat sample list
+    directly -- `interface_rate_history`'s single-series shape, not
+    `isis_adjacency_history`'s per-adjacency one. A drop between consecutive
+    samples means the device rebooted (`_samples_and_resets`, the identical
+    "seconds since this last came up" logic B-530 reuses from
+    `_shape_isis_adjacency_records`) -- "did this device reboot, and when",
+    which nothing in this build could answer before this query.
+    """
+
+    since_seconds = resolved["since_seconds"]
+    step_seconds = resolved["step_seconds"]
+    expected = since_seconds // step_seconds + 1
+
+    samples: list[dict[str, Any]] = []
+    reset_timestamps: list[str] = []
+    if result:
+        series = result[0] if isinstance(result[0], dict) else {}
+        values = series.get("values") if isinstance(series.get("values"), list) else []
+        samples, reset_timestamps = _samples_and_resets(values)
+
+    return samples, {
+        "records_returned": len(samples),
+        "records_available": expected,
+        "reboot_count": len(reset_timestamps),
+        "reboot_timestamps": reset_timestamps,
     }
 
 
@@ -698,12 +914,15 @@ class PrometheusQuery:
     description: str
 
 
-#: The exact-match table. Two entries, deliberately -- the two live metric
-#: families the build brief named (`Cisco_IOS_XR_clns_isis_oper` adjacency
-#: state, `infra_statsd_oper` interface counters). BGP session-state history
-#: is not here: see the module docstring's "grounding" section for why
-#: (192-label cardinality, free-text `reset_reason`/`peer_reset_reason`
-#: leaves measured live on that series, discovery-alerting.md §3).
+#: The exact-match table. Four entries -- the two live metric families the
+#: build brief originally named (`Cisco_IOS_XR_clns_isis_oper` adjacency
+#: state, `infra_statsd_oper` interface counters), plus two more from the
+#: B-530 TSDB survey (`Cisco_IOS_XR_mpls_ldp_oper` session uptime,
+#: `Cisco_IOS_XR_shellutil_oper` device uptime). BGP session-state history
+#: is still not here: see the module docstring's "Why BGP is still not
+#: queried" section for the re-verified reason (a re-verified reason, not
+#: the original one -- series churn from a label that takes multiple values
+#: over the retention window, not "free text").
 PROMETHEUS_QUERIES: dict[str, PrometheusQuery] = {
     "interface_rate_history": PrometheusQuery(
         name="interface_rate_history",
@@ -745,6 +964,47 @@ PROMETHEUS_QUERIES: dict[str, PrometheusQuery] = {
             "device, sampled every `step_seconds` over the last "
             "`since_seconds`; a value that drops between consecutive "
             "samples is a flap (the adjacency reset), counted per adjacency."
+        ),
+    ),
+    "ldp_session_history": PrometheusQuery(
+        name="ldp_session_history",
+        params={
+            "device": _DeviceSlot(),
+            "since_seconds": _BoundedIntSlot(minimum=60, maximum=7 * 24 * 3600),
+            "step_seconds": _BoundedIntSlot(minimum=15, maximum=3600),
+        },
+        build_selector=_build_ldp_session_selector,
+        selector_shape=_LDP_SESSION_SHAPE,
+        # Already a bare selector -- reused for the existence check unchanged,
+        # the same choice isis_adjacency_history makes for the same reason.
+        existence_selector=_build_ldp_session_selector,
+        existence_selector_shape=_LDP_SESSION_SHAPE,
+        shape_response=_shape_ldp_session_records,
+        description=(
+            "Every LDP session's `ta_up_time_seconds` (seconds since it "
+            "last came up) history on one device, sampled every "
+            "`step_seconds` over the last `since_seconds`; a value that "
+            "drops between consecutive samples is a flap (the session "
+            "reset), counted per session."
+        ),
+    ),
+    "device_uptime_history": PrometheusQuery(
+        name="device_uptime_history",
+        params={
+            "device": _DeviceSlot(),
+            "since_seconds": _BoundedIntSlot(minimum=60, maximum=7 * 24 * 3600),
+            "step_seconds": _BoundedIntSlot(minimum=15, maximum=3600),
+        },
+        build_selector=_build_device_uptime_selector,
+        selector_shape=_DEVICE_UPTIME_SHAPE,
+        existence_selector=_build_device_uptime_selector,
+        existence_selector_shape=_DEVICE_UPTIME_SHAPE,
+        shape_response=_shape_device_uptime_records,
+        description=(
+            "One device's own `system_time_uptime_uptime` (seconds since "
+            "boot) history, sampled every `step_seconds` over the last "
+            "`since_seconds`; a value that drops between consecutive "
+            "samples means the device rebooted."
         ),
     ),
 }

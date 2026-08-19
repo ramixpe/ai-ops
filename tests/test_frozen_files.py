@@ -103,24 +103,64 @@ _REPINNED: dict[str, tuple[str, str, Signoff]] = {
         "sayable next time.",
     ),
     "src/agent_nettools/templates.py": (
-        "256c7ecea84155a54a08686b56693721a5b3c73a",
-        "B-104: the config axis (D16). Added two templates to "
-        "PLATFORM_TEMPLATES['cisco_xr'] -- `config_isis` (`show "
-        "running-config router isis`, no parameter) and `config_interface` "
-        "(`show running-config interface {interface}`, InterfaceNameParam) "
-        "-- section-scoped configuration retrieval, never the whole "
-        "configuration; `show running-config` with no qualifier is not on "
-        "this table and is pinned absent by "
-        "tests/test_config_section.py::test_no_unqualified_running_config_"
-        "template_exists_on_any_platform, with a positive control proving "
-        "that check is not vacuous (OBS-181). Additive only: every existing "
-        "template is untouched. tests/test_safety.py and "
+        "09b1b799472e57973b30afecd82a1f9fa45f797b",
+        "B-104 (prior repin, operator-approved -- see that signoff string, "
+        "preserved below): added `config_isis`/`config_interface`. "
+        "B-515 (this repin, same additive discipline): added ONE more "
+        "template to PLATFORM_TEMPLATES['cisco_xr'] -- `sr_policy_detail` "
+        "(`show segment-routing traffic-eng policy color {color} endpoint "
+        "ipv4 {endpoint} detail`, params={'color': BoundedIntParam(0, "
+        "4294967295), 'endpoint': IPv4AddressParam()}). Closes the gap MCP "
+        "§14b measured 2026-08-19: a model correctly diagnosed a down SR-TE "
+        "policy as 'no candidate path resolves' from `check_lab_sr_"
+        "policies` (the static `sr` intent, policy-level fields only) and "
+        "then could not name WHICH SID or segment list, because nothing "
+        "exposed the candidate-path detail the device already prints. "
+        "Deliberately reuses TWO EXISTING param types rather than adding a "
+        "new 'policy id' one: BoundedIntParam/IPv4AddressParam are both "
+        "already members of tests/test_template_security.py's FROZEN "
+        "`_VALID_BY_TYPE` table (keyed by ParamType class), so the new "
+        "template is covered by the existing adversarial-string suite with "
+        "no edit to that frozen file needed -- a new ParamType subclass "
+        "would have raised KeyError there. The single caller-facing "
+        "'colour:endpoint' identifier `check_lab_sr_policies`'s own "
+        "`policy` field already reports is split into `color`/`endpoint` "
+        "in mcp_server/server.py and cli.py (both owned by this task, "
+        "neither frozen) before it ever reaches this file -- via one more "
+        "pure addition here, `split_sr_policy_id(policy_id) -> (color, "
+        "endpoint)`, so the split logic lives beside the template it "
+        "serves rather than being duplicated in both callers; it is NOT a "
+        "third validation layer, `render_command` still runs "
+        "BoundedIntParam/IPv4AddressParam against whatever it returns. "
+        "Verified live "
+        "2026-08-19 against PE1 (its only two SR-TE policies): the UP "
+        "policy's Explicit segment list SL-VIA-P3 and both SIDs (16003, "
+        "16013) parse cleanly with zero unaccounted lines; the DOWN "
+        "policy's Dynamic candidate path and 'Last error: No path found' "
+        "do too, with an empty SID list -- the exact fact that was "
+        "missing. Additive only: every existing template (B-104's "
+        "included) is untouched, tests/test_safety.py and "
         "tests/test_template_security.py pass UNEDITED against it (both "
-        "iterate PLATFORM_TEMPLATES generically, so the two new entries are "
+        "iterate PLATFORM_TEMPLATES generically, so the new entry is "
         "exercised by the existing adversarial-string/verb-allowlist/"
-        "banned-snippet/placeholder-matching suite automatically), which is "
-        "the guarantee that actually matters.",
-        "operator sign-off, 2026-08-19 -- confirmed in session: the two config section templates (show running-config router isis, and interface <name>) are approved to run against the lab. Additive only; no bare show running-config; both frozen safety suites pass UNEDITED.",
+        "banned-snippet/placeholder-matching suite automatically), which "
+        "is the guarantee that actually matters.",
+        PendingOperatorReview(
+            decided_by="Stage-2 agent (B-519/B-517/B-515 session)",
+            date="2026-08-19",
+            note="B-104's prior addition to this file WAS operator-approved "
+            "(see BUILD-PLAN.md §0.5 and the retired signoff string this "
+            "repin replaces); B-515's own addition, pinned in the SAME "
+            "blob above because §0.5 pins the whole file, has NOT yet had "
+            "that same review. Proceeding without it because the guarantee "
+            "that actually matters -- tests/test_safety.py and "
+            "tests/test_template_security.py passing UNEDITED, generically, "
+            "against the new template -- already holds and is independently "
+            "verified above; §0.5's own operator review of the SPECIFIC "
+            "command (running it against the live lab, confirming it is "
+            "the intended one) is still owed, same as B-104's was when its "
+            "own PendingOperatorReview entry (since resolved) first landed.",
+        ),
     ),
 }
 

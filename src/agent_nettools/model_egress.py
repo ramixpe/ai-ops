@@ -191,6 +191,15 @@ FREE_TEXT_FIELDS: frozenset[tuple[str, str]] = frozenset(
         ("config_interface", "description"),
         ("logs_for_device", "text"),
         ("logs_for_device", "code"),
+        # B-515: sr_policy_detail's "Last error" (e.g. "No path found") is
+        # device-generated free text describing WHY a candidate path did not
+        # resolve -- not a fixed enum the way admin_state/operational_state
+        # are -- the same class of field bgp_neighbor's last_reset_reason
+        # already is. No existing name to reuse (unlike netbox.py's
+        # "description"): "last_error" names what it is, honestly, rather
+        # than borrowing an unrelated field name just to add zero new
+        # entries.
+        ("sr_policy_detail", "last_error"),
     }
 )
 
@@ -292,6 +301,13 @@ ERROR_KINDS: tuple[tuple[str, str], ...] = (
     ("not a valid ipv4 address", "the parameter was refused: not a valid IPv4 address"),
     ("not a valid ipv4 prefix", "the parameter was refused: not a valid IPv4 prefix"),
     ("not a valid interface name", "the parameter was refused: not a valid interface name"),
+    # B-515: get_lab_sr_policy_detail's own pre-template split
+    # (templates.split_sr_policy_id) refuses a policy id with no
+    # colour:endpoint shape before it ever reaches BoundedIntParam/
+    # IPv4AddressParam -- classified the same "parameter was refused" way as
+    # every other validation refusal in this block, kept byte-identical to
+    # mcp_server.boundary.ERROR_KINDS's own copy.
+    ("not a valid policy id", "the parameter was refused: not a valid policy id (expected colour:endpoint)"),
     ("must be between", "the parameter was refused: out of range"),
     ("expected a string", "the parameter was refused: wrong type"),
     # --- Locally-generated selection errors (operator walkthrough 2026-08-18,
@@ -329,7 +345,7 @@ ERROR_KINDS: tuple[tuple[str, str], ...] = (
     # mismatch" also benefits `logs_loki.py`'s identical message shape,
     # which had no entry until now -- purely additive, nothing removed.
     ("parameter mismatch", "the parameter set was refused: missing or unexpected parameters"),
-    ("unknown prometheus query", "the query name was not recognised; valid: interface_rate_history, isis_adjacency_history"),
+    ("unknown prometheus query", "the query name was not recognised; valid: device_uptime_history, interface_rate_history, isis_adjacency_history, ldp_session_history"),
     ("is not an allowlisted counter", "the parameter was refused: not an allowlisted counter"),
     ("would return approximately", "the parameter was refused: the requested window/step would exceed the sample budget"),
     ("prometheus returned http status", "the metrics store returned a non-success HTTP status"),
@@ -350,6 +366,21 @@ ERROR_KINDS: tuple[tuple[str, str], ...] = (
     ("netbox response was not valid json", "the inventory store's response could not be parsed as JSON"),
     ("netbox response was not the expected", "the inventory store's response was not in the expected shape"),
     ("netbox request failed", "the inventory store could not be reached"),
+    # --- graph.py (B-517): neo4j as an MCP read tool, the third external-
+    # source registration class (NetBox's own pattern, above) applied to the
+    # topology PROJECTION -- `get_lab_graph_topology` stayed toolless until
+    # the graph held real data (measured 2026-08-19 after running the
+    # collector live: 9 nodes, 29 relationships against the container named
+    # by `docker inspect sota-lab-platform-neo4j-1`). A missing
+    # NEO4J_URI/NEO4J_PASSWORD classifies through the EXISTING "required
+    # environment variable" entry above (same reason `netbox.run_named_read`'s
+    # own docstring gives for needing no new one either). Kept
+    # byte-identical to `mcp_server.boundary.ERROR_KINDS`'s own copy of this
+    # block.
+    ("unknown neo4j query", "the query name was not recognised; valid: topology"),
+    ("neo4j authentication failed", "the graph store rejected the credentials"),
+    ("neo4j service unavailable", "the graph store could not be reached"),
+    ("neo4j request failed", "the graph store read failed"),
     # --- B-512 (Job 2): the MCP-only gate on the external-source tools
     # (get_lab_logs/get_lab_interface_rate_history/
     # get_lab_isis_adjacency_history), the same "classified, never a silent

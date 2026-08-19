@@ -368,6 +368,39 @@ PLATFORM_TEMPLATES: dict[str, dict[str, Template]] = {
             format_string="show running-config interface {interface}",
             params={"interface": InterfaceNameParam()},
         ),
+        # B-515: the SR-TE policy detail a model needs to name WHICH SID or
+        # segment list is involved in a down policy, not just that no
+        # candidate path resolves (MCP §14b) -- `check_lab_sr_policies`
+        # (the static `sr` intent) reports policy-level state only. Two
+        # EXISTING param types, not a new "policy id" one: a color is a
+        # `BoundedIntParam` (SR-TE color is a 32-bit value, RFC 8402/Cisco
+        # convention) and an endpoint is the `IPv4AddressParam` every other
+        # address-shaped template here already uses -- reusing both is what
+        # keeps `tests/test_template_security.py`'s FROZEN `_VALID_BY_TYPE`
+        # table (keyed by ParamType *class*) covering this template
+        # automatically, with no edit to that frozen file. The single
+        # caller-facing "colour:endpoint" identifier
+        # `check_lab_sr_policies`'s own `policy` field already reports (e.g.
+        # "20:10.255.0.13") is split into these two BEFORE it reaches this
+        # template -- see `mcp_server/server.py`'s `get_lab_sr_policy_detail`
+        # and `cli.py`'s `_cmd_sr_policy`, both of which I own; this file
+        # never sees the composite string. "detail" is kept in the rendered
+        # command even though a bare color+endpoint filter already prints
+        # candidate-path/SID detail for a DOWN policy (verified live,
+        # 2026-08-19) -- for an UP one it is NOT a no-op: it additionally
+        # prints the programmed LSP's own State, confirming the forwarding
+        # plane (not just the control plane) has the path.
+        "sr_policy_detail": Template(
+            name="sr_policy_detail",
+            format_string=(
+                "show segment-routing traffic-eng policy color {color} "
+                "endpoint ipv4 {endpoint} detail"
+            ),
+            params={
+                "color": BoundedIntParam(minimum=0, maximum=4294967295),
+                "endpoint": IPv4AddressParam(),
+            },
+        ),
     },
     # Unverified: no IOS-XE device in the lab (see platforms.py). Included to
     # prove the template abstraction, like PLATFORM_INTENTS, holds across a
@@ -416,6 +449,35 @@ def template_for(platform: str, template_name: str) -> Template:
             f"Platform {platform} has no template: {template_name}. Known: {known}."
         )
     return templates[template_name]
+
+
+def split_sr_policy_id(policy_id: str) -> tuple[str, str]:
+    """Split a caller-facing SR-TE policy id (``"<color>:<endpoint>"``, e.g.
+    ``"20:10.255.0.13"`` -- the same shape ``parsers.parse_xr_sr``'s own
+    ``policy`` field already reports) into the ``color``/``endpoint`` values
+    the ``sr_policy_detail`` template's two declared params expect (B-515).
+
+    **This is not a third validation layer.** ``render_command`` still runs
+    ``BoundedIntParam``/``IPv4AddressParam`` against whatever this returns --
+    a malformed half (e.g. an endpoint carrying a forbidden character) is
+    still refused there, safely, regardless of what this function does with
+    it. This exists only so a caller holds ONE identifier -- the one
+    ``check_lab_sr_policies`` already hands back -- rather than having to
+    know the template splits it into two internally.
+
+    Raises ``TemplateValidationError`` for a policy id with no ``:``
+    separator or an empty half -- the one shape check this function makes,
+    so a caller sees "not a valid policy id" rather than a confusing
+    downstream error about a garbled endpoint.
+    """
+
+    color, sep, endpoint = (policy_id or "").partition(":")
+    if not sep or not color or not endpoint:
+        raise TemplateValidationError(
+            f"sr_policy_detail: not a valid policy id (expected "
+            f"colour:endpoint, e.g. '20:10.255.0.13'): {policy_id!r}"
+        )
+    return color, endpoint
 
 
 @functools.lru_cache(maxsize=None)
