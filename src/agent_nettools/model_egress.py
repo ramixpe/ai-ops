@@ -212,6 +212,15 @@ _ACTIVE_PROBES_DISABLED_PHRASE = (
     "default"
 )
 
+#: B-512 (Job 2): kept identical, word for word, to `mcp_server.boundary`'s
+#: constant of the same name.
+_EXTERNAL_SOURCES_DISABLED_PHRASE = (
+    "external evidence sources are disabled by configuration "
+    "(Loki/Prometheus); set NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES=true (or 1) "
+    "-- the default -- to allow an MCP client to query them for historical "
+    "evidence, or explicitly to false/0/no/off to keep this disabled"
+)
+
 #: Copied from `mcp_server.boundary.ERROR_KINDS`, not imported -- see
 #: `RAW_TEXT_KEYS` above for why this package cannot depend on `mcp_server`.
 #: **Both tables must change together.** `tests/test_model_egress.py`
@@ -319,6 +328,13 @@ ERROR_KINDS: tuple[tuple[str, str], ...] = (
     ("prometheus response was not valid json", "the metrics store's response could not be parsed as JSON"),
     ("prometheus query did not return a success status", "the metrics store rejected the query or reported an internal error"),
     ("prometheus response was not the expected", "the metrics store's response was not in the expected shape"),
+    # --- B-512 (Job 2): the MCP-only gate on the external-source tools
+    # (get_lab_logs/get_lab_interface_rate_history/
+    # get_lab_isis_adjacency_history), the same "classified, never a silent
+    # no-op" treatment B-493 gives the active-probe refusal. Kept
+    # byte-identical to mcp_server.boundary.ERROR_KINDS's own copy of this
+    # entry.
+    ("external evidence sources are disabled", _EXTERNAL_SOURCES_DISABLED_PHRASE),
 )
 
 

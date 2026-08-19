@@ -212,6 +212,16 @@ MUTATIONS = [
      "    if False and args.flow in flows.REFUSED_OBJECT_TYPES:",
      "test_a_refused_flow_is_answered_with_its_reason_not_an_invalid_choice"),
 
+    ("B-511", "a document carrying the evaluation-material marker is never "
+     "returned by search_knowledge -- the corpus must not hold its own "
+     "answer key (OBS-194: a model under test searched MCP-RETEST-PROTOCOL.md "
+     "and read back the expected answer to the fabrication question it was "
+     "just asked)",
+     "src/agent_nettools/knowledge.py",
+     "            if _is_evaluation_material(lines):\n                continue\n",
+     "",
+     "test_evaluation_material_is_never_returned_by_search"),
+
     ("B-489", "_run_rendered_command has no command= parameter to smuggle a "
      "pre-rendered string through, bypassing reconstruction against the "
      "declaring template",
@@ -245,15 +255,23 @@ MUTATIONS = [
      '    "bgp_vpnv4": check_bgp_vpnv4_neighbors,\n', "",
      "test_every_cisco_xr_intent_has_a_check_tool"),
 
-    ("B-511", "a document carrying the evaluation-material marker is never "
-     "returned by search_knowledge -- the corpus must not hold its own "
-     "answer key (OBS-194: a model under test searched MCP-RETEST-PROTOCOL.md "
-     "and read back the expected answer to the fabrication question it was "
-     "just asked)",
-     "src/agent_nettools/knowledge.py",
-     "            if _is_evaluation_material(lines):\n                continue\n",
-     "",
-     "test_evaluation_material_is_never_returned_by_search"),
+    # ---- B-512 (Job 2): Loki/Prometheus as MCP tools. The main new guard is
+    # the external-source gate -- the same enforcement shape B-493 gave the
+    # active-probe gate, applied to a third registration class
+    # (`_external_source_tool`). Counted before mutating (OBS-191): the
+    # anchor string below occurs exactly once in server.py, and nothing else
+    # in `_register_sanitized_tool` independently stops the wrapped function
+    # (logs_loki.run_named_query/metrics_prometheus.run_named_query) from
+    # running while the gate is closed -- so a test that proves the wrapped
+    # function is never called is not vacuously true by some other path. ----
+
+    ("B-512-GATE", "the external-source gate is checked before an "
+     "external-source tool's wrapped function (logs_loki/"
+     "metrics_prometheus run_named_query) is ever called",
+     "mcp_server/server.py",
+     "            if external_source and not _mcp_external_sources_allowed():\n",
+     "            if external_source and False:\n",
+     "test_external_source_gate_actually_prevents_the_call_when_disabled"),
 ]
 
 

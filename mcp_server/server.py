@@ -22,15 +22,19 @@ except ModuleNotFoundError:
     # MCP SDK < 2.0 exposed it as FastMCP.
     from mcp.server.fastmcp import FastMCP
 
+from agent_nettools import logs_loki, metrics_prometheus
 from agent_nettools.health import evaluate_fabric
 from agent_nettools.inventory_model import load_inventory_file
 from agent_nettools.investigation import investigate
 from agent_nettools.llm_analysis import TROUBLESHOOTING_PROMPT
 from agent_nettools.network_tools import (
     check_bgp_neighbors,
+    check_bgp_vpnv4_neighbors,
     check_fabric,
     check_interfaces,
     check_isis_neighbors,
+    check_ldp_discovery,
+    check_ldp_neighbors,
     check_lldp_neighbors,
     check_sr_policies,
     collect_evidence,
@@ -156,6 +160,102 @@ def _active_probes_refused(tool_name: str, call_args: tuple, call_kwargs: dict) 
     }
 
 
+# --------------------------------------------------------------------------- #
+# B-512 (Job 2): a THIRD registration class, for tools that reach an
+# EXTERNAL evidence store (Loki, Prometheus) instead of a lab device.
+#
+# `_register_sanitized_tool` knew only two shapes: a passive device read
+# (`_read_only_tool`) and an active probe toward a caller-supplied address on
+# the managed network (`_active_probe_tool`, B-493). Neither name honestly
+# describes `get_lab_logs`/`get_lab_interface_rate_history`/
+# `get_lab_isis_adjacency_history`: they change no device state and generate
+# no traffic toward anything the model chooses (Loki/Prometheus's address is
+# operator-configured, `NETTOOLS_LOKI_URL`/`NETTOOLS_PROMETHEUS_URL`, never a
+# tool parameter -- see logs_loki.py/metrics_prometheus.py's own "named
+# queries only" argument), so `_active_probe_tool`'s risk model does not
+# apply. But they are not a passive `show` read either: every call leaves
+# the lab device fleet entirely and reaches a *different* subsystem the
+# per-platform command allowlist (`platforms.APPROVED_COMMANDS`) says
+# nothing about, over a query language with its own, separate allowlist
+# (`LOKI_QUERIES`/`PROMETHEUS_QUERIES`). A client auto-approving on
+# `readOnlyHint` alone cannot tell "reads this lab's own devices" apart from
+# "reads an external observability stack this lab happens to also run" --
+# the same signalling gap B-473 named for active probes, applied to a
+# different axis (destination, not traffic).
+#
+# So this gets its own annotation (title only -- read_only_hint stays True,
+# and open_world_hint stays unset: the destination is one fixed,
+# operator-configured service, not an arbitrary address, so "open world" in
+# the MCP spec's sense would overstate it) and its own gate,
+# `NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES`, enforced at registration the same
+# mechanical way B-493's gate is -- a tool registered through
+# `_external_source_tool` inherits it with no diff to this file.
+#
+# Default ENABLED, deliberately the OPPOSITE posture from B-493's gate:
+#   * No caller-controlled destination -- there is no SSRF-shaped risk a
+#     model can steer by choosing what to ask for, the exact risk that made
+#     active probes default OFF (a model choosing where traffic goes).
+#   * The query surface is the same allowlisted-slots rigor as a device
+#     command, not free text.
+#   * This is new functionality being turned ON by this change at the
+#     operator's own stated request (job 2's brief) -- shipping it
+#     default-off would make "expose Loki/Prometheus" ship invisible.
+#   * A real, non-hypothetical reason to still offer an off switch: a
+#     deployment of this server with no Loki/Prometheus reachable (this
+#     package is also used outside this one lab) would otherwise have a
+#     model repeatedly pay a timeout (`NETTOOLS_LOKI_TIMEOUT_SECONDS`/
+#     `NETTOOLS_PROMETHEUS_TIMEOUT_SECONDS`, 10s default each) for a tool
+#     that can never succeed there -- an availability/UX gate, not only a
+#     security one.
+# Because the risk this gate guards is "an unwanted outbound call ran",
+# never "the network was changed", an unrecognized value follows the
+# ordinary (non-B-493) convention already used by most bool settings in this
+# codebase (`settings.Setting.unknown_bool_disables=False`): it resolves
+# toward the documented default (enabled), not toward a fixed "safe" pole --
+# see settings.py's own comment on why that footgun is accepted for every
+# setting except the ones that exist specifically to stay off.
+NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES_ENV = "NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES"
+_MCP_EXTERNAL_SOURCES_FALSY = frozenset({"0", "false", "no", "off"})
+
+
+def _mcp_external_sources_allowed() -> bool:
+    value = os.getenv(NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES_ENV, "1").strip().lower()
+    return value not in _MCP_EXTERNAL_SOURCES_FALSY
+
+
+def _external_sources_refused(tool_name: str, call_args: tuple, call_kwargs: dict) -> dict:
+    """The envelope returned in place of calling an external-source tool.
+
+    Same shape as `_active_probes_refused` (`status: "error"`, classified
+    through `boundary.ERROR_KINDS`/`model_egress.ERROR_KINDS`'s matching
+    "external evidence sources are disabled" entry -- added to both,
+    byte-identical, in the same change) and the same reason: never a silent
+    no-op, never "an unclassified error". Every current external-source tool
+    (`get_lab_logs`, `get_lab_interface_rate_history`,
+    `get_lab_isis_adjacency_history`) takes `device_name` first, so it is
+    read the same way here rather than duplicated per tool.
+    """
+
+    device_name = call_kwargs.get("device_name")
+    if device_name is None and call_args:
+        device_name = call_args[0]
+
+    return {
+        "tool": tool_name,
+        "device": device_name,
+        "status": "error",
+        "data": {},
+        "errors": [
+            f"{tool_name}: external evidence sources are disabled for the MCP "
+            f"surface: {NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES_ENV} is set to a "
+            "falsy value. Set "
+            f"{NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES_ENV}=true (or 1) -- the "
+            "default -- to allow an MCP client to query Loki/Prometheus for "
+            "historical evidence; this tool never reaches a device."
+        ],
+    }
+
+
 _TOOL_ACCEPTS_ANNOTATIONS = "annotations" in inspect.signature(FastMCP.tool).parameters
 
 try:
@@ -184,21 +284,40 @@ try:
     ACTIVE_PROBE_HINT: Any | None = (
         ToolAnnotations(**_active_probe_kwargs) if _TOOL_ACCEPTS_ANNOTATIONS else None
     )
+
+    # B-512: title only -- see the module comment above `_external_source_tool`
+    # for why open_world_hint is deliberately NOT set here (one fixed,
+    # operator-configured destination, not an arbitrary one).
+    EXTERNAL_SOURCE_HINT: Any | None = (
+        ToolAnnotations(
+            read_only_hint=True,
+            title="EXTERNAL SOURCE — queries Loki/Prometheus, not a device",
+        )
+        if _TOOL_ACCEPTS_ANNOTATIONS
+        else None
+    )
 except ImportError:
     READ_ONLY_HINT = None
     ACTIVE_PROBE_HINT = None
+    EXTERNAL_SOURCE_HINT = None
     _ANNOTATIONS_ACCEPT_OPEN_WORLD = False
 
 # What actually happened, so a caller/reviewer can tell without re-deriving it
 # from the checks above.
 READ_ONLY_ANNOTATIONS_SUPPORTED = READ_ONLY_HINT is not None
 ACTIVE_PROBE_ANNOTATIONS_SUPPORTED = ACTIVE_PROBE_HINT is not None
+EXTERNAL_SOURCE_ANNOTATIONS_SUPPORTED = EXTERNAL_SOURCE_HINT is not None
 
 
 def _register_sanitized_tool(
-    annotations: Any | None, *args: Any, active_probe: bool = False, **kwargs: Any
+    annotations: Any | None,
+    *args: Any,
+    active_probe: bool = False,
+    external_source: bool = False,
+    **kwargs: Any,
 ) -> Callable[[Callable], Callable]:
-    """The shared body of `_read_only_tool` and `_active_probe_tool`.
+    """The shared body of `_read_only_tool`, `_active_probe_tool`, and
+    `_external_source_tool`.
 
     Registration and **the raw-text boundary** are identical for both -- the
     only thing that may ever legitimately differ between a passive read and an
@@ -223,6 +342,15 @@ def _register_sanitized_tool(
     every active-probe tool registers, rather than inside each tool body, for
     the same reason sanitisation lives here: a check a tool author has to
     remember to add is a check a future tool will ship without.
+
+    **`external_source=True` (B-512, Job 2) is the same move again, for a
+    third gate.** `_external_source_tool` passes it. When set, the wrapped
+    function is not called at all unless `_mcp_external_sources_allowed()`
+    says so -- so a disabled gate means `logs_loki.run_named_query`/
+    `metrics_prometheus.run_named_query` never fire, and no HTTP call leaves
+    this process. See the module comment above `_external_source_tool` for
+    why this gate exists and why it defaults to the opposite posture from
+    `active_probe`'s.
     """
 
     if annotations is not None:
@@ -239,6 +367,15 @@ def _register_sanitized_tool(
                 # reason, not a silent no-op and not an unclassified error.
                 return sanitize(
                     _active_probes_refused(function.__name__, call_args, call_kwargs)
+                )
+            if external_source and not _mcp_external_sources_allowed():
+                # Same move, opposite default: `function` (a logs_loki/
+                # metrics_prometheus named-query wrapper) is never called, so
+                # no outbound call to Loki/Prometheus is made while the gate
+                # is closed -- but the caller gets a classified, structured
+                # reason, not a silent no-op.
+                return sanitize(
+                    _external_sources_refused(function.__name__, call_args, call_kwargs)
                 )
             return sanitize(function(*call_args, **call_kwargs))
 
@@ -286,6 +423,31 @@ def _active_probe_tool(*args: Any, **kwargs: Any) -> Callable[[Callable], Callab
     """
 
     return _register_sanitized_tool(ACTIVE_PROBE_HINT, *args, active_probe=True, **kwargs)
+
+
+def _external_source_tool(*args: Any, **kwargs: Any) -> Callable[[Callable], Callable]:
+    """`_read_only_tool`'s twin for tools that reach an EXTERNAL evidence
+    store (Loki/Prometheus) rather than a lab device (B-512, Job 2).
+
+    Used by `get_lab_logs`, `get_lab_interface_rate_history`, and
+    `get_lab_isis_adjacency_history`. Same registration, same sanitisation
+    boundary (`_register_sanitized_tool`) as every other tool here --
+    annotated with `EXTERNAL_SOURCE_HINT` instead of `READ_ONLY_HINT` so a
+    client reading annotations can tell these apart from a tool that reads
+    this lab's own device fleet. See the module comment above this
+    function's constants (`NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES_ENV`) for why
+    this is a third class rather than a passive read or an active probe.
+
+    ``external_source=True`` IS the enforcement mechanism: every tool
+    registered through this function is gated by
+    `NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES`, by construction -- a tool added
+    here later inherits the gate with no diff to this file, the same
+    guarantee `_active_probe_tool` already gives its own gate.
+    """
+
+    return _register_sanitized_tool(
+        EXTERNAL_SOURCE_HINT, *args, external_source=True, **kwargs
+    )
 
 
 @_read_only_tool()
@@ -344,6 +506,25 @@ def check_lab_bgp_neighbors(device_name: str) -> dict:
 
 
 @_read_only_tool()
+def check_lab_bgp_vpnv4_neighbors(device_name: str) -> dict:
+    """Answers: *which MP-BGP VPNv4 sessions does this device have, and what
+    state are they in?*
+
+    Prefer this over `check_lab_bgp_neighbors` when the question is about
+    L3VPN/MPLS-VPN reachability specifically -- VPNv4 is a second address
+    family negotiated on the same peer, and a healthy IPv4 unicast session
+    says nothing about whether VPNv4 was negotiated or is Established. It
+    will not tell you **why** a VPNv4 session is down, and there is no
+    `investigate_lab_session` flow for it (VPNv4 is collected as a plain
+    context intent here, not a descent rung) -- check the underlying IPv4
+    unicast session with `check_lab_bgp_neighbors` and
+    `investigate_lab_session(flow="bgp_session")` first.
+    """
+
+    return check_bgp_vpnv4_neighbors(device_name)
+
+
+@_read_only_tool()
 def check_lab_lldp_neighbors(device_name: str) -> dict:
     """Answers: *what is physically cabled to this device, and to which port?*
 
@@ -367,6 +548,41 @@ def check_lab_isis_neighbors(device_name: str) -> dict:
     """
 
     return check_isis_neighbors(device_name)
+
+
+@_read_only_tool()
+def check_lab_ldp_neighbors(device_name: str) -> dict:
+    """Answers: *which LDP label-distribution sessions does this device
+    have, and what state are they in?*
+
+    Prefer this to find out **that** an LDP session is down, and which peer
+    it belongs to. It will not tell you **why** -- and a session's FSM state
+    alone does not say whether Hello discovery ever formed the adjacency
+    underneath it; for that, use `check_lab_ldp_discovery`.
+
+    If the question is why an LDP session is down, prefer
+    `investigate_lab_session` with ``flow="ldp_session"`` -- it walks the
+    layers beneath it (discovery, IS-IS, the physical interface) and reports
+    which one broke.
+    """
+
+    return check_ldp_neighbors(device_name)
+
+
+@_read_only_tool()
+def check_lab_ldp_discovery(device_name: str) -> dict:
+    """Answers: *has this device's LDP Hello discovery found a neighbor on
+    each link, before any session forms?*
+
+    Prefer this before `check_lab_ldp_neighbors` when an LDP session never
+    came up at all -- discovery is a real, in-protocol precondition for the
+    session, not merely a correlated signal: no Hello adjacency means no
+    session will ever form, regardless of LDP configuration. It will not
+    tell you whether an already-formed session is healthy; for that use
+    `check_lab_ldp_neighbors`.
+    """
+
+    return check_ldp_discovery(device_name)
 
 
 @_read_only_tool()
@@ -477,12 +693,12 @@ def search_lab_knowledge(query: str) -> dict:
     nobody read -- OBS-139). Plain text search with `path:line` citations; no
     device is contacted. Not a device-state tool -- for state, use the check/
     lookup tools; for "why is X broken", use `investigate_lab_session`.
-
+    
     This project's own internal evaluation material -- test protocols and
     their expected answers -- is withheld from the corpus and returns no hit,
     the same as a topic nobody has written up. A miss here is not proof a
     topic is undocumented elsewhere in the project.
-    """
+"""
 
     from agent_nettools.knowledge import search_knowledge
 
@@ -725,6 +941,185 @@ def detect_lab_flaps(device_name: str, min_transitions: int = 3) -> dict:
     """
 
     return detect_flaps(device_name, min_transitions=min_transitions)
+
+
+# --------------------------------------------------------------------------- #
+# B-512 (Job 2): Loki/Prometheus as external-source tools -- the temporal
+# evidence axis (stage-2-architecture.md §2.4a). Each tool below wraps
+# exactly ONE named query from `logs_loki.LOKI_QUERIES` /
+# `metrics_prometheus.PROMETHEUS_QUERIES`, with that query's own declared,
+# validated slots as its ONLY parameters. There is deliberately no
+# `query_name`, `logql`, or `promql` parameter anywhere on this surface -- a
+# model chooses a QUERY by choosing which TOOL to call, never by supplying a
+# query string, so "pass a raw query" is not a call shape that exists to be
+# refused; it cannot be constructed at all.
+#
+# These feed the wide step only (constraint 4): nothing here is imported by
+# flows.py/checks.py/investigation.py, and this file does not either.
+# --------------------------------------------------------------------------- #
+
+
+def _coverage_payload(coverage: Any) -> dict[str, Any]:
+    """`coverage.Coverage` -> the compact fields a model needs to tell
+    "nothing happened" apart from "this read cannot say" (constraint 3).
+
+    Built from `Coverage.complete`/`.gaps()`/`.records_returned`/
+    `.records_available` -- every one of them a bool, a tuple of
+    tool-authored strings, or an int; never a value that can carry
+    device-authored text, so nothing here needs free-text quoting. `gaps()`
+    is the operative field: empty means this read really does support a
+    claim of absence; anything else is a reason it cannot, spelled out
+    rather than left for a model to infer from a bare empty list.
+    """
+
+    return {
+        "complete": coverage.complete,
+        "gaps": list(coverage.gaps()),
+        "records_returned": coverage.records_returned,
+        "records_available": coverage.records_available,
+    }
+
+
+def _with_loki_coverage(envelope: dict, device_name: str) -> dict:
+    """Attach `logs_loki.coverage_from_loki`'s absence-is-not-zero verdict.
+
+    Computed HERE, in the MCP tool, not inside `logs_loki.py` itself:
+    `coverage_from_loki`'s own docstring names its caller as "a downstream,
+    wide-step consumer" that "calls this once it has decided the window is
+    relevant" and is explicit that the adapter module itself never calls it.
+    This tool is that consumer -- the adapter stays read-side-only, per its
+    own "expose the adapter, do not consume it in a descent" instruction.
+    """
+
+    parsed = envelope.get("data", {}).get("parsed")
+    if isinstance(parsed, dict):
+        envelope["data"]["coverage"] = _coverage_payload(
+            logs_loki.coverage_from_loki(parsed, device_name)
+        )
+    return envelope
+
+
+def _with_prometheus_coverage(envelope: dict, device_name: str) -> dict:
+    """`_with_loki_coverage`'s twin for `metrics_prometheus.
+    coverage_from_prometheus_history` -- same reasoning, same non-rung
+    consumer."""
+
+    parsed = envelope.get("data", {}).get("parsed")
+    if isinstance(parsed, dict):
+        envelope["data"]["coverage"] = _coverage_payload(
+            metrics_prometheus.coverage_from_prometheus_history(parsed, device_name)
+        )
+    return envelope
+
+
+@_external_source_tool()
+def get_lab_logs(device_name: str, since_seconds: int = 3600, limit: int = 200) -> dict:
+    """Answers: *what has Loki logged for this device recently, and how much
+    of that window can this read actually support?*
+
+    Prefer this over `get_lab_logging` when you need history beyond the
+    device's own small in-memory buffer, or logs from a device currently
+    unreachable by SSH -- Loki holds each device's syslog independently of
+    whether the device itself answers right now. This queries an external
+    log store (Loki), not the device: no SSH session is opened.
+
+    It will NOT show every severity: only IOS-XR severities 3 (err) and 4
+    (warning) reach this pipeline today, a measured platform gap upstream of
+    this tool, not a filter it applies -- an absence of critical/emergency
+    lines here is never evidence none occurred. Check ``data.coverage``
+    before reporting an absence: ``coverage.complete`` is true only when
+    this read can support that claim, and ``coverage.gaps`` says why not
+    when it cannot (the severity floor makes this true of every call, by
+    design -- see `logs_loki.py`).
+
+    ``since_seconds`` how far back to search, 1-604800 (Loki's own retention
+    is one week). ``limit`` how many lines to return, most recent first,
+    1-1000.
+    """
+
+    envelope = logs_loki.run_named_query(
+        "logs_for_device", device=device_name, since_seconds=since_seconds, limit=limit
+    )
+    return _with_loki_coverage(envelope, device_name)
+
+
+@_external_source_tool()
+def get_lab_interface_rate_history(
+    device_name: str,
+    interface: str,
+    counter: str,
+    since_seconds: int = 3600,
+    step_seconds: int = 60,
+) -> dict:
+    """Answers: *has this interface's traffic/error/drop rate been climbing,
+    dropping, or flat over time?*
+
+    Prefer this over `get_lab_interface`'s point-in-time counters when the
+    question is about a TREND -- a sudden utilisation spike, a rising error
+    rate -- rather than the current value. This queries an external metrics
+    store (Prometheus), not the device: no SSH session is opened. Reports a
+    rate (per second), already computed from the device's own cumulative
+    counters so a counter reset never reads as a nonsensical negative delta,
+    sampled every ``step_seconds`` over the last ``since_seconds``.
+
+    It will NOT tell you whether the interface is administratively or line
+    down, and it will NOT explain WHY a rate changed -- for current state
+    use `check_lab_interfaces`/`get_lab_interface`. A window with zero
+    returned samples is not a rate of zero: check ``data.coverage`` before
+    reporting one -- it distinguishes "this series has never been scraped
+    at all" from "it stopped reporting partway through this window" from
+    "the read failed outright".
+
+    ``interface`` an interface name as the device spells it, e.g.
+    "GigabitEthernet0/0/0/1". ``counter`` one of: bytes_received,
+    bytes_sent, packets_received, packets_sent, input_errors, output_errors,
+    input_drops, output_drops, crc_errors, carrier_transitions.
+    """
+
+    envelope = metrics_prometheus.run_named_query(
+        "interface_rate_history",
+        device=device_name,
+        interface=interface,
+        counter=counter,
+        since_seconds=since_seconds,
+        step_seconds=step_seconds,
+    )
+    return _with_prometheus_coverage(envelope, device_name)
+
+
+@_external_source_tool()
+def get_lab_isis_adjacency_history(
+    device_name: str, since_seconds: int = 3600, step_seconds: int = 60
+) -> dict:
+    """Answers: *has any of this device's IS-IS adjacencies flapped
+    recently, even though everything looks healthy right now?*
+
+    Prefer this over `check_lab_isis_neighbors` when a problem is
+    intermittent -- an adjacency that reset and came back looks clean in a
+    current-state read, the same reason `detect_lab_flaps` exists for
+    BGP/interface state. This queries an external metrics store
+    (Prometheus), not the device: no SSH session is opened. One record per
+    adjacency, each carrying its ``neighbor_uptime`` sample history and a
+    derived ``reset_count`` -- a drop in uptime between consecutive samples
+    means the adjacency reset.
+
+    It will NOT tell you the CURRENT Up/Down state of an adjacency that has
+    not been sampled since it last came up -- for that use
+    `check_lab_isis_neighbors`. Check ``data.coverage`` before reporting
+    zero adjacencies as isolation: it distinguishes "this device genuinely
+    has none" from "the read failed".
+
+    ``since_seconds``/``step_seconds`` bound the sampled window and its
+    resolution, the same as `get_lab_interface_rate_history`.
+    """
+
+    envelope = metrics_prometheus.run_named_query(
+        "isis_adjacency_history",
+        device=device_name,
+        since_seconds=since_seconds,
+        step_seconds=step_seconds,
+    )
+    return _with_prometheus_coverage(envelope, device_name)
 
 
 # --------------------------------------------------------------------------- #

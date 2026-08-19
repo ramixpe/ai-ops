@@ -256,6 +256,31 @@ SETTINGS: tuple[Setting, ...] = (
         "mcp_server.server",
         unknown_bool_disables=True,
     ),
+    # B-512 (Job 2): a THIRD MCP-only gate, for the external-source tools
+    # (get_lab_logs/get_lab_interface_rate_history/
+    # get_lab_isis_adjacency_history) -- see mcp_server/server.py's own
+    # comment above `_external_source_tool` for the full argument. Default
+    # ENABLED, the opposite posture from NETTOOLS_MCP_ALLOW_ACTIVE_PROBES:
+    # unlike an active probe, a model cannot choose *where* these calls go
+    # (the URL is operator-configured, never a tool parameter), so the risk
+    # that gate exists to close does not apply here. unknown_bool_disables
+    # is left at its default (False) deliberately -- this is NOT a "must
+    # stay off" gate the way NETTOOLS_MCP_ALLOW_ACTIVE_PROBES/
+    # NETTOOLS_ENABLE_AGENT are, so an unrecognized value follows the
+    # ordinary convention (resolves toward the documented default, enabled)
+    # rather than the B-493 exception.
+    Setting(
+        "NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES", "bool", True,
+        "Whether an MCP client may invoke get_lab_logs/"
+        "get_lab_interface_rate_history/get_lab_isis_adjacency_history "
+        "(the Loki/Prometheus external-source tools). Default ENABLED -- "
+        "the opposite of NETTOOLS_MCP_ALLOW_ACTIVE_PROBES, because the "
+        "destination is operator-configured (NETTOOLS_LOKI_URL/"
+        "NETTOOLS_PROMETHEUS_URL), never a caller-chosen value, so there is "
+        "no traffic-steering risk to gate closed by default. A refusal here "
+        "is a classified, structured error, never a silent no-op.",
+        "mcp_server.server",
+    ),
     # -- inventory_model.py --
     Setting(
         "NETTOOLS_INVENTORY", "path", None,

@@ -10,8 +10,11 @@ environment (`DEVICE_USERNAME`, `DEVICE_PASSWORD`).
 - `get_lab_device_facts`
 - `check_lab_interfaces`
 - `check_lab_bgp_neighbors`
+- `check_lab_bgp_vpnv4_neighbors`
 - `check_lab_lldp_neighbors`
 - `check_lab_isis_neighbors`
+- `check_lab_ldp_neighbors`
+- `check_lab_ldp_discovery`
 - `check_lab_sr_policies`
 - `check_lab_fabric`
 - `collect_lab_evidence`
@@ -29,8 +32,20 @@ environment (`DEVICE_USERNAME`, `DEVICE_PASSWORD`).
 - `investigate_lab_session`
 - `search_lab_knowledge`
 - `explain_lab_mnemonic`
+- `get_lab_logs`
+- `get_lab_interface_rate_history`
+- `get_lab_isis_adjacency_history`
 
 There is no shell, configuration tool, or generic command runner.
+
+`check_lab_bgp_vpnv4_neighbors`/`check_lab_ldp_neighbors`/
+`check_lab_ldp_discovery` (B-512, job 1) close a gap B-508 found: `bgp_vpnv4`,
+`ldp`, and `ldp_discovery` were already collected on every device read
+(`PLATFORM_INTENTS["cisco_xr"]`, `CHECK_TOOLS`) with CLI checks and no MCP
+tool naming them, so a model could only reach that evidence by asking for
+`collect_lab_evidence` and reading the block back out -- the right answer
+through the only door available. Same shape, same `_read_only_tool`
+registration, as `check_lab_isis_neighbors`/`check_lab_lldp_neighbors`.
 
 The `get_lab_route`/`get_lab_bgp_neighbor`/`get_lab_interface`/
 `get_lab_logging`/`get_lab_ping`/`get_lab_traceroute` tools are validated,
@@ -81,6 +96,62 @@ MCP-only gate:
   them -- never "an unclassified error", and never a call that just quietly
   did nothing.
 
+### External-source tools: Loki and Prometheus (B-512)
+
+`get_lab_logs`, `get_lab_interface_rate_history`, and
+`get_lab_isis_adjacency_history` are the temporal evidence axis
+(`stage-2-architecture.md` §2.4a) exposed as MCP tools: history read as
+*context*, never as a descent rung -- nothing in `flows.py`/`checks.py`/
+`investigation.py` imports these modules, and neither does this server file
+outside these three tool bodies.
+
+**Named queries only, always.** Each tool wraps exactly one entry from
+`logs_loki.LOKI_QUERIES` / `metrics_prometheus.PROMETHEUS_QUERIES`, with
+that query's own declared, validated slots (`device`, `interface`,
+`counter`, `since_seconds`, ...) as its **only** parameters. There is no
+`query_name`, `logql`, or `promql` parameter anywhere on this surface -- a
+model selects a query by selecting a *tool*, so "pass a raw query string"
+is not a call shape that can even be constructed, never mind refused.
+
+**Absence is never zero.** Every result carries `data.coverage`
+(`complete`, `gaps`, `records_returned`, `records_available`), built from
+`logs_loki.coverage_from_loki`/`metrics_prometheus.
+coverage_from_prometheus_history` -- the same "declared, not derived"
+discipline `checks.py` already applies to `unevaluated` vs `broken`. A
+window with zero records is not reported as a bare empty list: `coverage.
+gaps` says whether that is a real negative or a reason this read cannot
+support one (a scrape gap, a series never observed, a severity Loki's
+pipeline never carries, or a failed query).
+
+**A third registration class.** `_read_only_tool` (a passive device read)
+and `_active_probe_tool` (B-493, traffic toward a caller-chosen address)
+both existed; neither honestly describes a tool that changes no device
+state, generates no device-chosen traffic, and never reaches a device at
+all -- it reaches a *different*, operator-configured subsystem outside the
+per-platform command allowlist. `_external_source_tool` is that third
+class: same sanitisation boundary (`_register_sanitized_tool`), a
+distinguishing annotation `title` ("EXTERNAL SOURCE — queries
+Loki/Prometheus, not a device") without `open_world_hint` (the destination
+is one fixed, configured address, not an arbitrary one), and its own gate:
+
+- `NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES` -- default **enabled**, the
+  opposite posture from `NETTOOLS_MCP_ALLOW_ACTIVE_PROBES`. Unlike an
+  active probe, a model cannot choose *where* these calls go (Loki/
+  Prometheus's URL is operator-configured, `NETTOOLS_LOKI_URL`/
+  `NETTOOLS_PROMETHEUS_URL`, never a tool parameter), so the risk B-493
+  exists to close -- a model steering traffic toward an address it chose
+  -- does not apply. The gate still exists for a real, non-hypothetical
+  reason: a deployment with no Loki/Prometheus reachable would otherwise
+  pay a timeout on every call for a tool that can never succeed there. Set
+  it to `0`/`false`/`no`/`off` to disable; an unrecognized value stays
+  **enabled** (the ordinary, non-B-493 convention -- see `settings.py`).
+- Enforced at **registration**, inside `_register_sanitized_tool`/
+  `_external_source_tool`, the same mechanical place the other two gates
+  live -- a tool registered through it inherits the check with no diff to
+  `server.py`.
+- A refusal is classified (`mcp_server/boundary.py`'s `ERROR_KINDS`,
+  "external evidence sources are disabled"), never a silent no-op.
+
 ### Snapshots, diffing, health, and flap detection (Phase 8)
 
 Through Phase 7 these were CLI-only (`nettools diff`/`baseline`/`health`/
@@ -112,7 +183,7 @@ symptom. Every verdict is code comparing parsed fields; **no model is involved
 and none is called**, and the report is rendered from the descent's own typed
 fields rather than written by one.
 
-It exists because the other tools (22 at last count — the list above is authoritative) answer *what is the state of X*, and
+It exists because the other tools (28 at last count — the list above is authoritative) answer *what is the state of X*, and
 the question an operator actually has is *why is this broken*. Answering that by
 calling six tools and reasoning over the results is exactly where a model
 invents a plausible chain; this returns one that was derived.
@@ -134,7 +205,11 @@ accepted it (an older SDK's `tool()` decorator without an `annotations=`
 parameter degrades to the bare decorator instead of crashing the server).
 `get_lab_ping`/`get_lab_traceroute` additionally carry `open_world_hint=True`
 and a distinguishing `title` (`server.ACTIVE_PROBE_ANNOTATIONS_SUPPORTED`,
-B-473) -- see "Active probes" above.
+B-473) -- see "Active probes" above. `get_lab_logs`/
+`get_lab_interface_rate_history`/`get_lab_isis_adjacency_history` carry a
+distinguishing `title` of their own without `open_world_hint`
+(`server.EXTERNAL_SOURCE_ANNOTATIONS_SUPPORTED`, B-512) -- see "External-
+source tools" above.
 
 Two MCP **resources** let a client ground itself without spending a tool
 call:

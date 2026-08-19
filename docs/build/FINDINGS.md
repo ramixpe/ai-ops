@@ -6081,3 +6081,81 @@ that when the script runs *from inside* a worktree, every path contains that
 string, so the purge silently skips the entire repo. It fails safe here — the
 guard run still detected its own stale bytecode — but the fix I wrote for a race
 introduced a hole in the same function. Filed as B-513.
+
+---
+
+## OBS-196 · M6 · The MCP surface grew 23 → 29, and the third tool class finally had to exist
+
+Six tools added. Three protocol reads (`check_lab_bgp_vpnv4_neighbors`,
+`check_lab_ldp_neighbors`, `check_lab_ldp_discovery`) closing B-512 — the gap the
+2026-08-19 model run walked straight into, where both models answered an LDP
+question through `collect_lab_evidence` because it was the only door. Three
+history reads (`get_lab_logs`, `get_lab_interface_rate_history`,
+`get_lab_isis_adjacency_history`) exposing Loki and Prometheus for the first time.
+
+**The third registration class is now real, and the argument for it is the
+interesting part.** `_register_sanitized_tool` knew `read_only` and
+`active_probe`. Neither honestly describes a tool that reaches Loki: it changes
+no device state, so it is not a probe; but it leaves `APPROVED_COMMANDS`'s trust
+boundary entirely, so calling it a passive device read is a lie of omission.
+
+`_external_source_tool` splits the difference, and two consequences fall out of
+the distinction rather than being chosen:
+
+* **Its gate defaults ENABLED**, the opposite of the active-probe gate. The
+  probe gate is off by default because a probe emits traffic someone did not ask
+  for. This one exists only so a deployment without Loki does not pay a 10 s
+  timeout per call for a tool that cannot succeed — an ergonomic gate, not a
+  safety one, and pretending otherwise would teach the next author the wrong
+  rule.
+* **No `open_world_hint`**, deliberately. B-493's SSRF-shaped concern applies
+  when a caller chooses the destination. Here the Loki and Prometheus URLs are
+  operator environment variables and appear in no tool parameter, so the
+  destination is fixed. Annotating it open-world would be a warning about a risk
+  the design has already removed.
+
+**Free text on a brand-new path, verified against live syslog rather than a
+fixture.** B-481 was exactly this defect once: raw device text crossing to a
+model unquoted because a second path inherited a guarantee it never had. The new
+Loki tool reuses the existing `text`/`code` field names rather than inventing
+new ones — `boundary.sanitize` matches on field name alone, so the quoting fires
+with zero additions to `FREE_TEXT_FIELDS`. I probed the registered tool against
+the real fabric:
+
+```
+text: <<<DEVICE-TEXT untrusted>>>
+sshd[456124]: Read error from remote host 172.20.250.1 port 38882: Connection rese
+```
+
+Real syslog, real delimiters. Reusing the field name is what made it automatic,
+and it is worth noting *why* that worked: `sanitize` matching by name and not by
+`(context, field)` is normally a hazard — a generic name over-matches the whole
+surface — and here the same property is the reason a new source inherited the
+guarantee for free. The hazard and the convenience are the same mechanism.
+
+**Coverage survives to the model.** The four absence cases are attached as
+`data.coverage` by the MCP wrapper — the "downstream wide-step consumer" the
+adapters' docstrings were written waiting for, and deliberately not by the
+adapters themselves. Live, the tool reports what it could not see:
+
+```
+"severities 0,1,2,5,6,7 are not carried by this source"
+"the query returned exactly its requested limit (5); more matching records
+ may exist in this window and were not read"
+```
+
+That second line is the one that matters. A model handed five records and no
+caveat concludes there were five.
+
+**No tool anywhere accepts a LogQL or PromQL string** — each wraps exactly one
+named query with validated slots, pinned by a shape test. I probed every
+registered tool's parameter schema for `query`/`logql`/`promql`/`expr`: the only
+hit is `search_lab_knowledge`'s plain-text document search, which reaches no
+query language and no device.
+
+**Merge note.** This landed on top of B-511, which had also edited `server.py`
+and `mutate_guards.py`. Merging by ownership would have reverted both — the
+OBS-177 failure exactly. Hand-merged: took the agent's files, re-applied B-511's
+docstring and its mutation guard, and verified both present afterwards rather
+than assuming. The re-applied guard block carried a stray `]` from the end of
+HEAD's list and broke the module; caught by lint before any commit.

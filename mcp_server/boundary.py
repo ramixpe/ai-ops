@@ -123,6 +123,19 @@ _ACTIVE_PROBES_DISABLED_PHRASE = (
     "default"
 )
 
+#: B-512 (Job 2): the external-source tools' own gate refusal, classified the
+#: same way B-493's is. One constant referenced once here (unlike the
+#: active-probe phrase, this gate has only one env var, not two) but kept as
+#: a named constant anyway so `mcp_server/server.py`'s own copy of this
+#: reasoning and `model_egress.py`'s byte-identical ERROR_KINDS entry are
+#: easy to compare by eye.
+_EXTERNAL_SOURCES_DISABLED_PHRASE = (
+    "external evidence sources are disabled by configuration "
+    "(Loki/Prometheus); set NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES=true (or 1) "
+    "-- the default -- to allow an MCP client to query them for historical "
+    "evidence, or explicitly to false/0/no/off to keep this disabled"
+)
+
 #: What a transport failure can be, declared rather than pattern-guessed from
 #: the text. Same discipline as `template_parsers.IgnoreRule` and
 #: `log_window.NoiseRule`: a reviewable table, and anything not in it is
@@ -233,6 +246,12 @@ ERROR_KINDS: tuple[tuple[str, str], ...] = (
     ("prometheus response was not valid json", "the metrics store's response could not be parsed as JSON"),
     ("prometheus query did not return a success status", "the metrics store rejected the query or reported an internal error"),
     ("prometheus response was not the expected", "the metrics store's response was not in the expected shape"),
+    # --- B-512 (Job 2): the MCP-only gate on the external-source tools
+    # (get_lab_logs/get_lab_interface_rate_history/
+    # get_lab_isis_adjacency_history), the same "classified, never a silent
+    # no-op" treatment B-493 gives the active-probe refusal. Kept
+    # byte-identical to model_egress.ERROR_KINDS's own copy of this entry.
+    ("external evidence sources are disabled", _EXTERNAL_SOURCES_DISABLED_PHRASE),
 )
 
 
