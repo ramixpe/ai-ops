@@ -523,12 +523,21 @@ def test_write_records_without_pynetbox_installed_fails_at_the_call_not_the_impo
 
     monkeypatch.setenv(NETBOX_WRITE_ENABLED_ENV, "1")
 
+    # Simulate absence rather than relying on it. This test used to assert that
+    # pynetbox "is not installed in this venv", which made it a test of the
+    # ENVIRONMENT, not of the code: installing pynetbox to perform a real write
+    # turned it into a live connection attempt to host "x" and a DNS failure
+    # (2026-08-19, OBS-193). What it means to pin is that the ImportError
+    # happens inside the call and not at module import -- true whether or not
+    # the package is present.
+    monkeypatch.setitem(sys.modules, "pynetbox", None)
+
     try:
         write_records(_sample_records(), dry_run=False, url="http://x", token="y")
-    except ModuleNotFoundError as exc:
+    except (ModuleNotFoundError, ImportError) as exc:
         assert "pynetbox" in str(exc)
     else:
-        raise AssertionError("expected ModuleNotFoundError: pynetbox is not installed in this venv")
+        raise AssertionError("expected an ImportError naming pynetbox")
 
 
 # --------------------------------------------------------------------------- #
@@ -571,6 +580,46 @@ class _FakeEndpoint:
         return record
 
 
+class _FakeRelatedEndpoint(_FakeEndpoint):
+    """A fake endpoint that models NetBox's asymmetry between FILTER and WRITE.
+
+    Real NetBox accepts `?device=P1` as a filter (it resolves the name) but
+    rejects `device="P1"` in a create body, which must carry a numeric ID. The
+    original fake accepted a bare name in BOTH directions, so the writer shipped
+    creates that a live NetBox answered with `400 Related objects must be
+    referenced by numeric ID` -- three separate times, for `platform`, then
+    `interface.device` (OBS-193).
+
+    Modelling only the half a fake finds convenient is how a fake stops being a
+    test and becomes a second implementation that agrees with you. This one
+    records the ID it was created with AND resolves a name filter back through
+    the endpoint that owns those IDs, so a lookup by name still finds a record
+    created by ID -- which is what the real API does.
+    """
+
+    def __init__(self, related_field: str, owner: "_FakeEndpoint"):
+        super().__init__()
+        self._related_field = related_field
+        self._owner = owner
+
+    def get(self, **filters):
+        value = filters.get(self._related_field)
+        if isinstance(value, str):
+            parent = next((r for r in self._owner.records if getattr(r, "name", None) == value), None)
+            if parent is not None:
+                filters = {**filters, self._related_field: parent.id}
+        return super().get(**filters)
+
+    def create(self, **fields):
+        value = fields.get(self._related_field)
+        if isinstance(value, str):
+            raise AssertionError(
+                f"{self._related_field}={value!r} is a name, not an ID -- a real "
+                "NetBox rejects this create with 400. Resolve it to an ID first."
+            )
+        return super().create(**fields)
+
+
 class _FakeCables(_FakeEndpoint):
     def create(self, **fields):
         record = super().create(**fields)
@@ -594,7 +643,14 @@ class _Dcim:
         self.device_roles = _FakeEndpoint()
         self.device_types = _FakeEndpoint()
         self.devices = _FakeEndpoint()
-        self.interfaces = _FakeEndpoint()
+        self.interfaces = _FakeRelatedEndpoint("device", self.devices)
+        # Present because the REAL dcim API has it and the writer resolves
+        # `platform` through it. Its absence here is what let the writer ship
+        # sending a bare "cisco_xr" string that a live NetBox rejects with 400
+        # -- the fake accepted any shape, so the shape was never tested
+        # (OBS-193). A fake that is missing an endpoint does not fail loudly;
+        # it fails by never exercising the code that would have used it.
+        self.platforms = _FakeEndpoint()
         self.cables = _FakeCables()
         self.cables._interfaces_endpoint = self.interfaces
 
@@ -710,3 +766,73 @@ def test_writer_cables_a_mutually_upserted_pair_and_stays_idempotent(monkeypatch
     assert first.counts["cable"] == 1
     assert second.counts["cable"] == 0  # already cabled -- see the `.cable` skip in _apply
     assert len(client.dcim.cables.records) == 1
+
+
+def test_cables_match_when_lldp_and_the_interface_list_spell_the_name_differently(monkeypatch):
+    """LLDP says `GigabitEthernet0/0/0/0`; `show interfaces brief` says
+    `Gi0/0/0/0`. They are the same port and must cable together.
+
+    Measured against a live NetBox on 2026-08-19: the writer keyed its
+    interface cache on the exact string, so every cable lookup missed on BOTH
+    ends and the NB6 guard ("an interface this run never upserted cannot be
+    cabled") skipped all fifteen -- silently, because the guard is correct and
+    only its premise was false. Zero cables looked exactly like a fabric with
+    no LLDP. Third recurrence of the long-vs-short mismatch (OBS-178, OBS-193).
+    """
+
+    monkeypatch.setenv(NETBOX_WRITE_ENABLED_ENV, "1")
+    monkeypatch.setenv("NETBOX_URL", "http://netbox.invalid")
+    monkeypatch.setenv("NETBOX_TOKEN", "fake-token-never-used-the-client-is-injected")
+    client = _FakeClient()
+    records = NetBoxRecords(
+        devices=(
+            NetBoxDevice(name="PE1", platform="cisco_xr"),
+            NetBoxDevice(name="P1", platform="cisco_xr"),
+        ),
+        interfaces=(
+            # short form, as `show interfaces brief` reports it
+            NetBoxInterface(device="PE1", name="Gi0/0/0/0", kind="physical", enabled=True, mtu=1514, bandwidth_kbps=1000000),
+            NetBoxInterface(device="P1", name="Gi0/0/0/2", kind="physical", enabled=True, mtu=1514, bandwidth_kbps=1000000),
+        ),
+        ip_addresses=(),
+        cables=(
+            # long form, as LLDP reports it
+            NetBoxCable(
+                device_a="PE1", interface_a="GigabitEthernet0/0/0/0",
+                device_b="P1", interface_b="GigabitEthernet0/0/0/2",
+            ),
+        ),
+    )
+
+    write_records(records, dry_run=False, client_factory=lambda url, token: client)
+
+    assert client.dcim.cables.create_calls == 1, (
+        "the cable was skipped: the interface cache was keyed on the exact "
+        "spelling, so the long-form LLDP name never matched the short-form "
+        "interface name"
+    )
+
+
+def test_the_cable_match_is_not_merely_matching_everything(monkeypatch):
+    """Anti-vacuity companion. The test above would also pass if the lookup had
+    been loosened to match any interface on the right device. A cable to an
+    interface that genuinely was not upserted must still be skipped.
+    """
+
+    monkeypatch.setenv(NETBOX_WRITE_ENABLED_ENV, "1")
+    monkeypatch.setenv("NETBOX_URL", "http://netbox.invalid")
+    monkeypatch.setenv("NETBOX_TOKEN", "fake-token-never-used-the-client-is-injected")
+    client = _FakeClient()
+    records = NetBoxRecords(
+        devices=(NetBoxDevice(name="PE1", platform="cisco_xr"),
+                 NetBoxDevice(name="P1", platform="cisco_xr")),
+        interfaces=(NetBoxInterface(device="PE1", name="Gi0/0/0/0", kind="physical", enabled=True, mtu=1514, bandwidth_kbps=1000000),
+                    NetBoxInterface(device="P1", name="Gi0/0/0/2", kind="physical", enabled=True, mtu=1514, bandwidth_kbps=1000000)),
+        ip_addresses=(),
+        cables=(NetBoxCable(device_a="PE1", interface_a="GigabitEthernet0/0/0/9",
+                            device_b="P1", interface_b="GigabitEthernet0/0/0/2"),),
+    )
+
+    write_records(records, dry_run=False, client_factory=lambda url, token: client)
+
+    assert client.dcim.cables.create_calls == 0

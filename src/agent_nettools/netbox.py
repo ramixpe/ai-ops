@@ -124,6 +124,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from . import interface_kind, parsers, topology
+from .interface_kind import canonical
 
 # --------------------------------------------------------------------------- #
 # The record model -- plain, frozen, comparable data. No network, no pynetbox.
@@ -627,7 +628,12 @@ def _counts(records: NetBoxRecords) -> dict[str, int]:
     }
 
 
-def _get_or_create(endpoint: Any, key: dict[str, Any], fields: dict[str, Any]) -> Any:
+def _get_or_create(
+    endpoint: Any,
+    key: dict[str, Any],
+    fields: dict[str, Any],
+    create_key: dict[str, Any] | None = None,
+) -> Any:
     """Upsert-by-natural-key against one pynetbox endpoint.
 
     ``key`` is looked up with ``endpoint.get(**key)`` *alone* -- never mixed
@@ -648,7 +654,14 @@ def _get_or_create(endpoint: Any, key: dict[str, Any], fields: dict[str, Any]) -
     if existing is not None:
         existing.update(fields)
         return existing
-    return endpoint.create(**{**key, **fields})
+    # `create_key` exists because NetBox's FILTER syntax and its WRITE syntax
+    # disagree about related objects: `get(device="P1")` is a valid lookup,
+    # while `create(device="P1")` is rejected with
+    # `Related objects must be referenced by numeric ID`. The natural key we
+    # search by is therefore not always the payload we may create with, and
+    # collapsing the two is what shipped three separate 400s on the first real
+    # write (platform, then interface.device -- 2026-08-19, OBS-193).
+    return endpoint.create(**{**(create_key if create_key is not None else key), **fields})
 
 
 def _apply(client: Any, records: NetBoxRecords) -> dict[str, int]:
@@ -679,6 +692,16 @@ def _apply(client: Any, records: NetBoxRecords) -> dict[str, int]:
 
     device_type_cache: dict[str, Any] = {}
     interface_cache: dict[tuple[str, str], Any] = {}
+    # NetBox resolves related objects by numeric ID or by an attribute dict --
+    # never by a bare name. `site`, `role` and `device_type` above are already
+    # resolved through `_get_or_create`; `platform` was not, and was sent as the
+    # raw string "cisco_xr", which a live NetBox rejects with
+    # `400 ... Received an unrecognized value: cisco_xr`. The fake client the
+    # test suite builds accepts any value, so this shape was never exercised
+    # until the first real write (2026-08-19, OBS-193). Same get-or-create
+    # treatment as its three siblings, cached the same way.
+    platform_cache: dict[str, Any] = {}
+    device_cache: dict[str, Any] = {}
 
     for device in records.devices:
         type_name = device.device_type or UNCLASSIFIED_DEVICE_TYPE
@@ -691,23 +714,42 @@ def _apply(client: Any, records: NetBoxRecords) -> dict[str, int]:
             )
             device_type_cache[type_name] = device_type
 
-        _get_or_create(
+        platform_id = None
+        if device.platform:
+            platform = platform_cache.get(device.platform)
+            if platform is None:
+                platform = _get_or_create(
+                    client.dcim.platforms,
+                    {"slug": _slugify(device.platform)},
+                    {"name": device.platform},
+                )
+                platform_cache[device.platform] = platform
+            platform_id = platform.id
+
+        device_obj = _get_or_create(
             client.dcim.devices,
             {"name": device.name},
             {
                 "site": site.id,
                 "role": role.id,
                 "device_type": device_type.id,
-                "platform": device.platform,
+                "platform": platform_id,
                 "custom_fields": {
                     "configured_hostname": device.configured_hostname,
                     "software_version": device.software_version,
                 },
             },
         )
+        device_cache[device.name] = device_obj
         counts["device"] += 1
 
     for interface in records.interfaces:
+        parent = device_cache.get(interface.device)
+        if parent is None:
+            # NB6's sibling: an interface whose device this run never upserted
+            # cannot be created, and guessing an ID would attach it to whatever
+            # happened to hold that number.
+            continue
         obj = _get_or_create(
             client.dcim.interfaces,
             {"device": interface.device, "name": interface.name},
@@ -716,8 +758,18 @@ def _apply(client: Any, records: NetBoxRecords) -> dict[str, int]:
                 "enabled": interface.enabled,
                 "mtu": interface.mtu,
             },
+            create_key={"device": parent.id, "name": interface.name},
         )
-        interface_cache[(interface.device, interface.name)] = obj
+        # Keyed by CANONICAL name. The interface records come from
+        # `show interfaces brief` and spell it `Gi0/0/0/0`; LLDP spells the same
+        # port `GigabitEthernet0/0/0/0`, so an exact-match key missed on both
+        # ends of every cable and the NB6 guard below skipped all of them --
+        # silently, because "an interface this run never upserted" is a correct
+        # guard firing on a false premise (2026-08-19, OBS-193; third recurrence
+        # of the long-vs-short mismatch, after OBS-178). `canonical` is valid as
+        # a key here precisely because the tuple is scoped to one device, which
+        # is the condition its own docstring sets.
+        interface_cache[(interface.device, canonical(interface.name))] = obj
         counts["interface"] += 1
 
     for ip in records.ip_addresses:
@@ -729,8 +781,8 @@ def _apply(client: Any, records: NetBoxRecords) -> dict[str, int]:
         counts["ip_address"] += 1
 
     for cable in records.cables:
-        end_a = interface_cache.get((cable.device_a, cable.interface_a))
-        end_b = interface_cache.get((cable.device_b, cable.interface_b))
+        end_a = interface_cache.get((cable.device_a, canonical(cable.interface_a)))
+        end_b = interface_cache.get((cable.device_b, canonical(cable.interface_b)))
         if end_a is None or end_b is None:
             continue  # NB6: an interface this run never upserted cannot be cabled.
         if getattr(end_a, "cable", None) or getattr(end_b, "cable", None):

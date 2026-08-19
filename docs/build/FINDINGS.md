@@ -5931,3 +5931,51 @@ a check that has worked for months) failed identically, because
 `--from-fixtures` belongs to `investigate` and not to the check subcommands. The
 wiring was fine. **Fifth time tonight a probe of mine indicted working code**,
 and the fifth time the control was what saved it.
+
+---
+
+## OBS-193 · M3b · The NetBox writer had never met a real NetBox, and the fake agreed with every mistake
+
+The collector shipped tested and green. Its first real write failed four times
+in a row, each on a different bug, each caught only because a live API rejected
+what the fake accepted:
+
+1. `platform: "cisco_xr"` — a bare name where NetBox requires an ID.
+   `400 Related objects must be referenced by numeric ID`.
+2. `custom_fields: {configured_hostname, software_version}` — fields that did
+   not exist. NetBox requires a custom field to be *defined* before it is set.
+3. `device: "P1"` on interface create — the same class as (1), in a second
+   place, because NetBox's **filter** syntax accepts a name (`?device=P1`) while
+   its **write** syntax does not. One helper used one dict for both.
+4. **Zero cables, silently.** Interfaces are keyed from `show interfaces brief`
+   as `Gi0/0/0/0`; LLDP reports the same port as `GigabitEthernet0/0/0/0`. Every
+   cable lookup missed on both ends, and the guard "an interface this run never
+   upserted cannot be cabled" skipped all fifteen. A correct guard firing on a
+   false premise, and the only symptom was a topology that looked absent rather
+   than broken. Third recurrence of the long-vs-short mismatch after OBS-178.
+
+**The through-line is the fake.** `client_factory=` exists so the writer can be
+tested with no pynetbox installed and no NetBox reachable, and it did its job for
+the upsert *logic*. But it modelled only the half of the API that was convenient:
+it accepted a name where the real endpoint demands an ID, and it had no
+`platforms` endpoint at all — so the code path that would have used one was never
+executed. A fake missing an endpoint does not fail loudly; **it fails by never
+exercising the code that would have used it.**
+
+The module's own docstring said so plainly — *"Not independently mutation-tested
+against a live NetBox… no confirmed API token was available"* — which is the
+honest disclosure working exactly as intended. The gap was recorded; it just was
+not closed until something wrote for real.
+
+The fake now **refuses** a name where the real API refuses one, so this class
+cannot ship again: a create with `device="P1"` raises in the test suite instead
+of passing. That is the difference between a fake that tests you and a fake that
+agrees with you.
+
+> A test double that accepts more than the real thing is not a lenient test, it
+> is a second implementation that shares your misconceptions. Make the double
+> reject what production rejects, or the first real call is your first test.
+
+Result: NetBox now holds 9 devices, 73 interfaces, 5 IP addresses and 15 cables,
+with `software_version` and `configured_hostname` as custom fields — all derived
+from live parsed evidence, none hand-authored.
