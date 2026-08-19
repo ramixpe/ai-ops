@@ -116,6 +116,9 @@ from .template_parsers import (  # noqa: E402 - see the ordering note in the mod
 VOLATILE_FIELDS: dict[tuple[str, str], frozenset[str]] = {
     ("cisco_xr", "facts"): frozenset({"uptime"}),
     ("cisco_xr", "bgp"): frozenset({"msg_rcvd", "msg_sent", "up_down"}),
+    # Same table shape as "bgp", same volatile columns -- the message counters
+    # and Up/Down timer move on an unchanged session exactly as they do there.
+    ("cisco_xr", "bgp_vpnv4"): frozenset({"msg_rcvd", "msg_sent", "up_down"}),
     ("cisco_xr", "isis"): frozenset({"holdtime"}),
     ("cisco_xr", "sr"): frozenset({"operational_duration"}),
     ("cisco_xr", "interfaces"): frozenset(),
@@ -137,6 +140,7 @@ RECORD_KEYS: dict[tuple[str, str], str | None] = {
     ("cisco_xr", "facts"): None,
     ("cisco_xr", "interfaces"): "interface",
     ("cisco_xr", "bgp"): "neighbor",
+    ("cisco_xr", "bgp_vpnv4"): "neighbor",
     ("cisco_xr", "lldp"): "local_interface",
     ("cisco_xr", "isis"): "system_id",
     ("cisco_xr", "sr"): "policy",
@@ -489,6 +493,147 @@ def parse_xr_bgp(outputs: dict[str, str]) -> dict[str, Any]:
         records=records,
         consumed=consumed,
         ignores=BGP_IGNORES,
+        unparsed_rows=skipped,
+    )
+
+
+# Section 0.10 accounting for ``show bgp vpnv4 unicast summary``. Line-for-line
+# identical to BGP_IGNORES except the table-identifier line: the default AF's
+# "Table ID: 0xe0000000   RD version: 6" becomes "Table ID: 0x0" here -- no RD
+# counter, measured live on every device that has BGP configured (protocol
+# coverage sweep, 2026-08-19). A distinct constant rather than a shared one
+# because these are two different commands' output and the two shapes should
+# not be silently reconciled into one regex that happens to match both today.
+BGP_VPNV4_IGNORES: tuple[IgnoreRule, ...] = (
+    IgnoreRule(
+        r"^BGP generic scan interval \d+ secs$",
+        "configured scan-interval setting, not required by the schema",
+    ),
+    IgnoreRule(r"^Non-stop routing is enabled$", "NSR flag, not required by the schema"),
+    IgnoreRule(
+        r"^BGP table state: \S+$",
+        "table-level state flag; only 'Active' has been observed in this lab, but a "
+        "non-Active value would be a real process-health signal nothing currently reads",
+        kind=IgnoreKind.NOT_NEEDED_YET,
+    ),
+    IgnoreRule(
+        r"^Table ID: \S+$",
+        "internal table identifier, not required by the schema; the VPNv4 AF's summary "
+        "carries no RD-version counter the way the default AF's does",
+    ),
+    IgnoreRule(
+        r"^BGP table nexthop route policy:$",
+        "configured nexthop route-policy name, empty in this lab",
+    ),
+    IgnoreRule(
+        r"^BGP main routing table version \d+$",
+        "table-version bookkeeping counter, not required by the schema",
+    ),
+    IgnoreRule(
+        r"^BGP NSR Initial initsync version \d+ \(\S+\)$",
+        "non-stop-routing initial-sync bookkeeping, not required by the schema",
+    ),
+    IgnoreRule(
+        r"^BGP NSR/ISSU Sync-Group versions \S+$",
+        "non-stop-routing/ISSU sync-group bookkeeping, not required by the schema",
+    ),
+    IgnoreRule(
+        r"^BGP scan interval \d+ secs$",
+        "configured scan-interval setting, not required by the schema",
+    ),
+    IgnoreRule(
+        r"^BGP is operating in \S+ mode\.$",
+        "redundancy-mode banner, not required by the schema",
+    ),
+    IgnoreRule(
+        r"^Process\s+RcvTblVer\s+bRIB/RIB\s+LabelVer\s+ImportVer\s+SendTblVer\s+StandbyVer$",
+        "per-process table-version column header, decorative",
+    ),
+    IgnoreRule(
+        r"^Speaker(?:\s+\d+){6}$",
+        "per-process table-version counters, mirroring 'BGP main routing table version'; "
+        "not required by the schema",
+    ),
+    IgnoreRule(
+        r"^Neighbor\s+Spk\s+AS\s+MsgRcvd\s+MsgSent\s+TblVer\s+InQ\s+OutQ\s+Up/Down\s+St/PfxRcd$",
+        "neighbour-table column header, decorative",
+    ),
+)
+
+
+def parse_xr_bgp_vpnv4(outputs: dict[str, str]) -> dict[str, Any]:
+    """Parse ``show bgp vpnv4 unicast summary``.
+
+    Same shape as :func:`parse_xr_bgp` -- the router-id/local-AS preamble, the
+    "% BGP instance '...' not active" fallback for a device with no BGP
+    process, and the 10-column neighbour table with the same
+    :func:`_split_state_pfx_rcd` split for the ``St/PfxRcd`` column -- because
+    it is the *same command family* the device implements identically for
+    every address family. Not merged into :func:`parse_xr_bgp` because the two
+    commands read two different AFs of the same session: the default AF is
+    empty on this fabric (every session shows 0 prefixes -- see
+    ``inventory/lab.yaml``), while the VPNv4 AF, measured live on every
+    BGP-speaking device, carries a real, non-zero prefix count per neighbour.
+    Reusing ``_XR_BGP_META``/``_XR_BGP_INACTIVE``/``_split_state_pfx_rcd``
+    keeps the two parsers from drifting on that shared machinery while keeping
+    them as two records a caller can tell apart.
+    """
+
+    text = next(iter(outputs.values()), "")
+    lines = _nonblank_lines(text)
+
+    meta: dict[str, Any] = {}
+    consumed: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if match := _XR_BGP_META.match(stripped):
+            meta["router_id"] = match["router_id"]
+            meta["local_as"] = match["local_as"]
+            consumed.append(stripped)
+            break
+        if match := _XR_BGP_INACTIVE.match(stripped):
+            meta["active"] = False
+            meta["instance"] = match["instance"]
+            consumed.append(stripped)
+            break
+
+    rows = _after_header(lines, lambda line: line.strip().startswith("Neighbor "))
+    records = []
+    skipped = 0
+    for line in rows:
+        stripped = line.strip()
+        fields = stripped.split()
+        if len(fields) != 10:
+            skipped += 1
+            consumed.append(stripped)
+            continue
+        records.append(
+            {
+                "neighbor": fields[0],
+                "spk": fields[1],
+                "remote_as": fields[2],
+                "msg_rcvd": fields[3],
+                "msg_sent": fields[4],
+                "table_version": fields[5],
+                "in_q": fields[6],
+                "out_q": fields[7],
+                "up_down": fields[8],
+                **_split_state_pfx_rcd(fields[9]),
+            }
+        )
+        consumed.append(stripped)
+
+    if not meta and not records:
+        raise ParseError("no BGP router identifier and no neighbour rows found")
+
+    meta["neighbor_count"] = len(records)
+
+    return finalize(
+        raw=text,
+        meta=meta,
+        records=records,
+        consumed=consumed,
+        ignores=BGP_VPNV4_IGNORES,
         unparsed_rows=skipped,
     )
 
@@ -1081,6 +1226,7 @@ PARSERS: dict[tuple[str, str], Callable[[dict[str, str]], dict[str, Any]]] = {
     ("cisco_xr", "facts"): parse_xr_facts,
     ("cisco_xr", "interfaces"): parse_xr_interfaces,
     ("cisco_xr", "bgp"): parse_xr_bgp,
+    ("cisco_xr", "bgp_vpnv4"): parse_xr_bgp_vpnv4,
     ("cisco_xr", "lldp"): parse_xr_lldp,
     ("cisco_xr", "isis"): parse_xr_isis,
     ("cisco_xr", "ldp"): parse_xr_ldp_neighbor,

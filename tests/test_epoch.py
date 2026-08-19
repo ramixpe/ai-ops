@@ -134,7 +134,12 @@ def test_the_epoch_costs_fewer_commands_than_collecting_per_rung():
     # 2 devices this walk touches, RR1 and PE2); +10 on the per-rung side,
     # because the per-rung path re-collects the whole epoch at every rung
     # rather than once, so the same 2-intent addition is paid repeatedly.
-    assert (len(epoch_calls), len(per_rung_calls)) == (30, 51)
+    # 32 against 56 at the protocol-coverage sweep (2026-08-19): one more new
+    # intent, "bgp_vpnv4" (a plain context intent, no flow reads it -- see
+    # platforms.py), in the same always-collected bundle. +2 on the epoch side
+    # (1 intent x the same 2 devices); +5 on the per-rung side, matching
+    # B-109's per-intent rate of 5 exactly (10 / 2 intents).
+    assert (len(epoch_calls), len(per_rung_calls)) == (32, 56)
     assert sum("logging" in c for c in epoch_calls) == 1
 
 

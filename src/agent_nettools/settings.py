@@ -436,6 +436,36 @@ SETTINGS: tuple[Setting, ...] = (
         "logs_loki",
         minimum=0.001,
     ),
+    # -- metrics_prometheus.py (Stage-2 M5b): the read-only Prometheus
+    # metrics adapter -- the temporal evidence axis's second source.
+    Setting(
+        "NETTOOLS_PROMETHEUS_URL", "string", "http://172.20.250.102:9090",
+        "Base URL of the Prometheus instance "
+        "`metrics_prometheus.run_named_query` queries. The default is the "
+        "lab's management-network address as measured 2026-08-15/19 "
+        "(discovery-alerting.md) -- a container IP, not a guaranteed-stable "
+        "service address; override it explicitly in any environment where "
+        "that measurement does not hold.",
+        "metrics_prometheus",
+    ),
+    Setting(
+        "NETTOOLS_PROMETHEUS_TIMEOUT_SECONDS", "float", 10.0,
+        "HTTP timeout for a Prometheus query_range/series call.",
+        "metrics_prometheus",
+        minimum=0.001,
+    ),
+    Setting(
+        "NETTOOLS_PROMETHEUS_EXISTENCE_LOOKBACK_SECONDS", "int", 7 * 24 * 3600,
+        "How far back `metrics_prometheus` looks (via /api/v1/series) to "
+        "decide whether a series has ever been observed at all, when a "
+        "primary range query returns zero points -- the check that tells "
+        "'this series never existed' apart from 'it stopped being scraped'. "
+        "Defaults to Prometheus's own measured retention window (1 week, "
+        "/api/v1/status/runtimeinfo) -- looking back further than the "
+        "source retains cannot distinguish the two cases.",
+        "metrics_prometheus",
+        minimum=1,
+    ),
     # -- netbox.py (Stage-2 M3b): the read-only-by-default NetBox inventory
     # collector. NetBox is DERIVED from parsed device evidence, never
     # authored (stage-2-architecture.md §4) -- see the module docstring.

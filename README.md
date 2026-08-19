@@ -423,6 +423,7 @@ Approved read-only commands, by platform:
 - `show version`
 - `show interfaces brief`
 - `show bgp summary`
+- `show bgp vpnv4 unicast summary`
 - `show lldp neighbors`
 - `show isis neighbors`
 - `show mpls ldp neighbor`

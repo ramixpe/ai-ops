@@ -69,7 +69,13 @@ from .templates import (  # noqa: F401 - re-exported so this module stays the si
 # "ldp"/"ldp_discovery" (B-109) sit between "isis" and "sr" -- both are MPLS
 # control-plane facts, narratively following the IGP that carries their
 # reachability and preceding the traffic-engineering layer built on top of MPLS.
-INTENT_ORDER = ("facts", "interfaces", "bgp", "lldp", "isis", "ldp", "ldp_discovery", "sr")
+# "bgp_vpnv4" sits immediately after "bgp": same neighbor session, a second
+# address family read on it -- see the live-lab investigation note by
+# PLATFORM_INTENTS["cisco_xr"]["bgp_vpnv4"] below for why this is a plain
+# context intent and not a new flow.
+INTENT_ORDER = (
+    "facts", "interfaces", "bgp", "bgp_vpnv4", "lldp", "isis", "ldp", "ldp_discovery", "sr",
+)
 
 PLATFORM_INTENTS: dict[str, dict[str, tuple[str, ...]]] = {
     # Verified against the live lab (XRd 7.11.2) and captured in tests/fixtures.
@@ -77,6 +83,45 @@ PLATFORM_INTENTS: dict[str, dict[str, tuple[str, ...]]] = {
         "facts": ("show running-config hostname", "show version"),
         "interfaces": ("show interfaces brief",),
         "bgp": ("show bgp summary",),
+        # Protocol-coverage sweep, 2026-08-19: OSPF, RSVP-TE and CDP were
+        # checked live against all nine devices and none carries observable
+        # state on this fabric -- IS-IS/SR is the IGP, LLDP is enabled instead
+        # of CDP ("% CDP is not enabled" on every device), OSPF has no process
+        # configured anywhere (`show ospf`, `show ospf interface brief`, and
+        # `show ospf neighbor` are all empty, not merely zero-neighbor), and
+        # RSVP has interface bandwidth pools provisioned (`show rsvp
+        # interface` shows real MaxBW) but zero neighbors on every device
+        # (`show rsvp neighbor` empty everywhere) -- no session ever forms to
+        # observe, so it fails the "state to observe" bar rather than the
+        # "configured at all" one. None of the three earned a command here.
+        #
+        # MP-BGP VPNv4 is the one that is real: `show bgp vpnv4 unicast
+        # summary` was checked against all nine devices. The four P-routers
+        # report "% BGP instance 'default' not active", identical to plain
+        # `show bgp summary` there. RR1 and all four PEs report an
+        # Established session per iBGP peer with a **non-zero** prefix count
+        # (2-3 prefixes each) -- genuinely different information from the
+        # "bgp" intent's own summary, whose St/PfxRcd is 0 for every session
+        # on this fabric (see inventory/lab.yaml's per-device "every BGP
+        # session ... carries 0 prefixes" notes). This fabric does carry an
+        # L3VPN service in the VPNv4 AF even though the default IPv4-unicast
+        # AF is empty.
+        #
+        # Deliberately a plain context intent, not a new flow: the VPNv4 AF is
+        # negotiated on the *same* TCP session and neighbor FSM the existing
+        # `bgp_session` flow's top rung (`checks.bgp_session_state`, reading
+        # the "bgp" intent) already tests. A second rung reading this intent
+        # would not be a new dependency hypothesis (OBS-167) -- it would be
+        # the same Established/not-Established fact under a different AFI,
+        # which is corroboration, not a gate. Collected, parsed, reportable;
+        # same shape "lldp" has always had.
+        #
+        # One live-lab surprise worth flagging for the operator, not fixed
+        # here: RR1's and PE4's own `show bgp summary`/`show bgp vpnv4
+        # unicast summary` both show an Established session between them with
+        # 2 prefixes received -- inventory/lab.yaml's note on PE4 ("No BGP
+        # process configured at all") appears to be stale.
+        "bgp_vpnv4": ("show bgp vpnv4 unicast summary",),
         "lldp": ("show lldp neighbors",),
         "isis": ("show isis neighbors",),
         # B-109. Two intents, not one: "ldp" is the session-level FSM state

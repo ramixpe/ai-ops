@@ -304,7 +304,21 @@ ERROR_KINDS: tuple[tuple[str, str], ...] = (
     ("loki response was not valid json", "the log store's response could not be parsed as JSON"),
     ("loki query did not return a success status", "the log store rejected the query or reported an internal error"),
     ("loki response was not the expected", "the log store's response was not in the expected shape"),
-    ("built selector failed the post-build shape check", "an internal query-building check failed; refusing to query the log store"),
+    ("built selector failed the post-build shape check", "an internal query-building check failed; refusing to query the metrics/log store"),
+    # --- metrics_prometheus.py (Stage-2 M5b): the Prometheus adapter's own
+    # refusals and transport failures. Kept byte-identical to
+    # `mcp_server.boundary.ERROR_KINDS`'s own copy of this block, the same
+    # discipline the logs_loki block above already follows. "parameter
+    # mismatch" also benefits `logs_loki.py`'s identical message shape,
+    # which had no entry until now -- purely additive, nothing removed.
+    ("parameter mismatch", "the parameter set was refused: missing or unexpected parameters"),
+    ("unknown prometheus query", "the query name was not recognised; valid: interface_rate_history, isis_adjacency_history"),
+    ("is not an allowlisted counter", "the parameter was refused: not an allowlisted counter"),
+    ("would return approximately", "the parameter was refused: the requested window/step would exceed the sample budget"),
+    ("prometheus returned http status", "the metrics store returned a non-success HTTP status"),
+    ("prometheus response was not valid json", "the metrics store's response could not be parsed as JSON"),
+    ("prometheus query did not return a success status", "the metrics store rejected the query or reported an internal error"),
+    ("prometheus response was not the expected", "the metrics store's response was not in the expected shape"),
 )
 
 

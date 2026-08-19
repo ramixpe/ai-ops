@@ -300,9 +300,14 @@ def main(argv: list[str]) -> int:
     # instead of retiring it; `tests/test_frozen_files.py` carries the same
     # table and the reason each baseline moved.
     REPINNED = {
-        # platforms.py: B-109's ldp/ldp_discovery intents, operator sign-off
-        # 2026-08-19. Additive; the frozen safety TESTS pass unedited against it.
-        "src/agent_nettools/platforms.py": "09c389352da489e9d8a43e0a8aeadfbb3458724d",
+        # platforms.py: B-109's ldp/ldp_discovery intents (prior repin), plus
+        # the protocol-coverage sweep's bgp_vpnv4 intent (this repin, same
+        # session, operator sign-off 2026-08-19) -- OSPF/RSVP-TE/CDP were
+        # checked live and deliberately NOT added (no observable state on this
+        # fabric; see the comment beside PLATFORM_INTENTS["cisco_xr"]
+        # ["bgp_vpnv4"] in platforms.py). Additive both times; the frozen
+        # safety TESTS pass unedited against it.
+        "src/agent_nettools/platforms.py": "0a11cdc99d4b0d37c69e7845566bc32898dba96a",
     }
     for f in sorted(FROZEN):
         expected = REPINNED.get(f) or sh(f"git rev-parse {BASELINE_COMMIT}:{f}").stdout.strip()

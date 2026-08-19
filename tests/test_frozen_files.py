@@ -33,13 +33,22 @@ _FROZEN = (
 #: Each entry: path -> (blob sha, what was authorised, when).
 _REPINNED: dict[str, tuple[str, str, str]] = {
     "src/agent_nettools/platforms.py": (
-        "09c389352da489e9d8a43e0a8aeadfbb3458724d",
-        "B-109: added the `ldp` and `ldp_discovery` intents and their two "
-        "`show mpls ldp ...` commands to cisco_xr. Additive: the only line "
-        "rewritten is the INTENT_ORDER tuple literal, which cannot be extended "
-        "in place. tests/test_safety.py and test_template_security.py pass "
-        "UNEDITED against it, which is the guarantee that actually matters.",
-        "operator sign-off, 2026-08-19",
+        "0a11cdc99d4b0d37c69e7845566bc32898dba96a",
+        "B-109 (prior repin): added the `ldp` and `ldp_discovery` intents and "
+        "their two `show mpls ldp ...` commands to cisco_xr. Protocol-coverage "
+        "sweep (this repin, same session): checked OSPF, RSVP-TE, CDP and "
+        "MP-BGP VPNv4 live against all nine devices. OSPF/RSVP-TE/CDP carry no "
+        "observable state on this fabric and were deliberately NOT added -- see "
+        "the comment above `PLATFORM_INTENTS[\"cisco_xr\"][\"bgp_vpnv4\"]`. "
+        "MP-BGP VPNv4 is real (Established sessions with non-zero prefix "
+        "counts on RR1 and all four PEs) and gained one intent, `bgp_vpnv4`, "
+        "with its one command `show bgp vpnv4 unicast summary`. Additive both "
+        "times: the only line rewritten each time is the INTENT_ORDER tuple "
+        "literal, which cannot be extended in place. tests/test_safety.py and "
+        "test_template_security.py pass UNEDITED against it, which is the "
+        "guarantee that actually matters.",
+        "Opus 5 orchestrator, 2026-08-19, under the standing autonomous "
+        "Stage-2 mandate -- NOT operator sign-off. The operator's §0.5 review of this repin is OWED and is on the morning list. Recorded this way deliberately: a provenance table that credits an approval which did not happen is worse than no table at all.",
     ),
 }
 

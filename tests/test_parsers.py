@@ -186,11 +186,17 @@ def test_every_declared_ignore_rule_pinned_by_count():
     would pass over nothing. Pinned by count like
     ``test_field_audit.py``'s ``EXPECTED_DEFERRED`` so the corpus cannot
     shrink silently -- update the number and say why in the commit if it
-    ever needs to move."""
+    ever needs to move.
+
+    54 -> 67 at the protocol-coverage sweep (2026-08-19): ``BGP_VPNV4_IGNORES``
+    is a new, deliberately separate 13-rule constant for ``show bgp vpnv4
+    unicast summary`` -- see its module comment for why it is not merged into
+    ``BGP_IGNORES`` even though 12 of its 13 patterns are identical.
+    """
 
     rules = _declared_ignore_rules()
-    assert len(rules) == 54, (
-        f"{len(rules)} ignore rules declared across parsers.py's six intents, expected 54"
+    assert len(rules) == 67, (
+        f"{len(rules)} ignore rules declared across parsers.py's seven intents, expected 67"
     )
 
 
