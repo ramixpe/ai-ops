@@ -55,12 +55,18 @@
 <rect x="573.9" y="308.0" width="168.0" height="24.0" rx="12.0" fill="#ffffff" stroke="#9a9a94" stroke-width="1"/>
 <text x="584.9" y="324.3" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="12" font-weight="500" fill="#17171a" text-anchor="start">logging</text>
 <text x="643.7" y="323.6" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10" font-weight="400" fill="#6f6f6a" text-anchor="start">DEVICE --count N</text>
-<rect x="749.9" y="308.0" width="113.5" height="24.0" rx="12.0" fill="#fdf3e3" stroke="#b45309" stroke-width="1"/>
-<text x="760.9" y="324.3" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="12" font-weight="500" fill="#b45309" text-anchor="start">ping</text>
-<text x="797.9" y="323.6" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10" font-weight="400" fill="#6f6f6a" text-anchor="start">sends ICMP</text>
-<rect x="64.0" y="340.0" width="151.7" height="24.0" rx="12.0" fill="#fdf3e3" stroke="#b45309" stroke-width="1"/>
-<text x="75.0" y="356.3" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="12" font-weight="500" fill="#b45309" text-anchor="start">traceroute</text>
-<text x="155.6" y="355.6" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10" font-weight="400" fill="#6f6f6a" text-anchor="start">sends UDP</text>
+<rect x="749.9" y="308.0" width="186.2" height="24.0" rx="12.0" fill="#ffffff" stroke="#9a9a94" stroke-width="1"/>
+<text x="760.9" y="324.3" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="12" font-weight="500" fill="#17171a" text-anchor="start">config-isis</text>
+<text x="848.7" y="323.6" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10" font-weight="400" fill="#6f6f6a" text-anchor="start">DEVICE — B-104</text>
+<rect x="64.0" y="340.0" width="249.7" height="24.0" rx="12.0" fill="#ffffff" stroke="#9a9a94" stroke-width="1"/>
+<text x="75.0" y="356.3" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="12" font-weight="500" fill="#17171a" text-anchor="start">config-interface</text>
+<text x="199.2" y="355.6" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10" font-weight="400" fill="#6f6f6a" text-anchor="start">DEVICE NAME — B-104</text>
+<rect x="321.7" y="340.0" width="113.5" height="24.0" rx="12.0" fill="#fdf3e3" stroke="#b45309" stroke-width="1"/>
+<text x="332.7" y="356.3" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="12" font-weight="500" fill="#b45309" text-anchor="start">ping</text>
+<text x="369.8" y="355.6" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10" font-weight="400" fill="#6f6f6a" text-anchor="start">sends ICMP</text>
+<rect x="443.3" y="340.0" width="151.7" height="24.0" rx="12.0" fill="#fdf3e3" stroke="#b45309" stroke-width="1"/>
+<text x="454.3" y="356.3" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="12" font-weight="500" fill="#b45309" text-anchor="start">traceroute</text>
+<text x="534.9" y="355.6" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10" font-weight="400" fill="#6f6f6a" text-anchor="start">sends UDP</text>
 <rect x="48.0" y="392.0" width="1000.0" height="108.0" rx="11" fill="#fdfdfc" stroke="#d8d8d2" stroke-width="1"/>
 <text x="66.0" y="418.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12.5" font-weight="700" fill="#17171a" text-anchor="start" letter-spacing="0.7">DIAGNOSE</text>
 <text x="162.8" y="418.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#6f6f6a" text-anchor="start">the part that answers 'why', not just 'what'</text>

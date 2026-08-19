@@ -296,6 +296,23 @@ MUTATIONS = [
      "    collector and is NEVER authoritative about the live fabric: it is a\n",
      "    collector: it is a\n",
      "test_netbox_tools_state_they_are_derived_not_authoritative"),
+    # B-104: the config axis (D16). config_section.py's `parse_xr_config_isis`
+    # never stores what follows an `authentication ...` line -- only that one
+    # was seen (`authentication_configured: bool`). Counted before mutating
+    # (OBS-191): the anchor string below occurs exactly once in
+    # config_section.py (the interface-scoped branch; the global-scope branch
+    # a few lines up uses `meta[...]`, a textually different string, so this
+    # mutation targets one occurrence unambiguously). Mutated to store the
+    # raw line instead of a bool -- still truthy, so a check that only looked
+    # at "is this field falsy" would not notice; the guard is specifically
+    # that no secret-shaped text reaches any field, which is what the test
+    # below actually asserts (`canary not in json.dumps(parsed)`).
+    ("B-104", "config_isis never stores what follows an 'authentication ...' "
+     "line in a structured field",
+     "src/agent_nettools/config_section.py",
+     '                current["authentication_configured"] = True\n',
+     '                current["authentication_configured"] = stripped\n',
+     "test_config_isis_never_stores_what_follows_authentication"),
 ]
 
 
@@ -419,6 +436,15 @@ def main(argv: list[str]) -> int:
         # platforms.py). Additive both times; the frozen safety TESTS pass
         # unedited against it.
         "src/agent_nettools/platforms.py": "0a11cdc99d4b0d37c69e7845566bc32898dba96a",
+        # templates.py: B-104, the config axis (D16) -- two new templates,
+        # `config_isis` and `config_interface`, both section-scoped, neither
+        # an unqualified `show running-config` (pinned absent by
+        # tests/test_config_section.py, with a positive control per
+        # OBS-181). NOT operator sign-off -- see the matching
+        # PendingOperatorReview entry in tests/test_frozen_files.py for the
+        # full note; both slots must be kept in sync by hand, since this
+        # table is a plain literal and not imported from that test module.
+        "src/agent_nettools/templates.py": "256c7ecea84155a54a08686b56693721a5b3c73a",
     }
     for f in sorted(FROZEN):
         expected = REPINNED.get(f) or sh(f"git rev-parse {BASELINE_COMMIT}:{f}").stdout.strip()

@@ -1,0 +1,7 @@
+
+Wed Aug 19 12:02:38.180 UTC
+interface GigabitEthernet0/0/0/1
+ description TO-P4
+ ipv4 address 10.0.1.18 255.255.255.254
+ ipv6 address 2001:db8:1:10::/127
+!

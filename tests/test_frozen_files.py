@@ -34,7 +34,6 @@ _BASELINE = "6629a2c"
 _FROZEN = (
     "tests/test_safety.py",
     "tests/test_template_security.py",
-    "src/agent_nettools/templates.py",
 )
 
 
@@ -102,6 +101,38 @@ _REPINNED: dict[str, tuple[str, str, Signoff]] = {
         "left to raise a warning nobody needs to act on (OBS-182). The "
         "sentinel machinery stays -- it is what makes the honest state "
         "sayable next time.",
+    ),
+    "src/agent_nettools/templates.py": (
+        "256c7ecea84155a54a08686b56693721a5b3c73a",
+        "B-104: the config axis (D16). Added two templates to "
+        "PLATFORM_TEMPLATES['cisco_xr'] -- `config_isis` (`show "
+        "running-config router isis`, no parameter) and `config_interface` "
+        "(`show running-config interface {interface}`, InterfaceNameParam) "
+        "-- section-scoped configuration retrieval, never the whole "
+        "configuration; `show running-config` with no qualifier is not on "
+        "this table and is pinned absent by "
+        "tests/test_config_section.py::test_no_unqualified_running_config_"
+        "template_exists_on_any_platform, with a positive control proving "
+        "that check is not vacuous (OBS-181). Additive only: every existing "
+        "template is untouched. tests/test_safety.py and "
+        "tests/test_template_security.py pass UNEDITED against it (both "
+        "iterate PLATFORM_TEMPLATES generically, so the two new entries are "
+        "exercised by the existing adversarial-string/verb-allowlist/"
+        "banned-snippet/placeholder-matching suite automatically), which is "
+        "the guarantee that actually matters.",
+        PendingOperatorReview(
+            decided_by="Sonnet 5 (B-104 task agent)",
+            date="2026-08-19",
+            note="Task brief was explicit that platforms.py/templates.py "
+            "take additions only, with re-pinning required, and named the "
+            "PendingOperatorReview sentinel as the honest way to record a "
+            "re-pin that has not yet had a human review (OBS-182) -- this "
+            "session does not have operator sign-off on the addition, only "
+            "the frozen tests passing unedited against it and a live-lab "
+            "measurement (nine devices) backing the two command strings. "
+            "See docs/build/BACKLOG.md B-104 and this session's report for "
+            "the full argument the operator should review.",
+        ),
     ),
 }
 

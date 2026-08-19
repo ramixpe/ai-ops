@@ -1,0 +1,57 @@
+
+Wed Aug 19 12:02:37.870 UTC
+router isis CORE
+ is-type level-2-only
+ net 49.0001.0000.0000.0031.00
+ log adjacency changes
+ lsp-gen-interval maximum-wait 1000
+ address-family ipv4 unicast
+  metric-style wide level 2
+  mpls traffic-eng level-2-only
+  segment-routing mpls
+ !
+ address-family ipv6 unicast
+  metric-style wide level 2
+ !
+ flex-algo 128
+  metric-type delay
+  advertise-definition
+ !
+ interface Loopback0
+  passive
+  address-family ipv4 unicast
+   prefix-sid index 31
+   prefix-sid algorithm 128 index 128031
+  !
+  address-family ipv6 unicast
+  !
+ !
+ interface GigabitEthernet0/0/0/0
+  bfd minimum-interval 100
+  bfd multiplier 3
+  point-to-point
+  hello-padding disable
+  address-family ipv4 unicast
+   fast-reroute per-prefix
+   fast-reroute per-prefix ti-lfa
+  !
+  address-family ipv6 unicast
+   fast-reroute per-prefix
+   fast-reroute per-prefix ti-lfa
+  !
+ !
+ interface GigabitEthernet0/0/0/1
+  bfd minimum-interval 100
+  bfd multiplier 3
+  point-to-point
+  hello-padding disable
+  address-family ipv4 unicast
+   fast-reroute per-prefix
+   fast-reroute per-prefix ti-lfa
+  !
+  address-family ipv6 unicast
+   fast-reroute per-prefix
+   fast-reroute per-prefix ti-lfa
+  !
+ !
+!

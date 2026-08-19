@@ -330,6 +330,44 @@ PLATFORM_TEMPLATES: dict[str, dict[str, Template]] = {
             active_probe=True,
             read_timeout=60.0,
         ),
+        # B-104: the config axis (D16). Section-scoped, never the whole
+        # configuration -- `show running-config` with no qualifier is not on
+        # this table and never will be; see `test_no_unqualified_running_
+        # config_command_exists` in tests/test_config_section.py, which polices
+        # exactly that absence across both this table and `platforms.py`'s
+        # static one. Two sections only, chosen against what the descent
+        # measurably cannot explain today rather than against the LLD's larger
+        # illustrative set (`config_bgp`/`config_bgp_neighbor` are deliberately
+        # NOT added -- see config_section.py's module docstring for why):
+        #
+        # `config_isis` -- B-496's PE3<->P2 break (fixture label
+        # "isis-broken") is IS-IS's own worked example of the gap: the
+        # interface rung reads healthy, the isis rung reads broken, and the
+        # walk's honest answer today is `cause_not_localised` because nothing
+        # reads whether IS-IS is even enabled on that interface, what area/NET
+        # it belongs to, or whether authentication or network-type differs
+        # from the far end -- exactly the causes `flows.py`'s own
+        # `adjacency_not_up` finding text names and B-104 was opened against.
+        # IOS-XR configures per-interface IS-IS participation *inside* this
+        # same section (`router isis <tag> / interface <name> / ...`), so one
+        # unscoped section answers all of it without a second, narrower
+        # template.
+        #
+        # `config_interface` -- the bottom rung every flow's descent shares
+        # (`bgp_session`, `isis_adjacency`, `ldp_session` all terminate at
+        # `interface_line_down`). The status-side `interface` template already
+        # answers "is it down"; only the config side answers "was it put there
+        # on purpose" (`shutdown`) versus a real fault, which is the
+        # observed-vs-intended distinction D16 exists to build.
+        "config_isis": Template(
+            name="config_isis",
+            format_string="show running-config router isis",
+        ),
+        "config_interface": Template(
+            name="config_interface",
+            format_string="show running-config interface {interface}",
+            params={"interface": InterfaceNameParam()},
+        ),
     },
     # Unverified: no IOS-XE device in the lab (see platforms.py). Included to
     # prove the template abstraction, like PLATFORM_INTENTS, holds across a

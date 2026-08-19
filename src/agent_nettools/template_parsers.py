@@ -1573,6 +1573,19 @@ def parse_xr_traceroute(output: str) -> dict[str, Any]:
 # The registry
 # --------------------------------------------------------------------------- #
 
+# B-104: the config axis (D16). config_section.py's two parsers need
+# IgnoreRule/IgnoreKind/ParseError/finalize from *this* module -- imported at
+# its own top -- so this cross-import happens down here, after all four are
+# already defined, mirroring parsers.py's own late cross-import of this
+# module's primitives (see this module's docstring's ordering note, a few
+# hundred lines up). config_section.py has nothing this module needs before
+# this point, so the import is safe here and would not be above it.
+from .config_section import (  # noqa: E402 - see the ordering note immediately above
+    CONFIG_RECORD_KEYS,
+    CONFIG_TEMPLATE_PARSERS,
+    CONFIG_VOLATILE_FIELDS,
+)
+
 # Keyed by (platform, template_name), mirroring parsers.PARSERS' (platform,
 # intent) shape. A template parser takes the single rendered command's output.
 TEMPLATE_PARSERS: dict[tuple[str, str], Callable[[str], dict[str, Any]]] = {
@@ -1582,6 +1595,7 @@ TEMPLATE_PARSERS: dict[tuple[str, str], Callable[[str], dict[str, Any]]] = {
     ("cisco_xr", "logging"): parse_xr_logging,
     ("cisco_xr", "ping"): parse_xr_ping,
     ("cisco_xr", "traceroute"): parse_xr_traceroute,
+    **CONFIG_TEMPLATE_PARSERS,
 }
 
 # Fields that move on their own between two captures of an unchanged device --
@@ -1645,6 +1659,7 @@ TEMPLATE_VOLATILE_FIELDS: dict[tuple[str, str], frozenset[str]] = {
     # this template exists to surface, the same trap bgp_neighbor's
     # last_reset_reason and ping's success_pct/loss_pct avoid above.
     ("cisco_xr", "traceroute"): frozenset({"rtt_msec", "probes_lost"}),
+    **CONFIG_VOLATILE_FIELDS,
 }
 
 # The field identifying a record across two captures. ``None`` means records
@@ -1679,6 +1694,7 @@ TEMPLATE_RECORD_KEYS: dict[tuple[str, str], str | None] = {
     # identified by their next hop, but a traceroute's hops are identified
     # by their position in the path.
     ("cisco_xr", "traceroute"): "hop",
+    **CONFIG_RECORD_KEYS,
 }
 
 

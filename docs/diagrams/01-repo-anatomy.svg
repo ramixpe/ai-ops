@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1580" height="1000" viewBox="0 0 1580 1000" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"><defs><marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6f6f6a"/></marker><marker id="arwb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#1f5fd0"/></marker><marker id="arwr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#c0392b"/></marker><marker id="arwp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6d28d9"/></marker><marker id="arwg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#15803d"/></marker></defs>
 <rect width="1580" height="1000" fill="#fbfbf9"/>
 <text x="48.0" y="56.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="27" font-weight="700" fill="#17171a" text-anchor="start">ios-xr-nettools — repo anatomy</text>
-<text x="48.0" y="82.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="14" font-weight="400" fill="#6f6f6a" text-anchor="start">30,012 lines of source + 1,999 in the MCP server · 31,086 lines of tests · read-only, single lab, 9 Cisco XRd nodes</text>
+<text x="48.0" y="82.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="14" font-weight="400" fill="#6f6f6a" text-anchor="start">30,541 lines of source + 1,999 in the MCP server · 31,613 lines of tests · read-only, single lab, 9 Cisco XRd nodes</text>
 <rect x="1278.1" y="38.0" width="253.9" height="24.0" rx="12" fill="#fff" stroke="#d8d8d2" stroke-width="1"/>
 <text x="1405.1" y="54.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="11.5" font-weight="400" fill="#6f6f6a" text-anchor="middle">2026-08-19 · feat/investigation-layer</text>
 <line x1="48.0" y1="100.0" x2="1532.0" y2="100.0" stroke="#d8d8d2" stroke-width="1"/>
@@ -87,7 +87,7 @@
 <text x="524.6" y="582.8" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.5" font-weight="400" fill="#6f6f6a" text-anchor="start">1,278</text>
 <rect x="572.2" y="566.0" width="202.3" height="26.0" rx="13.0" fill="#fff" stroke="#d8d8d2" stroke-width="1"/>
 <text x="583.2" y="583.5" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="12.5" font-weight="500" fill="#17171a" text-anchor="start">template_parsers.py</text>
-<text x="734.9" y="582.8" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.5" font-weight="400" fill="#6f6f6a" text-anchor="start">1,742</text>
+<text x="734.9" y="582.8" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.5" font-weight="400" fill="#6f6f6a" text-anchor="start">1,758</text>
 <rect x="65.0" y="600.0" width="267.3" height="26.0" rx="13.0" fill="#fff" stroke="#d8d8d2" stroke-width="1"/>
 <text x="76.0" y="617.5" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="12.5" font-weight="500" fill="#17171a" text-anchor="start">evidence_store.py</text>
 <text x="212.6" y="616.8" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.5" font-weight="400" fill="#6f6f6a" text-anchor="start">548 · json | sqlite</text>
@@ -96,7 +96,7 @@
 <text x="457.6" y="616.8" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.5" font-weight="400" fill="#6f6f6a" text-anchor="start">423</text>
 <rect x="493.8" y="600.0" width="307.8" height="26.0" rx="13.0" fill="#fff" stroke="#d8d8d2" stroke-width="1"/>
 <text x="504.8" y="617.5" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="12.5" font-weight="500" fill="#17171a" text-anchor="start">fixtures.py</text>
-<text x="596.0" y="616.8" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.5" font-weight="400" fill="#6f6f6a" text-anchor="start">339 · 631 captures, replay offline</text>
+<text x="596.0" y="616.8" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.5" font-weight="400" fill="#6f6f6a" text-anchor="start">350 · 640 captures, replay offline</text>
 <line x1="553.0" y1="644.0" x2="553.0" y2="658.0" stroke="#bcbcb6" stroke-width="1.6" marker-end="url(#arw)"/>
 <rect x="48.0" y="662.0" width="1010.0" height="102.0" rx="12" fill="#fdecea" stroke="#f0bfb8" stroke-width="1"/>
 <circle cx="74.0" cy="687.0" r="11" fill="#c0392b"/>
@@ -108,7 +108,7 @@
 <text x="174.8" y="716.8" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.5" font-weight="400" fill="#6f6f6a" text-anchor="start">260 · FROZEN · exact-match frozenset</text>
 <rect x="399.8" y="700.0" width="378.3" height="26.0" rx="13.0" fill="#fff" stroke="#e0a79e" stroke-width="1"/>
 <text x="410.8" y="717.5" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="12.5" font-weight="500" fill="#17171a" text-anchor="start">templates.py</text>
-<text x="509.5" y="716.8" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.5" font-weight="400" fill="#6f6f6a" text-anchor="start">476 · FROZEN · canonicalise by reconstruction</text>
+<text x="509.5" y="716.8" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.5" font-weight="400" fill="#6f6f6a" text-anchor="start">514 · FROZEN · canonicalise by reconstruction</text>
 <text x="68.0" y="742.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11.5" font-weight="400" fill="#c0392b" text-anchor="start">cisco_xr 10 · cisco_iosxe 5 · juniper_junos 5 approved commands.  VERB_ALLOWLIST = {ping, show, traceroute}.  There is no run_command(), no config mode, no shell.</text>
 <rect x="48.0" y="784.0" width="1010.0" height="44.0" rx="12" fill="#ffffff" stroke="#d8d8d2" stroke-width="1"/>
 <circle cx="74.0" cy="806.0" r="11" fill="#55555a"/>
@@ -153,7 +153,7 @@
 <text x="1110.0" y="189.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11.5" font-weight="600" fill="#6d28d9" text-anchor="start">No model call happens unless you ask for one.</text>
 <rect x="1108.0" y="202.0" width="406.0" height="48.0" rx="8" fill="#fff" stroke="#d5c6f5" stroke-width="1"/>
 <text x="1120.0" y="222.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="12.5" font-weight="600" fill="#6d28d9" text-anchor="start">model_egress.py</text>
-<text x="1243.4" y="222.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#6f6f6a" text-anchor="start">553 · the projector</text>
+<text x="1243.4" y="222.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#6f6f6a" text-anchor="start">561 · the projector</text>
 <text x="1120.0" y="240.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.8" font-weight="400" fill="#6f6f6a" text-anchor="start">raw text withheld-with-count · free text quoted</text>
 <text x="1120.0" y="262.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12" font-weight="400" fill="#6d28d9" text-anchor="start">•</text>
 <text x="1132.0" y="262.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="11.5" font-weight="400" fill="#17171a" text-anchor="start">prompt_library.py</text>
@@ -201,7 +201,7 @@
 <text x="1140.0" y="741.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.9" font-weight="400" fill="#6f6f6a" text-anchor="start">Structural, not filtered: prompt_library never holds</text>
 <text x="1140.0" y="756.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.9" font-weight="400" fill="#6f6f6a" text-anchor="start">the text. Five egress paths, all projected.</text>
 <text x="1512.0" y="724.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="10" font-weight="400" fill="#9a9a94" text-anchor="end">layer 2/4</text>
-<text x="1110.0" y="794.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.8" font-weight="400" fill="#15803d" text-anchor="start">Each is pinned by a test that fails when the guard is removed (31/31 verified).</text>
+<text x="1110.0" y="794.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.8" font-weight="400" fill="#15803d" text-anchor="start">Each is pinned by a test that fails when the guard is removed (32/32 verified).</text>
 <path d="M 1060 250 H 1082" fill="none" stroke="#6d28d9" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#arwp)"/>
 <path d="M 1060 600 H 1082" fill="none" stroke="#6d28d9" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#arwp)"/>
 <text x="48.0" y="974.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12" font-weight="400" fill="#6f6f6a" text-anchor="start">Read down the spine: a question enters at the top, becomes an answer in layer 3, and only layers 4–6 ever touch a device. The model branch hangs off the side — it restates conclusions, it never reaches them.</text>

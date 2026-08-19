@@ -184,6 +184,17 @@ def template_manifest_for(
 
     for interface in interfaces:
         manifest.append(("interface", {"interface": interface}))
+        # B-104: the config axis (D16), captured over the same interface set
+        # as the status-side "interface" template just above -- one
+        # observed/intended pair per interface is what B-105/B-106 need to
+        # diff later, and it is the same physical-members-plus-Lo0 scope
+        # `_capturable_interfaces` already narrows this manifest to.
+        manifest.append(("config_interface", {"interface": interface}))
+
+    # One per device, not per interface: `show running-config router isis`
+    # is the whole process, and IOS-XR nests every interface's ISIS
+    # participation inside it -- see config_section.py's module docstring.
+    manifest.append(("config_isis", {}))
 
     manifest.append(("logging", {"count": str(LOGGING_LINES)}))
 

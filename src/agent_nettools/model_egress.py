@@ -175,12 +175,20 @@ RAW_TEXT_KEYS = frozenset({"commands", "unaccounted_lines"})
 #: `logging` entries above -- because a Loki record's `text`/`code` are the
 #: same concept the `logging` template's are (a syslog record's message body
 #: and its mnemonic's trailing code), not a coincidence of spelling.
+#: B-104: `config_interface`'s `description` is the config axis's one
+#: genuinely free-text field -- an operator-authored string, same character
+#: as the status-side `interface` template's `description` above (a
+#: different context key, since `_envelope_context` scopes by
+#: `data.template`, so it needs its own entry rather than reusing
+#: `("interface", "description")`). `config_isis` carries no free text at
+#: all -- see `config_section.py`'s module docstring.
 FREE_TEXT_FIELDS: frozenset[tuple[str, str]] = frozenset(
     {
         ("logging", "text"),
         ("logging", "code"),
         ("bgp_neighbor", "last_reset_reason"),
         ("interface", "description"),
+        ("config_interface", "description"),
         ("logs_for_device", "text"),
         ("logs_for_device", "code"),
     }

@@ -511,6 +511,31 @@ kept for the same reason `cisco_iosxe`'s static commands are: to prove the
 template abstraction holds across a vendor with different syntax
 (`show ip route`/`show ip bgp neighbors`).
 
+### The config axis — observed vs. intended (B-104, D16)
+
+Two more `cisco_xr`-only templates, `config_isis` (`show running-config
+router isis`, no parameter) and `config_interface` (`show running-config
+interface <name>`), give the deterministic descent its first look at
+*configuration* rather than only operational state. `show running-config`
+with **no** qualifier is not on this table and never will be -- see
+`agent_nettools/config_section.py`'s module docstring and
+`tests/test_config_section.py::test_no_unqualified_running_config_template_exists_on_any_platform`,
+which is paired with a positive control proving that check would actually
+catch a bad entry rather than passing vacuously. Neither template has a
+dedicated CLI subcommand yet (there is no generic "run any template by
+name" CLI surface, and none was added for these two); they are reachable
+today through `agent_nettools.network_tools.run_template("PE3",
+"config_isis")` and are captured into fixtures by `nettools capture
+--templates`, same as every other Phase 5 template.
+
+Parsed output never carries a secret: neither parser stores the text that
+follows an `authentication`/`password`-shaped keyword, only whether one was
+present. The one genuinely free-text field this axis adds
+(`config_interface`'s `description`) is quoted and budgeted like every
+other device-authored string a model ever sees (invariant 4) --
+`("config_interface", "description")` in
+`agent_nettools/model_egress.py`'s `FREE_TEXT_FIELDS`.
+
 ## Common Commands
 
 Everything is driven by the `nettools` CLI; the Makefile targets are thin
