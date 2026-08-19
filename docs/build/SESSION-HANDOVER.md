@@ -2,9 +2,9 @@
 
 > **OVERNIGHT RUN — 2026-08-18 into 2026-08-19. Read this first.**
 >
-> Green and fully pushed at every step: **2500 passed / 24 skipped**, lint clean,
+> Green and fully pushed at every step: **2502 passed / 24 skipped**, lint clean,
 > **27/27 mutation guards**, four frozen files intact. Tests went
-> **2229 → 2500** overnight. One warning is expected and deliberate — see
+> **2229 → 2502** overnight. One warning is expected and deliberate — see
 > "Your call in the morning", item 1.
 >
 > ### Landed
@@ -27,6 +27,10 @@
 > * **Nine intents** — `bgp_vpnv4` is new (real VPNv4 sessions on RR1 and all
 >   four PEs).
 > * Six services on the `stage2` compose profile; all 19 containers healthy.
+> * **The MCP descent tool now advertises all four flows.** It listed only two
+>   until this morning, so `isis_adjacency` and `ldp_session` were built,
+>   tested and *unselectable by any model* (OBS-191). Worth knowing before the
+>   LM Studio run: that surface changed, so a fresh session is the honest test.
 > * Evidence sources reachable and probed: Prometheus, Loki, Grafana,
 >   Alertmanager.
 > * `scripts/measure_context.py` — manifest/prompt/evidence cost, measured.
@@ -85,8 +89,8 @@
 > remember a flag. (OBS-185)
 >
 > ### Backlog
-> **138 rows** — 77 DONE, 15 OPEN, 28 DEFERRED, 14 BLOCKED, 2 OUT-OF-SCOPE,
-> 1 CLOSED-AS-MEASURED, 1 CLOSED-AS-REFUSED. FINDINGS.md holds **188**
+> **139 rows** — 78 DONE, 15 OPEN, 28 DEFERRED, 14 BLOCKED, 2 OUT-OF-SCOPE,
+> 1 CLOSED-AS-MEASURED, 1 CLOSED-AS-REFUSED. FINDINGS.md holds **189**
 > observations.
 >
 > ### The diagrams are now true

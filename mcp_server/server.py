@@ -800,7 +800,15 @@ def investigate_lab_session(
     ``subject`` what to investigate, in the flow's own vocabulary. For
                 ``bgp_session`` that is the peer's IPv4 address as
                 ``show bgp summary`` lists it, e.g. "10.255.0.12".
-    ``flow``    the object type. ``bgp_session`` (default) or ``interface``.
+    ``flow``    the object type. One of ``bgp_session`` (default),
+                ``interface``, ``isis_adjacency`` or ``ldp_session``.
+                For ``isis_adjacency`` and ``ldp_session`` the subject is
+                the LOCAL interface the adjacency forms over, e.g.
+                "GigabitEthernet0/0/0/2" -- not the neighbour's name.
+                ``device_health`` is deliberately NOT a flow: device
+                health is an aggregation over independent signals, not a
+                dependency descent, so it has no lowest-broken-layer to
+                report. Use ``assess_lab_device_health`` for that.
 
     Read ``finding`` first. Values you will see:
 

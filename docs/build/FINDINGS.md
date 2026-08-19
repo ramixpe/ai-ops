@@ -5837,3 +5837,48 @@ pretending they were collected.
 > schema promises the fact is being captured, and every reader downstream —
 > including a future analysis of "how does our context engineering behave" —
 > will read the null as "this run had none" rather than "we never looked."
+
+---
+
+## OBS-191 · MCP · Two shipped flows were invisible to every model, because the description still named two
+
+`investigate_lab_session` is the MCP surface's descent tool. Its description —
+the only thing a model reads when choosing a flow — said:
+
+```
+``flow``    the object type. ``bgp_session`` (default) or ``interface``.
+```
+
+B-107 shipped `isis_adjacency` and B-109 shipped `ldp_session`. Both are fully
+built, tested, mutation-guarded and reachable from the CLI. Both were
+**structurally unselectable by any model**, because a model cannot choose a flow
+it has never been told exists. The tools worked; the menu was two items short.
+
+This is OBS-187's shape a second time in one night. There, a refusal existed in
+the library and argparse rejected the word before anyone could reach it. Here, a
+capability exists in the registry and the description never mentions it. Both
+are the same failure: **the surface is the product, and a capability the surface
+does not name does not exist to the caller.** Neither was catchable by any test
+that exercised the capability, because the capability was never broken.
+
+Fixed, and pinned: `test_the_investigate_tool_advertises_every_implemented_flow`
+derives the expected list from `flows.FLOWS` itself, so shipping a fifth flow
+without advertising it now fails the suite. Its companion pins that the
+*refused* flow is described as refused with its replacement named — otherwise a
+model reasoning "device_health isn't listed, I'll try it" gets an error instead
+of an answer. Also added the subject vocabulary for the two new flows, which is
+the local interface rather than the neighbour's name — a distinction a model
+would otherwise have to guess, and would guess wrong.
+
+**A note on how nearly this pin shipped vacuous.** I mutated the description to
+drop the two flow names, ran the test, and it passed — which reads exactly like
+"the test asserts nothing." I spent a probe chasing whether the decorator
+rewrote `__doc__`. It did not. My *mutation* was incomplete: I had replaced one
+line while the very next line, which I had written moments earlier, still named
+both flows. Removing all four mentions made the test fail correctly.
+
+> A mutation that leaves the asserted fact true somewhere else in the file has
+> not tested the assertion, it has tested your search-and-replace. When a
+> mutation fails to break a test, suspect the mutation before the test — and
+> confirm the mutation actually removed the thing, by counting occurrences
+> rather than trusting one substitution.

@@ -451,3 +451,43 @@ def test_importing_the_server_writes_nothing_to_stdout():
     )
 
     assert result.stdout == "", f"stdout polluted at import: {result.stdout!r}"
+
+
+def test_the_investigate_tool_advertises_every_implemented_flow():
+    """The tool description is the ONLY thing a model reads when choosing a
+    flow, so a flow missing from it is a flow that will never be selected.
+
+    Measured 2026-08-19: the description said "``bgp_session`` (default) or
+    ``interface``" long after B-107 and B-109 shipped `isis_adjacency` and
+    `ldp_session`. Both were fully built, tested and reachable from the CLI,
+    and structurally invisible to every model on the MCP surface -- the same
+    shape as OBS-187, where a refusal existed and no operator could reach it.
+    A capability the surface does not name does not exist to the caller.
+    """
+
+    from agent_nettools import flows
+
+    doc = server.investigate_lab_session.__doc__ or ""
+    implemented = sorted(n for n, f in flows.FLOWS.items() if f is not None)
+
+    missing = [name for name in implemented if f"``{name}``" not in doc]
+    assert not missing, (
+        f"flows implemented but not advertised to a model: {missing}. "
+        "Add them to investigate_lab_session's docstring -- a model cannot "
+        "select a flow it has never been told exists."
+    )
+
+
+def test_the_investigate_tool_names_the_refused_flow_and_its_replacement():
+    """Anti-vacuity companion. The test above is satisfied by listing more
+    names; this one pins that the REFUSED flow is described as refused, with
+    its replacement named. Otherwise a model that reasons "device_health is
+    not listed, so I'll try it" gets an error instead of an answer.
+    """
+
+    from agent_nettools import flows
+
+    doc = server.investigate_lab_session.__doc__ or ""
+    for refused in flows.REFUSED_OBJECT_TYPES:
+        assert f"``{refused}``" in doc, f"{refused} not mentioned"
+    assert "assess_lab_device_health" in doc
