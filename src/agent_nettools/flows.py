@@ -455,8 +455,12 @@ UNIVERSAL_FINDINGS = frozenset(
 # The registry
 # --------------------------------------------------------------------------- #
 
-#: The seven object types, per D5. Two are implemented; the rest are declared
-#: so the registry's shape is fixed without pretending coverage exists.
+#: The seven object types, per D5. Four are implemented (`FLOWS`, below).
+#: `l3vpn_service` and `topology` are declared-but-not-yet-built stubs so the
+#: registry's shape is fixed without pretending coverage exists (B-110, B-111).
+#: `device_health` is a third kind of entry: investigated (B-108) and
+#: deliberately refused as a flow, permanently rather than provisionally --
+#: see the block comment beside `flow_for`, below the registry, for why.
 OBJECT_TYPES: tuple[str, ...] = (
     "interface",
     "isis_adjacency",
@@ -466,15 +470,6 @@ OBJECT_TYPES: tuple[str, ...] = (
     "device_health",
     "topology",
 )
-
-
-def _not_implemented(object_type: str, task: str) -> Callable[..., CheckResult]:
-    def raise_it(*_args, **_kwargs) -> CheckResult:
-        raise NotImplementedError(
-            f"the {object_type!r} flow is not implemented; see {task}"
-        )
-
-    return raise_it
 
 
 # --- interface -------------------------------------------------------------
@@ -760,6 +755,86 @@ LDP_SESSION_FLOW = Flow(
 )
 
 
+# --- device_health (B-108) --------------------------------------------------
+#
+# Investigated, not skipped -- and refused as a flow, permanently rather than
+# provisionally. `device_health` stays in OBJECT_TYPES because D5 named it as
+# one of the seven candidate object types up front, but it never gets a FLOWS
+# entry, and `flow_for` raises a distinct message for it below rather than the
+# generic "not implemented yet" it gives `l3vpn_service`/`topology`: those two
+# are waiting on judgement time, this one was given the judgement and failed
+# the bar on the evidence.
+#
+# The backlog's own framing is "wraps the existing health.py verdicts as a
+# flow, so 'is PE1 ok' has an entry point" -- and that entry point already
+# exists, and is not a flow: `checks.evaluate_device`/`evaluate_fabric`,
+# reachable today as `nettools health DEVICE` and as the MCP tool
+# `assess_lab_device_health`. Both already answer "is PE1 ok", from the same
+# evidence a flow would collect, without asserting an ordering between rules
+# that were never shown to depend on each other.
+#
+# What a descent asserts, and what device health has instead
+# --------------------------------------------------------------
+# A rung ladder's contract (B-437, on `Rung` above) is "the lowest broken rung
+# is the cause": each rung is a falsifiable claim that the layer above cannot
+# work unless this one does. `ROLE_INVARIANT_RULES` has no such relationship
+# between its members -- `isis_isolated`, `bgp_session_down`,
+# `interface_admin_up_line_down` and `sr_policy_down` are independent facts
+# about independent subsystems, evaluated independently and rolled up by
+# worst-severity, not by dependency. Forcing a rung order onto them would
+# manufacture a chain the rules were never designed to support, and every
+# investigate caller who trusted "lowest broken rung" would inherit a false
+# causal claim.
+#
+# Measured, not asserted, on `tests/fixtures/cisco_xr` (`t0`/`t1`): PE1 carries
+# `interface_admin_up_line_down` (an admin-up/line-down subinterface),
+# `sr_policy_down` (an SR-TE policy not operationally up) and `bgp_no_prefixes`
+# simultaneously. None of the three causes either of the others -- an SR-TE
+# policy's operational state does not depend on an unrelated subinterface's
+# line protocol. A device_health ladder ordering these would report whichever
+# sorts lowest as "the cause" of the ones above it, which the evidence does not
+# support.
+#
+# The one case that looks like a chain and is not one, also measured: PE2
+# carries both `isis_isolated` (zero adjacencies) and `bgp_session_down` (its
+# session to 10.255.0.31 stuck in Idle) on every label, while every physical
+# interface reads up/up -- so "interface" explains neither. If IS-IS isolation
+# explains that specific BGP session, establishing it is already
+# `bgp_session`'s job: its `igp_adjacency` rung is scoped to *that peer*, on
+# *the subject's device* (Q-013's `DeviceScope.SUBJECT`), and gets the right
+# answer today -- `nettools investigate RR1 10.255.0.12 --flow bgp_session`.
+# A device-wide rung asserting the same claim would be re-deriving it at
+# coarser granularity, for every BGP peer on the device at once, with no way
+# to tell a peer whose failure IS-IS actually explains from one that is down
+# for an unrelated reason (an MD5 mismatch, an admin shutdown) -- exactly the
+# false generalisation B-437 exists to refuse.
+#
+# What would make it real, and why that is not buildable now
+# ----------------------------------------------------------------
+# A genuine device-health descent needs a layer *below* every protocol rung
+# this tool has -- platform/environmental state that gates protocol state the
+# way a socket gates a session (B-432's shape). `docs/design/next-level.md`
+# names the candidate: `show environment` / `show redundancy` -- power,
+# temperature, RP/process state, "the faults that announce themselves before a
+# protocol notices". This build collects none of it: no such intent exists in
+# `platforms.py`, so there is no fixture, and no captured or injected
+# separating case. B-437 requires that evidence *before* a rung is added, not
+# after, and there is no lab or network access in this task to go generate it.
+# Adding the rung anyway would be exactly what B-437's own audit was built to
+# catch: a rung given a distinct subsystem with zero exercised evidence that
+# the boundary is real, which is indistinguishable from a rung that does not
+# work (OBS-121's "a capability added and never exercised" finding, about this
+# exact mistake made once already on `bgp_session`'s rung 2).
+#
+# `assess_lab_device_health`'s own docstring already draws this line: "It
+# tells you *that* something is wrong, and which rule fired. If you then need
+# to know *why* ..., prefer `investigate_lab_session`." device_health is the
+# *that*; the flows in `FLOWS` are the *why*. Collapsing them into one flow
+# would blur a distinction this codebase already ships and tests --
+# `docs/build/MCP-RETEST-PROTOCOL.md`'s Q3 is the negative control "is PE1
+# healthy?", and the documented correct answer is `assess_lab_device_health`,
+# not the descent tool.
+
 FLOWS: Mapping[str, Flow] = {
     "bgp_session": BGP_SESSION_FLOW,
     "interface": INTERFACE_FLOW,
@@ -767,12 +842,28 @@ FLOWS: Mapping[str, Flow] = {
     "ldp_session": LDP_SESSION_FLOW,
 }
 
+#: Set once, here, rather than recomputed at every `flow_for("device_health")`
+#: call -- the message is long because the reasoning above earns the length,
+#: not because it needs to be built fresh each time.
+_DEVICE_HEALTH_REFUSAL = (
+    "'device_health' is deliberately not a flow (B-108: investigated and "
+    "refused, not merely unbuilt -- see the comment block above FLOWS in "
+    "flows.py for the full reasoning). Device health is an aggregation over "
+    "independent per-protocol signals (IS-IS, BGP, interfaces, SR-TE), not a "
+    "dependency descent, so it has no 'lowest broken rung' to report. Use "
+    "`nettools health DEVICE` (`checks.evaluate_device`/`evaluate_fabric`) or "
+    "the MCP tool `assess_lab_device_health` instead -- both already answer "
+    "'is DEVICE ok' from the same evidence this flow would have collected."
+)
+
 
 def flow_for(object_type: str) -> Flow:
     """Return one flow, or raise ``NotImplementedError`` naming the task.
 
     A declared-but-unimplemented object type raises rather than returning
     ``None``, so a caller cannot quietly treat "no flow" as "nothing wrong".
+    ``device_health`` is a distinct case of this: not unimplemented, but
+    refused -- see ``_DEVICE_HEALTH_REFUSAL``.
     """
 
     if object_type not in OBJECT_TYPES:
@@ -787,11 +878,15 @@ def flow_for(object_type: str) -> Flow:
             f"{implemented} (declared but not yet implemented: "
             f"{sorted(set(OBJECT_TYPES) - set(implemented))})"
         )
+    if object_type == "device_health":
+        raise NotImplementedError(_DEVICE_HEALTH_REFUSAL)
     flow = FLOWS.get(object_type)
     if flow is None:
         raise NotImplementedError(
-            f"the {object_type!r} flow is declared but not implemented "
-            "(MVP-0 implements bgp_session and interface only; the rest are "
-            "backlog items B-107 to B-111)"
+            f"the {object_type!r} flow is declared but not implemented yet "
+            "(implemented: bgp_session, interface, isis_adjacency, "
+            "ldp_session; l3vpn_service and topology are backlog items "
+            "B-110 and B-111; device_health is refused, not unbuilt -- see "
+            "OBJECT_TYPES' docstring)"
         )
     return flow

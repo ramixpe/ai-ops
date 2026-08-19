@@ -96,6 +96,33 @@ def test_an_unknown_object_type_is_a_key_error_not_a_not_implemented():
         flows.flow_for("bgp_sesion")
 
 
+def test_device_health_is_refused_not_merely_unbuilt():
+    """B-108. `device_health` never gets a `FLOWS` entry -- it is an
+    aggregation over independent per-protocol rules, not a dependency descent,
+    and forcing rung order onto independent signals would fabricate a causal
+    claim the evidence does not support (see the block comment above `FLOWS`
+    in `flows.py`).
+
+    Both still raise `NotImplementedError`, so a caller cannot tell "refused"
+    from "not yet built" by exception type alone -- but the message must, so a
+    human (or a retrying model) reading it does not wait for B-108 to land.
+    """
+
+    with pytest.raises(NotImplementedError) as excinfo:
+        flows.flow_for("device_health")
+    message = str(excinfo.value)
+    assert "device_health" in message
+    assert "nettools health" in message
+    assert "assess_lab_device_health" in message
+
+    # Contrast: a genuinely pending stub does NOT carry this message -- the
+    # two must read differently, or the distinction this test exists to pin
+    # is not actually visible to a caller.
+    with pytest.raises(NotImplementedError) as pending:
+        flows.flow_for("l3vpn_service")
+    assert "nettools health" not in str(pending.value)
+
+
 @pytest.mark.parametrize(
     "object_type", ["bgp_session", "interface", "isis_adjacency", "ldp_session"]
 )

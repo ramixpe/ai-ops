@@ -1,7 +1,9 @@
 # Documentation map
 
-Regenerated 2026-08-17 from the tree. The previous version listed 15 of 32 files
-and pointed at two that did not exist.
+Regenerated 2026-08-19 from the tree, during the deep-cleanup pass. The
+previous version (2026-08-17) predated M0 (2026-08-18): nine files it listed
+under `docs/build/` now live under `docs/archive/`, and two files it listed no
+longer exist. See `docs/build/M0-DOC-RETIREMENT.md` and `docs/archive/README.md`.
 
 ## If you have just cloned this
 
@@ -29,6 +31,7 @@ ios-xr-nettools/
 ├── README.md                           Start here. Runnable demo in the first ten lines
 ├── CLAUDE.md                           Agent instructions and the rules that must not break
 ├── SECURITY.md                         Threat model, what is/isn't enforced, disclosure path
+├── CONTRIBUTING.md                     How to set up, test, and submit a change
 ├── docs/
 │   ├── design/     WHY — reference. Changes rarely.
 │   │   ├── glossary.md                 Pinned terminology. Read FIRST — `intent` collides
@@ -40,63 +43,82 @@ ios-xr-nettools/
 │   │   ├── evidence-epoch.md           One observation window; why skew is not coherence
 │   │   ├── chaos-harness.md            Fault injection and how accuracy is measured
 │   │   ├── peer-review-response.md     Three external reviews; accepted, corrected, deferred
+│   │   ├── stage-2-architecture.md     Stage 2 brainstorm: MCP hub, cache+syslog invalidation,
+│   │   │                               wide/narrow flow-vs-tool dimension. Decision record
+│   │   ├── cache-spike.md              M4 spike: answers the cache brief with file:line
+│   │   │                               evidence; concludes a cache isn't justified yet
 │   │   └── next-level.md               Proposal: the three tiers + the local model, read together
 │   ├── build/      HOW — the build's own record. Append-only in spirit.
 │   │   ├── BUILD-PLAN.md               The task plan. Part 0 is binding
 │   │   ├── TRACKER.md                  Progress. Authoritative on task status
 │   │   ├── FINDINGS.md                 Append-only log + the Open Questions table
 │   │   ├── BACKLOG.md                  Every open item with its reconciled state
-│   │   ├── MVP0-REVIEW.md              The M4 review: what it does, and what it does not
-│   │   ├── VERIFICATION.md             Every claim with its evidence. Found six overstated
-│   │   ├── BACKLOG-STATUS.md           All 98 items by state, DONE claims verified,
-│   │   │                               12 guardrails mutation-tested
-│   │   ├── PEER-REVIEW-BRIEF.md        For a reviewer: what to read, and what to attack
-│   │   ├── REPO-INVENTORY.md           Every file, purpose, last touched, referenced by
-│   │   ├── OPERATOR-RUNBOOK.md         Step by step for the outstanding lab work
-│   │   ├── MCP-RETEST-PROTOCOL.md      The six MCP questions and what to capture
-│   │   ├── ROUND-6.md                  Injection round 6 — the trust-loss scenario (sealed)
 │   │   ├── SESSION-HANDOVER.md         Read first if resuming a build session
-│   │   ├── PLAN-V2.md                  The current plan
-│   │   ├── BACKLOG-COMPLETION-PLAN.md  Superseded by PLAN-V2; kept for its reasoning
+│   │   ├── MVP0-REVIEW.md              The M4 review: what it does, and what it does not
+│   │   ├── HOLISTIC-REVIEW.md          The 2026-08-18 five-perspective review: B-481/B-482
+│   │   │                               fixed, 18 UX fixes, the two-lens-convergence finding
 │   │   ├── MCP-EXPERIMENT.md           The MCP experiment: audit, refuted prediction, B-459
+│   │   ├── MCP-RETEST-PROTOCOL.md      Six MCP questions and what to capture. Q1 still owed
+│   │   │                               as of round 6 — kept live, deliberately not archived
+│   │   ├── M0-DOC-RETIREMENT.md        The doc kill-list M0 executed from (2 deleted, 9 moved
+│   │   │                               to docs/archive/). A historical plan record, not a queue
+│   │   ├── OPERATOR-RUNBOOK.md         Step by step for the outstanding lab work
 │   │   ├── ROUND-5.md                  Injection round 5 — invoke during propagation
+│   │   ├── ROUND-6.md                  Injection round 6 — the trust-loss scenario (sealed)
 │   │   ├── ROUND-7.md                  Injection round 7 — does a down port persist
 │   │   ├── ROUND-8.md                  Injection round 8 — AS mismatch; §5 scored, §6 re-sealed
-│   │   ├── AUTONOMOUS-LOG.md           Unattended-run log
 │   │   ├── capture-manifest.md         T-007 — what to capture, per device and label
 │   │   ├── discovery-loki.md           T-004 — log pipeline, label scheme, mnemonics
 │   │   ├── discovery-alerting.md       T-005 — Alertmanager routing, Prometheus surface
-│   │   ├── discovery-l3vpn.md          T-006 — VRF/RT map, CE attachment, subject naming
-│   │   ├── FIX-PLAN.md                 Both reviews' findings, reconciled into one wave plan
-│   │   └── OPS-WAVE-PLAN.md            n8n/knowledge/MCP judged, then built (B-477–480)
-│   ├── devices.md                      Generated from inventory — do not hand-edit
-│   ├── REVIEW.md                       Code review
+│   │   └── discovery-l3vpn.md          T-006 — VRF/RT map, CE attachment, subject naming
+│   ├── archive/    Completed process documents. Kept, not deleted — see archive/README.md
+│   │   ├── README.md                   What each file was, and what superseded it
+│   │   ├── REVIEW.md                   The first external review, 2026-07-28, at 32 tests
+│   │   ├── PLAN-V2.md                  The plan Gate Zero reconciled the backlog against
+│   │   ├── BACKLOG-COMPLETION-PLAN.md  A completion plan for the backlog. Executed
+│   │   ├── FIX-PLAN.md                 The six-agent fix wave. Executed
+│   │   ├── OPS-WAVE-PLAN.md            The OPS wave plan. Executed — B-477…B-480 shipped
+│   │   ├── BACKLOG-STATUS.md           Point-in-time verification of 98 items (now 129 rows)
+│   │   ├── VERIFICATION.md             Point-in-time claim audit, superseded by the same
+│   │   ├── PEER-REVIEW-BRIEF.md        Brief handed to a reviewer; superseded by the reviews
+│   │   │                               it produced
+│   │   └── REPO-INVENTORY.md           Pre-publication tree inventory; the tree moved under it
 │   ├── ARCHITECTURE-REVIEW.md          External review A
-│   ├── OPERATIONS-REVIEW.md            External review B
+│   ├── OPERATIONS-REVIEW.md            External review B — "Would I use this at 3am?"
 │   ├── EVALUATION-METHODOLOGY-REVIEW.md  External review C
 │   ├── EXPERT-PEER-REVIEW-2026-08-17.md  External review: architecture, safety, security, roadmap (P0-P3)
 │   ├── DEEP-REVIEW-2026-08-17.md       Verifies the review above at source; B-467, the sanitisation gap
-│   └── architecture.drawio             Diagram source
+│   ├── diagrams/                       Six SVGs of the system as built — layer stack, one call
+│   │   │                               end to end, trust boundary, capabilities, current state,
+│   │   │                               the descent — plus the Stage 2 architecture SVG. Generated
+│   │   │                               from the tree by d1.py…d7.py; regenerate, never hand-edit
+│   │   └── README.md                   What each diagram answers, and how to regenerate it
+│   └── architecture.drawio             Pre-M0 diagram source, superseded by docs/diagrams/ —
+│                                       not regenerated since 6629a2c; treat as historical
 ├── examples/                           Orchestrator wiring (n8n, systemd) — plumbing only,
 │                                       never logic; the boundary rule is stated inside
 ├── prompts/README.md                   Versioned prompt artifacts (GRACE) and their rules
 ├── evidence-archive/                   Committed round payloads. See its own README
 ├── scripts/                            Probes and round samplers
+├── mcp_server/README.md                The MCP tool surface and the sanitisation boundary
 └── tests/fixtures/README.md            What each label means, and how to reproduce it
 ```
 
 ## Reading order, by what you are doing
 
 **Building or resuming:** `build/SESSION-HANDOVER.md` → `build/TRACKER.md` →
-`build/FINDINGS.md` for anything logged since you last looked → `build/PLAN-V2.md`.
+`build/FINDINGS.md` for anything logged since you last looked → `build/BACKLOG.md`.
 
 **Changing the investigation layer:** `design/glossary.md` →
 `design/architecture.md` → `CLAUDE.md`'s safety boundary → the rung rules on
 `flows.Rung`.
 
-**Reviewing the repository:** start at `build/PEER-REVIEW-BRIEF.md` — it names what to
-read, in what order, what is already known to be wrong, and where an attack is most
-likely to land. Then `build/VERIFICATION.md` for every claim with its evidence.
+**Reviewing the repository:** start at `build/HOLISTIC-REVIEW.md` — the most
+recent whole-repo pass, five perspectives, with what it fixed. For the review
+process that preceded it, `archive/PEER-REVIEW-BRIEF.md` names what to read, in
+what order, and where an attack was most likely to land; `archive/VERIFICATION.md`
+holds every claim from that round with its evidence. Both are archived — point in
+time, not current state.
 
 **Touching fixtures:** `tests/fixtures/README.md` before capturing anything. `t0`
 and `t1` are frozen and the reason is not obvious from looking at them.
@@ -120,3 +142,12 @@ wrong turns that were later corrected in place with the original left visible.
 That is deliberate: the order things were learned in is most of its value, and a
 narrative rewrite would lose the one thing a build log can offer that a design
 document cannot.
+
+## Document retirement
+
+`docs/build/M0-DOC-RETIREMENT.md` is the reviewed kill-list M0 (2026-08-18) acted
+on, with operator sign-off: two files deleted (`docs/devices.md`,
+`docs/build/AUTONOMOUS-LOG.md`), nine archived to `docs/archive/`. It is kept as
+the historical record of that decision, not as a live queue — no further action
+is pending from it. `docs/build/MCP-RETEST-PROTOCOL.md` was deliberately left out
+of that pass because Q1 is still owed as of round 6.

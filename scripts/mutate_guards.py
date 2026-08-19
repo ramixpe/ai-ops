@@ -204,6 +204,21 @@ MUTATIONS = [
      "    return EXIT_OK if received > 0 else EXIT_WARNING",
      "    return EXIT_OK",
      "test_a_ping_with_total_loss_exits_nonzero"),
+
+    ("B-489", "_run_rendered_command has no command= parameter to smuggle a "
+     "pre-rendered string through, bypassing reconstruction against the "
+     "declaring template",
+     "src/agent_nettools/network_tools.py",
+     "    params: dict[str, str],\n"
+     "    read_timeout: float | None = None,\n"
+     "    sender: Callable[[dict[str, Any], str], str] | None = None,\n"
+     ") -> dict[str, Any]:\n",
+     "    params: dict[str, str],\n"
+     "    command: str | None = None,\n"
+     "    read_timeout: float | None = None,\n"
+     "    sender: Callable[[dict[str, Any], str], str] | None = None,\n"
+     ") -> dict[str, Any]:\n",
+     "test_run_rendered_command_refuses_a_show_running_config_shaped_smuggled_command"),
 ]
 
 
@@ -302,11 +317,14 @@ def main(argv: list[str]) -> int:
     REPINNED = {
         # platforms.py: B-109's ldp/ldp_discovery intents (prior repin), plus
         # the protocol-coverage sweep's bgp_vpnv4 intent (this repin, same
-        # session, operator sign-off 2026-08-19) -- OSPF/RSVP-TE/CDP were
-        # checked live and deliberately NOT added (no observable state on this
-        # fabric; see the comment beside PLATFORM_INTENTS["cisco_xr"]
-        # ["bgp_vpnv4"] in platforms.py). Additive both times; the frozen
-        # safety TESTS pass unedited against it.
+        # session -- Opus 5 orchestrator, 2026-08-19, under the standing
+        # autonomous Stage-2 mandate, NOT operator sign-off; §0.5 review is
+        # still owed, see PendingOperatorReview in tests/test_frozen_files.py
+        # and OBS-182/B-505) -- OSPF/RSVP-TE/CDP were checked live and
+        # deliberately NOT added (no observable state on this fabric; see the
+        # comment beside PLATFORM_INTENTS["cisco_xr"]["bgp_vpnv4"] in
+        # platforms.py). Additive both times; the frozen safety TESTS pass
+        # unedited against it.
         "src/agent_nettools/platforms.py": "0a11cdc99d4b0d37c69e7845566bc32898dba96a",
     }
     for f in sorted(FROZEN):

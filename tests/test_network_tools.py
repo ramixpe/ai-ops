@@ -487,6 +487,66 @@ def test_run_rendered_command_has_no_raw_command_parameter_to_smuggle_one_throug
         )
 
 
+def test_run_rendered_command_refuses_a_show_running_config_shaped_smuggled_command(
+    monkeypatch,
+):
+    """B-489's precise refusal case. The previous test pins that a raw command
+    cannot be smuggled in *positionally* -- but the keyword-only `*` alone
+    would refuse that regardless of whether the parameter existed, so it does
+    not by itself prove there is no `command=` parameter. This offers the
+    same `show running-config`-shaped string as an explicit keyword instead,
+    which a bare `*` would happily accept if the parameter existed. Refused
+    with `TypeError` only because `command` is not a parameter of this
+    function at all -- the only thing that can ever produce the string sent
+    to a device is `render_command(platform, template_name, **params)`,
+    reconstructing byte-for-byte from the *declaring* template, never a
+    caller-supplied string standing in for it. Mutation-tested: see
+    B-489 in scripts/mutate_guards.py."""
+
+    set_device_environment(monkeypatch)
+
+    def refusing_sender(device, command):
+        raise AssertionError(f"sender must never be called, got {command!r}")
+
+    with pytest.raises(TypeError):
+        network_tools._run_rendered_command(
+            "PE1",
+            template_name="route",
+            platform="cisco_xr",
+            params={"prefix": "10.255.0.31/32"},
+            command="show running-config",  # type: ignore[call-arg]
+            sender=refusing_sender,
+        )
+
+
+def test_run_rendered_command_positive_control_for_the_smuggling_refusal(monkeypatch):
+    """Positive control for the refusal test directly above (OBS-181: a
+    refusal test that has never once seen an acceptance travel the identical
+    path is not evidence of refusal -- 'refused' and 'broken' are the same
+    observation until something legitimate gets through). Same function,
+    same call shape, no `command=` smuggling attempt: a legitimate `params`
+    value must still render by reconstruction and reach the sender."""
+
+    set_device_environment(monkeypatch)
+    seen = []
+
+    def recording_sender(device, command):
+        seen.append(command)
+        return "output"
+
+    result = network_tools._run_rendered_command(
+        "PE1",
+        template_name="route",
+        platform="cisco_xr",
+        params={"prefix": "10.255.0.31/32"},
+        sender=recording_sender,
+    )
+
+    assert result["status"] == "success"
+    assert seen == ["show route 10.255.0.31/32"]
+    assert result["data"]["command"] == "show route 10.255.0.31/32"
+
+
 def test_diff_evidence_reports_changed_intents():
     """No parser is wired for these hand-built sections (no "parse_status"), so
     the comparison falls back to normalized text -- exercised on its own merits

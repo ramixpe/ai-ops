@@ -83,6 +83,13 @@ exclude = ["tests*", "scripts*", "docs*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Put the tree's OWN src/ ahead of the editable install on sys.path.
+# Without this, an agent working in a git worktree that shares this repo's
+# .venv silently tests the MAIN checkout's code: the editable install
+# resolves `agent_nettools` to an absolute path outside the worktree, so a
+# worktree's own edits are invisible to its own test run and it reports
+# green for code it never executed (measured 2026-08-19, OBS-185).
+pythonpath = ["src"]
 markers = [
     "live_lab: needs a reachable live IOS-XR lab (real SSH, real credentials). Skipped by default -- run with `NETTOOLS_LIVE_LAB=1 pytest -m live_lab` (see tests/test_live_lab.py).",
 ]

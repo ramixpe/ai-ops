@@ -18,7 +18,7 @@ Roughly two hours to be able to attack it properly.
 | 1 | `README.md`, first 110 lines | The claim being made. Includes the one blind trial and the model error it produced |
 | 2 | `docs/design/glossary.md` | 137 lines. `intent` means *a question name* here, which collides with normal usage |
 | 3 | `docs/build/MVP0-REVIEW.md` §5 | What it does **not** do, by the people who built it |
-| 4 | `docs/build/VERIFICATION.md` | Every claim with its evidence, and the six places verification found the claim overstated |
+| 4 | `docs/archive/VERIFICATION.md` | Every claim with its evidence, and the six places verification found the claim overstated |
 | 5 | `src/agent_nettools/descent.py` | The module the entire architectural claim rests on |
 | 6 | `docs/design/peer-review-response.md` §4 | The five claims already withdrawn under review |
 | 7 | `docs/build/BUILD-PLAN.md` §0.12–§0.14 | The three rules this build derived from its own failures |

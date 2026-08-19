@@ -534,8 +534,6 @@ EXTERNAL_ONLY_KEYS: frozenset[str] = frozenset(
     {"DEVICE_USERNAME", "DEVICE_PASSWORD", "DEVICE_SSH_KEYFILE"}
 )
 
-_BY_NAME: dict[str, Setting] = {setting.name: setting for setting in SETTINGS}
-
 
 # --------------------------------------------------------------------------- #
 # Validation

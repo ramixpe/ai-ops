@@ -179,10 +179,12 @@ Management network `172.20.250.0/24`:
 | PE4  | 172.20.250.24 |
 | RR1  | 172.20.250.31 |
 
-The full device table (with roles) lives in [docs/devices.md](docs/devices.md),
-generated from the inventory by `agent_nettools.devices_doc.render_devices_doc`
--- `tests/test_docs.py` pins that it cannot drift. The linux CE nodes are not
-IOS-XR and are intentionally excluded.
+The full device table (with roles) is rendered on demand from the inventory by
+`agent_nettools.devices_doc.render_devices_doc()` -- `docs/devices.md` was the
+committed copy until M0 (2026-08-18) retired it as a second source that could
+drift from `inventory/lab.yaml`; `tests/test_docs.py` now pins that the
+generator itself still renders and reads the inventory. The linux CE nodes are
+not IOS-XR and are intentionally excluded.
 
 The inventory file location follows the same env-then-default pattern as
 snapshots and fixtures: the `NETTOOLS_INVENTORY` environment variable, else
@@ -950,7 +952,7 @@ src/agent_nettools/network_tools.py  Allowlist, SSH, evidence, fabric, diff, gol
 src/agent_nettools/evidence_store.py  Snapshot storage backends: JSON files (default) or SQLite
 src/agent_nettools/health.py       Deterministic health verdicts: role invariants + baseline rules
 src/agent_nettools/topology.py     Derived expected topology + the fabric anomaly report
-src/agent_nettools/devices_doc.py  Renders docs/devices.md from the inventory
+src/agent_nettools/devices_doc.py  Renders the device table from the inventory on demand (docs/devices.md, the committed copy, was retired at M0)
 src/agent_nettools/llm_analysis.py   Provider selection + single-device analysis + Anthropic plumbing
 src/agent_nettools/evidence_budget.py  Character budget + middle-truncation for fabric-wide evidence
 src/agent_nettools/fabric_analysis.py  Cross-device correlation over evidence + Phase 4 health verdicts

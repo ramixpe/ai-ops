@@ -5483,3 +5483,151 @@ them instead of re-running the sweep.
 Side finding, reported and not silently fixed: `inventory/lab.yaml`'s note that
 PE4 has "No BGP process configured at all" is **stale** — PE4 holds an
 Established VPNv4 session to RR1 with 2 prefixes, confirmed from both ends.
+
+---
+
+## OBS-184 · Orchestration · I briefed an agent with a constraint that had been satisfied a day earlier
+
+The deep-cleanup brief opened with a hard boundary in bold: `M0-DOC-RETIREMENT.md`
+is a kill-list **awaiting operator sign-off**, do not delete or move anything on
+it, that gate belongs to the human. The agent's first finding was that the gate
+had already been passed — commit `7df4ed0`, an ancestor of HEAD, opens with
+"Operator signed off", the two Tier-1 files are already deleted and the nine
+Tier-2 files already live in `docs/archive/`.
+
+I wrote that boundary by reading `M0-DOC-RETIREMENT.md`, which still says in its
+prose "Nothing is deleted until this list is signed off." That sentence was true
+when written and false by the time I quoted it. **A decision document describes
+the moment it was authored; it does not update itself when the decision is
+taken.** Its own table had already been rewritten with post-move `docs/archive/`
+paths, so the file was internally contradictory — the data said executed, the
+prose said pending, and I read the prose.
+
+The check that would have caught it is the one OBS-180 already named and I did
+not generalise: *ask git, not the document*. `git log --oneline | grep M0` was
+one command and answers "was this executed?" definitively, where the document
+can only answer "what was intended when this was written?"
+
+No harm done — a stale prohibition is the safe direction to be wrong in, and the
+agent surfaced it rather than obeying it blindly. But it cost the cleanup pass
+its largest scope for no reason, and had the error run the other way (briefing
+an agent that a gate was *cleared* when it was not) it would have destroyed
+evidence.
+
+> OBS-180 said: enumerate a merge's damage with git, not memory. The general
+> form is broader — **for any question of the form "has this happened yet?", ask
+> the history, never the plan.** A plan is a record of intent, and intent does
+> not know when it has been fulfilled.
+
+`M0-DOC-RETIREMENT.md` is deliberately left uncorrected: it is a decision
+document whose status line belongs to the operator, and the agent was right to
+flag rather than edit it.
+
+---
+
+## OBS-185 · Infrastructure · Every worktree agent was verifying against the main checkout's code
+
+The cleanup agent reported, as an aside, that the shared `.venv`'s editable
+install resolves `agent_nettools` to an absolute path in the **main** checkout,
+so an agent running `pytest` inside a git worktree tests the main tree's source
+rather than its own edits.
+
+I verified it directly, because it invalidates the verification claim of every
+agent that ran tonight. Taking the `device_health` worktree, whose `flows.py`
+contains a refusal block that main's does not:
+
+```
+worktree flows.py mentions _DEVICE_HEALTH_REFUSAL: 3
+MAIN     flows.py mentions _DEVICE_HEALTH_REFUSAL: 0
+$ python -m pytest tests/test_flows.py::test_device_health_is_refused... -q
+FAILED  (1 failed)
+```
+
+The worktree's own new test fails in its own worktree, because the code it tests
+is not the code it imports. Yet the agent reported "2476 passed". The report was
+not dishonest — it ran the command and read the output. **The command lied.**
+
+This is the most dangerous class of defect in an agent build: not a wrong answer,
+but a *verification instrument that reports green for code it never executed*.
+Every "tests pass" from a worktree tonight was, strictly, a statement about the
+main checkout. What saved it is the merge discipline — I re-run the full gate on
+main after every merge, so nothing shipped on an agent's word. That habit existed
+for a different reason (not inheriting claims) and caught this one for free.
+
+Fixed structurally in `pyproject.toml`, not by instructing agents to remember a
+flag:
+
+```toml
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+```
+
+which puts each tree's own `src/` ahead of the editable install. Verified: the
+same test that failed above now passes in the same worktree. A check an agent has
+to remember is a check a future agent ships without — the same reasoning
+`server.py:223` gives for putting sanitisation in the registration decorator.
+
+> A test run is evidence only about the code it actually imported. When the
+> import path and the edit path can differ, "the suite is green" is not a claim
+> about your work — and the failure mode is silent, universal, and looks exactly
+> like success.
+
+---
+
+## OBS-186 · B-108 · The flow the backlog asked for was refused, because a summary is not a descent
+
+`device_health` was on the backlog as the fourth flow: "wraps the existing
+`health.py` verdicts as a flow, so 'is PE1 ok' has an entry point." The agent was
+told it could legitimately conclude the flow should not exist. It did, and the
+argument holds:
+
+**Device health is an aggregation over independent signals, and an aggregation
+wearing a descent's clothes breaks the descent's central contract.** The whole
+value of the walk is "the lowest broken rung is the cause." Measured on the
+committed fixtures, PE1 fires `interface_admin_up_line_down`, `sr_policy_down`
+and `bgp_no_prefixes` **simultaneously**, from three unrelated subsystems with no
+causal link between any pair. Ordering them into rungs would manufacture a
+causal claim out of a ranked list, and the tool would confidently name a "cause"
+that is merely the first item in an arbitrary order.
+
+The one case that *looks* like a chain — PE2 showing `isis_isolated` and
+`bgp_session_down` together while every interface reads up/up — is already
+handled correctly, and at the right granularity, by the existing `bgp_session`
+flow: `investigate RR1 10.255.0.12 --flow bgp_session` descends past the IGP
+isolation to `interface_line_down` on PE2. A device-wide rung asserting the same
+thing would be strictly worse, because it could not distinguish a peer whose
+IS-IS genuinely explains the BGP drop from one broken for an unrelated reason.
+
+Two further reasons it should not be built as a flow:
+
+* **The evidence for a real health spine does not exist in this build.** There is
+  no CPU, memory, disk, process or environmental intent — nine intents, all
+  protocol state. `next-level.md` already lists `show environment`/`show
+  redundancy` as unbuilt work needed for "device_health flow depth (B-108)". The
+  design had recorded the blocker; the backlog row had not.
+* **The architecture already draws this line and tests it.** `assess_lab_device_health`'s
+  docstring says it tells you *that* something is wrong and to prefer
+  `investigate_lab_session` for *why*; the MCP retest protocol's Q3 negative
+  control is literally "is PE1 healthy?" with the documented correct answer being
+  the health tool, not the descent. Building the flow would have contradicted a
+  decision already made and verified.
+
+So `flow_for("device_health")` now raises a **distinct** refusal naming
+`nettools health` and `assess_lab_device_health` as the real entry points —
+deliberately different from the generic "not yet built" stub that
+`l3vpn_service` and `topology` return, and pinned by a test. The distinction
+matters: *unbuilt* invites a future agent to build it, *refused* tells them why
+not to.
+
+> The entry point the item asked for already existed (`nettools health DEVICE`).
+> The item was not "build a capability" but "give an existing capability a second
+> door" — and the second door would have been in a wall where the shape of the
+> door implies a guarantee the room cannot make.
+
+**Related, same night:** B-489 was carried as `OPEN` ("the rendered-command gate
+is verb+char-only") and was found already fixed a day earlier at `f36713a` — the
+gate no longer accepts a pre-rendered string at all, it renders from validated
+params itself, so reconstruction runs on every call. What was genuinely missing
+was the *mutation guard*, now added (25/25). Two stale backlog rows in one night,
+both pointing the same way: **a backlog row is a claim about the code, and it
+decays exactly like a comment does.**

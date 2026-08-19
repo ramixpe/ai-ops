@@ -38,8 +38,11 @@ across every device instead of one at a time; `nettools agent "QUESTION"
 Anthropic only) runs a bounded, read-only tool-calling loop.
 `nettools investigate DEVICE SUBJECT [--flow bgp_session|interface|
 isis_adjacency|ldp_session] [--from-fixtures [--label LABEL]] [--no-model]`
-(MVP-0, `--flow` set widened by B-107/B-109 -- `device_health`, B-108, is
-still OPEN) runs the deterministic
+(MVP-0, `--flow` set widened by B-107/B-109 -- `device_health`, B-108, was
+investigated and refused: it is an aggregation over independent per-protocol
+signals, not a dependency descent, so `nettools health DEVICE` is the entry
+point for "is DEVICE ok", not a flow; see `flows.py`'s comment above `FLOWS`)
+runs the deterministic
 dependency descent and reports the lowest broken rung plus its causal chain;
 `--from-fixtures` replays committed captures and needs no lab, credentials or
 API key. Every run appends what it diagnosed to the diagnosis accuracy
