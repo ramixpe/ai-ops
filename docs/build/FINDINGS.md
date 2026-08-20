@@ -7098,3 +7098,34 @@ Three lessons worth the price:
 
 > **Worktrees are removed at merge time from now on.** The permanent verifier
 > makes that a one-command habit instead of a 7 GB debt.
+
+## OBS-645 · EER-014 · The supply-chain gate's first run found two real advisories, one of them structurally unfixable by us
+
+- **Kind:** risk
+- **What happened:** Adding `pip-audit` to CI (EER-014) immediately reported two
+  advisories against the current dependency set: `paramiko 4.0.0`
+  (PYSEC-2026-2858, **no fix version listed**) and `setuptools 79.0.1`
+  (PYSEC-2026-3447, fixed in 83.0.0). Neither was fixed in that change, per the
+  plan's own rule that a dependency bump is a separate reviewable decision.
+  Investigating the paramiko one afterwards produced the more useful fact:
+  **paramiko 5.0.0 exists on PyPI, but `netmiko` requires
+  `paramiko>=3.5.0,<5.0`**, so the upgrade is not available to us while netmiko
+  holds that ceiling. "No fix version" was accurate but for a reason the audit
+  line alone does not convey — the fix exists, our own dependency tree
+  forbids it.
+- **Why it matters more than a routine advisory:** paramiko is the library
+  EER-002's brand-new SSH host-key verification is built on. The trust root we
+  just closed sits directly on a component with an open advisory we cannot
+  currently patch. That does not undo the fix -- unverified host keys were a
+  certainty, this is a contingent risk in the layer beneath -- but the two
+  should be read together, not separately.
+- **Evidence:** `pip-audit` output recorded verbatim in the EER-014 commit;
+  `importlib.metadata.requires("netmiko")` → `paramiko (>=3.5.0,<5.0)`;
+  PyPI reports paramiko 5.0.0 as latest.
+- **What I did:** recorded it. The realistic paths are (a) wait for netmiko to
+  widen its ceiling, (b) pin a patched paramiko fork, or (c) accept and monitor
+  — all three are operator decisions, and (b) in particular trades a known
+  advisory for an unknown one.
+- **Needs human review:** yes
+- **Blocks:** nothing today; the CI job is report-only by design
+  (`continue-on-error`), so this surfaces without wedging the pipeline.
