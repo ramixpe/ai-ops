@@ -148,6 +148,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from . import interface_kind, parsers, topology
+from ._env import _float_env
 from .interface_kind import canonical
 
 # --------------------------------------------------------------------------- #
@@ -986,22 +987,6 @@ DEFAULT_TIMEOUT_SECONDS = 10.0
 #: intended spelling for this exact source ("A brand-new, non-SSH source
 #: (Loki, NetBox)... `_base_result(..., source="loki")`").
 SOURCE_NETBOX = "netbox"
-
-
-def _float_env(name: str, default: float) -> float:
-    """A further copy of the `_float_env` shape `settings.py`'s own
-    docstring already notes is duplicated (`network_tools.py`, `notifier.py`,
-    `logs_loki.py`, `metrics_prometheus.py`) -- not a new smell, the same
-    module-independence choice `logs_loki.py`'s own copy documents."""
-
-    raw = os.getenv(name, "").strip()
-    if not raw:
-        return default
-    try:
-        value = float(raw)
-    except ValueError:
-        return default
-    return value if value > 0 else default
 
 
 class NetBoxReadError(ValueError):

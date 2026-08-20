@@ -271,6 +271,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Mapping
 
+from ._env import _float_env, _int_env
 from .coverage import Coverage
 from .interface_kind import canonical
 from .inventory_model import find_device
@@ -340,32 +341,6 @@ DEFAULT_EXISTENCE_LOOKBACK_SECONDS = 7 * 24 * 3600
 #: any HTTP call -- the same evidence-budget ethos as `logs_loki`'s `limit`
 #: slot ceiling (1000), not a value Prometheus itself imposes.
 MAX_SAMPLES_PER_QUERY = 1000
-
-
-def _float_env(name: str, default: float) -> float:
-    """A sixth copy of the `_int_env`/`_float_env` shape `settings.py`'s own
-    docstring already notes is duplicated across `network_tools.py`,
-    `notifier.py`, and `logs_loki.py` -- not a new smell, the documented one."""
-
-    raw = os.getenv(name, "").strip()
-    if not raw:
-        return default
-    try:
-        value = float(raw)
-    except ValueError:
-        return default
-    return value if value > 0 else default
-
-
-def _int_env(name: str, default: int) -> int:
-    raw = os.getenv(name, "").strip()
-    if not raw:
-        return default
-    try:
-        value = int(raw)
-    except ValueError:
-        return default
-    return value if value > 0 else default
 
 
 def _prometheus_url() -> str:

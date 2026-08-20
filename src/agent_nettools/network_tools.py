@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from . import admission, evidence_store, metrics, parsers, template_parsers
+from ._env import _float_env, _int_env
 from .evidence_store import get_store
 from .inventory import InventoryError, get_device, load_inventory
 from .inventory_model import load_inventory_file
@@ -77,34 +78,6 @@ def _source_for(sender: Callable[[dict[str, Any], str], str] | None) -> str:
     """
 
     return SOURCE_FIXTURE if sender is not None else SOURCE_LIVE
-
-
-def _float_env(name: str, default: float) -> float:
-    """Read a float-valued env var, env-then-default, same pattern as everywhere else."""
-
-    import math
-
-    raw = os.getenv(name, "").strip()
-    if not raw:
-        return default
-    try:
-        value = float(raw)
-    except ValueError:
-        return default
-    # NaN/inf pass every range check (nan<min and nan>max are both False in
-    # IEEE-754), so a `NETTOOLS_*_SECONDS=nan` typo would sail into netmiko as
-    # a timeout that never fires (2026-08-18 review). Reject non-finite here.
-    return value if math.isfinite(value) else default
-
-
-def _int_env(name: str, default: int) -> int:
-    raw = os.getenv(name, "").strip()
-    if not raw:
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        return default
 
 
 def _timestamp() -> str:

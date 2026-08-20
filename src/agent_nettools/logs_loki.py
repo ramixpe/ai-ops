@@ -117,6 +117,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Mapping
 
 from . import log_window
+from ._env import _float_env
 from .coverage import Coverage
 from .inventory_model import find_device
 from .parsers import PARSE_FAILED, PARSE_OK
@@ -188,21 +189,6 @@ DEFAULT_TIMEOUT_SECONDS = 10.0
 #: updated by a human after a fresh measurement -- never widened
 #: automatically, and never narrowed without one either.
 MEASURED_SEVERITY_AVAILABLE: tuple[int, ...] = (3, 4)
-
-
-def _float_env(name: str, default: float) -> float:
-    """Same shape as `network_tools._float_env`/`notifier._float_env` --
-    a fourth copy of a helper `settings.py`'s own docstring already notes is
-    duplicated three times; not a new smell."""
-
-    raw = os.getenv(name, "").strip()
-    if not raw:
-        return default
-    try:
-        value = float(raw)
-    except ValueError:
-        return default
-    return value if value > 0 else default
 
 
 def _loki_url() -> str:
