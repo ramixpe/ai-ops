@@ -7029,3 +7029,72 @@ citation completeness is not a shape a context-free generator produces usefully.
 everywhere else** — `hypothesis` was installed ad hoc into a venv; it is now
 declared in the dev extras so the gate actually runs for anyone who checks this
 out.
+
+---
+
+## OBS-480 · B-621 · Fifty-one worktrees reclaimed, and the verifier held on exactly the right things
+
+The operator postponed their evening plan to fix this properly: 51 agent
+worktrees, 7.37 GB, ~515k files, accumulated because nothing removes a worktree
+at merge time. Directive: 100% accuracy, nothing lost, everything measured.
+
+**The numbers.**
+
+| | before | after |
+|---|---|---|
+| worktrees | 51 (+ main) | 0 (+ main) |
+| `.claude` size | 7,373 MB | 0 |
+| venvs | 6,664 MB across 47 | 0 |
+| `worktree-agent-*` branches | 51 | 0 |
+| backup | — | 98 MB tar, 46,127 files, sha256-verified |
+
+**What the two surveys established before anything was touched:** all 51 branch
+tips were ancestors of main (nothing committed-and-unmerged anywhere); 309 dirty
+files byte-identical to main; 0 files sitting on a path main never moved past;
+all 296 worktree-only files machine-generated tickets. One `.venv` was a
+**symlink to the main repo's venv** — a naive recursive delete would have
+destroyed the working environment; the removal used an explicit
+symlink-aware form.
+
+**The `.env` sweep caught the predicted loss.** `NEO4J_URI`, `NEO4J_USER` and
+`NEO4J_PASSWORD` existed *only* in the B-517 agent's worktree `.env` — main
+never had them, and pruning without the key-level sweep would have silently
+broken `get_lab_graph_topology`. Merged file-to-file, values never printed,
+verified live afterwards (9 nodes, 29 relationships read from main).
+
+**The verifier (now permanent: `scripts/prune_worktrees.py`) proved 44 of 51
+mechanically** — 496 files by exact blob membership in main's object set, 30 by
+line containment, 296 as noise — and **held 7**. Every hold was correct:
+
+* Four were **my own recorded merge decisions** — a rejected conflict side, a
+  rewritten backlog row, a removed duplicate assertion, and a test file whose
+  version I explicitly rejected in favour of another agent's.
+* One was **the OBS-188 bug itself**: the worktree's `facts.py` still carried
+  `counts.get("passed", 0)` — the exact line whose replacement was the fix. The
+  verifier flagged the *defect* as unmerged work, which is precisely the
+  discrimination it exists to make.
+* Two were superseded drafts, verified by direct diff: yesterday's ledger-fix
+  wording and an earlier latency design, both landed in evolved form.
+
+The operator reviewed the seven resolutions and approved pruning all 51. Every
+branch deletion used lowercase `-d` — git's own merged-check as an independent
+second guard — **and all 51 agreed with the verdicts.**
+
+**Restore drill passed**: a full worktree extracted from the backup, 927 files,
+spot byte-compare against main identical. Gate green after: 3075+ tests, 56/56
+guards.
+
+Three lessons worth the price:
+
+> **A verifier that holds on your own documented decisions is working.** Five of
+> seven holds were things I did on purpose and wrote down. The tool cannot know
+> that — and should not guess. The human-review step existed for exactly those,
+> and it cost minutes because the merge commits carried the evidence.
+
+> **The riskiest byte in a cleanup is the one nothing lists.** The neo4j
+> credentials were invisible to every git-based check — `.env` is ignored — and
+> only a purpose-built key-level sweep caught them. Whatever the inventory is,
+> ask what it structurally cannot see.
+
+> **Worktrees are removed at merge time from now on.** The permanent verifier
+> makes that a one-command habit instead of a 7 GB debt.
