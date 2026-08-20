@@ -115,6 +115,30 @@ describes the descent's own confidence, not the ledger's opinion of whether
 the descent was right, and the two are recorded as separate fields on
 purpose so nobody can later confuse "the tool thought this was solid" with
 "a human confirmed this was correct".
+
+``run_id`` (B-486's ledger-integration gap, closed on the write side here)
+-----------------------------------------------------------------------------
+`record_diagnosis` accepts an optional `run_id` -- the identifier
+`ticket.open_ticket`/`session_memory.record_turn` already mint and pass
+around for the *same* investigation (`ticket.Ticket.run_id`), not a second id
+this module invents. It is deliberately **not** required and has no
+relationship to this ledger's own `id` field: `id` is this ledger entry's own
+identity (what `record_verdict` targets); `run_id` is the identity of the
+*investigation run* that produced the diagnosis, which is what a consumer
+needs to walk back to the concrete ticket/evidence bundle -- two different
+questions, two different fields, on purpose. A caller that omits it (every
+call site before wave 2 wires `cli.py`'s ticket handle through) gets
+`run_id: None` on the written record -- present, not absent, the same
+"unevaluated, not silently ok" discipline this whole codebase already
+applies elsewhere. An empty or whitespace-only string is normalised to
+`None` rather than stored verbatim, for the same reason: a missing run id
+must never be indistinguishable from an empty-string one by whichever reader
+checks for its presence later (`incident_correlation.py`'s own consumer of
+this field treats `None` and only `None` as "unrecorded"). Old rows written
+before this change simply have no `run_id` key at all; `dict.get("run_id")`
+already returns `None` for those with no reader change required -- this
+ledger is append-only JSONL (see "Storage" above), so there is no migration
+and never will be one.
 """
 
 from __future__ import annotations
@@ -290,6 +314,7 @@ class DiagnosisLedger:
         reason: str | None = None,
         report_status: str | None = None,
         correlation_status: str | None = None,
+        run_id: str | None = None,
     ) -> LedgerWriteResult:
         """Append one diagnosis. Called by the tool -- never carries a verdict.
 
@@ -298,6 +323,12 @@ class DiagnosisLedger:
         a stand-in for a human's verdict -- that is the entire point of this
         module (see "The one rule that makes this worth building at all"
         above). ``source`` has no default; see the module docstring.
+
+        ``run_id`` is optional and unrelated to this entry's own ``id`` -- see
+        the module docstring's ``run_id`` section. A blank or whitespace-only
+        string is normalised to ``None``, the same "absent, never an empty
+        stand-in" rule ``NETTOOLS_ACTOR``'s own fallback chain already
+        follows elsewhere in this codebase.
         """
 
         device = _require_nonempty_str("device", device)
@@ -307,6 +338,7 @@ class DiagnosisLedger:
         source = _require_nonempty_str("source", source)
         if not isinstance(trustworthy, bool):
             raise ValueError(f"trustworthy must be a bool, got {trustworthy!r}")
+        run_id = run_id.strip() if isinstance(run_id, str) and run_id.strip() else None
 
         record: dict[str, Any] = {
             "kind": _DIAGNOSIS,
@@ -322,6 +354,7 @@ class DiagnosisLedger:
             "reason": reason,
             "report_status": report_status,
             "correlation_status": correlation_status,
+            "run_id": run_id,
         }
         with self._lock:
             self._load_once()
@@ -543,12 +576,14 @@ def record_diagnosis(
     reason: str | None = None,
     report_status: str | None = None,
     correlation_status: str | None = None,
+    run_id: str | None = None,
     ledger: DiagnosisLedger | None = None,
 ) -> LedgerWriteResult:
     return (ledger or default_ledger).record_diagnosis(
         device=device, subject=subject, flow=flow, finding=finding,
         trustworthy=trustworthy, source=source, cause=cause, reason=reason,
         report_status=report_status, correlation_status=correlation_status,
+        run_id=run_id,
     )
 
 
