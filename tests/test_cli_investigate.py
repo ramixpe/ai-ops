@@ -637,6 +637,72 @@ def test_the_ledger_id_is_surfaced_so_an_operator_can_run_ledger_verdict(
 
 
 # --------------------------------------------------------------------------- #
+# W3c -- the ledger row carries this run's real run_id and the cause rung's
+# own subject (not the investigation's top-level subject), the two fields
+# `incident_correlation.from_ledger_diagnoses` needs and could not get before
+# this wiring landed (see that module's "ledger integration gap" section).
+# --------------------------------------------------------------------------- #
+
+
+def test_a_run_writes_a_ledger_row_carrying_a_real_run_id_and_cause_subject(
+    monkeypatch, capsys,
+):
+    from agent_nettools import ledger
+
+    monkeypatch.delenv("NETTOOLS_DIAGNOSIS_LEDGER_FILE", raising=False)
+    ledger.reset()
+    try:
+        _main(ARGS, monkeypatch)
+
+        recorded = ledger.diagnoses()
+        assert len(recorded) == 1
+        row = recorded[0]
+
+        # A real run_id -- present, not None, and it round-trips through
+        # ledger.diagnoses() (the same shape incident_correlation.py's
+        # from_ledger_diagnoses reads).
+        assert row["run_id"] is not None
+        assert isinstance(row["run_id"], str) and row["run_id"]
+
+        # The cause rung's own subject (the interface, "Gi0/0/0/0" on the
+        # committed "broken" fixture), NOT the investigation's own top-level
+        # subject ("10.255.0.12") -- the two are deliberately different
+        # fields, per incident_correlation.py's module docstring.
+        assert row["subject"] == "10.255.0.12"
+        assert row["cause"]["subject"] not in (None, row["subject"])
+        assert row["cause"]["rung"] == "interface"
+        assert row["cause"]["device"] == "PE2"
+    finally:
+        ledger.reset()
+
+
+def test_the_ledger_run_id_matches_the_tickets_own_run_id(monkeypatch, tmp_path):
+    """The join key actually joins: the run_id on the ledger row is the SAME
+    run_id as the ticket opened for the same investigation, not two
+    independently-minted ids that merely look alike."""
+
+    from agent_nettools import ledger
+
+    monkeypatch.delenv("NETTOOLS_DIAGNOSIS_LEDGER_FILE", raising=False)
+    monkeypatch.setenv("NETTOOLS_TICKET_DIR", str(tmp_path / "tickets"))
+    ledger.reset()
+    try:
+        _main(ARGS, monkeypatch)
+
+        recorded = ledger.diagnoses()
+        assert len(recorded) == 1
+        run_id = recorded[0]["run_id"]
+
+        from agent_nettools import ticket_read
+
+        found = ticket_read.read_ticket_by_run_id(run_id)
+        assert found is not None
+        assert found["run_id"] == run_id
+    finally:
+        ledger.reset()
+
+
+# --------------------------------------------------------------------------- #
 # B-407 -- session memory wiring
 #
 # `session_memory.py` shipped with the exact call this wiring makes already

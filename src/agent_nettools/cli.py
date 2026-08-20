@@ -656,11 +656,23 @@ def _record_diagnosis_in_ledger(result, args, subject, flow, run_id=None) -> Non
             # live diagnosis in the corpus this ledger exists to build.
             source=(_ledger.SOURCE_FIXTURE if getattr(args, "from_fixtures", False)
                     else _ledger.SOURCE_LIVE),
+            # `subject` here is the CAUSE rung's own `CheckResult.subject`
+            # (the peer, the interface) -- not this function's own `subject`
+            # parameter (the investigation's top-level subject, already
+            # passed above) -- see `incident_correlation.py`'s module
+            # docstring ("The ledger integration gap (B-486), and what W3a
+            # closed"), which names this exact addition:
+            # `"subject": cause.result.subject` beside `rung`/`device`/
+            # `reason`. `correlate_by_cause` reads it back as `cause_subject`
+            # and needs it to tell apart two diagnoses that share a device
+            # and rung name but not the same underlying object.
             cause=({"rung": cause.rung, "device": cause.device,
-                    "reason": cause.result.reason} if cause is not None else None),
+                    "reason": cause.result.reason,
+                    "subject": cause.result.subject} if cause is not None else None),
             reason=result.descent.reason,
             report_status=result.report_status,
             correlation_status=result.correlation_status,
+            run_id=run_id,
             ledger=_ledger_for_cli(),
         )
     except Exception as exc:  # noqa: BLE001 -- bookkeeping never fails a diagnosis
@@ -1006,17 +1018,23 @@ def _cmd_investigate(args: argparse.Namespace) -> int:
 
     _emit(result.to_payload(), args)
 
+    # B-446: the flight recorder. One markdown file per interaction, every
+    # field code-observed. Opened here rather than at the top of the command so
+    # the resolved flow/subject are known -- the ticket records what was
+    # actually investigated, not what was typed. Opened BEFORE the ledger
+    # write below (W3c) so the ledger row can carry this ticket's own
+    # `run_id` as its join key -- `ticket.Ticket.run_id`'s own docstring
+    # names this the reason it exists.
+    ticket_handle = _open_ticket_for(args, subject, flow, entry_point="cli:investigate")
+
     # B-485: record WHAT was diagnosed. Never whether it was right -- there is
     # no parameter for that, and only a named human can add a verdict later.
     # Bookkeeping must never take down a diagnosis, so a write failure is a
     # note on stderr and nothing more.
-    _record_diagnosis_in_ledger(result, args, subject, flow)
+    _record_diagnosis_in_ledger(
+        result, args, subject, flow, run_id=getattr(ticket_handle, "run_id", None)
+    )
 
-    # B-446: the flight recorder. One markdown file per interaction, every
-    # field code-observed. Opened here rather than at the top of the command so
-    # the resolved flow/subject are known -- the ticket records what was
-    # actually investigated, not what was typed.
-    ticket_handle = _open_ticket_for(args, subject, flow, entry_point="cli:investigate")
     _record_in_ticket(
         ticket_handle, args, result, subject, flow,
         question=(raw_subject if raw_subject != subject else None),
