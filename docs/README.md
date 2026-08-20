@@ -1,9 +1,14 @@
 # Documentation map
 
-Regenerated 2026-08-19 from the tree, during the deep-cleanup pass. The
-previous version (2026-08-17) predated M0 (2026-08-18): nine files it listed
-under `docs/build/` now live under `docs/archive/`, and two files it listed no
-longer exist. See `docs/build/M0-DOC-RETIREMENT.md` and `docs/archive/README.md`.
+Regenerated 2026-08-20 from the tree, ahead of the v1.0.0 tag. The previous
+version (2026-08-19) predated this pass: `BUILD-PLAN.md`'s binding Part 0
+moved out to its own live file, `docs/build/PROCESS.md`, and four more
+completed process documents — `SESSION-HANDOVER.md`, `OPERATOR-RUNBOOK.md`,
+`M0-DOC-RETIREMENT.md`, `TRACKER.md`, plus what was left of `BUILD-PLAN.md`
+itself (Parts 1-8) — moved from `docs/build/` to `docs/archive/`. See
+`docs/archive/README.md` for what each was and what superseded it, and
+`docs/archive/M0-DOC-RETIREMENT.md` for the earlier, larger 2026-08-18 pass
+this one follows the same reasoning as.
 
 ## If you have just cloned this
 
@@ -49,30 +54,37 @@ ios-xr-nettools/
 │   │   │                               evidence; concludes a cache isn't justified yet
 │   │   └── next-level.md               Proposal: the three tiers + the local model, read together
 │   ├── build/      HOW — the build's own record. Append-only in spirit.
-│   │   ├── BUILD-PLAN.md               The task plan. Part 0 is binding
-│   │   ├── TRACKER.md                  Progress. Authoritative on task status
+│   │   ├── PROCESS.md                  The rules of engagement — BUILD-PLAN.md's former Part 0.
+│   │   │                               Binding: model roles, escalation ladder, frozen files
 │   │   ├── FINDINGS.md                 Append-only log + the Open Questions table
-│   │   ├── BACKLOG.md                  Every open item with its reconciled state
-│   │   ├── SESSION-HANDOVER.md         Read first if resuming a build session
+│   │   ├── BACKLOG.md                  Every open item with its reconciled state — current status
 │   │   ├── MVP0-REVIEW.md              The M4 review: what it does, and what it does not
 │   │   ├── HOLISTIC-REVIEW.md          The 2026-08-18 five-perspective review: B-481/B-482
 │   │   │                               fixed, 18 UX fixes, the two-lens-convergence finding
 │   │   ├── MCP-EXPERIMENT.md           The MCP experiment: audit, refuted prediction, B-459
 │   │   ├── MCP-RETEST-PROTOCOL.md      Six MCP questions and what to capture. Q1 still owed
 │   │   │                               as of round 6 — kept live, deliberately not archived
-│   │   ├── M0-DOC-RETIREMENT.md        The doc kill-list M0 executed from (2 deleted, 9 moved
-│   │   │                               to docs/archive/). A historical plan record, not a queue
-│   │   ├── OPERATOR-RUNBOOK.md         Step by step for the outstanding lab work
 │   │   ├── ROUND-5.md                  Injection round 5 — invoke during propagation
 │   │   ├── ROUND-6.md                  Injection round 6 — the trust-loss scenario (sealed)
 │   │   ├── ROUND-7.md                  Injection round 7 — does a down port persist
 │   │   ├── ROUND-8.md                  Injection round 8 — AS mismatch; §5 scored, §6 re-sealed
+│   │   ├── ON-CALL-RUNBOOK.md          For whoever is paged, not at a terminal with the lab
 │   │   ├── capture-manifest.md         T-007 — what to capture, per device and label
 │   │   ├── discovery-loki.md           T-004 — log pipeline, label scheme, mnemonics
 │   │   ├── discovery-alerting.md       T-005 — Alertmanager routing, Prometheus surface
 │   │   └── discovery-l3vpn.md          T-006 — VRF/RT map, CE attachment, subject naming
 │   ├── archive/    Completed process documents. Kept, not deleted — see archive/README.md
 │   │   ├── README.md                   What each file was, and what superseded it
+│   │   ├── BUILD-PLAN.md               The 34-task plan (Parts 1-8), archived 2026-08-20 —
+│   │   │                               its binding Part 0 lives on at build/PROCESS.md
+│   │   ├── TRACKER.md                  Progress on that plan. Authoritative on its task
+│   │   │                               status; current project status is build/BACKLOG.md
+│   │   ├── SESSION-HANDOVER.md         A build-state snapshot, 2026-08-18/19. Superseded by
+│   │   │                               build/BACKLOG.md for current state
+│   │   ├── OPERATOR-RUNBOOK.md         A lab-window checklist, 2026-08-19. Not all done —
+│   │   │                               check build/BACKLOG.md before treating it as current
+│   │   ├── M0-DOC-RETIREMENT.md        The doc kill-list the 2026-08-18 M0 pass executed from
+│   │   │                               (2 deleted, 9 moved). A historical plan record
 │   │   ├── REVIEW.md                   The first external review, 2026-07-28, at 32 tests
 │   │   ├── PLAN-V2.md                  The plan Gate Zero reconciled the backlog against
 │   │   ├── BACKLOG-COMPLETION-PLAN.md  A completion plan for the backlog. Executed
@@ -90,8 +102,9 @@ ios-xr-nettools/
 │   ├── DEEP-REVIEW-2026-08-17.md       Verifies the review above at source; B-467, the sanitisation gap
 │   ├── diagrams/                       Nine SVGs of the system as built — layer stack, one call
 │   │   │                               end to end, trust boundary, capabilities, current state,
-│   │   │                               the descent — plus the Stage 2 architecture SVG. Generated
-│   │   │                               from the tree by d1.py…d7.py; regenerate, never hand-edit
+│   │   │                               the descent, Stage 2, the event-driven loop, and the model
+│   │   │                               boundary. Generated from the tree by d1.py…d9.py;
+│   │   │                               byte-pinned, regenerate, never hand-edit
 │   │   └── README.md                   What each diagram answers, and how to regenerate it
 │   └── architecture.drawio             Pre-M0 diagram source, superseded by docs/diagrams/ —
 │                                       not regenerated since 6629a2c; treat as historical
@@ -106,8 +119,11 @@ ios-xr-nettools/
 
 ## Reading order, by what you are doing
 
-**Building or resuming:** `build/SESSION-HANDOVER.md` → `build/TRACKER.md` →
-`build/FINDINGS.md` for anything logged since you last looked → `build/BACKLOG.md`.
+**Building or resuming:** `build/BACKLOG.md` for current state → `build/FINDINGS.md`
+for anything logged since you last looked → `build/PROCESS.md` for the rules you
+are operating under. (Earlier sessions read `archive/SESSION-HANDOVER.md` →
+`archive/TRACKER.md` first; both are archived now, superseded by `BACKLOG.md` as
+the live status record.)
 
 **Changing the investigation layer:** `design/glossary.md` →
 `design/architecture.md` → `CLAUDE.md`'s safety boundary → the rung rules on
@@ -126,16 +142,23 @@ and `t1` are frozen and the reason is not obvious from looking at them.
 **Running or scoring a round:** `design/chaos-harness.md` §6 — the protocol is
 binding, and §6.1d has cost two rounds their evidence.
 
-## The three build documents
+## The build documents
+
+The original three — `BUILD-PLAN.md` (task specs) and `TRACKER.md` (what was
+done, authoritative on that plan's status) — governed the MVP-0 build and are
+now archived alongside it (`docs/archive/`); their disagreement rule is
+historical, kept below because it explains how to read them together if you do.
+Two live ones replace them for anything current:
 
 | File | Nature | Who writes it |
 |---|---|---|
-| `BUILD-PLAN.md` | The plan. Task specs. | Human; executor edits status fields only |
-| `TRACKER.md` | What is done. Authoritative on status. | Opus 5, after every task |
+| `PROCESS.md` | The rules of engagement — `BUILD-PLAN.md`'s former Part 0. Binding. | Human; rarely amended |
+| `BACKLOG.md` | Every open item, with its reconciled state. Authoritative on current status. | Opus 5, continuously |
 | `FINDINGS.md` | What was learned. Append-only. | Opus 5, whenever a trigger fires |
 
-If `BUILD-PLAN.md` and `TRACKER.md` disagree about whether a task is done,
-**`TRACKER.md` wins and the discrepancy is itself a finding.**
+**Historical, for the archived pair:** if `BUILD-PLAN.md` and `TRACKER.md`
+disagreed about whether a task was done, `TRACKER.md` won and the discrepancy
+was itself a finding.
 
 **`FINDINGS.md` is not tidied.** It is long, it is out of order, and it contains
 wrong turns that were later corrected in place with the original left visible.
@@ -145,9 +168,16 @@ document cannot.
 
 ## Document retirement
 
-`docs/build/M0-DOC-RETIREMENT.md` is the reviewed kill-list M0 (2026-08-18) acted
+`docs/archive/M0-DOC-RETIREMENT.md` is the reviewed kill-list M0 (2026-08-18) acted
 on, with operator sign-off: two files deleted (`docs/devices.md`,
 `docs/build/AUTONOMOUS-LOG.md`), nine archived to `docs/archive/`. It is kept as
 the historical record of that decision, not as a live queue — no further action
 is pending from it. `docs/build/MCP-RETEST-PROTOCOL.md` was deliberately left out
-of that pass because Q1 is still owed as of round 6.
+of that pass because Q1 is still owed as of round 6, and still is.
+
+**A second, smaller pass ran 2026-08-20**, ahead of the v1.0.0 tag: `BUILD-PLAN.md`'s
+binding Part 0 was extracted to `docs/build/PROCESS.md` (still live, same section
+numbers), and the plan's executed remainder plus `SESSION-HANDOVER.md`,
+`OPERATOR-RUNBOOK.md`, `TRACKER.md` and `M0-DOC-RETIREMENT.md` itself moved to
+`docs/archive/` — see `docs/archive/README.md` for the reasoning per file. No
+files were deleted in this pass.

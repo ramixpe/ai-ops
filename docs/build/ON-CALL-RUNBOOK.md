@@ -1,6 +1,6 @@
 # On-Call Runbook — the agent runs unattended, you don't
 
-**B-410.** This is not `docs/build/OPERATOR-RUNBOOK.md`. That document is for
+**B-410.** This is not `docs/archive/OPERATOR-RUNBOOK.md`. That document is for
 a human sitting at a terminal with the lab in front of them, working through a
 list of tasks. This document is for a human who is *not* at a terminal, who
 was just paged, and who has not read a design doc in their life. If that is
@@ -286,7 +286,10 @@ nettools ledger verdict DIAGNOSIS_ID confirmed_correct|incorrect|unknown \
 
 ## See also
 
-- `docs/build/OPERATOR-RUNBOOK.md` — the lab-window runbook. Different
+- `docs/archive/OPERATOR-RUNBOOK.md` — the lab-window runbook (archived
+  2026-08-20 as a completed-process document per M0's convention; some of the
+  individual lab items it lists, e.g. B-440/round 6, are still `BLOCKED` in
+  `BACKLOG.md` rather than done — see that file for current status). Different
   audience: a human at a terminal with the fabric in front of them.
 - `SECURITY.md` — read §0 above first, then the full "Unsupported deployment
   modes" section if this is genuinely how your team runs this.

@@ -2,7 +2,7 @@
 
 How the agent's diagnostic accuracy is measured rather than believed.
 
-Companion to `design-thinking.md` (D6, the dependency descent), `BUILD-PLAN.md` §0.13 (the evidence-bounds-conclusion family), and `interfaces.md`. Backlog items **B-426** (the harness) and **B-427** (the evaluation corpus).
+Companion to `design-thinking.md` (D6, the dependency descent), `docs/build/PROCESS.md` §0.13 (the evidence-bounds-conclusion family, formerly `BUILD-PLAN.md`'s Part 0), and `interfaces.md`. Backlog items **B-426** (the harness) and **B-427** (the evaluation corpus).
 
 ---
 
@@ -70,7 +70,7 @@ The process that applies faults must share no context with the process that diag
 
 #### Reason one: it is a device write
 
-An injector configures devices, so `BUILD-PLAN.md` §0.11 applies and it is an absolute HALT. Granting the diagnostician config-write capability for testing convenience is precisely the erosion the pre-commitment exists to resist, and it would falsify the claim that `ios-xr-nettools` cannot configure a device.
+An injector configures devices, so `docs/build/PROCESS.md` §0.11 applies and it is an absolute HALT. Granting the diagnostician config-write capability for testing convenience is precisely the erosion the pre-commitment exists to resist, and it would falsify the claim that `ios-xr-nettools` cannot configure a device.
 
 #### Reason two: it destroys the blinding — and this is *not* a §0.11 rule
 

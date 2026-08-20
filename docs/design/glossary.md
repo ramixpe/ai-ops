@@ -117,7 +117,7 @@ A caller-supplied parameter is never substituted into a command as text. It is p
 A command that generates traffic from the device — `ping`, `traceroute`. Non-mutating but distinct from a passive read, with its own gate (`NETTOOLS_ALLOW_ACTIVE_PROBES`).
 
 ### `frozen file`
-A file the build plan forbids modifying because it encodes the safety boundary. Listed in `BUILD-PLAN.md` §0.5.
+A file the build plan forbids modifying because it encodes the safety boundary. Listed in `docs/build/PROCESS.md` §0.5 (formerly `BUILD-PLAN.md`'s Part 0, moved 2026-08-20).
 
 ---
 
@@ -127,13 +127,13 @@ A file the build plan forbids modifying because it encodes the safety boundary. 
 Read-only, user-initiated. A human asks; the agent answers with evidence. **Current target.**
 
 ### `Stage 2`
-Event-driven. Syslog, SNMP or an alert wakes the agent; it runs the checks and reports RCA. Nobody is present at invocation, which is why memory and the property tests in `BUILD-PLAN.md` are gates on this transition.
+Event-driven. Syslog, SNMP or an alert wakes the agent; it runs the checks and reports RCA. Nobody is present at invocation, which is why memory and the property tests in `docs/build/PROCESS.md` are gates on this transition.
 
 ### `Stage 3`
 Standard procedures only — pre-approved actions to cut MTTR, then hand to a human. There is no Stage 4.
 
 ### `MVP-0`
-Descent to grounded report. No gate, no narrowing, no config axis, no memory. The subject of `BUILD-PLAN.md`.
+Descent to grounded report. No gate, no narrowing, no config axis, no memory. The subject of `docs/archive/BUILD-PLAN.md` (the executed task list) and `docs/build/PROCESS.md` (the rules it operated under).
 
 ### `MVP-1`
 Adds the gate, the narrowing pass, and the config axis.

@@ -1,6 +1,6 @@
 # T-005 — Alertmanager and Prometheus discovery
 
-**Task:** `docs/build/BUILD-PLAN.md` T-005 `[NON-BLOCKING]`
+**Task:** `docs/archive/BUILD-PLAN.md` T-005 `[NON-BLOCKING]` (archived 2026-08-20)
 **Question it answers:** Q-003 — does Alertmanager have a webhook receiver, and can it replace n8n as the Stage 2 trigger?
 **Measured:** 2026-08-15, against the live `sota-lab-platform` stack.
 

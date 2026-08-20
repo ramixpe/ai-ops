@@ -1,6 +1,6 @@
 # T-004 — Loki discovery
 
-**Task:** `docs/build/BUILD-PLAN.md` T-004 `[NON-BLOCKING]`
+**Task:** `docs/archive/BUILD-PLAN.md` T-004 `[NON-BLOCKING]` (archived 2026-08-20)
 **Question it answers:** Q-002 — is syslog-ng shipping to Loki, and do IOS-XR mnemonics survive into a queryable label?
 **Measured:** 2026-08-15, against the live `sota-lab-platform` stack.
 

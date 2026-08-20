@@ -1,6 +1,6 @@
 # T-006 — L3VPN discovery
 
-**Task:** `docs/build/BUILD-PLAN.md` T-006
+**Task:** `docs/archive/BUILD-PLAN.md` T-006 (archived 2026-08-20)
 **Question it answers:** Q-004 — what is the subject naming scheme for an L3VPN service object?
 **Measured:** 2026-08-15, read-only SSH to PE1–PE4.
 

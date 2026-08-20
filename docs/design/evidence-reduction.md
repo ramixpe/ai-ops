@@ -300,7 +300,7 @@ A filtered source does not produce absence. Measured on this fabric (§4): query
 
 That is why no consistency check can catch it — there is nothing inconsistent to find — and why coverage metadata is the only thing that can. Coverage does not ask "is anything missing from this result", which is unanswerable from inside the result. It states what the source **could not have carried**, which is a fact about the source, knowable without knowing what the answer should have been.
 
-Recorded as the sixth silent-failure shape in `BUILD-PLAN.md` §0.13, and the only one whose polarity is presence rather than absence.
+Recorded as the sixth silent-failure shape in `docs/build/PROCESS.md` §0.13, and the only one whose polarity is presence rather than absence.
 
 **One correction to how that reads.** A filtered source is *an instance* of the shape, not its definition — §0.13 now states the general form, which is **inference from partial evidence**, and lists four instances of which only this one involves a filter. Another is a hand diagnosis reading a transit next-hop as a destination owner (OBS-089); another is a developer's own successful test runs answering *"does this work in my environment"* when the question was *"does this work with nothing"* (OBS-072).
 
@@ -527,7 +527,7 @@ Divergence 5 is worth more than the other five together, because it is the only 
 
 > **A test written from the same premise as the implementation confirms the premise, not the implementation. An independent specification is the only thing that catches a premise.**
 
-Now `BUILD-PLAN.md` §0.13.
+Now `docs/build/PROCESS.md` §0.13.
 
 ### Revision 2 → merged
 

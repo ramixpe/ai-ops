@@ -32,7 +32,7 @@ The `decision-made` count is the one worth pausing on. **Forty-three percent of 
 
 ### The silent-failure shapes, and their polarity
 
-**Eight as of 2026-08-17.** Seven are listed below, as they stood at M4. Shape 8 — *a fix silently deletes coverage of behaviour that was always correct* (OBS-097) — was added afterwards and is in `BUILD-PLAN.md:456`. **Not merged into the table below**, because this document is the M4 review and what it did not know then is part of what it records.
+**Eight as of 2026-08-17.** Seven are listed below, as they stood at M4. Shape 8 — *a fix silently deletes coverage of behaviour that was always correct* (OBS-097) — was added afterwards and is in `docs/build/PROCESS.md`, under "Shape 8" (formerly `BUILD-PLAN.md`'s Part 0; a stale line-number citation to that section was corrected here 2026-08-20 — it had drifted to point at the wrong paragraph even before the file moved). **Not merged into the table below**, because this document is the M4 review and what it did not know then is part of what it records.
 
 | # | Shape | Found by |
 |---|---|---|
@@ -206,7 +206,7 @@ Worth knowing if you read the reports rather than the exit codes: before the fix
 
 **It succeeded on three discriminating blind cases and failed the fourth** (OBS-095). The fourth was a **false positive on a working session**, predicted in advance, reproduced exactly, and its **known vector** now passes a regression test (B-428) — which is not the same as the class being closed (reviewer C, §4).
 
-Three strata, reported together and none of them an estimate of field accuracy, **because the cases were not sampled from a defined population** (§3.5): **3/3** on-path, **0/1** no-fault, **3/4** overall. No round has yet tested a fault chosen without reference to the ladder, and none has run while the network was still changing — which reviewer A, B and C independently identify as both the dominant production condition and the one the trial protocol excludes by construction (§2.1, and `BUILD-PLAN.md` §0.15).
+Three strata, reported together and none of them an estimate of field accuracy, **because the cases were not sampled from a defined population** (§3.5): **3/3** on-path, **0/1** no-fault, **3/4** overall. No round has yet tested a fault chosen without reference to the ladder, and none has run while the network was still changing — which reviewer A, B and C independently identify as both the dominant production condition and the one the trial protocol excludes by construction (§2.1, and `docs/build/PROCESS.md` §0.15).
 
 ### The honest summary
 

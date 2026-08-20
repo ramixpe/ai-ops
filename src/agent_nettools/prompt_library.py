@@ -6,7 +6,7 @@ like code. This module is the loader and the renderer: it turns a
 
 Invariant 4 is enforced here, structurally
 -------------------------------------------
-`BUILD-PLAN.md` §0.6: **no unparsed device text is ever passed to a model.**
+`docs/build/PROCESS.md` §0.6: **no unparsed device text is ever passed to a model.**
 
 :func:`build_report_prompt` cannot violate that even by mistake, because it
 does not receive device output. It receives a ``DescentResult``, which holds

@@ -214,29 +214,30 @@ Read these before changing anything in the investigation layer.
 | [docs/design/glossary.md](docs/design/glossary.md) | **Read first.** Pinned terminology — `intent` means a question name here, not intended state |
 | [docs/design/design-thinking.md](docs/design/design-thinking.md) | Decisions D1-D20 with options considered, rationale, and growth path |
 | [docs/design/lld-investigation-layer.md](docs/design/lld-investigation-layer.md) | Delta spec: what this repo is missing and where it goes |
-| [docs/design/interfaces.md](docs/design/interfaces.md) | How humans interact with the agent, staged. Read before T-035 |
+| [docs/design/interfaces.md](docs/design/interfaces.md) | How humans interact with the agent, staged. T-035 (the outbound report relay) shipped; this is the interaction ladder for what comes after it |
 | [docs/design/evidence-reduction.md](docs/design/evidence-reduction.md) | How large evidence sources are made model-readable **without a model reading them** |
 | [docs/design/chaos-harness.md](docs/design/chaos-harness.md) | Fault injection, framed as the Stage 2 acceptance vehicle. §3.1's operating rule is binding |
 | [docs/design/evidence-epoch.md](docs/design/evidence-epoch.md) | One observation window; why skew is not coherence (B-436) |
 | [docs/design/next-level.md](docs/design/next-level.md) | Proposal: the tiers + the local model; ranked candidates |
 | [docs/design/stage-2-architecture.md](docs/design/stage-2-architecture.md) | **The Stage 2 brainstorm** — MCP hub, the cache+syslog-invalidation layer, the wide/narrow flow-vs-tool dimension. Brainstorm and decision record, for an external eye |
 | [docs/design/peer-review-response.md](docs/design/peer-review-response.md) | Three external reviews and what was accepted, corrected or deferred |
-| [docs/build/BUILD-PLAN.md](docs/build/BUILD-PLAN.md) | The 34-task build plan. **Part 0 is binding** — model roles, escalation ladder, frozen files |
-| [docs/build/TRACKER.md](docs/build/TRACKER.md) | Progress. Authoritative on task status |
+| [docs/build/PROCESS.md](docs/build/PROCESS.md) | **Binding.** The rules of engagement extracted from `BUILD-PLAN.md`'s Part 0 on 2026-08-20 — model roles, escalation ladder, frozen files, same section numbers (§0.1-§0.16) as before the move |
+| [docs/archive/BUILD-PLAN.md](docs/archive/BUILD-PLAN.md) | The 34-task build plan (Parts 1-8), all long since executed. Archived 2026-08-20 alongside its Part 0's extraction into `PROCESS.md` above |
+| [docs/archive/TRACKER.md](docs/archive/TRACKER.md) | Progress on that same 34-task plan. Authoritative on *its* task status, not on the project's current state — that is `BACKLOG.md`. Archived 2026-08-20 |
 | [docs/build/FINDINGS.md](docs/build/FINDINGS.md) | Append-only findings log. **Never rewrite an entry** — corrections are appended |
 | [docs/build/BACKLOG.md](docs/build/BACKLOG.md) | Every open item, with its reconciled state. `DEFERRED` carries its unblocking condition |
-| [docs/build/SESSION-HANDOVER.md](docs/build/SESSION-HANDOVER.md) | **Read first if resuming.** Current state, the open HALT (Q-020), and what to do next |
+| [docs/archive/SESSION-HANDOVER.md](docs/archive/SESSION-HANDOVER.md) | A build-state snapshot from 2026-08-18/19. Archived 2026-08-20 — its own text already records Q-020 as answered ("clause 2 dropped"); for current state read `BACKLOG.md` |
 | [docs/build/MCP-EXPERIMENT.md](docs/build/MCP-EXPERIMENT.md) | The 2026-08-17 MCP experiment: the invariant-4 audit, the refuted prediction, and argument fabrication (B-459) |
 | [docs/build/MVP0-REVIEW.md](docs/build/MVP0-REVIEW.md) | **The M4 review.** What the build changed about the design, what is still unknown, and what MVP-0 can and cannot do |
 | [docs/archive/VERIFICATION.md](docs/archive/VERIFICATION.md) | Every claim with its evidence — frozen-file hashes, guardrails by name, rounds by payload |
 | [docs/archive/BACKLOG-STATUS.md](docs/archive/BACKLOG-STATUS.md) | All 98 backlog items by state, every DONE claim verified, 12 guardrails mutation-tested |
 | [docs/build/HOLISTIC-REVIEW.md](docs/build/HOLISTIC-REVIEW.md) | **The 2026-08-18 five-perspective review.** Two security defects fixed (B-481/B-482), 18 UX fixes, the two-lens-convergence meta-finding (OBS-156) |
 | [docs/archive/PEER-REVIEW-BRIEF.md](docs/archive/PEER-REVIEW-BRIEF.md) | **Give this to a reviewer.** What to read, what is already known wrong, where to attack |
-| [docs/build/OPERATOR-RUNBOOK.md](docs/build/OPERATOR-RUNBOOK.md) | Step by step for the outstanding lab work |
+| [docs/archive/OPERATOR-RUNBOOK.md](docs/archive/OPERATOR-RUNBOOK.md) | A lab-window checklist from 2026-08-19. Archived 2026-08-20; not all of it is done — e.g. B-440/round 6 is still `BLOCKED` in `BACKLOG.md`, which is authoritative on what remains |
 | [docs/diagrams/](docs/diagrams/) | **Nine SVGs of the system as built** — layer stack, one call end to end, the trust boundary, capabilities, current state, the descent, Stage 2, **the event-driven loop** (and where it stops), and **the model boundary** (what a model may and may not do, with each enforcement point named). Generated from the tree and byte-pinned; regenerate, never hand-edit. Two carry self-invalidating guards: `d8` refuses to regenerate if any Stage-3 write-path row stops being DEFERRED, `d9` if `reasoning_gate` gains a live caller |
 | [docs/README.md](docs/README.md) | Map of the docs tree and reading order |
 
 **Non-negotiable while the build plan is active:** `tests/test_safety.py` and
 `tests/test_template_security.py` are frozen. `platforms.py` and `templates.py`
-take additions only — never a relaxed validator. See `BUILD-PLAN.md` §0.5.
+take additions only — never a relaxed validator. See `docs/build/PROCESS.md` §0.5.
 <!-- design-docs:end -->

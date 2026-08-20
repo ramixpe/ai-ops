@@ -12,7 +12,7 @@ boundary and its ordering invariant, the investigation layer's four invariants,
 the testing seams, the doc-sync markers, and the frozen-file list. **This file
 describes; that file constrains.** Where a section here touches something
 load-bearing it says so and points back rather than restating it, because two
-copies of an invariant is how they diverge (`BUILD-PLAN.md` §0.13, the
+copies of an invariant is how they diverge (`docs/build/PROCESS.md` §0.13, the
 duplication face).
 
 **Read `docs/design/glossary.md` first** if any term here is unfamiliar. `intent`
