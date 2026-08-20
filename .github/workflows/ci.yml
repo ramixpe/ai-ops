@@ -20,13 +20,24 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install
+        # constraints.txt (EER-013): pins the exact versions verified to work
+        # together, so this resolves the same graph every run instead of
+        # whatever each package's index happens to serve on a given day.
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,llm]"
+          pip install -c constraints.txt -e ".[dev,llm]"
       - name: Lint
         run: ruff check .
-      - name: Test
-        run: pytest -q
+      - name: Test with coverage
+        # EER-014. 90% is a measured floor, not a guess: the suite covered
+        # 93% of src/agent_nettools + mcp_server on 2026-08-20 (10,495
+        # statements, 727 missed; see constraints.txt's generation date for
+        # the same verification pass). Set a few points under that measured
+        # number, not at it, as headroom for cross-version variance between
+        # this matrix's 3.11 and 3.12 legs (only 3.11 was measured locally)
+        # -- so this ratchets against real regressions instead of failing on
+        # day one or chasing a moving target.
+        run: pytest -q --cov=agent_nettools --cov=mcp_server --cov-report=term-missing --cov-fail-under=90
 
   # B-423. The offline demo's entire value is that it needs nothing, so nothing
   # is the only environment that tests it.
@@ -54,10 +65,11 @@ jobs:
       - name: Install without the LLM extra
         # Deliberately not ".[dev,llm]". No provider SDK is installed, so an
         # import of one would fail here rather than succeeding by accident on a
-        # machine that happens to have it.
+        # machine that happens to have it. constraints.txt (EER-013) still
+        # applies -- it only constrains packages actually being installed.
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
+          pip install -c constraints.txt -e .
 
       - name: Prove there is no .env and no credentials
         run: |
@@ -116,3 +128,148 @@ jobs:
             --from-fixtures --format json 2>/dev/null \
             | python -c "import json,sys; assert json.load(sys.stdin)['finding']"
           echo "json output parses without stripping anything"
+
+  # EER-012. Every job above tests a checkout (`pip install -e .`), which is
+  # not the thing that ships. That gap is exactly how the six prompt files
+  # and the demo fixture subset went missing from the wheel (EER-003/EER-004,
+  # 2026-08-20) -- `[tool.setuptools.package-data]` was correct in
+  # pyproject.toml and no test noticed, because no test ever built the wheel,
+  # installed it somewhere with no source tree nearby, and ran it. This job
+  # is that check: build the real artifact, install *that* (not `-e`, not
+  # `.`), and run the documented offline demo from a directory that has never
+  # seen this checkout.
+  build-artifact:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install build tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install -c constraints.txt build
+
+      - name: Build the wheel and sdist
+        run: python -m build
+
+      - name: Upload the built artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-nettools-dist
+          path: dist/
+
+      - name: Install the built wheel into a venv outside the checkout
+        # Not `pip install -e .`, not `pip install .` from the checkout --
+        # the wheel file itself, the same one just uploaded above.
+        run: |
+          python -m venv "$RUNNER_TEMP/artifact-venv"
+          "$RUNNER_TEMP/artifact-venv/bin/pip" install --upgrade pip
+          WHEEL="$(ls dist/*.whl)"
+          "$RUNNER_TEMP/artifact-venv/bin/pip" install -c constraints.txt "$WHEEL"
+
+      - name: Run the offline demo from outside the checkout
+        # $RUNNER_TEMP is outside $GITHUB_WORKSPACE -- no ./tests/fixtures,
+        # no ./prompts, no source tree of any kind nearby. If the packaged
+        # data ever goes missing from the wheel again, this is where it is
+        # caught. Assertions mirror the offline-demo job's own (exit codes,
+        # named rung, causal-chain marker, parseable JSON).
+        run: |
+          NETTOOLS="$RUNNER_TEMP/artifact-venv/bin/nettools"
+          mkdir -p "$RUNNER_TEMP/elsewhere"
+          cd "$RUNNER_TEMP/elsewhere"
+
+          set -o pipefail
+          "$NETTOOLS" investigate RR1 10.255.0.12 \
+            --from-fixtures --format table > out.txt 2> err.txt && code=0 || code=$?
+          cat out.txt; echo "--- stderr ---"; cat err.txt
+          test "$code" = "1" || { echo "expected exit 1, got $code"; exit 1; }
+          grep -q "interface_line_down" out.txt
+          grep -q "bgp_session" out.txt
+          grep -q -- "<-- CAUSE" out.txt
+          echo "installed wheel: a named rung and a causal chain, from outside the checkout"
+
+          "$NETTOOLS" investigate RR1 10.255.0.12 \
+            --from-fixtures --label healthy --quiet && h=0 || h=$?
+          "$NETTOOLS" investigate RR1 10.255.0.12 \
+            --from-fixtures --label t0 --quiet && t=0 || t=$?
+          test "$h" = "0" || { echo "healthy: expected 0, got $h"; exit 1; }
+          test "$t" = "2" || { echo "t0: expected 2, got $t"; exit 1; }
+          echo "0 / 1 / 2 all reachable from the installed wheel"
+
+          "$NETTOOLS" investigate RR1 10.255.0.12 --from-fixtures --format json 2>/dev/null \
+            | "$RUNNER_TEMP/artifact-venv/bin/python" -c "import json,sys; assert json.load(sys.stdin)['finding']"
+          echo "json output parses without stripping anything"
+
+      - name: nettools version matches the version this build declares
+        run: |
+          DECLARED="$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
+          cd "$RUNNER_TEMP/elsewhere"
+          REPORTED="$("$RUNNER_TEMP/artifact-venv/bin/nettools" version \
+            | "$RUNNER_TEMP/artifact-venv/bin/python" -c "import json,sys; print(json.load(sys.stdin)['nettools_version'])")"
+          test "$DECLARED" = "$REPORTED" || {
+            echo "pyproject.toml declares $DECLARED but the installed wheel reports $REPORTED"; exit 1;
+          }
+          echo "nettools version ($REPORTED) matches pyproject.toml"
+
+      - name: nettools-mcp starts and exits cleanly
+        # Nothing else in this repo invokes the second console script. Piping
+        # in an already-closed stdin gives the stdio transport an immediate
+        # EOF, which is the same "nothing to do" shape a client disconnect
+        # produces -- proof the entry point imports, wires up its tools, and
+        # returns rather than hanging or throwing on startup.
+        run: |
+          cd "$RUNNER_TEMP/elsewhere"
+          timeout 20 "$RUNNER_TEMP/artifact-venv/bin/nettools-mcp" < /dev/null
+          echo "nettools-mcp: started and exited cleanly on stdin EOF"
+
+      - name: Build the Docker image
+        # `make docker-build` is documented but nothing ran it before this.
+        run: docker build -t ios-xr-nettools-mcp .
+
+      - name: Containerized nettools-mcp starts and exits cleanly
+        run: |
+          timeout 20 docker run --rm -i ios-xr-nettools-mcp < /dev/null
+          echo "container: started and exited cleanly on stdin EOF"
+
+  # EER-014 (supply-chain half; coverage lives in the `test` job above).
+  supply-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install the project and pip-audit
+        run: |
+          python -m pip install --upgrade pip
+          pip install -c constraints.txt -e ".[dev,llm]" pip-audit
+
+      - name: pip-audit
+        # Report-only, deliberately: `continue-on-error` plus an explicit
+        # `exit 0` keep this from blocking merges on findings this lane is
+        # under instruction not to silently fix. A real finding is a
+        # reviewable dependency-bump decision for a human, same discipline as
+        # any other version bump -- see constraints.txt's own comment. Findings
+        # are still loud: printed to the job log and to the run summary, not
+        # swallowed.
+        continue-on-error: true
+        run: |
+          set +e
+          pip-audit > pip-audit-report.txt 2>&1
+          status=$?
+          cat pip-audit-report.txt
+          {
+            echo '### pip-audit'
+            echo '```'
+            cat pip-audit-report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$status" -ne 0 ]; then
+            echo "pip-audit reported findings above -- not blocking CI (report-only; see EER-014)."
+          fi
+          exit 0
