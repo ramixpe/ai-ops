@@ -360,7 +360,10 @@ def test_health_all_maps_severity_to_exit_code(monkeypatch, severity, expected_c
         lambda: {"status": "success", "data": {"devices": [{"name": "PE1"}]}},
     )
     monkeypatch.setattr(cli, "collect_evidence", lambda name: {"device": name})
-    monkeypatch.setattr(cli, "evaluate_fabric", lambda evidence_by_device: _health_result(severity))
+    monkeypatch.setattr(
+        cli, "evaluate_fabric_with_silences",
+        lambda evidence_by_device, *a, **k: _health_result(severity),
+    )
     parser = cli.build_parser()
     args = parser.parse_args(["health", "--all"])
 
@@ -378,7 +381,7 @@ def test_health_min_severity_filters_the_view_but_not_the_exit_code(monkeypatch,
     )
     monkeypatch.setattr(cli, "collect_evidence", lambda name: {"device": name})
 
-    def fake_evaluate_fabric(evidence_by_device):
+    def fake_evaluate_fabric(evidence_by_device, *a, **k):
         return {
             "severity": "critical",
             "counts": {"devices": 2, "by_severity": {"ok": 1, "critical": 1, "warning": 0, "info": 0}},
@@ -388,7 +391,7 @@ def test_health_min_severity_filters_the_view_but_not_the_exit_code(monkeypatch,
             },
         }
 
-    monkeypatch.setattr(cli, "evaluate_fabric", fake_evaluate_fabric)
+    monkeypatch.setattr(cli, "evaluate_fabric_with_silences", fake_evaluate_fabric)
     parser = cli.build_parser()
     args = parser.parse_args(["health", "--all", "--min-severity", "critical"])
 

@@ -114,7 +114,7 @@ from .agent_loop import run_agent_loop
 from .fabric_analysis import analyze_fabric
 from .fixtures import capture_device, load_fixture_evidence
 from .flow_selection import looks_like_sentence, select_flow
-from .health import evaluate_fabric, exit_code_for_severity, severity_rank
+from .health import evaluate_fabric_with_silences, exit_code_for_severity, severity_rank
 from .inventory import InventoryError, get_default_device_name
 from .inventory_model import resolve_inventory_path
 from .investigation import investigate
@@ -1413,7 +1413,16 @@ def _cmd_health(args: argparse.Namespace) -> int:
     else:
         evidence_by_device = {name: collect_evidence(name) for name in names}
 
-    result = evaluate_fabric(evidence_by_device)
+    # W1 (release-1.0 cleanup): every finding still passes through
+    # `evaluate_device`/`evaluate_fabric` unchanged -- this only adds the
+    # annotation pass `evaluate_fabric_with_silences` already performs on
+    # top of it. No explicit path is given here, so resolution falls
+    # through to this module's env-var fallback (`health._resolve_silences`'
+    # own documented order); with nothing configured either way this is
+    # byte-for-byte the old `evaluate_fabric` result plus the always-present
+    # `silenced: False` tag and the `raw_severity`/`counts`/`silences_applied`
+    # fields the annotation pass always adds.
+    result = evaluate_fabric_with_silences(evidence_by_device)
 
     # One JSON document, like every other subcommand: a stream of concatenated
     # pretty-printed objects is not parseable, and `nettools health --all | jq`
