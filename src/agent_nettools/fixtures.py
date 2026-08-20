@@ -81,6 +81,19 @@ def scrub_output(text: str) -> str:
     return text
 
 
+#: The charset a fixture path component may use -- deliberately the same one
+#: `evidence_store._DEVICE_NAME_RE` allows, since both answer the identical
+#: question ("is this string safe to become one path segment?"). It covers
+#: every real value in the committed corpus: platform `cisco_xr`, devices
+#: `P1`..`RR1`, labels `t0`/`t1`/`broken`/`healthy`/`isis-broken`/`unit`.
+#:
+#: Duplicated rather than imported for this hotfix (v1.0.1): EER-001 asks for
+#: ONE storage-key policy shared by every boundary, which is a real
+#: consolidation across `evidence_store`, `fixtures`, inventory and the CLI --
+#: tracked as its own item rather than smuggled into a security fix.
+_FIXTURE_PART_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+
+
 def _fixture_dir(base_dir: str | None) -> Path:
     return Path(base_dir or os.getenv("NETTOOLS_FIXTURE_DIR") or DEFAULT_FIXTURE_DIR)
 
@@ -92,15 +105,33 @@ def fixture_path(
     label: str,
     base_dir: str | None = None,
 ) -> Path:
-    """Return the fixture file for one command on one device capture."""
+    """Return the fixture file for one command on one device capture.
 
-    return (
-        _fixture_dir(base_dir)
-        / str(device["platform"])
-        / str(device["name"])
-        / label
-        / f"{command_slug(command)}.txt"
-    )
+    EER-001 named this join as sharing the evidence store's trust shape:
+    platform, device name and label all reach a path unchecked. `command` is
+    already safe (`command_slug` reduces it to a slug), but the other three
+    are caller-supplied. A `label` of `"../.."` would read or write outside
+    the fixture corpus.
+
+    Same two-gate approach as `evidence_store.FileEvidenceStore._device_dir`:
+    reject the traversal semantically, then assert resolved containment as
+    the structural backstop.
+    """
+
+    root = _fixture_dir(base_dir)
+    for part_name, part in (
+        ("platform", str(device["platform"])),
+        ("device name", str(device["name"])),
+        ("label", str(label)),
+    ):
+        if part in (".", "..") or not _FIXTURE_PART_RE.fullmatch(part):
+            raise ValueError(f"invalid {part_name} for a fixture path: {part!r}")
+
+    path = root / str(device["platform"]) / str(device["name"]) / label / f"{command_slug(command)}.txt"
+    resolved_root = root.resolve()
+    if resolved_root not in path.resolve().parents:
+        raise ValueError(f"fixture path escapes the fixture root: {path}")
+    return path
 
 
 # --------------------------------------------------------------------------- #

@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1580" height="1210" viewBox="0 0 1580 1210" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"><defs><marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6f6f6a"/></marker><marker id="arwb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#1f5fd0"/></marker><marker id="arwr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#c0392b"/></marker><marker id="arwp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6d28d9"/></marker><marker id="arwg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#15803d"/></marker></defs>
 <rect width="1580" height="1210" fill="#fbfbf9"/>
 <text x="48.0" y="56.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="27" font-weight="700" fill="#17171a" text-anchor="start">ios-xr-nettools — repo anatomy</text>
-<text x="48.0" y="82.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="14" font-weight="400" fill="#6f6f6a" text-anchor="start">38,374 lines of source + 2,334 in the MCP server · 41,977 lines of tests · read-only, single lab, 9 Cisco XRd nodes</text>
+<text x="48.0" y="82.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="14" font-weight="400" fill="#6f6f6a" text-anchor="start">38,439 lines of source + 2,334 in the MCP server · 42,113 lines of tests · read-only, single lab, 9 Cisco XRd nodes</text>
 <rect x="1472.4" y="38.0" width="59.6" height="24.0" rx="12" fill="#fff" stroke="#d8d8d2" stroke-width="1"/>
-<text x="1502.2" y="54.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="11.5" font-weight="400" fill="#6f6f6a" text-anchor="middle">v1.0.0</text>
+<text x="1502.2" y="54.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="11.5" font-weight="400" fill="#6f6f6a" text-anchor="middle">v1.0.1</text>
 <line x1="48.0" y1="100.0" x2="1532.0" y2="100.0" stroke="#d8d8d2" stroke-width="1"/>
 <rect x="48.0" y="126.0" width="1010.0" height="114.0" rx="12" fill="#eef0f3" stroke="#d8d8d2" stroke-width="1"/>
 <circle cx="74.0" cy="151.0" r="11" fill="#55555a"/>
@@ -123,13 +123,13 @@
 <text x="734.9" y="818.8" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.5" font-weight="400" fill="#6f6f6a" text-anchor="start">2,045</text>
 <rect x="65.0" y="836.0" width="267.3" height="26.0" rx="13.0" fill="#fff" stroke="#d8d8d2" stroke-width="1"/>
 <text x="76.0" y="853.5" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="12.5" font-weight="500" fill="#17171a" text-anchor="start">evidence_store.py</text>
-<text x="212.6" y="852.8" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.5" font-weight="400" fill="#6f6f6a" text-anchor="start">548 · json | sqlite</text>
+<text x="212.6" y="852.8" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.5" font-weight="400" fill="#6f6f6a" text-anchor="start">582 · json | sqlite</text>
 <rect x="340.3" y="836.0" width="145.5" height="26.0" rx="13.0" fill="#fff" stroke="#d8d8d2" stroke-width="1"/>
 <text x="351.3" y="853.5" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="12.5" font-weight="500" fill="#17171a" text-anchor="start">log_window.py</text>
 <text x="457.6" y="852.8" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.5" font-weight="400" fill="#6f6f6a" text-anchor="start">423</text>
 <rect x="493.8" y="836.0" width="307.8" height="26.0" rx="13.0" fill="#fff" stroke="#d8d8d2" stroke-width="1"/>
 <text x="504.8" y="853.5" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="12.5" font-weight="500" fill="#17171a" text-anchor="start">fixtures.py</text>
-<text x="596.0" y="852.8" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.5" font-weight="400" fill="#6f6f6a" text-anchor="start">357 · 640 captures, replay offline</text>
+<text x="596.0" y="852.8" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.5" font-weight="400" fill="#6f6f6a" text-anchor="start">388 · 640 captures, replay offline</text>
 <line x1="553.0" y1="880.0" x2="553.0" y2="894.0" stroke="#bcbcb6" stroke-width="1.6" marker-end="url(#arw)"/>
 <rect x="48.0" y="898.0" width="1010.0" height="102.0" rx="12" fill="#fdecea" stroke="#f0bfb8" stroke-width="1"/>
 <circle cx="74.0" cy="923.0" r="11" fill="#c0392b"/>

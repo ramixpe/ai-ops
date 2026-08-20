@@ -243,6 +243,32 @@ class FileEvidenceStore(EvidenceStore):
         self._root = _snapshot_dir(base_dir)
 
     def _device_dir(self, device_name: str) -> Path:
+        """The one place a device name becomes a path in this backend.
+
+        EER-001: `_validate_device_name` used to be applied on the SAVE paths
+        only, so `prune(device_name="../outside")` joined unchecked input
+        under the root and unlinked `*.json` OUTSIDE it -- reproduced against
+        a canary before this fix. Every read, list and prune call reaches the
+        filesystem through this method, so validating here closes the whole
+        family at once rather than at each call site, where the next new
+        caller would have to remember.
+
+        Two independent gates, deliberately: the charset check rejects the
+        traversal *semantically* (a device is `[A-Za-z0-9_.-]{1,64}`, never a
+        path), and the resolved-containment assertion below is the structural
+        backstop -- it holds even if the charset is one day widened, or a
+        symlink inside the root points out of it. The review's own guidance:
+        treat containment as defence in depth, not as a replacement for
+        semantic validation.
+        """
+
+        _validate_device_name(device_name)
+        candidate = (self._root / device_name).resolve()
+        root = self._root.resolve()
+        if candidate != root and root not in candidate.parents:
+            raise ValueError(
+                f"device directory escapes the evidence root: {device_name!r}"
+            )
         return self._root / device_name
 
     def _timestamped_paths(self, device_name: str) -> list[Path]:
@@ -486,6 +512,14 @@ class SQLiteEvidenceStore(EvidenceStore):
         keep_days: float | None = None,
         keep_count: int | None = None,
     ) -> dict[str, Any]:
+        # Parity with the file backend (EER-001). This backend has no path to
+        # traverse -- every query is parameterised -- so an invalid name here
+        # would simply match no rows rather than escape anything. It is
+        # refused anyway so the two backends agree on what a device IS,
+        # which is the same reasoning `_validate_device_name`'s own docstring
+        # already gives for validating on both save paths.
+        if device_name is not None:
+            _validate_device_name(device_name)
         devices = [device_name] if device_name is not None else self.list_devices()
         now = time.time()
         removed_by_device: dict[str, int] = {}

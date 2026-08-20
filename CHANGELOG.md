@@ -5,6 +5,32 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); this
 project does not yet promise semantic-versioning stability outside the CLI
 and MCP surfaces (see README's "product surface for 1.0" note).
 
+## [1.0.1] — 2026-08-20
+
+Security patch. One finding from an independent engineering review of the
+v1.0.0 tag, reproduced against a canary before the fix and pinned by
+regression tests afterwards.
+
+### Fixed
+
+- **Path traversal in evidence storage (EER-001, critical).**
+  `_validate_device_name` was applied on the save paths only, so the file
+  backend joined unchecked caller input under the evidence root on every
+  read, list and prune. `prune(device_name="../outside")` reported one
+  removal and **deleted a JSON file outside the root** — confirmed by
+  reproduction, not inferred. Now validated and containment-checked at
+  `FileEvidenceStore._device_dir`, the single point every filesystem access
+  in that backend passes through. The SQLite backend refuses the same names
+  for parity (it was never traversable — its queries are parameterised).
+- **The same trust shape in fixture paths.** `fixture_path` joined
+  caller-supplied platform, device name and label straight into a path; a
+  label of `"../.."` would read or write outside the fixture corpus. Both
+  gates applied there too.
+
+Not reachable from the MCP server in either case: `prune` is CLI-only, and
+no MCP tool takes a fixture label. The exposure was to a mistaken or
+malicious CLI argument, inventory entry, or direct API call.
+
 ## [1.0.0] — 2026-08-20
 
 First tagged release. Read-only Cisco IOS-XR inspection for a single-user
