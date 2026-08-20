@@ -5,6 +5,86 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); this
 project does not yet promise semantic-versioning stability outside the CLI
 and MCP surfaces (see README's "product surface for 1.0" note).
 
+## [1.1.0] — 2026-08-20
+
+Boundary repair. Closes the remaining findings from the independent
+engineering review of `v1.0.0` (`docs/ELITE-ENGINEERING-REVIEW-2026-08-20.md`),
+whose verdict was that the core is sound but *"several boundary layers do not
+preserve the guarantees claimed by the core."* Every fix below was verified by
+probe against the real system, not inferred from the change.
+
+### Security
+
+- **SSH now verifies host identity (EER-002).** Previously every connection
+  silently trusted whatever key a device presented, so a management-path
+  attacker could impersonate a router and return fabricated output that every
+  deterministic check below would treat as truth. Verification runs against a
+  dedicated trust store — never the operator's own `~/.ssh/known_hosts`, which
+  would inherit unrelated trust — populated by `scripts/enroll_host_keys.py`.
+  A host-key mismatch is also no longer classified as a *transient* failure,
+  which would have retried it several times before reporting a generic
+  connection error. Verified against the live lab: correct key connects, one
+  flipped bit in a recorded key is refused, restoring it connects again.
+- **Raised exceptions are sanitised, not just returned values (EER-006,
+  EER-007).** The MCP boundary wrapped returns but not raises, so an exception
+  carrying raw device output reached the client verbatim; the agent loop had
+  the same hole into a model prompt. Both now route through the existing
+  classifier. A tool raising with device text now yields *"an unclassified
+  error; its detail is withheld because a transport exception can embed device
+  output."*
+- **Four configuration gates failed open (EER-008).** `NETTOOLS_ALLOW_ACTIVE_
+  PROBES=flase` enabled device-side traffic; an unrecognised `NETTOOLS_MCP_
+  SURFACE` selected the *wider* surface; an unrecognised evidence backend
+  silently downgraded, splitting history across two stores. All now fail
+  closed, with defaults unchanged — default-on and typo-fails-closed are
+  independent properties.
+- **Durable data is owner-only (EER-019).** Evidence, tickets, the ledger,
+  session memory, metrics and the audit log no longer inherit the umask.
+  Verified under `umask 000`.
+- **Private-first vulnerability disclosure (EER-018).**
+
+### Fixed
+
+- **Flap detection silently disabled on SQLite (EER-005).** Under
+  `NETTOOLS_EVIDENCE_BACKEND=sqlite`, `detect_flaps` read the filesystem
+  directly, found nothing, and returned `{"flapping": [], "snapshots_examined":
+  0}` with exit 0 — byte-identical to a genuinely stable device. A real flap
+  became a clean bill of health, in the one check whose whole job is spotting
+  instability. It now reads through the store contract. `snapshots_skipped`
+  reports 0 for sqlite as *"not measurable yet"* rather than a fabricated count.
+- **The wheel omitted its own runtime assets (EER-003, EER-004).** Prompts and
+  a 180-file demo fixture subset are packaged, so a `pip install` can run the
+  documented offline demo. CI now builds the wheel and container and runs that
+  demo from outside the checkout — the check whose absence let both ship.
+- **Metrics lost concurrent updates (EER-011).** A process-local lock plus a
+  read-once cache meant two of the forty processes an event fan-out spawns
+  would each write the same incremented value. Now serialised by a
+  cross-process flock.
+- **Inventory accepted ambiguous and path-unsafe identities (EER-009).**
+  Device names, router IDs, AS numbers, ports and credential env-var names are
+  validated; duplicate `router_id`/`mgmt_ip` are rejected. The three duplicated
+  storage-key charsets are now one shared policy.
+- Model calls carry an enforceable deadline (EER-010); Ollama's hardcoded 120s
+  is configurable.
+
+### Added
+
+- Coverage measurement (93%, floor 90) and a report-only `pip-audit` job
+  (EER-014). Its first run found two real advisories — see `FINDINGS.md`
+  OBS-645, including why one is not currently fixable.
+- Dependency upper bounds, a digest-pinned base image, and a constraints file
+  (EER-013).
+- `docs/build/ROADMAP.md` — the ten-epic roadmap and standing non-goals.
+- `BACKLOG.md` is now machine-checkable: one authoritative status per item, a
+  documented vocabulary, and a test that enforces both (EER-016).
+- Makefile targets work without a pre-activated venv (EER-020).
+
+### Deferred, deliberately
+
+**EER-015** (module size) and **EER-017** (production ops workflow) — both
+large refactors, and doing them immediately behind a security release
+maximises the chance of reintroducing what was just removed.
+
 ## [1.0.1] — 2026-08-20
 
 Security patch. One finding from an independent engineering review of the
