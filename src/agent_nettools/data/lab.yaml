@@ -1,0 +1,291 @@
+# Declarative topology for the single-user IOS-XR lab. This file is topology,
+# not secrets: credentials are resolved at runtime from the environment
+# variables *named* under credential_groups below, never stored here (see
+# CLAUDE.md and README.md's "Inventory" section).
+#
+# platforms.known_platforms() gates every `platform` field, lab.platform_for()
+# reads this file without ever touching an environment variable (the
+# precondition for the safety boundary: the command allowlist is checked
+# before credentials load), and inventory.load_inventory() joins this file
+# with environment credentials at call time.
+#
+# `expected:` blocks hold DERIVED per-device topology counts, produced by
+# `nettools learn-topology` from parsed evidence -- never hand-invented. That
+# command reports by default and rewrites this file only with --write, which
+# strips these comments; use --out to review a generated draft instead.
+#
+# CAUTION: a derived expectation records what the fabric *does*, which is only a
+# valid target if the fabric is currently healthy -- so health rules must also
+# apply role-based invariants that do not depend on these counts (an edge
+# router with no IS-IS adjacency is wrong whatever this file says). PE2's and
+# PE4's isis_adjacencies were baked-in brokenness (recorded as 0, learned while
+# both were isolated) until 2026-08-19, when B-465/B-516 re-derived every
+# isis_adjacencies value below against a freshly and consistently captured
+# t0/t1 (see each device's own notes for the per-device history). PE3 was
+# deliberately left alone in that pass: it carries a real, still-open fault
+# (B-496 -- Gi0/0/0/0 is IS-IS-enabled but has no ipv4 address, so no adjacency
+# can form to P2) and writing its current live count into `expected:` would
+# bake that fault in as normal, exactly what suspicious_baseline exists to
+# catch.
+#
+# Deliberately absent: link-level ("A connects to B") expected topology.
+#
+# The original reason given here was that this fabric's LLDP data contradicts
+# itself. **It does not** -- see the `lldp` note on P1 below, and B-435. P1's
+# configured hostname at t0 was LEAF05_DHCP_SERVER, so P2 reporting that
+# neighbour on Gi0/0/0/0 agreed with P1 exactly; `topology.hostname_map` now
+# resolves the two spellings and the anomaly report is clean.
+#
+# **The rule stands and its reason is now the right one.** A device-reported
+# name and an inventory label can legitimately differ -- they did here for
+# months -- so a link claim has to pick a spelling and defend it, while a
+# per-device count is true under either. Counts survive a rename; links do not.
+version: 1
+
+defaults:
+  platform: cisco_xr
+  credential_group: lab
+  port: 22
+
+credential_groups:
+  lab:
+    username_env: DEVICE_USERNAME
+    password_env: DEVICE_PASSWORD
+    ssh_keyfile_env: DEVICE_SSH_KEYFILE
+
+devices:
+  - name: P1
+    mgmt_ip: 172.20.250.11
+    role: core
+    site: lab
+    expected:
+      isis_adjacencies: 5
+
+    notes:
+      - applies_to: lldp
+        note: >-
+          LLDP here does NOT contradict itself; the rule is to compare device IDs against each
+          device's configured hostname, not against its inventory label -- `topology.hostname_map`
+          (B-435) does this automatically now. It looked like it did in the t0/t1 captures as
+          they stood 2026-08-16: P1's own configured hostname there was LEAF05_DHCP_SERVER, so P2
+          reporting that neighbour on Gi0/0/0/0 agreed with P1 exactly. P3 was Lab-leaf01 and PE4
+          was SDWAN-Edge01 in the same captures; all three were aligned to their inventory labels
+          by the healthy/broken captures. As of the 2026-08-19 re-capture (B-516 -- the prior t0
+          was internally inconsistent and needed replacing anyway) none of the three aliases
+          appear any more; every device now reports its inventory-label hostname directly. The
+          rule and the worked example both stay, since a future rename would reproduce exactly
+          this shape of apparent contradiction.
+        author: operator
+        recorded: "2026-08-16"
+        revisit_when: >-
+          a device in this lab is renamed again, to confirm hostname_map still resolves it
+      - applies_to: bgp
+        note: >-
+          Every BGP session on this lab carries 0 prefixes -- nothing is advertised into it.
+          `bgp_no_prefixes` is the normal state here and is not a fault.
+        author: operator
+        recorded: "2026-08-16"
+        revisit_when: >-
+          the lab starts advertising real prefixes
+  - name: P2
+    mgmt_ip: 172.20.250.12
+    role: core
+    site: lab
+    expected:
+      isis_adjacencies: 5
+
+    notes:
+      - applies_to: bgp
+        note: >-
+          Every BGP session on this lab carries 0 prefixes -- nothing is advertised into it.
+          `bgp_no_prefixes` is the normal state here and is not a fault.
+        author: operator
+        recorded: "2026-08-16"
+        revisit_when: >-
+          the lab starts advertising real prefixes
+  - name: P3
+    mgmt_ip: 172.20.250.13
+    role: core
+    site: lab
+    expected:
+      isis_adjacencies: 5
+
+    notes:
+      - applies_to: bgp
+        note: >-
+          Every BGP session on this lab carries 0 prefixes -- nothing is advertised into it.
+          `bgp_no_prefixes` is the normal state here and is not a fault.
+        author: operator
+        recorded: "2026-08-16"
+        revisit_when: >-
+          the lab starts advertising real prefixes
+  - name: P4
+    mgmt_ip: 172.20.250.14
+    role: core
+    site: lab
+    expected:
+      isis_adjacencies: 5
+
+    notes:
+      - applies_to: bgp
+        note: >-
+          Every BGP session on this lab carries 0 prefixes -- nothing is advertised into it.
+          `bgp_no_prefixes` is the normal state here and is not a fault.
+        author: operator
+        recorded: "2026-08-16"
+        revisit_when: >-
+          the lab starts advertising real prefixes
+  - name: PE1
+    mgmt_ip: 172.20.250.21
+    role: edge
+    site: lab
+    router_id: 10.255.0.11
+    local_as: 65000
+    expected:
+      isis_adjacencies: 2
+      bgp_peers: 1
+
+    notes:
+      - applies_to: bgp
+        note: >-
+          Every BGP session on this lab carries 0 prefixes -- nothing is advertised into it.
+          `bgp_no_prefixes` is the normal state here and is not a fault.
+        author: operator
+        recorded: "2026-08-16"
+        revisit_when: >-
+          the lab starts advertising real prefixes
+  # Formerly isolated (2026-08-16): 0 LLDP neighbours and 0 IS-IS adjacencies,
+  # though it still carried a BGP router-id and one (idle) peer toward RR1.
+  # Repaired since -- see the isis note below, filed rather than silently
+  # edited per OBS-139 (an operator note has twice held an answer nobody read).
+  - name: PE2
+    mgmt_ip: 172.20.250.22
+    role: edge
+    site: lab
+    router_id: 10.255.0.12
+    local_as: 65000
+    expected:
+      isis_adjacencies: 2
+      bgp_peers: 1
+
+    notes:
+      - applies_to: isis
+        note: >-
+          Historical (2026-08-16): the expected: isis_adjacencies value here was learned by
+          `nettools learn-topology` while this device was isolated, so the baseline recorded 0
+          and matching it did not mean healthy -- health.py's suspicious_baseline meta rule
+          existed for exactly this case.
+        author: operator
+        recorded: "2026-08-16"
+        revisit_when: >-
+          the expected: block is re-derived against a fabric verified healthy first
+      - applies_to: isis
+        note: >-
+          Resolved 2026-08-19 (B-465/B-516): the revisit condition above is met. `t0`/`t1` were
+          fully re-captured live (B-516 found the prior t0 internally inconsistent -- its
+          isis/lldp/bgp/version files were three weeks stale relative to the rest of the label)
+          and the isis_adjacencies baseline re-derived against the fresh capture, cross-checked
+          against LLDP: PE2 now shows 2 IS-IS adjacencies (P1, P3), matching PE1/PE4/RR1's
+          pattern. suspicious_baseline no longer fires for PE2; it was never a signal that this
+          device is unconditionally healthy, only that the recorded baseline itself is not
+          trustworthy, and it now is.
+        author: operator
+        recorded: "2026-08-19"
+        revisit_when: >-
+          PE2's isis_adjacencies count changes again, so this baseline gets re-derived rather
+          than drifting stale a second time
+      - applies_to: bgp
+        note: >-
+          Every BGP session on this lab carries 0 prefixes -- nothing is advertised into it.
+          `bgp_no_prefixes` is the normal state here and is not a fault.
+        author: operator
+        recorded: "2026-08-16"
+        revisit_when: >-
+          the lab starts advertising real prefixes
+  - name: PE3
+    mgmt_ip: 172.20.250.23
+    role: edge
+    site: lab
+    router_id: 10.255.0.13
+    local_as: 65000
+    expected:
+      isis_adjacencies: 2
+      bgp_peers: 1
+
+    notes:
+      - applies_to: bgp
+        note: >-
+          Every BGP session on this lab carries 0 prefixes -- nothing is advertised into it.
+          `bgp_no_prefixes` is the normal state here and is not a fault.
+        author: operator
+        recorded: "2026-08-16"
+        revisit_when: >-
+          the lab starts advertising real prefixes
+  # PE4's DEFAULT address family reports "% BGP instance 'default' not active",
+  # like the P-routers -- that part is real device output. An earlier version
+  # of this comment wrongly generalized that single-AF fact into a blanket
+  # denial that BGP runs here at all (B-504, corrected 2026-08-19): PE4 runs a
+  # separate MP-BGP VPNv4 process, with an Established session to RR1 (2
+  # prefixes, confirmed from both ends). Filed rather than silently edited,
+  # per OBS-139 (an operator note has twice held an answer nobody read). Per
+  # operator decision the correction now lives in NetBox (`netbox.py`'s
+  # derived `bgp_vpnv4_peers` custom field, B-509), not here, so it cannot
+  # drift out of sync with a second hand-typed copy. `bgp_peers` below stays
+  # absent rather than zero for the reason this comment always gave:
+  # `expected` is derived from the DEFAULT address family only, and zero
+  # would claim a process that produced no peers, which is not what this
+  # device reports on that AF.
+  - name: PE4
+    mgmt_ip: 172.20.250.24
+    role: edge
+    site: lab
+    expected:
+      isis_adjacencies: 2
+
+    notes:
+      - applies_to: isis
+        note: >-
+          Historical (2026-08-16): same as PE2 -- the recorded isis_adjacencies baseline of 0
+          was learned from a broken fabric. Role invariants, not the baseline, were what caught
+          isolation here.
+        author: operator
+        recorded: "2026-08-16"
+        revisit_when: >-
+          the expected: block is re-derived against a fabric verified healthy first
+      - applies_to: isis
+        note: >-
+          Resolved 2026-08-19 (B-465/B-516): re-derived against the fresh t0/t1 capture (see
+          PE2's note for why the prior capture could not be trusted). PE4 now shows 2 IS-IS
+          adjacencies (P3, P4), matching PE1/PE2/RR1's pattern; suspicious_baseline no longer
+          fires.
+        author: operator
+        recorded: "2026-08-19"
+        revisit_when: >-
+          PE4's isis_adjacencies count changes again, so this baseline gets re-derived rather
+          than drifting stale a second time
+      - applies_to: bgp
+        note: >-
+          Every BGP session on this lab carries 0 prefixes -- nothing is advertised into it.
+          `bgp_no_prefixes` is the normal state here and is not a fault.
+        author: operator
+        recorded: "2026-08-16"
+        revisit_when: >-
+          the lab starts advertising real prefixes
+  - name: RR1
+    mgmt_ip: 172.20.250.31
+    role: route-reflector
+    site: lab
+    router_id: 10.255.0.31
+    local_as: 65000
+    expected:
+      isis_adjacencies: 2
+      bgp_peers: 4
+    notes:
+      - applies_to: bgp
+        note: >-
+          Every BGP session on this lab carries 0 prefixes -- nothing is advertised into it.
+          `bgp_no_prefixes` is the normal state here and is not a fault.
+        author: operator
+        recorded: "2026-08-16"
+        revisit_when: >-
+          the lab starts advertising real prefixes

@@ -84,6 +84,100 @@ def test_sanitisation_holds_on_the_staged_surface(staged_server, monkeypatch):
     assert "commands_withheld" in json.dumps(result)
 
 
+# --------------------------------------------------------------------------- #
+# F1 -- the six hand-authored error envelopes must carry the same key set as
+# every other envelope in the surface (tool/device/status/data/errors), not a
+# bare {"status": "error", "errors": [...]}. Exercised directly on the plain
+# functions (no MCP registration/session needed -- these are ordinary Python
+# calls) so each test targets exactly one branch.
+# --------------------------------------------------------------------------- #
+
+_ENVELOPE_KEYS = {"tool", "device", "status", "data", "errors"}
+
+
+def test_check_lab_unknown_intent_carries_the_full_envelope():
+    import mcp_server.staged_surface as staged
+
+    result = staged.check_lab("PE1", intent="bogus-intent")
+
+    assert set(result) == _ENVELOPE_KEYS
+    assert result["tool"] == "check_lab"
+    assert result["device"] == "PE1"
+    assert result["status"] == "error"
+    assert result["data"] == {}
+    assert "bogus-intent" in result["errors"][0]
+
+
+def test_check_lab_unknown_device_carries_the_full_envelope():
+    import mcp_server.staged_surface as staged
+
+    result = staged.check_lab("not-a-real-device")
+
+    assert set(result) == _ENVELOPE_KEYS
+    assert result["tool"] == "check_lab"
+    assert result["device"] == "not-a-real-device"
+    assert result["status"] == "error"
+    assert result["data"] == {}
+    assert "not-a-real-device" in result["errors"][0]
+
+
+def test_lookup_lab_unknown_kind_carries_the_full_envelope():
+    import mcp_server.staged_surface as staged
+
+    result = staged.lookup_lab("PE1", "bogus-kind", "10.0.0.0/24")
+
+    assert set(result) == _ENVELOPE_KEYS
+    assert result["tool"] == "lookup_lab"
+    assert result["device"] == "PE1"
+    assert result["status"] == "error"
+    assert result["data"] == {}
+    assert "bogus-kind" in result["errors"][0]
+
+
+def test_history_lab_unknown_mode_carries_the_full_envelope():
+    import mcp_server.staged_surface as staged
+
+    result = staged.history_lab("PE1", mode="bogus-mode")
+
+    assert set(result) == _ENVELOPE_KEYS
+    assert result["tool"] == "history_lab"
+    assert result["device"] == "PE1"
+    assert result["status"] == "error"
+    assert result["data"] == {}
+    assert "bogus-mode" in result["errors"][0]
+
+
+def test_history_lab_no_saved_snapshot_carries_the_full_envelope(monkeypatch):
+    import mcp_server.staged_surface as staged
+
+    # Deterministic regardless of what evidence store state happens to exist
+    # on disk -- the branch under test is "no baseline found", not "the repo
+    # happens to have none right now".
+    monkeypatch.setattr(staged, "load_latest_snapshot", lambda device: None)
+
+    result = staged.history_lab("PE1", mode="latest_diff")
+
+    assert set(result) == _ENVELOPE_KEYS
+    assert result["tool"] == "history_lab"
+    assert result["device"] == "PE1"
+    assert result["status"] == "error"
+    assert result["data"] == {}
+    assert "no saved snapshot exists for PE1" in result["errors"][0]
+
+
+def test_probe_lab_unknown_kind_carries_the_full_envelope():
+    import mcp_server.staged_surface as staged
+
+    result = staged.probe_lab("PE1", "bogus-kind", "10.0.0.1")
+
+    assert set(result) == _ENVELOPE_KEYS
+    assert result["tool"] == "probe_lab"
+    assert result["device"] == "PE1"
+    assert result["status"] == "error"
+    assert result["data"] == {}
+    assert "bogus-kind" in result["errors"][0]
+
+
 def test_the_staged_manifest_is_smaller_than_classic(staged_server):
     """B-113's arithmetic argument, made checkable: the whole point of
     consolidation is context cost, so measure it."""

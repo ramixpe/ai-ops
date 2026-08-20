@@ -64,7 +64,6 @@ _FREE_TEXT_FIELD_NAMES = frozenset(field for _context, field in _PROJECTOR_FREE_
 
 __all__ = [
     "ERROR_KINDS",
-    "MAX_ERROR_CHARS",
     "RAW_TEXT_KEYS",
     "sanitize",
 ]
@@ -92,22 +91,22 @@ __all__ = [
 #: written from a name rather than from a measured type.
 RAW_TEXT_KEYS = frozenset({"commands", "unaccounted_lines"})
 
-#: Error strings are kept — a model that cannot see failures is worse than one
-#: that sees none — but they are **classified and rebuilt**, never truncated
-#: (B-458).
-#:
-#: Truncation was the first mitigation and it was a bound, not a fix: it still
-#: passed up to 400 characters of whatever the exception carried. And the
-#: exception does carry device output — measured in netmiko 4.7's
-#: `base_connection`, one `ReadException` message interpolates
-#: ``output={repr(output)}`` directly. That is the residual this closes.
-#:
-#: The safe structure of one of our error strings is ``"<command>: <detail>"``:
-#: the command is **ours**, rendered by reconstruction and already validated,
-#: and the detail is the part that came from somewhere else. So the command is
-#: kept verbatim, the detail is matched against a declared table of kinds, and
-#: anything unmatched is dropped rather than trimmed.
-MAX_ERROR_CHARS = 400
+# Error strings are kept — a model that cannot see failures is worse than one
+# that sees none — but they are **classified and rebuilt**, never truncated
+# (B-458). Truncation was the first mitigation and it was a bound, not a fix:
+# it still passed up to 400 characters of whatever the exception carried, and
+# the exception does carry device output — measured in netmiko 4.7's
+# `base_connection`, one `ReadException` message interpolates
+# ``output={repr(output)}`` directly. That is the residual this closes.
+#
+# The safe structure of one of our error strings is ``"<command>: <detail>"``:
+# the command is **ours**, rendered by reconstruction and already validated,
+# and the detail is the part that came from somewhere else. So the command is
+# kept verbatim, the detail is matched against a declared table of kinds, and
+# anything unmatched is dropped rather than trimmed -- see ``_classify_errors``
+# below, which is what actually does this now (``MAX_ERROR_CHARS``, the
+# truncation-era bound this replaced, was deleted as dead code once nothing
+# referenced it any more).
 
 #: B-493: the classified text for both active-probe-refused shapes below.
 #: One constant, referenced twice, so the two entries cannot drift apart --

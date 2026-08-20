@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import ipaddress
 import os
+from importlib import resources as importlib_resources
 from pathlib import Path
 from typing import Any, Literal
 
@@ -274,15 +275,30 @@ DEFAULT_INVENTORY_PATH = "inventory/lab.yaml"
 
 
 def _packaged_fallback_path() -> Path:
-    """Repo-root ``inventory/lab.yaml``, resolved from this file's own location.
+    """A byte-identical copy of ``inventory/lab.yaml``, shipped as package data.
 
-    Makes the inventory findable for an editable install run from outside the
-    repo root, without requiring ``NETTOOLS_INVENTORY`` or a matching cwd. A
-    distributed (non-editable) package would ship the file as package data
-    instead; there is no such packaging step for this single-lab tool.
+    R2: the canonical file lives at the repo root, outside ``src/``, so a
+    non-editable install (a real ``pip install`` of a built wheel, with no
+    source checkout anywhere nearby) cannot see it -- ``resolve_inventory_path``
+    would previously fall through to nothing findable. The fix is a real
+    packaging step: ``src/agent_nettools/data/lab.yaml`` is a checked-in copy
+    of the same file, declared in ``pyproject.toml``'s
+    ``[tool.setuptools.package-data]`` (the existing ``agent_nettools =
+    ["data/*.yaml"]`` glob already covers it -- no new entry needed), so it
+    ships inside the wheel and ``importlib.resources`` can find it regardless
+    of whether this is an editable or an installed copy.
+
+    This is only ever reached when there is no explicit path, no
+    ``NETTOOLS_INVENTORY``, and no ``./inventory/lab.yaml`` in the cwd --  a
+    live checkout run from its own repo root always wins via the cwd check in
+    ``resolve_inventory_path`` and never reaches this function, so the two
+    files being distinct copies (rather than one) never surfaces as a stale
+    read for the common case. Kept honest by
+    ``tests/test_packaging_inventory.py``, which fails loudly if the two
+    copies ever diverge.
     """
 
-    return Path(__file__).resolve().parents[2] / "inventory" / "lab.yaml"
+    return importlib_resources.files("agent_nettools") / "data" / "lab.yaml"
 
 
 def resolve_inventory_path(explicit: str | None = None) -> Path:

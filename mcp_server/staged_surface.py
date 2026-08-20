@@ -133,12 +133,13 @@ def check_lab(scope: str, intent: Literal["facts", "interfaces", "bgp", "lldp", 
         return evaluate_fabric(evidence)
     if intent:
         if intent not in CHECK_TOOLS:
-            return {"status": "error",
+            return {"tool": "check_lab", "device": scope, "status": "error", "data": {},
                     "errors": [f"unknown intent {intent!r}; one of {sorted(CHECK_TOOLS)}"]}
         return run_intent(scope, intent)
     record = _device_record(scope)
     if record is None:
-        return {"status": "error", "errors": [f"{scope!r} is not in the inventory"]}
+        return {"tool": "check_lab", "device": scope, "status": "error", "data": {},
+                "errors": [f"{scope!r} is not in the inventory"]}
     return evaluate_device(collect_evidence(scope), record)
 
 
@@ -153,7 +154,7 @@ def lookup_lab(device_name: str, kind: Literal["route", "bgp_neighbor", "interfa
 
     fn = _LOOKUPS.get(kind)
     if fn is None:
-        return {"status": "error",
+        return {"tool": "lookup_lab", "device": device_name, "status": "error", "data": {},
                 "errors": [f"unknown kind {kind!r}; one of {sorted(_LOOKUPS)}"]}
     return fn(device_name, value)
 
@@ -186,11 +187,11 @@ def history_lab(device_name: str, mode: Literal["latest_diff", "golden_diff", "f
         return detect_flaps(device_name)
     loader = {"latest_diff": load_latest_snapshot, "golden_diff": load_golden_snapshot}.get(mode)
     if loader is None:
-        return {"status": "error",
+        return {"tool": "history_lab", "device": device_name, "status": "error", "data": {},
                 "errors": [f"unknown mode {mode!r}; latest_diff, golden_diff, or flaps"]}
     baseline = loader(device_name)
     if baseline is None:
-        return {"status": "error",
+        return {"tool": "history_lab", "device": device_name, "status": "error", "data": {},
                 "errors": [f"no {'golden' if mode == 'golden_diff' else 'saved'} "
                            f"snapshot exists for {device_name}"]}
     return diff_evidence(baseline, collect_evidence(device_name))
@@ -211,7 +212,8 @@ def probe_lab(device_name: str, kind: Literal["ping", "traceroute"], address: st
         return ping_device(device_name, address)
     if kind == "traceroute":
         return traceroute_device(device_name, address)
-    return {"status": "error", "errors": [f"unknown kind {kind!r}; ping or traceroute"]}
+    return {"tool": "probe_lab", "device": device_name, "status": "error", "data": {},
+            "errors": [f"unknown kind {kind!r}; ping or traceroute"]}
 
 
 def apply(server_module: Any) -> None:

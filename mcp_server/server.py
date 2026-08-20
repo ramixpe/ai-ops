@@ -56,13 +56,6 @@ from agent_nettools.templates import TemplateValidationError, split_sr_policy_id
 from agent_nettools.ticket_read import DEFAULT_LIST_LIMIT as TICKET_LIST_DEFAULT_LIMIT
 from agent_nettools.ticket_read import list_tickets, read_ticket_by_run_id
 
-# MCP clients (and `make mcp` / `nettools-mcp`) launch this server directly, so it
-# has to load .env itself — otherwise every tool fails on a missing
-# DEVICE_USERNAME / DEVICE_PASSWORD. Two lookups so it works both from the
-# current directory upward and next to an editable install; a no-op in Docker,
-# where the credentials arrive via -e / --env-file.
-load_dotenv(find_dotenv(usecwd=True)) or load_dotenv()
-
 mcp = FastMCP("IOS-XR Read-Only Network Tools")
 
 # --------------------------------------------------------------------------- #
@@ -1645,24 +1638,58 @@ def protect_stdio() -> list[str]:
 # --------------------------------------------------------------------------- #
 
 NETTOOLS_MCP_SURFACE_ENV = "NETTOOLS_MCP_SURFACE"
-ACTIVE_SURFACE = os.getenv(NETTOOLS_MCP_SURFACE_ENV, "classic").strip().lower()
+ACTIVE_SURFACE = "classic"
 
-if ACTIVE_SURFACE == "staged":
-    from . import staged_surface as _staged
 
-    _staged.apply(sys.modules[__name__])
-elif ACTIVE_SURFACE != "classic":
-    # A typo (e.g. `stage`) silently fell back to classic -- inconsistent with
-    # apply()'s own fail-loud philosophy (2026-08-18 review). Warn; do not
-    # crash, since classic is a safe default.
-    logging.getLogger(__name__).warning(
-        "NETTOOLS_MCP_SURFACE=%r is not 'classic' or 'staged'; using classic",
-        ACTIVE_SURFACE,
-    )
+def _select_surface() -> None:
+    """Read NETTOOLS_MCP_SURFACE and apply the staged surface if selected.
+
+    Split out from module level (R8/OBS-50x) so it can be called twice:
+    once here at import time -- unchanged from before, and what
+    `tests/test_staged_surface.py`'s `importlib.reload(server)` seam still
+    relies on, with no `.env` involved -- and again from `main()`, after
+    `.env` loads, so a real deployment that sets NETTOOLS_MCP_SURFACE only in
+    `.env` (never exported in the shell) still gets it: `load_dotenv()` never
+    overrides an already-set variable, so re-running this after the load is a
+    no-op everywhere except that one case. `staged_surface.apply()` clears
+    and rebuilds the tool registry, so calling it twice with the same
+    resolved value is idempotent.
+    """
+
+    global ACTIVE_SURFACE
+    ACTIVE_SURFACE = os.getenv(NETTOOLS_MCP_SURFACE_ENV, "classic").strip().lower()
+
+    if ACTIVE_SURFACE == "staged":
+        from . import staged_surface as _staged
+
+        _staged.apply(sys.modules[__name__])
+    elif ACTIVE_SURFACE != "classic":
+        # A typo (e.g. `stage`) silently fell back to classic -- inconsistent with
+        # apply()'s own fail-loud philosophy (2026-08-18 review). Warn; do not
+        # crash, since classic is a safe default.
+        logging.getLogger(__name__).warning(
+            "NETTOOLS_MCP_SURFACE=%r is not 'classic' or 'staged'; using classic",
+            ACTIVE_SURFACE,
+        )
+
+
+_select_surface()
 
 
 def main() -> None:
     """Console-script entry point: start the MCP server over stdio."""
+
+    # Loaded here, not at import time (R8/OBS-50x): importing this module must
+    # be side-effect-free, otherwise every process that merely imports
+    # mcp_server.server -- including every pytest run from a checkout that
+    # has a real .env -- picks up whatever live secrets sit in cwd. Two
+    # lookups so it works both from the current directory upward and next to
+    # an editable install; a no-op in Docker, where credentials arrive via
+    # -e / --env-file.
+    load_dotenv(find_dotenv(usecwd=True)) or load_dotenv()
+    # Re-resolve the surface now that .env is loaded -- see _select_surface's
+    # docstring for why this is safe to call twice.
+    _select_surface()
 
     for change in protect_stdio():
         print(f"nettools-mcp: redirected {change} away from stdout", file=sys.stderr)
