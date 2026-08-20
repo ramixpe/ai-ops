@@ -7222,3 +7222,57 @@ Three lessons worth the price:
   mixing device text and code prose in one field, so containment can mark the
   fragment rather than the sentence. Filed as **B-692**.
 - **Needs human review:** no.
+
+## OBS-692 · Wave D · A seven-hour fault the tool reported as `all_layers_healthy`
+
+- **Kind:** defect (capability gap), found on live hardware
+- **What happened:** while checking whether Loki now carries every device (it
+  does — all nine), the per-device volumes were lopsided: PE1, PE2 and RR1 hit
+  the 5,000-entry query cap in 24h while the other six sat near 30. Sampling
+  the chatty three found RR1 logging `%IP-TCP-3-BADAUTH : Invalid MD5 digest
+  from 10.255.0.11:<port> to 10.255.0.31:179` — PE1 repeatedly opening a BGP
+  connection to RR1 with an MD5 key RR1 does not accept. That is
+  `fault_lab.py`'s `bgp_password` option (`password clear FaultLabTrial`),
+  **a second leftover fault**, on a different device pair from OBS-690's.
+- **Measured, not estimated:** 4,882 events between **16:34 and 23:22** today,
+  roughly one every five seconds for seven hours, spread evenly across every
+  hour of that window (154/870/612/486/727/930/875/228 per hour).
+- **The session never dropped.** RR1 logged **zero** adjacency changes for
+  `10.255.0.11` across the entire window — the only 19 `ADJCHANGE` events are
+  a different, IPv6 neighbour coming up. The established IPv4 session survived
+  the whole seven hours; what failed was every *new* connection attempt.
+- **So every rung read healthy, and the tool said so.** Run at 23:45:
+  `nettools investigate RR1 10.255.0.11 --no-model` → **`all_layers_healthy`,
+  `cause: null`, `trustworthy: true`, five of five rungs healthy.** That is
+  correct at every layer it examines and wrong about the network. **This is a
+  false clean** — the failure class `ROADMAP.md` singles out ("the false-clean
+  rate deserves emphasis: EER-005 was exactly that defect, and nothing was
+  measuring it") arriving on real hardware rather than in a fixture.
+- **Why the descent cannot catch it, and this is the point.** The ladder walks
+  BGP session → transport → route → IGP → interface, and all five describe the
+  *established* session. A fault that lives entirely in *rejected connection
+  attempts* has no rung, because it has no state — it exists only as a rate of
+  events over time. **No amount of work on the descent would find this.** It
+  is precisely the evidence the log axis exists to supply, and it is live
+  justification for B-416 (episodes) and B-418 (`max_rate_1m`, burst
+  detection): 4,882 events at a steady ~12/min is exactly the "60 in ninety
+  seconds versus 60 across an hour" distinction B-418 is about, and nothing in
+  the product can currently see it.
+- **Honest limits of this finding.** I measured the finding at 23:45, after the
+  events stopped; that all five rungs were healthy *during* the window is an
+  inference from the absence of any adjacency change, not a reading taken at
+  the time. It is a strong inference — the descent has no input that could
+  have differed — but it is an inference. **And I do not know why the events
+  stopped at 23:22.** PE1's session to RR1 reports
+  `last_reset_reason: "Address family removed (CEASE notification sent -
+  configuration change)"`, which is a configuration change I did not make and
+  cannot attribute. Recorded as unexplained rather than guessed at.
+- **Also surfaced, unrelated and worth a look later:** RR1 has an IPv6 BGP
+  neighbour (`2001:db8:ffff::13`) that appears nowhere in `inventory/lab.yaml`
+  or the flow subjects, and PE2 is emitting ~8 SSH errors a minute
+  (`%SECURITY-SSHD_SYSLOG_PRX-3-ERR_GENERAL`, 254 in 30 minutes) — which is
+  B-206b's "collector SSH churn", now measurable rather than described.
+- **What I did:** nothing to the fabric. Read-only throughout. Escalated with
+  OBS-690.
+- **Needs human review:** yes — same single decision as OBS-690, now covering
+  two leftover faults rather than one.
