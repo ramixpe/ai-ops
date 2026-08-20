@@ -20,11 +20,15 @@ facts.assert_contains("src/agent_nettools/network_tools.py", r"def _netmiko_send
                        "d1.py's TRANSPORT box code pointer")
 config_axis = facts.config_axis_summary()
 config_diff_consumers = facts.config_diff_consumers()
-if config_diff_consumers:
-    raise SystemExit(
-        f"d1.py: config_diff.py now has live consumers {config_diff_consumers} — "
-        "the 'unwired' pill label below is stale; update it before regenerating."
-    )
+# Was a one-time SystemExit tripwire ("has a consumer now — go update the
+# pill label"); retired at release-1.0 (W5, `--reconcile-config` gave
+# config_diff.py its first consumer). The label below now reads
+# `config_diff_consumers` itself, so it can never go stale silently again —
+# a permanent fix, not a permanent guard.
+config_diff_label = (
+    f"opt-in via --reconcile-config ({', '.join(config_diff_consumers)})"
+    if config_diff_consumers else "unwired"
+)
 ROLE_LABEL = {"core": "core", "edge": "edge", "route-reflector": "reflector"}
 
 W, H = 1580, 1210
@@ -84,7 +88,7 @@ LAYERS = [
             ("grounding.py", f"{facts.fmt(SL('grounding.py'))} · citation + chain + containment"),
             ("reasoning_gate.py", f"{facts.fmt(SL('reasoning_gate.py'))} · built, not yet wired (diagram 9)"),
             ("config_section.py", f"{facts.fmt(SL('config_section.py'))} · {len(config_axis['templates'])} templates, configured intent"),
-            ("config_diff.py", f"{facts.fmt(SL('config_diff.py'))} · {len(config_axis['diff_functions'])} fields, {len(config_axis['outcomes'])} outcomes, unwired"),
+            ("config_diff.py", f"{facts.fmt(SL('config_diff.py'))} · {len(config_axis['diff_functions'])} fields, {len(config_axis['outcomes'])} outcomes, {config_diff_label}"),
             ("topology.py", facts.fmt(SL('topology.py'))), ("interface_kind.py", facts.fmt(SL('interface_kind.py')))]),
     dict(t="EVIDENCE & PARSING", n="5", c="#ffffff", sc=LINE, tc=INK,
          d="the only code in the repository that reads raw device text",

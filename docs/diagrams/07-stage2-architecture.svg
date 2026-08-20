@@ -58,7 +58,7 @@
 <text x="62.0" y="546.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="13" font-weight="700" fill="#17171a" text-anchor="start">nettools</text>
 <rect x="307.7" y="533.0" width="41.9" height="17.0" rx="8" fill="#15803d" stroke="#15803d" stroke-width="1"/>
 <text x="328.7" y="545.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="9.5" font-weight="700" fill="#fff" text-anchor="middle">BUILT</text>
-<text x="62.0" y="568.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.3" font-weight="400" fill="#6f6f6a" text-anchor="start">36 commands · 37 MCP tools · 4 flows</text>
+<text x="62.0" y="568.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.3" font-weight="400" fill="#6f6f6a" text-anchor="start">37 commands · 37 MCP tools · 4 flows</text>
 <text x="62.0" y="584.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.3" font-weight="400" fill="#6f6f6a" text-anchor="start">descent, grounding, epoch, ledger</text>
 <text x="62.0" y="600.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.3" font-weight="400" fill="#6f6f6a" text-anchor="start">the deterministic diagnostic core</text>
 <rect x="375.6" y="522.0" width="313.6" height="108.0" rx="11" fill="#e8f5ec" stroke="#15803d" stroke-width="1"/>

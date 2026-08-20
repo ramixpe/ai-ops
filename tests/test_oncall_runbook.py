@@ -18,7 +18,7 @@ from __future__ import annotations
 import inspect
 import re
 
-from agent_nettools import admission, checks, cli, flows, ledger
+from agent_nettools import admission, checks, cli, flows, ledger, settings
 
 # --------------------------------------------------------------------------- #
 # Section 3 -- the trustworthy/finding table and the exit-code tables.
@@ -77,24 +77,34 @@ def test_health_exit_codes_are_ok_warning_critical_in_that_order():
 # --------------------------------------------------------------------------- #
 
 
-def test_health_cli_does_not_yet_apply_silences():
-    """`_cmd_health` calls `evaluate_fabric` and nothing that reads a silence
-    file. If this ever starts calling `apply_silences`/`apply_silences_to_
-    fabric`, §5's "there is no CLI switch for this yet" paragraph is wrong
-    and must be rewritten to describe how to use the new switch instead."""
+def test_health_cli_now_applies_silences():
+    """§5's "there is no CLI switch for this yet" paragraph is stale by
+    design as of the release-1.0 cleanup (Wave 3, W1/W2b): `_cmd_health` now
+    calls `evaluate_fabric_with_silences`, which applies
+    `NETTOOLS_SILENCE_FILE` (or an explicit `--silence-file`) internally.
+    Flipped the reverse of this test's original assertion; the runbook's
+    §5 text itself still needs the matching rewrite (tracked separately --
+    out of this file's scope, which only pins CLI/test behaviour)."""
 
     source = inspect.getsource(cli._cmd_health)
-    assert "apply_silences" not in source
+    assert "evaluate_fabric_with_silences" in source
 
 
-def test_no_silence_subcommand_is_registered():
-    """§5 says there is no `nettools silence` subcommand. Pinned against the
-    parser-building source rather than by trying to invoke the CLI, so this
-    stays a cheap, import-only check."""
+def test_a_silence_subcommand_is_still_not_registered_but_the_flag_is():
+    """§5 said there is no `nettools silence` subcommand -- still true, and
+    still not this wave's job to add. What changed is the OTHER half of
+    §5's claim: `NETTOOLS_SILENCE_FILE` is now a real, wired setting
+    (`--silence-file` on `nettools health`), not an absent one.
+    `NETTOOLS_SILENCE_FILE` itself is a `settings.py`/`health.py` concern,
+    not cli.py's -- the CLI only ever threads an explicit path through, by
+    design, so it is checked in the module that actually owns the env var
+    name."""
 
     source = inspect.getsource(cli)
     assert 'sub.add_parser("silence"' not in source
-    assert "NETTOOLS_SILENCE_FILE" not in source
+    assert "--silence-file" in source
+
+    assert "NETTOOLS_SILENCE_FILE" in inspect.getsource(settings)
 
 
 # --------------------------------------------------------------------------- #
