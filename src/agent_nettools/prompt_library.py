@@ -70,6 +70,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from functools import lru_cache
+from importlib import resources as importlib_resources
 from pathlib import Path
 from typing import Any
 
@@ -88,6 +89,16 @@ __all__ = [
     "load_prompt",
 ]
 
+# The source-tree location, three parents up from this file
+# (src/agent_nettools/prompt_library.py -> repo root -> prompts/). Kept as a
+# plain `Path`, and kept in `__all__` unchanged, deliberately: this constant
+# is public API (reviewed prompts are meant to be walkable on disk by anyone
+# working in a checkout), so widening it to a `Traversable` would be a type
+# change for every existing caller/test that treats it as a `Path`. It is
+# correct for a source checkout (editable install or a clone) and simply does
+# not exist in an installed wheel with no source tree nearby -- see
+# `_packaged_prompts_dir` and EER-003 below for the fallback that covers that
+# case without touching this constant's type or meaning.
 PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "prompts"
 
 #: The version each builder uses when a caller does not name one.
@@ -112,6 +123,32 @@ class PromptNotFoundError(FileNotFoundError):
     """A named prompt version does not exist."""
 
 
+def _packaged_prompts_dir() -> Path:
+    """The packaged fallback copy of the runtime-required prompts (EER-003).
+
+    ``PROMPTS_DIR`` is three parents up from this file -- the repo root -- so
+    it does not exist in an installed wheel with no source checkout nearby,
+    and `load_prompt` would raise `PromptNotFoundError` for every caller,
+    including the deterministic `investigate` path that runs with
+    `--no-model` and touches no LLM at all (`build_report_prompt` is still
+    reachable from a plain descent report). Follows the same precedent as
+    `inventory_model._packaged_fallback_path`: `src/agent_nettools/data/
+    prompts/*.txt` are checked-in byte-identical copies of the six
+    runtime-required versions (`report.v1/v2`, `correlate.v1..v4` --
+    `load_prompt` accepts any version and superseded versions are kept
+    reachable on purpose), declared in `pyproject.toml`'s
+    `[tool.setuptools.package-data]`, resolved through `importlib.resources`
+    so it works whether this is an editable or an installed copy. Kept honest
+    by `tests/test_packaging_prompts.py`, which fails loudly if a packaged
+    copy ever drifts from its source-tree original.
+
+    `prompts/tests/cases/*.json` and `prompts/README.md` are test-only and
+    are deliberately NOT packaged here -- nothing at runtime reads them.
+    """
+
+    return importlib_resources.files("agent_nettools") / "data" / "prompts"
+
+
 @lru_cache(maxsize=None)
 def load_prompt(name: str, version: int = 1) -> str:
     """Load ``prompts/<name>.v<version>.txt``.
@@ -120,15 +157,29 @@ def load_prompt(name: str, version: int = 1) -> str:
     output someone acts on: a report has to be attributable to the exact text
     that produced it. Silently editing a prompt in place makes every earlier
     report unreproducible.
+
+    Resolution order (EER-003): the source-tree ``PROMPTS_DIR`` first -- so an
+    operator's own edit to a prompt under active development is always what
+    runs -- then the packaged fallback under ``importlib.resources``, which is
+    the only copy that exists at all once this package is installed from a
+    built wheel with no source checkout nearby. The cache key stays
+    ``(name, version)``, unchanged: which of the two locations answered a
+    given call is not part of what a caller can observe or needs to.
     """
 
-    path = PROMPTS_DIR / f"{name}.v{version}.txt"
-    if not path.is_file():
-        raise PromptNotFoundError(
-            f"no prompt {name!r} version {version} at {path}; "
-            "prompts are versioned files, never edited in place"
-        )
-    return path.read_text(encoding="utf-8")
+    filename = f"{name}.v{version}.txt"
+    source_path = PROMPTS_DIR / filename
+    if source_path.is_file():
+        return source_path.read_text(encoding="utf-8")
+
+    packaged_path = _packaged_prompts_dir() / filename
+    if packaged_path.is_file():
+        return packaged_path.read_text(encoding="utf-8")
+
+    raise PromptNotFoundError(
+        f"no prompt {name!r} version {version} at {source_path} or in the "
+        "packaged fallback; prompts are versioned files, never edited in place"
+    )
 
 
 @dataclass(frozen=True)

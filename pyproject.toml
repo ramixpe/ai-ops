@@ -80,7 +80,11 @@ nettools = "agent_nettools.cli:main"
 nettools-mcp = "mcp_server.server:main"
 
 [tool.setuptools.package-data]
-agent_nettools = ["data/*.yaml"]
+# data/*.yaml: inventory/lab.yaml's packaged fallback copy (R2).
+# data/prompts/*.txt: the six runtime-required prompt versions (EER-003) --
+# report.v1/v2, correlate.v1..v4. `.txt` needs its own entry; the yaml glob
+# above does not cover it.
+agent_nettools = ["data/*.yaml", "data/prompts/*.txt"]
 
 [tool.setuptools.packages.find]
 where = ["src", "."]
