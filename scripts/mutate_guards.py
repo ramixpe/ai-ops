@@ -139,7 +139,10 @@ MUTATIONS = [
      "src/agent_nettools/epoch.py",
      "        return self.status in (FABRIC_MOVED, UNVERIFIED)",
      "        return False",
-     "refuses"),
+     # symbol narrowed from `refuses` (26 test files / 963 tests, ~60s of
+     # every full pass) to the constant the catching tests actually name --
+     # 2 files. P3, release-1.0 campaign.
+     "FABRIC_MOVED"),
 
     ("B-458", "the MCP boundary sanitises at registration",
      "mcp_server/server.py", "sanitize(", "(lambda x, **k: x)(",
@@ -163,7 +166,9 @@ MUTATIONS = [
 
     ("B-461", "rungs are numbered in the report",
      "src/agent_nettools/render.py", '"{position}/{total} ', '"',
-     "position"),
+     # symbol narrowed from `position` (9 test files / 735 tests) to the
+     # literal format placeholder only test_render.py contains. P3.
+     "{position}"),
 
     # ---- Wave 1 guards (FIX-PLAN). Three of these first ran with wrong
     # anchors/symbols or against a genuinely vacuous suite; the B-474 entry
