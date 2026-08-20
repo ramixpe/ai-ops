@@ -126,22 +126,33 @@ when. What changes is narrower and specific to what a silence is *for*:
 unlike a report) is allowed to actually skip delivery when silenced, while
 the *report* --  this module's concern -- never does.
 
-No dedicated environment variable, on purpose
------------------------------------------------
-Unlike ``inventory_model.resolve_inventory_path``'s ``NETTOOLS_INVENTORY``,
-:func:`load_silences` takes an explicit ``path`` and reads no environment
-variable of its own. ``settings.py`` -- where a new ``NETTOOLS_*`` variable
-would need to be declared and validated for ``nettools config show|check`` --
-is owned by another track this session; ``ledger.py`` sets the identical
-precedent for the identical reason (see its own module docstring's "No new
-environment variable" section). The wiring a future change needs -- a
-``NETTOOLS_SILENCE_FILE`` variable, read once in ``cli.py`` and passed down as
-``path=`` -- is offered in the report accompanying this change rather than
-applied here.
+``NETTOOLS_SILENCE_FILE`` -- verdict production, not just annotation
+----------------------------------------------------------------------
+:func:`load_silences` itself still takes an explicit ``path`` and reads no
+environment variable -- it stays a pure function, the same discipline
+``ledger.py``'s own module docstring gives for the identical shape. The
+environment variable lives one layer up, on the two functions that actually
+*produce* a verdict for a caller: :func:`evaluate_device_with_silences` and
+:func:`evaluate_fabric_with_silences`. Each runs ``evaluate_device``/
+``evaluate_fabric`` and then :func:`apply_silences`/
+:func:`apply_silences_to_fabric` in one call, resolving which silences apply
+in this order: an explicit ``silences=`` sequence wins outright; otherwise an
+explicit ``silence_path=`` is loaded; otherwise ``NETTOOLS_SILENCE_FILE`` is
+read and loaded. Declared in ``settings.py`` like every other ``NETTOOLS_*``
+variable, so it shows up in ``nettools config show|check``. Unset (the
+default) resolves to ``load_silences(None)`` -- ``()``, never an error -- so
+a verdict produced through these two functions with no silence file
+configured is byte-for-byte what :func:`evaluate_device`/:func:`evaluate_fabric`
+already returned, plus the always-present ``silenced: False`` tag
+:func:`apply_silences` adds to every finding. **Nothing above this line about
+"never removed" changes**: these two functions exist so a caller gets that
+guarantee automatically, by calling one function instead of remembering to
+thread three together; they do not change what silencing means.
 """
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -162,11 +173,18 @@ from .checks import (  # noqa: F401 - re-exported for the pre-merge importers
     exit_code_for_severity,
     severity_rank,
 )
+from .inventory_model import Device
+
+#: Read only by `evaluate_device_with_silences`/`evaluate_fabric_with_silences`
+#: below -- `load_silences` itself stays a pure function. Declared in
+#: settings.py so `nettools config show|check` lists it.
+NETTOOLS_SILENCE_FILE_ENV = "NETTOOLS_SILENCE_FILE"
 
 __all__ = [
     "ALL_RULES",
     "BASELINE_RULES",
     "META_RULES",
+    "NETTOOLS_SILENCE_FILE_ENV",
     "ROLE_INVARIANT_RULES",
     "SEVERITY_ORDER",
     "Rule",
@@ -176,7 +194,9 @@ __all__ = [
     "apply_silences",
     "apply_silences_to_fabric",
     "evaluate_device",
+    "evaluate_device_with_silences",
     "evaluate_fabric",
+    "evaluate_fabric_with_silences",
     "exit_code_for_severity",
     "find_silence",
     "load_silences",
@@ -514,3 +534,72 @@ def apply_silences_to_fabric(
     counts["silenced_devices"] = sorted(silenced_devices)
     result["counts"] = counts
     return result
+
+
+def _resolve_silences(
+    silences: Sequence[Silence] | None, silence_path: str | Path | None
+) -> Sequence[Silence]:
+    """Shared resolution order for the two verdict-production helpers below.
+
+    An explicit ``silences=`` sequence always wins (a caller -- typically a
+    test -- that already has parsed :class:`Silence` objects should never pay
+    for a file read it does not need). Otherwise an explicit ``silence_path=``
+    is loaded. Otherwise :data:`NETTOOLS_SILENCE_FILE_ENV` is read and loaded.
+    :func:`load_silences` already returns ``()`` -- never raises -- for
+    ``None`` or a nonexistent path, so "nothing configured" here is quiet by
+    construction, not something this helper has to special-case.
+    """
+
+    if silences is not None:
+        return silences
+    path = silence_path if silence_path is not None else os.getenv(NETTOOLS_SILENCE_FILE_ENV)
+    return load_silences(path)
+
+
+def evaluate_device_with_silences(
+    evidence: dict[str, Any],
+    device: Device,
+    *,
+    silences: Sequence[Silence] | None = None,
+    silence_path: str | Path | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """:func:`evaluate_device` followed by :func:`apply_silences`, in one call.
+
+    This is the verdict-production entry point promised by the module
+    docstring's "``NETTOOLS_SILENCE_FILE`` -- verdict production, not just
+    annotation" section: a silenced subject's verdict is still produced by
+    ``evaluate_device`` exactly as before, and this function only ever
+    ANNOTATES it -- the finding stays in ``findings``, tagged, never dropped
+    (see :func:`apply_silences`'s own docstring for the full guarantee). With
+    no silence source configured at all (no ``silences=``/``silence_path=``
+    and ``NETTOOLS_SILENCE_FILE`` unset), the returned verdict differs from a
+    bare ``evaluate_device`` call only by the always-present
+    ``silenced: False`` tag :func:`apply_silences` adds to every finding and
+    the ``raw_severity``/``counts["silenced"]``/``silences_applied`` fields it
+    always adds -- severity itself is unchanged, since nothing matched.
+    """
+
+    verdict = evaluate_device(evidence, device)
+    resolved = _resolve_silences(silences, silence_path)
+    return apply_silences(verdict, resolved, now=now)
+
+
+def evaluate_fabric_with_silences(
+    evidence_by_device: dict[str, dict[str, Any]],
+    devices: list[Device] | None = None,
+    *,
+    silences: Sequence[Silence] | None = None,
+    silence_path: str | Path | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """:func:`evaluate_fabric` followed by :func:`apply_silences_to_fabric`.
+
+    The fabric-wide counterpart to :func:`evaluate_device_with_silences` --
+    see its docstring for the silence-resolution order and the "never
+    removed" guarantee both of these functions ultimately rest on.
+    """
+
+    verdict = evaluate_fabric(evidence_by_device, devices)
+    resolved = _resolve_silences(silences, silence_path)
+    return apply_silences_to_fabric(verdict, resolved, now=now)
