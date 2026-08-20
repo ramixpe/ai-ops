@@ -111,7 +111,6 @@ from __future__ import annotations
 
 import contextlib
 import fcntl
-import math
 import os
 import re
 import sys
@@ -119,6 +118,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Iterator
+
+from ._env import _float_env, _int_env
 
 __all__ = [
     "AdmissionDenied",
@@ -129,36 +130,15 @@ __all__ = [
 
 
 # --------------------------------------------------------------------------- #
-# Env resolution: deliberately self-contained, not imported from
-# network_tools.py. network_tools.py imports THIS module (to gate
-# _netmiko_send_commands); the reverse import would be circular. settings.py's
-# own module docstring already names this shape ("near-duplicates in
-# notifier.py/evidence_budget.py") as an accepted cost of keeping module
-# boundaries acyclic, not an oversight repeated by accident here.
+# Env resolution: `_float_env`/`_int_env` now come from `._env`, a leaf
+# module with no imports of its own -- both this module and
+# `network_tools.py` (which imports THIS module, to gate
+# _netmiko_send_commands) can depend on it with no cycle. Before F2
+# (release-1.0 cleanup) this module carried its own copy specifically to
+# avoid that cycle; `settings.py`'s own module docstring named the resulting
+# duplication ("near-duplicates in notifier.py/evidence_budget.py") as an
+# accepted cost. F2 removed the cost without reintroducing the cycle.
 # --------------------------------------------------------------------------- #
-
-
-def _int_env(name: str, default: int) -> int:
-    raw = os.getenv(name, "").strip()
-    if not raw:
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        return default
-
-
-def _float_env(name: str, default: float) -> float:
-    raw = os.getenv(name, "").strip()
-    if not raw:
-        return default
-    try:
-        value = float(raw)
-    except ValueError:
-        return default
-    # NaN/inf pass every range check silently -- network_tools._float_env
-    # guards the same way for the same reason (2026-08-18 review).
-    return value if math.isfinite(value) else default
 
 
 NETTOOLS_ADMISSION_DIR_ENV = "NETTOOLS_ADMISSION_DIR"

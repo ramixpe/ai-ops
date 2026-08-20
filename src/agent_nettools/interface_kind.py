@@ -41,6 +41,7 @@ from enum import Enum
 __all__ = [
     "AGGREGATE_PREFIXES",
     "canonical",
+    "expansions_lower",
     "interface_scoped_flows",
     "same_interface",
     "MANAGEMENT_PREFIXES",
@@ -142,6 +143,16 @@ def physical_members(names: list[str]) -> tuple[list[str], list[str]]:
 #: ``show interfaces brief`` but not in ``show route``. Declared rather than
 #: derived by regex, the same discipline as the prefix tables above: the set of
 #: abbreviations a platform uses is a fact about the platform, not a pattern.
+#:
+#: **The one declared table** (F3, release-1.0 cleanup) -- this used to be a
+#: second, independent copy in ``grounding._IFACE_EXPANSIONS`` that drifted in
+#: both directions: this table had ``Twe``/``FH`` (25G/400G) that the other
+#: lacked, and the other had ``Mgmt``/``Null``/``Nu``/``BVI``/``BV``/
+#: ``tunnel-ip``/``ti``/``tunnel-te``/``tt`` that this one lacked. Both sides'
+#: entries are unioned in below so neither table's coverage was lost.
+#: :func:`expansions_lower` is the case-insensitive view ``grounding`` reads
+#: instead of keeping its own copy, so the two call sites cannot drift apart
+#: again.
 _EXPANSIONS: tuple[tuple[str, str], ...] = (
     ("GigabitEthernet", "GigabitEthernet"),
     ("TenGigE", "TenGigE"),
@@ -161,7 +172,31 @@ _EXPANSIONS: tuple[tuple[str, str], ...] = (
     ("Loopback", "Loopback"),
     ("Mg", "MgmtEth"),
     ("MgmtEth", "MgmtEth"),
+    # ---- Union additions from grounding._IFACE_EXPANSIONS (F3) ----
+    ("Mgmt", "MgmtEth"),
+    ("Null", "Null"),
+    ("Nu", "Null"),
+    ("BVI", "BVI"),
+    ("BV", "BVI"),
+    ("tunnel-ip", "tunnel-ip"),
+    ("ti", "tunnel-ip"),
+    ("tunnel-te", "tunnel-te"),
+    ("tt", "tunnel-te"),
 )
+
+
+def expansions_lower() -> dict[str, str]:
+    """:data:`_EXPANSIONS` as a lowercase abbreviation/long-form mapping.
+
+    The case-insensitive shape a free-text matcher needs -- built fresh from
+    the one declared table above every call, so it can never hold a stale
+    copy. ``grounding.canonical_identifier`` reads this instead of keeping
+    its own dict, which is what the F3 cleanup closed: before it, that
+    module's table was a second, independently-edited copy of this one and
+    the two drifted apart in both directions (see the table's own comment).
+    """
+
+    return {short.lower(): long.lower() for short, long in _EXPANSIONS}
 
 
 def canonical(name: str) -> str:

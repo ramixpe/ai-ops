@@ -483,21 +483,6 @@ def known_graph_read_queries() -> tuple[str, ...]:
     return tuple(sorted(NEO4J_READ_QUERIES))
 
 
-class GraphReadError(ValueError):
-    """A named read query is unknown. Never raised out of
-    :func:`run_named_read` -- caught there and turned into a
-    ``status="error"`` envelope, `netbox.NetBoxReadError`'s exact
-    counterpart."""
-
-
-class GraphTransportError(Exception):
-    """The read from neo4j failed, or its response was not usable.
-    `netbox.NetBoxTransportError`'s exact counterpart -- not currently
-    raised (classification happens inline in :func:`run_named_read`, the
-    same way `logs_loki`'s HTTP-status branches do), kept as a named type so
-    a future split mirrors `netbox.py`'s shape rather than inventing one."""
-
-
 def _read_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat()
 

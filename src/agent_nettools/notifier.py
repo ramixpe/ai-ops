@@ -181,6 +181,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Sequence
 
+from ._env import _float_env, _int_env
 from .ownership import DEFAULT_CHANNEL, Owner
 
 __all__ = [
@@ -236,28 +237,6 @@ def _redact(text: str) -> str:
     if token:
         text = text.replace(token, "[REDACTED]")
     return text
-
-
-def _float_env(name: str, default: float) -> float:
-    raw = os.getenv(name)
-    if raw is None or not raw.strip():
-        return default
-    try:
-        value = float(raw)
-    except ValueError:
-        return default
-    return value if value > 0 else default
-
-
-def _int_env(name: str, default: int) -> int:
-    raw = os.getenv(name)
-    if raw is None or not raw.strip():
-        return default
-    try:
-        value = int(raw)
-    except ValueError:
-        return default
-    return value if value > 0 else default
 
 
 # --------------------------------------------------------------------------- #

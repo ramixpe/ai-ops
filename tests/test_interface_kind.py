@@ -231,3 +231,72 @@ def test_the_capture_manifest_differs_deliberately_and_visibly():
     source = inspect.getsource(fixtures)
     assert 'startswith("Gi")' not in source
     assert "is_physical_member(name) or name ==" in source
+
+
+# --------------------------------------------------------------------------- #
+# F3 (release-1.0 cleanup): interface_kind._EXPANSIONS and
+# grounding._IFACE_EXPANSIONS were two independently-edited copies of the
+# same abbreviation table that had drifted in both directions -- this table
+# had Twe/FH that grounding's lacked, grounding's had Mgmt/Null/Nu/BVI/BV/
+# tunnel-ip/ti/tunnel-te/tt that this table lacked. grounding now reads
+# `expansions_lower()` instead of keeping its own dict; this test imports
+# both call sites and proves they can never silently diverge again.
+# --------------------------------------------------------------------------- #
+
+
+def test_grounding_reads_the_same_expansion_table_and_cannot_drift():
+    from agent_nettools import grounding, interface_kind
+
+    assert grounding._IFACE_EXPANSIONS == interface_kind.expansions_lower()
+    # Not merely equal by coincidence at import time -- literally the same
+    # data, sourced from the one declared table each time it is asked for.
+    assert grounding._IFACE_EXPANSIONS == {
+        short.lower(): long.lower() for short, long in interface_kind._EXPANSIONS
+    }
+
+
+def test_expansions_lower_carries_every_abbreviation_both_tables_used_to_have():
+    """The union, named explicitly so a future edit that drops one of these
+    by accident fails loudly rather than silently narrowing coverage again."""
+
+    from agent_nettools import interface_kind
+
+    lower = interface_kind.expansions_lower()
+    # Present only in interface_kind._EXPANSIONS before F3 (25G/400G):
+    assert lower["twe"] == "twentyfivegige"
+    assert lower["fh"] == "fourhundredgige"
+    # Present only in grounding._IFACE_EXPANSIONS before F3:
+    assert lower["mgmt"] == "mgmteth"
+    assert lower["null"] == "null"
+    assert lower["nu"] == "null"
+    assert lower["bvi"] == "bvi"
+    assert lower["bv"] == "bvi"
+    assert lower["tunnel-ip"] == "tunnel-ip"
+    assert lower["ti"] == "tunnel-ip"
+    assert lower["tunnel-te"] == "tunnel-te"
+    assert lower["tt"] == "tunnel-te"
+    # Present in both before F3:
+    assert lower["gi"] == "gigabitethernet"
+    assert lower["te"] == "tengige"
+    assert lower["fo"] == "fortygige"
+    assert lower["hu"] == "hundredgige"
+    assert lower["lo"] == "loopback"
+    assert lower["mg"] == "mgmteth"
+    assert lower["be"] == "bundle-ether"
+
+
+def test_canonical_now_expands_bv_and_nu_which_this_fabric_actually_produces():
+    """`BV200`/`Nu0` are in `REAL_NAMES` above -- this fabric produces both.
+    Before F3, `interface_kind._EXPANSIONS` had no entry for either, so
+    `canonical("BV200")`/`canonical("Nu0")` returned the abbreviation
+    unchanged: a real `show interfaces brief` reading of a BVI or Null
+    interface could never be matched against a `show route`/long-form
+    reading of the same port. The union fixes this for interface_kind's own
+    device-text canonicalisation, not only for grounding's free-text one."""
+
+    from agent_nettools.interface_kind import canonical, same_interface
+
+    assert canonical("BV200") == "BVI200"
+    assert canonical("Nu0") == "Null0"
+    assert same_interface("BV200", "BVI200")
+    assert same_interface("Nu0", "Null0")

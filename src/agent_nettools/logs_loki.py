@@ -117,6 +117,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Mapping
 
 from . import log_window
+from ._env import _float_env
 from .coverage import Coverage
 from .inventory_model import find_device
 from .parsers import PARSE_FAILED, PARSE_OK
@@ -134,7 +135,6 @@ __all__ = [
     "LokiQuery",
     "LokiQueryError",
     "LokiTransportError",
-    "UnknownLokiQueryError",
     "coverage_from_loki",
     "known_loki_queries",
     "run_named_query",
@@ -190,21 +190,6 @@ DEFAULT_TIMEOUT_SECONDS = 10.0
 MEASURED_SEVERITY_AVAILABLE: tuple[int, ...] = (3, 4)
 
 
-def _float_env(name: str, default: float) -> float:
-    """Same shape as `network_tools._float_env`/`notifier._float_env` --
-    a fourth copy of a helper `settings.py`'s own docstring already notes is
-    duplicated three times; not a new smell."""
-
-    raw = os.getenv(name, "").strip()
-    if not raw:
-        return default
-    try:
-        value = float(raw)
-    except ValueError:
-        return default
-    return value if value > 0 else default
-
-
 def _loki_url() -> str:
     return os.getenv(LOKI_URL_ENV, "").strip() or DEFAULT_LOKI_URL
 
@@ -224,10 +209,6 @@ class LokiQueryError(ValueError):
     (§0.5) and governs a different command surface (device commands, not a
     log query), and this module must not couple to it.
     """
-
-
-class UnknownLokiQueryError(LokiQueryError):
-    """The caller asked for a query name not in :data:`LOKI_QUERIES`."""
 
 
 class LokiTransportError(Exception):
@@ -370,18 +351,6 @@ LOKI_QUERIES: dict[str, LokiQuery] = {
         ),
     ),
 }
-
-#: (record-context, field) pairs this module's records carry that are
-#: device-authored free text. Deliberately reuses `("logging", "text")` /
-#: `("logging", "code")`'s own field names under a new context
-#: (`"logs_for_device"`, the query name) -- see the module docstring's
-#: "Field-name choice" section for why that is the safe direction, not a
-#: shortcut. Merge this into `model_egress.FREE_TEXT_FIELDS` (this module
-#: does not import that module -- see `_base_envelope`'s docstring for why
-#: `agent_nettools` submodules stay independent of each other where nothing
-#: requires the coupling; `model_egress.py` is edited directly instead, in
-#: the same commit, per the build's own instruction).
-FREE_TEXT_CONTEXT = "logs_for_device"
 
 
 def known_loki_queries() -> tuple[str, ...]:
