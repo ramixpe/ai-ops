@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 
 import pytest
 from mcp import ClientSession
@@ -440,7 +441,7 @@ def test_protect_stdio_leaves_an_unconfigured_root_logger_safe():
 
 
 def test_importing_the_server_writes_nothing_to_stdout():
-    """The import-time half: `load_dotenv` and 21 tool registrations, silent."""
+    """The import-time half: 21 tool registrations, silent."""
 
     import subprocess
     import sys
@@ -451,6 +452,52 @@ def test_importing_the_server_writes_nothing_to_stdout():
     )
 
     assert result.stdout == "", f"stdout polluted at import: {result.stdout!r}"
+
+
+def test_importing_the_server_does_not_load_dotenv(monkeypatch, tmp_path):
+    """R8/OBS-50x: import must be side-effect-free.
+
+    `load_dotenv` used to run at module level, so merely importing
+    `mcp_server.server` (which every test in this file does) loaded whatever
+    real secrets sat in a developer's cwd `.env` into the pytest process --
+    the verification environment contaminated by the thing being verified,
+    the same shape of bug OBS-072 named for `cli.py`. It is now loaded only
+    from `main()`.
+
+    A poisoned `.env` in cwd proves the import path stays silent (never the
+    repo's real `.env` -- a fabricated poison var that nothing else could
+    plausibly set). The positive control (OBS-181) proves the same poison
+    *would* have been picked up by the loading path `main()` actually uses,
+    so the negative result is not vacuous (OBS-191) -- without it, this test
+    would pass identically if `.env` loading were deleted everywhere, not
+    just moved.
+    """
+
+    import importlib
+
+    from dotenv import find_dotenv, load_dotenv
+
+    poison_var = "NETTOOLS_TEST_DOTENV_POISON"
+    monkeypatch.delenv(poison_var, raising=False)
+    (tmp_path / ".env").write_text(f"{poison_var}=leaked\n")
+    monkeypatch.chdir(tmp_path)
+
+    try:
+        importlib.reload(server)
+        assert os.getenv(poison_var) is None, (
+            "importing mcp_server.server must not load .env"
+        )
+
+        # Positive control: the exact loading path main() uses DOES pick up
+        # the same poisoned .env when actually invoked.
+        load_dotenv(find_dotenv(usecwd=True)) or load_dotenv()
+        assert os.getenv(poison_var) == "leaked", (
+            "the loading path itself never sets this variable -- the negative "
+            "assertion above would be vacuous"
+        )
+    finally:
+        monkeypatch.delenv(poison_var, raising=False)
+        importlib.reload(server)  # restore a clean module for later tests
 
 
 def test_the_investigate_tool_advertises_every_implemented_flow():
