@@ -140,6 +140,7 @@ def test_resolve_device_falls_back_to_default_when_none(monkeypatch):
 
 
 def test_check_command_success_exits_zero_and_prints_json(monkeypatch, capsys):
+    cli._require("CHECK_TOOLS")
     monkeypatch.setitem(cli.CHECK_TOOLS, "facts", lambda device: _envelope())
     parser = cli.build_parser()
     args = parser.parse_args(["facts", "PE1"])
@@ -167,6 +168,7 @@ def test_check_command_error_status_exits_warning(monkeypatch, capsys):
 def test_check_command_uses_default_device_when_omitted(monkeypatch, capsys):
     monkeypatch.setattr(cli, "get_default_device_name", lambda: "PE1")
     seen = []
+    cli._require("CHECK_TOOLS")
     monkeypatch.setitem(cli.CHECK_TOOLS, "facts", lambda device: seen.append(device) or _envelope())
     parser = cli.build_parser()
     args = parser.parse_args(["facts"])
@@ -177,6 +179,7 @@ def test_check_command_uses_default_device_when_omitted(monkeypatch, capsys):
 
 
 def test_check_command_format_table(monkeypatch, capsys):
+    cli._require("CHECK_TOOLS")
     monkeypatch.setitem(cli.CHECK_TOOLS, "facts", lambda device: _envelope())
     parser = cli.build_parser()
     args = parser.parse_args(["facts", "PE1", "--format", "table"])
@@ -189,6 +192,7 @@ def test_check_command_format_table(monkeypatch, capsys):
 
 
 def test_check_command_format_summary(monkeypatch, capsys):
+    cli._require("CHECK_TOOLS")
     monkeypatch.setitem(cli.CHECK_TOOLS, "facts", lambda device: _envelope())
     parser = cli.build_parser()
     args = parser.parse_args(["facts", "PE1", "--format", "summary"])
@@ -199,6 +203,7 @@ def test_check_command_format_summary(monkeypatch, capsys):
 
 
 def test_check_command_quiet_suppresses_all_output(monkeypatch, capsys):
+    cli._require("CHECK_TOOLS")
     monkeypatch.setitem(cli.CHECK_TOOLS, "facts", lambda device: _envelope())
     parser = cli.build_parser()
     args = parser.parse_args(["facts", "PE1", "--quiet"])
@@ -956,6 +961,7 @@ def _stub_load_dotenv(monkeypatch):
 def test_main_dispatches_to_the_right_subcommand(monkeypatch, capsys):
     _stub_load_dotenv(monkeypatch)
     monkeypatch.setattr(sys, "argv", ["nettools", "facts", "PE1"])
+    cli._require("CHECK_TOOLS")
     monkeypatch.setitem(cli.CHECK_TOOLS, "facts", lambda device: _envelope())
 
     assert cli.main() == cli.EXIT_OK
