@@ -76,6 +76,34 @@ DEFAULT_EVIDENCE_BACKEND = "files"
 
 _SQLITE_FILENAME = "evidence.db"
 
+# EER-019: this store holds device evidence (and, via metrics.py sharing
+# `_atomic_write_text`, operational counters) that should not be readable by
+# other accounts on a shared host. 0600/0700 -- owner-only -- is the
+# defensible fixed default; an operator who deliberately wants to share a
+# directory can already do so with a `chmod` after the fact, or a group-ID
+# sticky bit on the parent directory, without this project adding a new env
+# var (`settings.py` is owned elsewhere this wave; see the EER-019 report for
+# why a setting was considered and not added).
+_SECURE_DIR_MODE = 0o700
+_SECURE_FILE_MODE = 0o600
+
+
+def _secure_mkdir(directory: Path) -> None:
+    """Create ``directory`` (and parents) then force ``_SECURE_DIR_MODE`` on it.
+
+    ``Path.mkdir(mode=...)`` alone is not sufficient: with ``exist_ok=True``
+    the ``mode`` argument is silently ignored once the directory already
+    exists (the common case -- every snapshot after the first), so a
+    directory created under a permissive umask before this fix, or nudged
+    open by hand, would stay world-readable forever. The explicit
+    ``os.chmod`` below runs on *every* call, not just the directory's first
+    creation, so it self-heals on the next write instead of only protecting
+    directories created after this change shipped.
+    """
+
+    directory.mkdir(parents=True, exist_ok=True)
+    os.chmod(directory, _SECURE_DIR_MODE)
+
 
 def _snapshot_dir(base_dir: str | None) -> Path:
     return Path(base_dir or os.getenv(NETTOOLS_EVIDENCE_DIR_ENV) or DEFAULT_SNAPSHOT_DIR)
@@ -98,10 +126,22 @@ def _atomic_write_text(path: Path, text: str) -> None:
     found. fsync before the rename so the tempfile's bytes are actually on
     disk, not just sitting in the OS write cache, before the rename that
     makes them visible under the final name.
+
+    EER-019: ``tempfile.mkstemp`` creates the tempfile ``0600`` (owner
+    read/write only), and that mode **survives** ``os.replace`` -- POSIX
+    rename semantics mean the destination directory entry is repointed at the
+    source inode, not that the destination's pre-existing permissions apply
+    to the new content. Verified empirically (a target file pre-chmod'd
+    ``0644``, then overwritten via this exact mkstemp+replace sequence, ends
+    up ``0600``, matching the tempfile it replaced) and pinned by
+    ``test_atomic_write_text_result_is_0600_even_overwriting_a_permissive_file``
+    in ``tests/test_evidence_store.py``. So the *file* mode here was already
+    correct by construction; only the *directory* mode was not -- hence
+    ``_secure_mkdir`` below instead of the bare ``mkdir`` this used to call.
     """
 
     directory = path.parent
-    directory.mkdir(parents=True, exist_ok=True)
+    _secure_mkdir(directory)
     fd, tmp_name = tempfile.mkstemp(dir=directory, prefix=f".{path.name}.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -303,7 +343,10 @@ class FileEvidenceStore(EvidenceStore):
         _validate_device_name(device)
         stamp = _timestamp_now().replace(":", "-")
         directory = self._device_dir(device)
-        directory.mkdir(parents=True, exist_ok=True)
+        # Redundant with `_atomic_write_text`'s own `_secure_mkdir` below, but
+        # cheap and explicit -- EER-019, same belt-and-suspenders reasoning
+        # `_device_dir`'s own docstring gives for its two independent gates.
+        _secure_mkdir(directory)
         path = directory / f"{stamp}.json"
         _atomic_write_text(path, json.dumps(evidence, indent=2))
         return str(path)
@@ -318,7 +361,7 @@ class FileEvidenceStore(EvidenceStore):
         device = str(evidence.get("device", "unknown"))
         _validate_device_name(device)
         directory = self._device_dir(device)
-        directory.mkdir(parents=True, exist_ok=True)
+        _secure_mkdir(directory)  # EER-019, see save_snapshot's comment above.
         path = directory / GOLDEN_SNAPSHOT_FILENAME
         _atomic_write_text(path, json.dumps(evidence, indent=2))
         return str(path)
@@ -393,8 +436,17 @@ class SQLiteEvidenceStore(EvidenceStore):
 
     def __init__(self, base_dir: str | None = None) -> None:
         self._path = _snapshot_dir(base_dir) / _SQLITE_FILENAME
-        self._path.parent.mkdir(parents=True, exist_ok=True)
+        _secure_mkdir(self._path.parent)
         self._init_schema()
+        # EER-019: `sqlite3.connect` (called by `_init_schema` -> `_connect`)
+        # creates the file, if missing, with the process's default mode
+        # (0o666 & ~umask) -- the sqlite3 module offers no creation-mode
+        # parameter, unlike `tempfile.mkstemp`. Chmod unconditionally, not
+        # just "if just created": `_init_schema` runs on every construction
+        # (existing db or new), so this also self-heals a pre-existing
+        # `evidence.db` left permissive by an older version of this code, or
+        # by hand.
+        os.chmod(self._path, _SECURE_FILE_MODE)
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(str(self._path))

@@ -13,6 +13,7 @@ disagree; this one is a summary, not a parametrised test, but the same
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -208,6 +209,46 @@ def test_ledger_file_is_literally_append_only_jsonl(tmp_path):
     assert len(lines) == 2
     assert lines[0] == first_line  # Untouched by the second write.
     assert json.loads(lines[1])["device"] == "PE2"
+
+
+# --------------------------------------------------------------------------- #
+# Durable-data permissions (EER-019). A diagnosis entry can carry `cause`/
+# `reason` detail lifted from device evidence -- owner-only by default, the
+# same fixed mode `evidence_store.py`/`ticket.py` use.
+#
+# Both modes below come from an explicit `os.chmod` in `ledger._append`/
+# `ledger._secure_mkdir`, which sets exactly the bits requested regardless of
+# the process umask -- so these are exact assertions, not "no group/other
+# bits", and need no umask fixture. See `evidence_store._secure_mkdir`'s
+# docstring for the same reasoning applied to the sibling module.
+# --------------------------------------------------------------------------- #
+
+
+def test_ledger_directory_is_0700(tmp_path):
+    path = tmp_path / "sub" / "ledger.jsonl"  # directory does not exist yet
+    led = ledger.DiagnosisLedger(path=str(path))
+    _diagnosis(led)
+
+    assert path.parent.stat().st_mode & 0o777 == 0o700
+
+
+def test_ledger_file_is_0600(tmp_path):
+    path = tmp_path / "ledger.jsonl"
+    led = ledger.DiagnosisLedger(path=str(path))
+    _diagnosis(led)
+
+    assert path.stat().st_mode & 0o777 == 0o600
+
+
+def test_ledger_file_self_heals_a_permissive_file_on_the_next_append(tmp_path):
+    path = tmp_path / "ledger.jsonl"
+    led = ledger.DiagnosisLedger(path=str(path))
+    _diagnosis(led)
+    os.chmod(path, 0o644)  # simulate a file left permissive by an older version
+
+    _diagnosis(led, device="PE2")
+
+    assert path.stat().st_mode & 0o777 == 0o600
 
 
 def test_in_memory_only_when_no_path_is_configured(tmp_path, monkeypatch):

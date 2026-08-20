@@ -289,6 +289,28 @@ def _session_dir(base_dir: str | None) -> Path:
     return Path(env_dir or DEFAULT_SESSION_MEMORY_DIR)
 
 
+# EER-019: a session-memory record names a device/subject/flow/ticket path
+# for one operator's recent turn -- private the same way ticket/evidence data
+# is. Re-declared locally rather than imported from `evidence_store.py` for
+# the same "each is plausibly somebody else's" reason the module docstring's
+# "Storage" section already gives for re-declaring `_atomic_write_text`
+# itself.
+_SECURE_DIR_MODE = 0o700
+
+
+def _secure_mkdir(directory: Path) -> None:
+    """Create ``directory`` (and parents) then force ``_SECURE_DIR_MODE`` on it.
+
+    Same reasoning as `evidence_store._secure_mkdir`: `Path.mkdir(mode=...)`
+    is a no-op on an already-existing directory (the common case here --
+    every turn after a session's first), so the chmod must happen explicitly,
+    on every call, for a pre-existing permissive directory to self-heal.
+    """
+
+    directory.mkdir(parents=True, exist_ok=True)
+    os.chmod(directory, _SECURE_DIR_MODE)
+
+
 def _atomic_write_text(path: Path, text: str) -> None:
     """Write via tempfile in the same directory + fsync + os.replace.
 
@@ -296,10 +318,17 @@ def _atomic_write_text(path: Path, text: str) -> None:
     the module docstring's "Storage" section. Same-directory tempfile matters
     for the same reason `evidence_store._atomic_write_text` gives: `os.replace`
     is only atomic within one filesystem.
+
+    EER-019: `tempfile.mkstemp`'s ``0600`` mode survives `os.replace` (POSIX
+    rename repoints the directory entry at the source inode; the
+    destination's old permissions do not apply to the new content) -- see
+    `evidence_store._atomic_write_text`'s docstring for how this was
+    verified. Only the *directory* needed an explicit fix, hence
+    `_secure_mkdir` below.
     """
 
     directory = path.parent
-    directory.mkdir(parents=True, exist_ok=True)
+    _secure_mkdir(directory)
     fd, tmp_name = tempfile.mkstemp(dir=directory, prefix=f".{path.name}.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:

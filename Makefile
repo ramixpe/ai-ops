@@ -1,4 +1,25 @@
 PYTHON ?= python3
+
+# Resolve dev tools through the local venv when it exists, so every target
+# below works whether or not the venv is activated (EER-020). Before this,
+# `make lint`/`make test`/any `nettools ...` target failed with a bare
+# "command not found" outside an activated shell -- not a product defect
+# (CONTRIBUTING.md's own "Before you change anything" says to activate
+# first), but a rough enough edge that it has been mistaken for a real
+# regression (`make: nettools: No such file or directory` read as a broken
+# build rather than a missing `source .venv/bin/activate`). Each variable
+# prefers $(VENV_BIN)/<tool> when `make setup` has actually created it --
+# `$(wildcard ...)` is evaluated once, at parse time -- and falls back to the
+# bare name, resolved through $PATH, when it has not: an activated venv or a
+# tool installed elsewhere behaves exactly as before. `make setup` itself is
+# untouched; it is what creates the path these variables check for.
+VENV := .venv
+VENV_BIN := $(VENV)/bin
+NETTOOLS := $(if $(wildcard $(VENV_BIN)/nettools),$(VENV_BIN)/nettools,nettools)
+NETTOOLS_MCP := $(if $(wildcard $(VENV_BIN)/nettools-mcp),$(VENV_BIN)/nettools-mcp,nettools-mcp)
+PYTEST := $(if $(wildcard $(VENV_BIN)/pytest),$(VENV_BIN)/pytest,pytest)
+RUFF := $(if $(wildcard $(VENV_BIN)/ruff),$(VENV_BIN)/ruff,ruff)
+
 # PE1 matches agent_nettools.inventory.get_default_device_name()'s own
 # fallback, so this is an explicit spelling of the same default, not a new
 # one. Made explicit (rather than left empty) because the Phase 5 template
@@ -44,66 +65,66 @@ setup:  ## Create venv and install the package (dev+llm extras)
 	. .venv/bin/activate && python -m pip install --upgrade pip && pip install -e ".[dev,llm]"
 
 test:  ## Run unit tests
-	pytest -q
+	$(PYTEST) -q
 
 lint:  ## Run Ruff
-	ruff check .
+	$(RUFF) check .
 
 inventory:  ## List devices without credentials
-	nettools inventory
+	$(NETTOOLS) inventory
 
 facts:  ## Facts on PE1 (or DEVICE=name)
-	nettools facts $(DEVICE)
+	$(NETTOOLS) facts $(DEVICE)
 
 interfaces:  ## Interface status on PE1 (or DEVICE=name)
-	nettools interfaces $(DEVICE)
+	$(NETTOOLS) interfaces $(DEVICE)
 
 bgp:  ## BGP summary on PE1 (or DEVICE=name)
-	nettools bgp $(DEVICE)
+	$(NETTOOLS) bgp $(DEVICE)
 
 lldp:  ## LLDP neighbors on PE1 (or DEVICE=name)
-	nettools lldp $(DEVICE)
+	$(NETTOOLS) lldp $(DEVICE)
 
 isis:  ## IS-IS neighbors on PE1 (or DEVICE=name)
-	nettools isis $(DEVICE)
+	$(NETTOOLS) isis $(DEVICE)
 
 sr:  ## SR-TE policies on PE1 (or DEVICE=name)
-	nettools sr $(DEVICE)
+	$(NETTOOLS) sr $(DEVICE)
 
 fabric-bgp:  ## BGP summary across the whole inventory
-	nettools fabric bgp
+	$(NETTOOLS) fabric bgp
 
 # Validated, parameterized command templates (Phase 5). See CLAUDE.md,
 # "Validated, parameterized command templates". ping/traceroute generate
 # traffic (active probes) and are gated by NETTOOLS_ALLOW_ACTIVE_PROBES.
 route:  ## Look up a route (DEVICE=name PREFIX=10.0.0.0/24)
-	nettools route $(DEVICE) $(PREFIX)
+	$(NETTOOLS) route $(DEVICE) $(PREFIX)
 
 bgp-neighbor:  ## Look up a BGP neighbor (DEVICE=name ADDRESS=...)
-	nettools bgp-neighbor $(DEVICE) $(ADDRESS)
+	$(NETTOOLS) bgp-neighbor $(DEVICE) $(ADDRESS)
 
 interface:  ## Look up an interface (DEVICE=name NAME=...)
-	nettools interface $(DEVICE) $(NAME)
+	$(NETTOOLS) interface $(DEVICE) $(NAME)
 
 sr-policy:  ## Look up an SR-TE policy's candidate path/SID detail (DEVICE=name POLICY_ID=colour:endpoint)
-	nettools sr-policy $(DEVICE) $(POLICY_ID)
+	$(NETTOOLS) sr-policy $(DEVICE) $(POLICY_ID)
 
 logging:  ## Show recent log lines (DEVICE=name COUNT=...)
-	nettools logging $(DEVICE) --count $(COUNT)
+	$(NETTOOLS) logging $(DEVICE) --count $(COUNT)
 
 ping:  ## Ping from a device (DEVICE=name ADDRESS=...); active probe
-	nettools ping $(DEVICE) $(ADDRESS)
+	$(NETTOOLS) ping $(DEVICE) $(ADDRESS)
 
 traceroute:  ## Traceroute from a device (DEVICE=name ADDRESS=...); active probe
-	nettools traceroute $(DEVICE) $(ADDRESS)
+	$(NETTOOLS) traceroute $(DEVICE) $(ADDRESS)
 
 analyze:  ## Collect evidence and analyze with the selected LLM
-	nettools analyze $(DEVICE)
+	$(NETTOOLS) analyze $(DEVICE)
 
 # Phase 6: cross-device correlation over the whole fabric's evidence + Phase 4
 # health verdicts, instead of one device at a time.
 analyze-fabric:  ## Analyze the whole fabric together (cross-device correlation)
-	nettools analyze --fabric
+	$(NETTOOLS) analyze --fabric
 
 # Phase 6: bounded, read-only tool-calling agent loop. Anthropic only -- see
 # CLAUDE.md, "Bounded agent loop (Phase 6)".
@@ -111,63 +132,63 @@ analyze-fabric:  ## Analyze the whole fabric together (cross-device correlation)
 # chooses its own tools and writes its own answer, which is the opposite
 # of what the rest of this tool claims. Set NETTOOLS_ENABLE_AGENT=1 to opt in.
 agent:  ## Ask the bounded tool-calling agent a question (QUESTION=...; Anthropic only)
-	nettools agent "$(QUESTION)"
+	$(NETTOOLS) agent "$(QUESTION)"
 
 demo:  ## Run the narrated agent demo (or DEVICE=name)
-	nettools demo $(DEVICE)
+	$(NETTOOLS) demo $(DEVICE)
 
 diff:  ## Diff evidence against the last snapshot (or DEVICE=name)
-	nettools diff $(DEVICE)
+	$(NETTOOLS) diff $(DEVICE)
 
 # Recaptures both halves of the quiet-fabric pair. Review the git diff by eye
 # before committing: fixtures are permanent once pushed.
 capture:  ## Recapture test fixtures from the whole lab
-	nettools capture --all --label t0
+	$(NETTOOLS) capture --all --label t0
 	sleep 75
-	nettools capture --all --label t1
+	$(NETTOOLS) capture --all --label t1
 
 # Derives expected/ blocks from the committed t0 fixtures and prints the
 # fabric anomaly report; pass ARGS=--live to derive from a live collection.
 learn-topology:  ## Derive expected topology from fixtures and update inventory/lab.yaml
-	nettools learn-topology $(ARGS)
+	$(NETTOOLS) learn-topology $(ARGS)
 
 # Deterministic health verdicts (see CLAUDE.md, "Phase 4"). Exit codes:
 # 0 ok/info, 1 warning, 2 critical.
 health:  ## Evaluate health verdicts across the whole fabric (live)
-	nettools health --all
+	$(NETTOOLS) health --all
 
 health-fixtures:  ## Evaluate health verdicts against the committed t0 fixtures
-	nettools health --all --from-fixtures
+	$(NETTOOLS) health --all --from-fixtures
 
 baseline-pin:  ## Pin a golden snapshot (or DEVICE=name)
-	nettools baseline pin $(DEVICE)
+	$(NETTOOLS) baseline pin $(DEVICE)
 
 baseline-show:  ## Print a device's pinned golden snapshot (or DEVICE=name)
-	nettools baseline show $(DEVICE)
+	$(NETTOOLS) baseline show $(DEVICE)
 
 flaps:  ## Detect oscillating fields in snapshot history (or DEVICE=name)
-	nettools flaps $(DEVICE)
+	$(NETTOOLS) flaps $(DEVICE)
 
 # Retention/prune (Phase 7): deletes timestamped snapshots outside the
 # retention window (never the pinned golden snapshot), against whichever
 # NETTOOLS_EVIDENCE_BACKEND selects.
 evidence-prune:  ## Prune old snapshots (KEEP_DAYS=30 KEEP_COUNT=20 by default)
-	nettools evidence prune --keep-days $(KEEP_DAYS) --keep-count $(KEEP_COUNT)
+	$(NETTOOLS) evidence prune --keep-days $(KEEP_DAYS) --keep-count $(KEEP_COUNT)
 
 # Phase 8: operational metrics (per-device collection outcomes/latency/retries,
 # health verdict counts by severity). In-memory only unless
 # NETTOOLS_METRICS_FILE is set -- see .env.example.
 metrics:  ## Report operational metrics (JSON; ARGS=--format=prometheus for text exposition)
-	nettools metrics $(ARGS)
+	$(NETTOOLS) metrics $(ARGS)
 
 version:  ## Print the installed nettools version
-	nettools version
+	$(NETTOOLS) version
 
 mcp:  ## Start the MCP server over stdio
-	nettools-mcp
+	$(NETTOOLS_MCP)
 
 inspect:  ## Smoke-test the MCP server (or DEVICE=name)
-	nettools inspect $(DEVICE)
+	$(NETTOOLS) inspect $(DEVICE)
 
 docker-build:  ## Build the MCP server container image
 	docker build -t ios-xr-nettools-mcp .
@@ -178,16 +199,16 @@ clean:  ## Remove caches and build artifacts
 
 # --- OPS wave (B-477/B-480/B-476) -------------------------------------------
 audit:  ## Deterministic fabric audit (exit 0 ok/info, 1 warning, 2 critical)
-	nettools audit
+	$(NETTOOLS) audit
 
 audit-fixtures:  ## The same audit against committed captures (no lab needed)
-	nettools audit --from-fixtures --label healthy
+	$(NETTOOLS) audit --from-fixtures --label healthy
 
 config-check:  ## Validate every NETTOOLS_*/provider env var; exit 1 on problems
-	nettools config check
+	$(NETTOOLS) config check
 
 route-event:  ## Route an event from stdin (pipe an Alertmanager JSON or syslog line in)
-	nettools route-event
+	$(NETTOOLS) route-event
 
 # --- Investigation layer (MVP-0, B-485) -------------------------------------
 # investigate and ledger existed on the CLI with no make wrapper until now
@@ -195,11 +216,11 @@ route-event:  ## Route an event from stdin (pipe an Alertmanager JSON or syslog 
 # match how the OPS wave targets above were themselves appended rather than
 # reordered in.
 investigate:  ## Deterministically descend a flow's dependency stack and report the cause (DEVICE=name SUBJECT=address; ARGS=--flow bgp_session|interface|isis_adjacency|ldp_session, --from-fixtures, etc.)
-	nettools investigate $(DEVICE) $(SUBJECT) $(ARGS)
+	$(NETTOOLS) investigate $(DEVICE) $(SUBJECT) $(ARGS)
 
 ledger-summary:  ## Diagnosis accuracy ledger: counts by outcome (unknown always shown)
-	nettools ledger summary
+	$(NETTOOLS) ledger summary
 
 ledger-verdict:  ## Record a human verdict on one diagnosis (DIAGNOSIS_ID=id OUTCOME=confirmed_correct|incorrect|unknown; ARGS=--by NAME optional)
-	nettools ledger verdict $(DIAGNOSIS_ID) $(OUTCOME) $(ARGS)
+	$(NETTOOLS) ledger verdict $(DIAGNOSIS_ID) $(OUTCOME) $(ARGS)
 

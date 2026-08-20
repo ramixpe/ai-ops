@@ -12,10 +12,37 @@ Work beyond MVP-0, staged. Nothing here is scheduled — this is the ordered lis
 
 ## State vocabulary
 
+Seven states are in use below — this section used to document five of them; EER-016 found the other two (`CLOSED-AS-REFUSED`, `CLOSED-AS-MEASURED`) already in the Reconciliation table's own rows since 2026-08-19 but never added here. **A vocabulary a reader is told exists must be exactly the vocabulary the table uses, not a subset of it** — that gap is closed below.
+
 `DONE` shipped and verified · `OPEN` real work, not started · `DEFERRED`
 examined and postponed, **carrying its unblocking condition** · `BLOCKED`
-cannot proceed (hardware, another repo, an unlanded dependency) ·
-**`OUT-OF-SCOPE`** decided against.
+cannot proceed (hardware, another repo, an unlanded dependency), **carrying
+what would unblock it** · `CLOSED-AS-REFUSED` investigated in detail and
+declined on the evidence gathered · `CLOSED-AS-MEASURED` the item asked a
+question and taking the measurement answered it, no build required ·
+**`OUT-OF-SCOPE`** decided against, independent of what a future
+investigation would show.
+
+**`DEFERRED` vs. `BLOCKED`.** `DEFERRED` is *chose not to yet, and this is
+what would change that* — a decision, reversible by a condition the row
+itself names (e.g. B-301: "until Stage 3"; B-443: "until a second address
+family or a VRF-scoped session exists"). `BLOCKED` is *cannot, right now* —
+a circumstance (hardware, another repo, an unlanded dependency), reversible
+only when that circumstance changes, which the row also names (e.g. B-412:
+"outside this repository"; B-440: "needs the lab").
+
+**`CLOSED-AS-REFUSED` vs. `OUT-OF-SCOPE`.** Both mean "not being built", for
+different reasons. `CLOSED-AS-REFUSED` follows an investigation — the
+evidence gathered *is* the reason, and several rows name a reopening
+condition case by case (B-110: "reopens if VRF commands are added").
+`OUT-OF-SCOPE` is decided **without** evidence being the deciding factor — an
+operator choice (B-401/B-510) that stands regardless of what a future
+measurement would show.
+
+**`CLOSED-AS-MEASURED` vs. `DONE`.** `DONE` means something was built and
+shipped. `CLOSED-AS-MEASURED` means the item was a question — taking the
+measurement closed it (B-414, B-620), and there is no code to point to
+because none was needed.
 
 `OUT-OF-SCOPE` was added 2026-08-18 for the same reason `DEFERRED` was added at
 Gate Zero: the vocabulary was one state short and items were being labelled
@@ -26,6 +53,41 @@ anything. **A state that misdescribes why an item is not moving is how a
 backlog drifts from the repository**, which is the failure Gate Zero exists to
 correct.
 
+## How this file is structured
+
+**Two tiers, not one — EER-016 found this file computing nothing reliably
+because that was never stated.** An engineer reading this file needs one
+answer per question ("is B-103 open?"); before this section, the file gave
+two, in two schemas, and left which one wins unstated.
+
+**The Reconciliation table below is the single authoritative status for
+every ID it lists.** One row per ID: `State` (the seven-value vocabulary
+above), `Evidence` (what was found, measured or built — a `DEFERRED`/
+`BLOCKED` row's unblocking condition lives here), `Depends on (state)`, and
+`Last touched`. To know whether an item is done, blocked, or safe to build
+on: **read this table, not the sections after it.**
+
+**The four sections after it — MVP-1, Stage 2, Stage 3, Cross-cutting — are
+the original PLAN-V2 planning tables**, kept for their design rationale (the
+*why*, the original size estimate, the decision it traces to in
+`design-thinking.md`), not for current status. Most of their rows (B-101
+through the low B-400s) were individually carried into the Reconciliation
+table by Gate Zero's 2026-08-17 pass; later items (B-470 onward) were filed
+directly into the Reconciliation table and have no planning-table
+counterpart at all. **Where an ID appears in both, the Reconciliation
+table's row is authoritative — full stop.** A planning-table row's own prose
+can read as a status (B-446's original wording: *"Deferred until workflow
+adoption"*) and that reading can go stale without anyone editing it; the
+Reconciliation table's row for the same ID (`OPEN`, *"the original 'until
+workflow adoption' condition no longer applies"*) is the one kept current.
+Each of the four sections below carries its own reminder of this so it
+cannot be read in isolation.
+
+`tests/test_backlog.py` makes this checkable rather than aspirational: it
+parses the Reconciliation table and asserts every status is one of the seven
+above, that no ID carries two contradictory explicit statuses, and that
+every `DEFERRED`/`BLOCKED` row states what would change that.
+
 ## The governing rule
 
 > Over-engineering is building *N* of something before validating one.
@@ -34,12 +96,7 @@ Which is why the backlog is deliberately shallow in places it could be deep. The
 
 ---
 
-# MVP-1 — the adaptive layer
-
-MVP-0 proves the deterministic descent. MVP-1 adds the parts where the model gets to influence what happens next, each fenced by a typed contract.
-
-| ID | Item | Why | Depends on | Size | Decision |
-## Reconciliation — 2026-08-17 (PLAN-V2 Gate Zero)
+# Reconciliation — authoritative status (2026-08-17 PLAN-V2 Gate Zero)
 
 Every item carries **state**, **evidence**, **dependencies with their states**, and
 **last touched**. Produced because the previous plan was written from item titles and
@@ -269,6 +326,13 @@ cost of the state a reconciliation cannot express, measured (OBS-140).
 
 ---
 
+# MVP-1 — the adaptive layer
+
+MVP-0 proves the deterministic descent. MVP-1 adds the parts where the model gets to influence what happens next, each fenced by a typed contract.
+
+> **Historical planning table (PLAN-V2).** Kept for its design rationale. Status for any ID also listed in the Reconciliation table above is authoritative there, not here — see "How this file is structured".
+
+| ID | Item | Why | Depends on | Size | Decision |
 |---|---|---|---|---|---|
 | **B-101** | **The reasoning gate** — typed decision object, two shapes only | The model asks for more evidence without being able to invent a target | MVP-0 complete | M | D7 |
 | **B-102** | **Candidate enumeration** — code derives narrowing targets from observed objects | The half of the gate that stops "the model chooses" becoming "the model invents" | B-101 | S | D7 |
@@ -294,6 +358,8 @@ cost of the state a reconciliation cannot express, measured (OBS-140).
 
 The agent stops being asked and starts being woken. The architectural change is small; the assurance change is not, because the boundaries now hold with nobody present.
 
+> **Historical planning table (PLAN-V2).** Kept for its design rationale. Status for any ID also listed in the Reconciliation table above is authoritative there, not here — see "How this file is structured".
+
 | ID | Item | Why | Depends on | Size | Decision |
 |---|---|---|---|---|---|
 | **B-201** | **Trigger intake** — Alertmanager webhook receiver | Alertmanager already does grouping, dedupe, inhibition and silencing better than we would build it. **B-426 is how this gets tested end to end.** `inject → device syslog → Alertmanager → agent wakes → investigates → reports` is the entire Stage 2 loop, and fault injection is the only way to exercise it as one thing rather than as five components that each pass in isolation. A webhook receiver verified against a hand-crafted POST verifies the receiver; it says nothing about whether a real fault on a real device produces an alert that produces an investigation | T-005 finding | M | D4 · B-426 |
@@ -315,6 +381,8 @@ The agent stops being asked and starts being woken. The architectural change is 
 
 The write path. Everything here is gated on identity, and identity does not exist yet.
 
+> **Historical planning table (PLAN-V2).** Kept for its design rationale. Status for any ID also listed in the Reconciliation table above is authoritative there, not here — see "How this file is structured".
+
 | ID | Item | Why | Depends on | Size | Decision |
 |---|---|---|---|---|---|
 | **B-301** | **Identity provider integration** | Verified SSO/OIDC or a signed client certificate — something a caller cannot set an environment variable to become. **Nothing else in Stage 3 starts without this** | — | L | D2, interfaces.md |
@@ -332,6 +400,8 @@ The write path. Everything here is gated on identity, and identity does not exis
 # Cross-cutting
 
 Not tied to a stage. Several are cheap enough to slot into any gap.
+
+> **Historical planning table (PLAN-V2).** Kept for its design rationale. Status for any ID also listed in the Reconciliation table above is authoritative there, not here — see "How this file is structured".
 
 | ID | Item | Why | Depends on | Size | Decision |
 |---|---|---|---|---|---|

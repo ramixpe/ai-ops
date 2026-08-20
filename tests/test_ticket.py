@@ -14,6 +14,7 @@ being able to forge a fake section when the file is read back.
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -1027,3 +1028,59 @@ def test_blockquoted_model_response_cannot_start_a_line_at_column_zero(tmp_path)
     # It DOES appear, blockquoted, in the narrative -- contained, not
     # deleted, so the response can still be read and studied.
     assert any(line.startswith("> ## Outcome update") for line in raw_lines)
+
+
+# --------------------------------------------------------------------------- #
+# Durable-data permissions (EER-019). A ticket is "full model prompts/
+# responses" (module docstring) plus device evidence quoted into
+# record_answer/record_tool_event -- the most sensitive durable output this
+# project writes, so it gets owner-only files and directories by default.
+#
+# Every mode asserted below comes from an explicit `os.chmod` in
+# `_write_block`/`_write_sidecar_once`/`_secure_mkdir`, not from a bare
+# `mkdir`/`open` mode argument -- `os.chmod` sets exactly the bits requested
+# regardless of the process umask, so these assertions are exact rather than
+# "no group/other bits" and need no umask fixture. See
+# `evidence_store._secure_mkdir`'s docstring for the same reasoning applied
+# to the sibling module.
+# --------------------------------------------------------------------------- #
+
+
+def test_tickets_directory_is_0700(tmp_path):
+    # A subdirectory that does not exist yet, not `tmp_path` itself -- pytest's
+    # own `tmp_path` fixture already creates its directory at 0700, which
+    # would make this assertion pass whether or not `_secure_mkdir` ever ran
+    # (mkdir's `exist_ok=True` is a no-op on an already-existing directory).
+    tickets_dir = tmp_path / "tickets"
+    _open(tickets_dir)
+
+    assert tickets_dir.stat().st_mode & 0o777 == 0o700
+
+
+def test_ticket_file_is_0600_after_the_header_write(tmp_path):
+    tk = _open(tmp_path)
+
+    assert Path(tk.path).stat().st_mode & 0o777 == 0o600
+
+
+def test_ticket_file_stays_0600_after_an_append(tmp_path):
+    tk = _open(tmp_path)
+    os.chmod(tk.path, 0o644)  # simulate a file left permissive by an older version
+
+    tk.record_answer(finding="interface_line_down", trustworthy=True)
+
+    assert Path(tk.path).stat().st_mode & 0o777 == 0o600
+
+
+def test_prompt_sidecar_directory_and_file_are_owner_only(tmp_path):
+    tk = _open(tmp_path)
+    tk.record_model_exchange(
+        purpose="report_paraphrase", system_prompt="a system prompt", response_text="an answer",
+    )
+
+    sidecar_dir = tmp_path / ticket._PROMPT_SIDECAR_DIRNAME
+    assert sidecar_dir.stat().st_mode & 0o777 == 0o700
+    sidecar_files = list(sidecar_dir.glob("*.txt"))
+    assert sidecar_files, "expected the system prompt to be sidecarred"
+    for path in sidecar_files:
+        assert path.stat().st_mode & 0o777 == 0o600, path
