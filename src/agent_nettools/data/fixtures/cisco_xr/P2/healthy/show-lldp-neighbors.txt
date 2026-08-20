@@ -1,0 +1,14 @@
+
+Sat Aug 15 18:06:11.606 UTC
+Capability codes:
+	(R) Router, (B) Bridge, (T) Telephone, (C) DOCSIS Cable Device
+	(W) WLAN Access Point, (P) Repeater, (S) Station, (O) Other
+
+Device ID       Local Intf                      Hold-time  Capability      Port ID
+P1              GigabitEthernet0/0/0/0          120        R               GigabitEthernet0/0/0/0
+P4              GigabitEthernet0/0/0/1          120        R               GigabitEthernet0/0/0/0
+P3              GigabitEthernet0/0/0/2          120        R               GigabitEthernet0/0/0/2
+PE1             GigabitEthernet0/0/0/3          120        R               GigabitEthernet0/0/0/1
+PE3             GigabitEthernet0/0/0/4          120        R               GigabitEthernet0/0/0/0
+
+Total entries displayed: 5

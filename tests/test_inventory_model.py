@@ -352,3 +352,239 @@ def test_a_typo_in_a_note_is_a_load_failure_not_a_silent_no_op():
 
     with _pytest.raises(ValidationError):
         Note(note="x", applies__to="bgp")
+
+
+# --------------------------------------------------------------------------- #
+# EER-009 -- ambiguous and path-unsafe identities
+# --------------------------------------------------------------------------- #
+
+
+def test_the_committed_lab_inventory_still_validates_under_every_new_constraint():
+    """Positive control (OBS-181), first: every constraint this item adds
+    must still accept the real, committed 9-device fabric -- device names,
+    router ids, local_as, port, and every credential env var name. If this
+    ever fails, either the new validator is wrong or `inventory/lab.yaml`
+    needs a real fix, not a loosened check."""
+
+    reset_inventory_cache()
+    inventory = load_inventory_file()
+
+    assert len(inventory.devices) == 9
+    for device in inventory.devices:
+        assert device.name
+        if device.router_id is not None:
+            assert device.router_id.count(".") == 3
+
+
+@pytest.mark.parametrize("bad_name", ["", "../..", "..", ".", "a/b", "a b", "x" * 65])
+def test_device_name_rejects_unsafe_or_ambiguous_values(tmp_path, bad_name):
+    document = _base_document()
+    document["devices"][0]["name"] = bad_name
+    path = _write(tmp_path, document)
+
+    with pytest.raises(InventoryError, match="storage key"):
+        parse_inventory(path)
+
+
+@pytest.mark.parametrize("good_name", ["P1", "PE4", "RR1", "LAB-ONLY-DEVICE", "a", "x" * 64])
+def test_device_name_accepts_the_real_charset(tmp_path, good_name):
+    """Positive control for the refusal test above."""
+
+    document = _base_document()
+    document["devices"][0]["name"] = good_name
+    path = _write(tmp_path, document)
+
+    inventory = parse_inventory(path)
+
+    assert inventory.devices[0].name == good_name
+
+
+@pytest.mark.parametrize("bad_site", ["", "   "])
+def test_site_must_say_something(tmp_path, bad_site):
+    document = _base_document()
+    document["devices"][0]["site"] = bad_site
+    path = _write(tmp_path, document)
+
+    with pytest.raises(InventoryError, match="site must say something"):
+        parse_inventory(path)
+
+
+def test_router_id_must_be_ipv4_when_present(tmp_path):
+    document = _base_document()
+    document["devices"][1]["router_id"] = "not-an-ip"
+    path = _write(tmp_path, document)
+
+    with pytest.raises(InventoryError, match="router_id is not a valid IPv4 address"):
+        parse_inventory(path)
+
+
+def test_router_id_is_optional_and_a_real_one_still_validates(tmp_path):
+    """Positive control: `router_id` stays optional (PE4 in the real lab has
+    none), and a real IPv4 value parses cleanly."""
+
+    document = _base_document()
+    document["devices"][1]["router_id"] = "10.255.0.11"
+    path = _write(tmp_path, document)
+
+    inventory = parse_inventory(path)
+
+    assert inventory.devices[1].router_id == "10.255.0.11"
+    assert inventory.devices[0].router_id is None
+
+
+def test_duplicate_router_id_raises(tmp_path):
+    document = _base_document()
+    document["devices"][0]["router_id"] = "10.255.0.11"
+    document["devices"][1]["router_id"] = "10.255.0.11"
+    path = _write(tmp_path, document)
+
+    with pytest.raises(InventoryError, match="duplicates router_id"):
+        parse_inventory(path)
+
+
+def test_two_devices_with_no_router_id_do_not_collide(tmp_path):
+    """Positive control: absence is never a duplicate of another absence --
+    the real lab has devices with no router_id at all (P1-P4)."""
+
+    document = _base_document()
+    document["devices"][0]["router_id"] = None
+    document["devices"][1]["router_id"] = None
+    path = _write(tmp_path, document)
+
+    inventory = parse_inventory(path)
+
+    assert inventory.devices[0].router_id is None
+    assert inventory.devices[1].router_id is None
+
+
+def test_duplicate_mgmt_ip_raises(tmp_path):
+    document = _base_document()
+    document["devices"][1]["mgmt_ip"] = document["devices"][0]["mgmt_ip"]
+    path = _write(tmp_path, document)
+
+    with pytest.raises(InventoryError, match="duplicates mgmt_ip"):
+        parse_inventory(path)
+
+
+@pytest.mark.parametrize("bad_as", [0, -1, 4294967296])
+def test_local_as_rejects_out_of_range_values(tmp_path, bad_as):
+    document = _base_document()
+    document["devices"][0]["local_as"] = bad_as
+    path = _write(tmp_path, document)
+
+    with pytest.raises(InventoryError):
+        parse_inventory(path)
+
+
+@pytest.mark.parametrize("good_as", [1, 65000, 4294967295])
+def test_local_as_accepts_the_full_asn_range(tmp_path, good_as):
+    """Positive control: the real lab's ASN (65000) and the full 2-/4-byte
+    RFC 6793 range still validate."""
+
+    document = _base_document()
+    document["devices"][0]["local_as"] = good_as
+    path = _write(tmp_path, document)
+
+    inventory = parse_inventory(path)
+
+    assert inventory.devices[0].local_as == good_as
+
+
+@pytest.mark.parametrize("bad_port", [0, -1, 65536])
+def test_defaults_port_rejects_out_of_range_values(tmp_path, bad_port):
+    document = _base_document()
+    document["defaults"]["port"] = bad_port
+    path = _write(tmp_path, document)
+
+    with pytest.raises(InventoryError):
+        parse_inventory(path)
+
+
+@pytest.mark.parametrize("good_port", [1, 22, 65535])
+def test_defaults_port_accepts_the_real_range(tmp_path, good_port):
+    document = _base_document()
+    document["defaults"]["port"] = good_port
+    path = _write(tmp_path, document)
+
+    inventory = parse_inventory(path)
+
+    assert inventory.defaults.port == good_port
+
+
+@pytest.mark.parametrize("field", ["isis_adjacencies", "bgp_peers"])
+def test_expected_counts_reject_negative_values(tmp_path, field):
+    document = _base_document()
+    document["devices"][0]["expected"] = {field: -1}
+    path = _write(tmp_path, document)
+
+    with pytest.raises(InventoryError):
+        parse_inventory(path)
+
+
+def test_expected_counts_accept_zero_and_real_values(tmp_path):
+    """Positive control: zero is a real, meaningful count (a device with no
+    adjacencies is not the same as a device with no `expected:` block at
+    all), and it must still validate."""
+
+    document = _base_document()
+    document["devices"][0]["expected"] = {"isis_adjacencies": 0, "bgp_peers": 4}
+    path = _write(tmp_path, document)
+
+    inventory = parse_inventory(path)
+
+    assert inventory.devices[0].expected.isis_adjacencies == 0
+    assert inventory.devices[0].expected.bgp_peers == 4
+
+
+@pytest.mark.parametrize(
+    "field", ["username_env", "password_env", "ssh_keyfile_env"]
+)
+@pytest.mark.parametrize("bad_value", ["device_username", "1DEVICE", "DEVICE-NAME", ""])
+def test_credential_group_env_names_reject_non_grammar_values(tmp_path, field, bad_value):
+    """Grammar only (EER-009's hard constraint): this never asks whether the
+    named variable is actually SET in the environment -- only whether the
+    string could ever be a legal env var name."""
+
+    document = _base_document()
+    document["credential_groups"]["lab"][field] = bad_value
+    path = _write(tmp_path, document)
+
+    with pytest.raises(InventoryError, match="environment variable name"):
+        parse_inventory(path)
+
+
+def test_credential_group_env_names_accept_the_real_names(tmp_path):
+    """Positive control: the real lab's three env var names
+    (DEVICE_USERNAME, DEVICE_PASSWORD, DEVICE_SSH_KEYFILE) all validate, and
+    this reads nothing from the actual process environment to do it -- no
+    `monkeypatch.setenv` anywhere in this test."""
+
+    document = _base_document()
+    document["credential_groups"]["lab"]["ssh_keyfile_env"] = "DEVICE_SSH_KEYFILE"
+    path = _write(tmp_path, document)
+
+    inventory = parse_inventory(path)
+
+    group = inventory.credential_groups["lab"]
+    assert group.username_env == "DEVICE_USERNAME"
+    assert group.password_env == "DEVICE_PASSWORD"
+    assert group.ssh_keyfile_env == "DEVICE_SSH_KEYFILE"
+
+
+def test_credential_group_validation_reads_nothing_from_the_environment(monkeypatch, tmp_path):
+    """The credential-free invariant, pinned directly: a document naming env
+    vars that are NOT set in the process environment at all must still
+    validate cleanly -- this module may only check the *name*'s grammar,
+    never whether it is present (that would leak "is this credential
+    configured" into the credential-free layer)."""
+
+    monkeypatch.delenv("TOTALLY_UNSET_VAR_1", raising=False)
+    monkeypatch.delenv("TOTALLY_UNSET_VAR_2", raising=False)
+    document = _base_document()
+    document["credential_groups"]["lab"]["username_env"] = "TOTALLY_UNSET_VAR_1"
+    document["credential_groups"]["lab"]["password_env"] = "TOTALLY_UNSET_VAR_2"
+    path = _write(tmp_path, document)
+
+    inventory = parse_inventory(path)
+
+    assert inventory.credential_groups["lab"].username_env == "TOTALLY_UNSET_VAR_1"

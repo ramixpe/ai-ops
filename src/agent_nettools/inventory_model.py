@@ -15,7 +15,9 @@ credentials, which is the precondition for the safety boundary in
 ``network_tools.py`` (see ``CLAUDE.md``, "The safety boundary").
 
 Layering: this module depends only on ``platforms.py`` (for
-``known_platforms()``); ``lab.py`` and ``inventory.py`` depend on this module,
+``known_platforms()``) and ``storage_key.py`` (for the shared storage-key
+charset policy, EER-009 -- a leaf module with no imports of its own, so this
+adds no cycle risk); ``lab.py`` and ``inventory.py`` depend on this module,
 never the other way, so there is no import cycle.
 """
 
@@ -23,6 +25,7 @@ from __future__ import annotations
 
 import ipaddress
 import os
+import re
 from importlib import resources as importlib_resources
 from pathlib import Path
 from typing import Any, Literal
@@ -31,6 +34,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from .platforms import known_platforms
+from .storage_key import is_valid_storage_key
 
 Role = Literal["core", "edge", "route-reflector"]
 
@@ -41,6 +45,27 @@ class InventoryError(ValueError):
     Re-exported from ``inventory.py`` for backward compatibility -- existing
     code and tests import it from there.
     """
+
+
+#: The shell-portable environment-variable-name grammar (POSIX "Environment
+#: Variable Name" in XBD 8.1, minus a leading digit): an uppercase letter,
+#: then any run of uppercase letters, digits, or underscores. A *grammar*
+#: check only -- this module never asks whether the named variable is
+#: actually set (EER-009's hard constraint: this module may read the
+#: environment only to *locate* the YAML file, in `resolve_inventory_path`
+#: below; checking presence here would leak "is this credential configured"
+#: into the credential-free layer, which is exactly what
+#: `test_refuses_unapproved_commands_before_loading_credentials` pins against
+#: and what CLAUDE.md's "safety boundary" section names explicitly).
+_ENV_VAR_NAME_RE = re.compile(r"[A-Z][A-Z0-9_]*")
+
+
+def _validate_env_var_name(value: str) -> str:
+    if not _ENV_VAR_NAME_RE.fullmatch(value):
+        raise ValueError(
+            f"not a valid environment variable name (expected [A-Z][A-Z0-9_]*): {value!r}"
+        )
+    return value
 
 
 class CredentialGroup(BaseModel):
@@ -57,6 +82,18 @@ class CredentialGroup(BaseModel):
     password_env: str
     ssh_keyfile_env: str | None = None
 
+    @field_validator("username_env", "password_env")
+    @classmethod
+    def _validate_required_env_names(cls, value: str) -> str:
+        return _validate_env_var_name(value)
+
+    @field_validator("ssh_keyfile_env")
+    @classmethod
+    def _validate_optional_env_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _validate_env_var_name(value)
+
 
 class Defaults(BaseModel):
     """Fallback values applied to any device that omits the field."""
@@ -65,7 +102,10 @@ class Defaults(BaseModel):
 
     platform: str
     credential_group: str
-    port: int = 22
+    #: TCP port range (EER-009) -- a port outside 1-65535 cannot be dialled,
+    #: so it is a load-time typo, not a value worth carrying through to a
+    #: connect-time failure.
+    port: int = Field(default=22, ge=1, le=65535)
 
 
 class Expected(BaseModel):
@@ -80,8 +120,11 @@ class Expected(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    isis_adjacencies: int | None = None
-    bgp_peers: int | None = None
+    #: Non-negative (EER-009) -- both are counts of observed records, and a
+    #: negative count cannot come from `nettools learn-topology`'s own
+    #: derivation; one in a hand-edited file is a typo, not a real value.
+    isis_adjacencies: int | None = Field(default=None, ge=0)
+    bgp_peers: int | None = Field(default=None, ge=0)
 
 
 class Note(BaseModel):
@@ -132,22 +175,58 @@ class Note(BaseModel):
 class Device(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    #: EER-009: validated below with the shared storage-key policy
+    #: (`storage_key.is_valid_storage_key`) -- this value feeds
+    #: `evidence_store`/`fixtures` storage paths (device names are the one
+    #: identity this module's own `_index_cache` and every downstream storage
+    #: boundary key off), so `""` or `"../.."` reaching those boundaries
+    #: unvalidated is a path-safety issue, not just a schema nicety.
     name: str
     mgmt_ip: str
     role: Role
+    #: Free text (a location label, not a storage key or command argument
+    #: anywhere downstream -- confirmed by grep, nothing else in this package
+    #: reads `Device.site`), so the only thing worth enforcing is EER-009's
+    #: "must say something" -- see `_non_empty_site` below.
     site: str
     platform: str | None = None
     # Not in the Task 1 schema sketch, but a natural per-device escape hatch
     # from ``defaults.credential_group`` -- kept optional so the common case
     # (every device sharing one credential group) needs no per-device entry.
     credential_group: str | None = None
+    #: IPv4 when present (EER-009, mirrors `mgmt_ip`'s `_validate_ipv4`) --
+    #: `investigation.py`'s `_route_back_prefix` interpolates this straight
+    #: into `f"{router_id}/32"` for a `route` template lookup, so a
+    #: non-IPv4 value here would only surface as a confusing downstream
+    #: failure far from where the bad value was written. Uniqueness is
+    #: checked at the document level, in `InventoryFile._validate_cross_
+    #: references` below -- a single field cannot see its siblings.
     router_id: str | None = None
-    local_as: int | None = None
+    #: 1-4294967295 when present (EER-009): the full 2-byte/4-byte BGP ASN
+    #: range (RFC 6793); 0 is reserved and never a real device's ASN.
+    local_as: int | None = Field(default=None, ge=1, le=4294967295)
     tags: list[str] = Field(default_factory=list)
     expected: Expected | None = None
     #: Operator-authored facts about this device (B-402). Empty by default;
     #: an estate with nothing worth saying about a device says nothing.
     notes: list[Note] = Field(default_factory=list)
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name_is_a_safe_storage_key(cls, value: str) -> str:
+        if not is_valid_storage_key(value):
+            raise ValueError(
+                f"device name is not a safe storage key (expected 1-64 characters "
+                f"of letters, digits, '_', '.', '-', and never '.' or '..'): {value!r}"
+            )
+        return value
+
+    @field_validator("site")
+    @classmethod
+    def _non_empty_site(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("site must say something")
+        return value
 
     @field_validator("mgmt_ip")
     @classmethod
@@ -156,6 +235,17 @@ class Device(BaseModel):
             ipaddress.IPv4Address(value)
         except ValueError as exc:
             raise ValueError(f"mgmt_ip is not a valid IPv4 address: {value!r}") from exc
+        return value
+
+    @field_validator("router_id")
+    @classmethod
+    def _validate_router_id_ipv4(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            ipaddress.IPv4Address(value)
+        except ValueError as exc:
+            raise ValueError(f"router_id is not a valid IPv4 address: {value!r}") from exc
         return value
 
 
@@ -178,10 +268,31 @@ class InventoryFile(BaseModel):
         """
 
         seen_names: set[str] = set()
+        seen_mgmt_ips: set[str] = set()
+        seen_router_ids: set[str] = set()
         for device in self.devices:
             if device.name in seen_names:
                 raise ValueError(f"duplicate device name: {device.name!r}")
             seen_names.add(device.name)
+
+            # EER-009: mgmt_ip is required and unconditionally checked; a
+            # duplicate router_id can only be checked when the field is
+            # present at all -- absent (e.g. PE4, which has none) is not a
+            # collision with anything.
+            if device.mgmt_ip in seen_mgmt_ips:
+                raise ValueError(
+                    f"device {device.name!r} duplicates mgmt_ip {device.mgmt_ip!r} "
+                    f"already used by another device"
+                )
+            seen_mgmt_ips.add(device.mgmt_ip)
+
+            if device.router_id is not None:
+                if device.router_id in seen_router_ids:
+                    raise ValueError(
+                        f"device {device.name!r} duplicates router_id {device.router_id!r} "
+                        f"already used by another device"
+                    )
+                seen_router_ids.add(device.router_id)
 
             platform = device.platform or self.defaults.platform
             if platform not in known_platforms():

@@ -1,0 +1,18 @@
+
+Wed Aug 19 14:08:03.436 UTC
+
+               Intf       Intf        LineP              Encap  MTU        BW
+               Name       State       State               Type (byte)    (Kbps)
+--------------------------------------------------------------------------------
+                Lo0          up          up           Loopback  1500          0
+              Lo100          up          up           Loopback  1500          0
+              Lo150          up          up           Loopback  1500          0
+              Lo200          up          up           Loopback  1500          0
+                Nu0          up          up               Null  1500          0
+       srte_c_10_ep          up          up             TUNNEL  1500          0
+       srte_c_20_ep        down        down             TUNNEL  1500          0
+     Mg0/RP0/CPU0/0          up          up               ARPA  1514    1000000
+          Gi0/0/0/0          up          up               ARPA  1514    1000000
+          Gi0/0/0/1          up          up               ARPA  1514    1000000
+          Gi0/0/0/2          up          up               ARPA  1514    1000000
+      Gi0/0/0/2.300          up        down             802.1Q  1514    1000000

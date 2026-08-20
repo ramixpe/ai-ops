@@ -131,6 +131,28 @@ def test_the_readme_records_the_causal_chain_requirement():
     assert "observation" in readme and "interpretation" in readme
 
 
+def test_load_prompt_resolves_through_the_librarys_own_prompts_dir():
+    """EER-003 regression guard.
+
+    Every other test in this module computes its own ``PROMPTS_DIR`` (above)
+    rather than importing ``prompt_library.PROMPTS_DIR`` -- so none of them
+    would have caught the packaged-wheel bug, where ``load_prompt`` resolved
+    a path three parents up that does not exist once this package is
+    installed with no source checkout nearby. This test goes through
+    ``load_prompt`` itself, so a regression in the library's own resolution
+    (not this file's independently-computed path) fails here.
+    """
+
+    from agent_nettools import prompt_library
+    from agent_nettools.prompt_library import CURRENT_VERSION, load_prompt
+
+    for name, version in CURRENT_VERSION.items():
+        expected = (prompt_library.PROMPTS_DIR / f"{name}.v{version}.txt").read_text(
+            encoding="utf-8"
+        )
+        assert load_prompt(name, version) == expected
+
+
 def test_the_rule_tests_are_actually_running_now_that_prompts_exist():
     """Was `test_the_library_is_still_a_scaffold...` (T-026).
 

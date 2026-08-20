@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import re
+from importlib import resources as importlib_resources
 from pathlib import Path
 from typing import Any, Callable
 
@@ -23,6 +24,7 @@ from . import parsers
 from .interface_kind import is_physical_member
 from .inventory import get_device
 from .network_tools import collect_evidence, run_templates
+from .storage_key import is_valid_storage_key
 
 # Fixtures land here, relative to the working directory unless overridden.
 DEFAULT_FIXTURE_DIR = "tests/fixtures"
@@ -81,21 +83,74 @@ def scrub_output(text: str) -> str:
     return text
 
 
-#: The charset a fixture path component may use -- deliberately the same one
-#: `evidence_store._DEVICE_NAME_RE` allows, since both answer the identical
-#: question ("is this string safe to become one path segment?"). It covers
-#: every real value in the committed corpus: platform `cisco_xr`, devices
-#: `P1`..`RR1`, labels `t0`/`t1`/`broken`/`healthy`/`isis-broken`/`unit`.
-#:
-#: Duplicated rather than imported for this hotfix (v1.0.1): EER-001 asks for
-#: ONE storage-key policy shared by every boundary, which is a real
-#: consolidation across `evidence_store`, `fixtures`, inventory and the CLI --
-#: tracked as its own item rather than smuggled into a security fix.
-_FIXTURE_PART_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+#: EER-009: this used to be its own duplicate copy of the charset
+#: `evidence_store._DEVICE_NAME_RE` also carries (the v1.0.1 hotfix -- EER-001
+#: -- deliberately deferred that consolidation rather than smuggling it into
+#: a security fix). `is_valid_storage_key` (see `storage_key.py`) is the one
+#: shared policy now; `fixture_path` below is one of its two migrated call
+#: sites (`inventory_model.Device.name` is the other). It covers every real
+#: value in the committed corpus: platform `cisco_xr`, devices `P1`..`RR1`,
+#: labels `t0`/`t1`/`broken`/`healthy`/`isis-broken`/`unit`.
 
 
 def _fixture_dir(base_dir: str | None) -> Path:
+    """Resolve the fixture root for a WRITE (``nettools capture``): explicit
+    argument, then env var, then the cwd-relative default -- unchanged from
+    before EER-004, and deliberately so.
+
+    Never falls back to the packaged, read-only copy under
+    ``importlib.resources`` (see ``_fixture_read_dir`` below, used for reads):
+    a `capture` running from an installed package with no `./tests/fixtures`
+    in its cwd must create one there, not attempt to write into site-packages.
+    """
+
     return Path(base_dir or os.getenv("NETTOOLS_FIXTURE_DIR") or DEFAULT_FIXTURE_DIR)
+
+
+def _packaged_fixture_root() -> Path:
+    """The packaged demo fixture subset, shipped as package data (EER-004).
+
+    Not the full ~3.4 MB / 641-file ``tests/fixtures/`` corpus -- that stays
+    test-only. This is the minimum subset that makes the README-documented
+    ``--from-fixtures`` commands (``investigate``, ``health --all``,
+    ``audit``, ``learn-topology``, each against the label(s) their own
+    ``--help`` names as the default) work from a `pip install` with no
+    source checkout nearby, ~144 KiB across 180 files, determined by tracing
+    exactly which fixture files those commands read and copying only those,
+    byte-identical, to ``src/agent_nettools/data/fixtures/``. Declared in
+    ``pyproject.toml``'s ``[tool.setuptools.package-data]``. Kept honest by
+    ``tests/test_packaging_fixtures.py``, which fails loudly if a packaged
+    copy ever drifts from its ``tests/fixtures/`` original.
+    """
+
+    return importlib_resources.files("agent_nettools") / "data" / "fixtures"
+
+
+def _fixture_read_dir(base_dir: str | None) -> Path:
+    """Resolve the fixture root for a READ (replay): explicit argument, then
+    env var, then a real ``./tests/fixtures`` in cwd, then the packaged demo
+    subset -- same 4-rung shape as ``inventory_model.resolve_inventory_path``
+    (EER-004).
+
+    Unlike ``_fixture_dir``, this checks the cwd-relative default actually
+    exists before using it: a plain resolution with no existence check would
+    never reach the packaged fallback at all, since a bare
+    ``Path("tests/fixtures")`` is always "resolved" whether or not anything
+    is there. An explicit ``base_dir`` or ``NETTOOLS_FIXTURE_DIR`` still wins
+    outright, exactly as before -- only the "nothing else was given" case
+    gains a further rung instead of a bare guess at a relative path that
+    might not exist.
+    """
+
+    if base_dir:
+        return Path(base_dir)
+    env_dir = os.getenv("NETTOOLS_FIXTURE_DIR", "").strip()
+    if env_dir:
+        return Path(env_dir)
+    cwd_default = Path(DEFAULT_FIXTURE_DIR)
+    if cwd_default.is_dir():
+        return cwd_default
+    return Path(str(_packaged_fixture_root()))
 
 
 def fixture_path(
@@ -104,6 +159,7 @@ def fixture_path(
     *,
     label: str,
     base_dir: str | None = None,
+    for_write: bool = False,
 ) -> Path:
     """Return the fixture file for one command on one device capture.
 
@@ -116,15 +172,21 @@ def fixture_path(
     Same two-gate approach as `evidence_store.FileEvidenceStore._device_dir`:
     reject the traversal semantically, then assert resolved containment as
     the structural backstop.
+
+    ``for_write`` (EER-004) selects which of the two root resolvers applies:
+    ``capture_device``/``capture_device_templates`` pass ``for_write=True``
+    so a capture never lands in the packaged, read-only copy; every read call
+    site (``fixture_sender``'s sender, and this function's own default) uses
+    the read resolver, which adds the packaged fallback rung.
     """
 
-    root = _fixture_dir(base_dir)
+    root = _fixture_dir(base_dir) if for_write else _fixture_read_dir(base_dir)
     for part_name, part in (
         ("platform", str(device["platform"])),
         ("device name", str(device["name"])),
         ("label", str(label)),
     ):
-        if part in (".", "..") or not _FIXTURE_PART_RE.fullmatch(part):
+        if not is_valid_storage_key(part):
             raise ValueError(f"invalid {part_name} for a fixture path: {part!r}")
 
     path = root / str(device["platform"]) / str(device["name"]) / label / f"{command_slug(command)}.txt"
@@ -270,7 +332,7 @@ def capture_device_templates(
     written: list[str] = []
     for command, output in result.get("data", {}).get("commands", {}).items():
         text = scrub_output(output) if scrub else output
-        path = fixture_path(device, command, label=label, base_dir=base_dir)
+        path = fixture_path(device, command, label=label, base_dir=base_dir, for_write=True)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
         written.append(str(path))
@@ -316,7 +378,7 @@ def capture_device(
         # nothing here -- correct, there is no output to capture.
         for command, output in section_result.get("data", {}).get("commands", {}).items():
             text = scrub_output(output) if scrub else output
-            path = fixture_path(device, command, label=label, base_dir=base_dir)
+            path = fixture_path(device, command, label=label, base_dir=base_dir, for_write=True)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
             written.append(str(path))

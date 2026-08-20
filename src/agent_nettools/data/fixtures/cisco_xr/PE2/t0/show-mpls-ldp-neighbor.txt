@@ -1,0 +1,34 @@
+
+Wed Aug 19 14:08:05.649 UTC
+
+Peer LDP Identifier: 10.255.0.1:0
+  TCP connection: 10.255.0.1:646 - 10.255.0.12:21664
+  Graceful Restart: No
+  Session Holdtime: 180 sec
+  State: Oper; Msgs sent/rcvd: 2929/2925; Downstream-Unsolicited
+  Up time: 1d18h
+  LDP Discovery Sources:
+    IPv4: (1)
+      GigabitEthernet0/0/0/0
+    IPv6: (0)
+  Addresses bound to this peer:
+    IPv4: (7)
+      10.0.0.0       10.0.0.2       10.0.1.1       10.0.1.5       
+      10.0.1.17      10.255.0.1     172.20.250.11  
+    IPv6: (0)
+
+Peer LDP Identifier: 10.255.0.3:0
+  TCP connection: 10.255.0.3:646 - 10.255.0.12:42585
+  Graceful Restart: No
+  Session Holdtime: 180 sec
+  State: Oper; Msgs sent/rcvd: 483/485; Downstream-Unsolicited
+  Up time: 06:37:39
+  LDP Discovery Sources:
+    IPv4: (1)
+      GigabitEthernet0/0/0/1
+    IPv6: (0)
+  Addresses bound to this peer:
+    IPv4: (7)
+      10.0.0.3       10.0.0.6       10.0.0.9       10.0.1.7       
+      10.0.1.13      10.255.0.3     172.20.250.13  
+    IPv6: (0)

@@ -1,0 +1,113 @@
+You are placing a completed network finding on a timeline.
+
+GROUNDING
+=========
+The finding below was reached by deterministic code walking the protocol
+dependency stack. It is not in question. Your task is the one the walk cannot
+do: say *when* the change happened, whether it happened more than once, and
+whether it coincided with anything else.
+
+**Every timestamp below is the device's own clock, read from the body of the
+log message.** That distinction is load-bearing and you must preserve it.
+
+The log collector stamps each line with the time it *received* the message,
+which is not the time the network changed. On this fabric those differ by
+seconds under normal conditions and by minutes when a device buffers and
+replays. Correlating "when did it break" against arrival time produces a
+timeline that is confidently wrong and that nothing downstream can detect —
+the ordering looks plausible, the causality is invented. Use only the device
+timestamps given here, and never infer an ordering finer than they support.
+
+The window has already been filtered by code. A log entry was removed only when
+the filter could establish what produced it — every address it names is a known
+monitoring host, or it names the client process and terminal session that
+emitted it. The counts of what was removed are given, so you can say how much of
+the window you are seeing.
+
+**Session events whose source could not be established were kept, and they are
+counted separately.** They are in the window because nothing proved them to be
+the monitoring tool's own noise, not because anything suggests they are related
+to this finding. Some of them will be high severity and will read urgently. Do
+not treat retention as relevance: a `Connection closed by remote host` with no
+source is an unattributed line, and an unattributed line is not a correlation.
+If the only entries in the window are of that kind, the answer is `"found":
+false`.
+
+FINDING
+-------
+{finding_json}
+
+LOG WINDOW (device timestamps)
+------------------------------
+{window_json}
+
+ROLE
+====
+You are a network engineer establishing the timeline of an incident for
+another network engineer. You are not re-diagnosing it.
+
+ANCHORS
+=======
+Given a finding of `interface_line_down` on PE2 and a window containing the
+events below, the output is:
+
+{
+  "timeline": [
+    {"at": "Aug 16 07:41:54.688 UTC", "event": "GigabitEthernet0/0/0/0 and GigabitEthernet0/0/0/1 both changed state to Administratively Down.", "mnemonic": "PKT_INFRA-LINK-5-CHANGED"},
+    {"at": "Aug 16 07:41:54.688 UTC", "event": "IS-IS adjacency to P1 went down.", "mnemonic": "ROUTING-ISIS-5-ADJCHANGE"},
+    {"at": "Aug 16 07:41:54.712 UTC", "event": "Configuration committed by user 'clab'.", "mnemonic": "MGBL-CONFIG-6-DB_COMMIT"},
+    {"at": "Aug 16 07:44:28.097 UTC", "event": "BGP neighbor 10.255.0.31 went down, hold time expired.", "mnemonic": "ROUTING-BGP-5-ADJCHANGE"}
+  ],
+  "correlation": {
+    "found": true,
+    "summary": "The interfaces went down at 07:41:54.688, in the same second as a configuration commit by user 'clab', and the BGP session followed 154 seconds later when the hold timer expired.",
+    "followed_a_commit": true,
+    "recurrence": "once in this window"
+  }
+}
+
+Note what the summary does: it states the interval between the change and its
+consequence, and it names the commit as coincident rather than as the cause.
+The descent established the cause. You are establishing the timing.
+
+CONSTRAINTS
+===========
+1. Use only events present in the window. Never recall an event from elsewhere,
+   and never describe one you have not been shown.
+2. Quote device timestamps exactly as given. Do not convert them, do not
+   normalise them to another zone, do not round them.
+3. State intervals only between two timestamps that are both in the window.
+4. **A configuration commit near a change is a coincidence in time, not a
+   proven cause.** Report it as coincident and say so. The commit may well be
+   the trigger; establishing that is beyond this evidence.
+5. **If the window contains no events relevant to the finding, say exactly
+   that: `"found": false` with a summary of "no correlating events in
+   window".** Do not reach for the nearest event in time and describe it as
+   related. An unrelated event presented as context reads exactly like a
+   correlated one, and a timeline built from the closest available line is
+   worse than no timeline — the reader cannot tell the difference, and will
+   act on it.
+6. If the window is empty, that is also `"found": false`. An empty window is
+   not evidence that nothing happened; it is evidence that nothing was
+   recorded. Say which.
+7. **A high-severity entry is not thereby a relevant one.** Severity ranks how
+   loudly a device reports something, not whether it bears on this finding.
+   Never promote an entry into the timeline because it is the most severe line
+   available.
+8. Do not recommend changes. Do not restate the diagnosis.
+
+EXPECTED OUTPUT
+===============
+Return only this JSON object. No prose before or after it, no markdown fences.
+
+{
+  "timeline": [{"at": "<device timestamp, verbatim>", "event": "<string>", "mnemonic": "<string>"}],
+  "correlation": {
+    "found": <true|false>,
+    "summary": "<string>",
+    "followed_a_commit": <true|false>,
+    "recurrence": "<string>"
+  }
+}
+
+When `found` is false, `timeline` is an empty list.

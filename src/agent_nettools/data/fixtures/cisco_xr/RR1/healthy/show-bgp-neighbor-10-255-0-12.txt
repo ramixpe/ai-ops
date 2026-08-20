@@ -1,0 +1,158 @@
+
+Sat Aug 15 18:08:59.644 UTC
+
+BGP neighbor is 10.255.0.12
+ Remote AS 65000, local AS 65000, internal link
+ Remote router ID 10.255.0.12
+ Cluster ID 10.255.0.31
+  BGP state = Established, up for 1d23h
+  Previous State: Idle
+  Last Received Message: KeepAlive
+  NSR State: None
+  BFD enabled (session down, BFD not configured on remote neighbor)
+  Last read 00:00:52, Last read before reset 1d23h
+  Hold time is 180, keepalive interval is 60 seconds
+  Configured hold time: 180, keepalive: 60, min acceptable hold time: 3
+  Last write 00:00:31, attempted 19, written 19
+  Second last write 00:01:31, attempted 19, written 19
+  Last write before reset 1d23h, attempted 19, written 19
+  Second last write before reset 1d23h, attempted 107, written 107
+  Last write pulse rcvd  Aug 15 18:08:28.957 last full not set pulse count 5884
+  Last write pulse rcvd before reset 1d23h
+  Socket not armed for io, armed for read, armed for write
+  Last write thread event before reset 1d23h, second last 1d23h
+  Last KA expiry before reset 00:00:00, second last 00:00:00
+  Last KA error before reset 00:00:00, KA not sent 00:00:00
+  Last KA start before reset 00:00:00, second last 00:00:00
+  Precedence: internet
+  Non-stop routing is enabled
+  Multi-protocol capability received
+  Neighbor capabilities:
+    Route refresh: advertised (old + new) and received (old + new)
+    4-byte AS: advertised and received
+    Address family IPv4 Unicast: advertised and received
+    Address family VPNv4 Unicast: advertised and received
+    Address family IPv6 Labeled-unicast: advertised and received
+    Address family VPNv6 Unicast: advertised and received
+    Address family L2VPN EVPN: advertised and received
+  Received 2950 messages, 0 notifications, 0 in queue
+  Sent 2984 messages, 0 notifications, 0 in queue
+  Minimum time between advertisement runs is 0 secs
+  Inbound message logging enabled, 3 messages buffered
+  Outbound message logging enabled, 3 messages buffered
+
+ For Address Family: IPv4 Unicast
+  BGP neighbor version 7
+  Update group: 0.2 Filter-group: 0.1  No Refresh request being processed
+  Route-Reflector Client
+  NEXT_HOP is always this router
+    Extended Nexthop Encoding: advertised and received
+  Route refresh request: received 0, sent 0
+  Policy for incoming advertisements is PASS
+  Policy for outgoing advertisements is PASS
+  0 accepted prefixes, 0 are bestpaths
+  Exact no. of prefixes denied : 0.
+  Cumulative no. of prefixes denied: 0. 
+  Prefix advertised 0, suppressed 0, withdrawn 0
+  AIGP is enabled
+  An EoR was received during read-only mode
+  Last ack version 7, Last synced ack version 0
+  Outstanding version objects: current 0, max 0, refresh 0
+  Additional-paths operation: None
+  Send Multicast Attributes
+  Advertise routes with local-label via Unicast SAFI
+  Slow Peer State: Detection-only
+    Detected state: FALSE, Detection threshold: 300
+    Detection Count: 0, Recovery Count: 0
+
+ For Address Family: VPNv4 Unicast
+  BGP neighbor version 36
+  Update group: 0.2 Filter-group: 0.1  No Refresh request being processed
+  Route-Reflector Client
+    Extended Nexthop Encoding: advertised and received
+  Route refresh request: received 0, sent 0
+  Policy for incoming advertisements is PASS
+  Policy for outgoing advertisements is PASS
+  2 accepted prefixes, 2 are bestpaths
+  Exact no. of prefixes denied : 0.
+  Cumulative no. of prefixes denied: 0. 
+  Prefix advertised 9, suppressed 0, withdrawn 0
+  AIGP is enabled
+  An EoR was received during read-only mode
+  Last ack version 36, Last synced ack version 0
+  Outstanding version objects: current 0, max 2, refresh 0
+  Additional-paths operation: None
+  Send Multicast Attributes
+  Slow Peer State: Detection-only
+    Detected state: FALSE, Detection threshold: 300
+    Detection Count: 0, Recovery Count: 0
+
+ For Address Family: IPv6 Labeled-unicast
+  BGP neighbor version 27
+  Update group: 0.3 Filter-group: 0.2  No Refresh request being processed
+  Route-Reflector Client
+  NEXT_HOP is always this router
+  Route refresh request: received 0, sent 0
+  Policy for incoming advertisements is PASS
+  Policy for outgoing advertisements is PASS
+  0 accepted prefixes, 0 are bestpaths
+  Exact no. of prefixes denied : 0.
+  Cumulative no. of prefixes denied: 0. 
+  Prefix advertised 4, suppressed 0, withdrawn 0
+  AIGP is enabled
+  An EoR was received during read-only mode
+  Last ack version 27, Last synced ack version 0
+  Outstanding version objects: current 0, max 1, refresh 0
+  Additional-paths operation: None
+  Send Multicast Attributes
+  Slow Peer State: Detection-only
+    Detected state: FALSE, Detection threshold: 300
+    Detection Count: 0, Recovery Count: 0
+
+ For Address Family: VPNv6 Unicast
+  BGP neighbor version 25
+  Update group: 0.1 Filter-group: 0.1  No Refresh request being processed
+  Route-Reflector Client
+  Route refresh request: received 0, sent 0
+  Policy for incoming advertisements is PASS
+  Policy for outgoing advertisements is PASS
+  2 accepted prefixes, 2 are bestpaths
+  Exact no. of prefixes denied : 0.
+  Cumulative no. of prefixes denied: 0. 
+  Prefix advertised 8, suppressed 0, withdrawn 0
+  AIGP is enabled
+  An EoR was not received during read-only mode
+  Last ack version 25, Last synced ack version 0
+  Outstanding version objects: current 0, max 1, refresh 0
+  Additional-paths operation: None
+  Send Multicast Attributes
+  Slow Peer State: Detection-only
+    Detected state: FALSE, Detection threshold: 300
+    Detection Count: 0, Recovery Count: 0
+
+ For Address Family: L2VPN EVPN
+  BGP neighbor version 17
+  Update group: 0.2 Filter-group: 0.1  No Refresh request being processed
+  Route-Reflector Client
+  Route refresh request: received 0, sent 0
+  Policy for incoming advertisements is PASS
+  Policy for outgoing advertisements is PASS
+  1 accepted prefixes, 1 are bestpaths
+  Exact no. of prefixes denied : 0.
+  Cumulative no. of prefixes denied: 0. 
+  Prefix advertised 4, suppressed 0, withdrawn 0
+  AIGP is enabled
+  An EoR was received during read-only mode
+  Last ack version 17, Last synced ack version 0
+  Outstanding version objects: current 0, max 2, refresh 0
+  Additional-paths operation: None
+  Send Multicast Attributes
+  Slow Peer State: Detection-only
+    Detected state: FALSE, Detection threshold: 300
+    Detection Count: 0, Recovery Count: 0
+
+  Connections established 3; dropped 2
+  Local host: 10.255.0.31, Local port: 58844, IF Handle: 0x00000000
+  Foreign host: 10.255.0.12, Foreign port: 179
+  Last reset 1d23h, due to Peer closing down the session
+  Peer reset reason: Remote closed the session (Invalid argument)

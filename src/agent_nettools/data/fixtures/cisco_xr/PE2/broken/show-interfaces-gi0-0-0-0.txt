@@ -1,0 +1,31 @@
+
+Sun Aug 16 07:46:42.795 UTC
+GigabitEthernet0/0/0/0 is administratively down, line protocol is administratively down 
+  Interface state transitions: 4
+  Hardware is GigabitEthernet, address is aac1.abb9.f295 (bia aac1.abb9.f295)
+  Description: TO-P1
+  Internet address is 10.0.1.4/31
+  MTU 1514 bytes, BW 1000000 Kbit (Max: 1000000 Kbit)
+     reliability 255/255, txload 0/255, rxload 0/255
+  Encapsulation ARPA,
+  Full-duplex, 1000Mb/s, unknown, link type is force-up
+  output flow control is off, input flow control is off
+  Carrier delay (up) is 10 msec
+  loopback not set,
+  Last link flapped 00:04:48
+  ARP type ARPA, ARP timeout 04:00:00
+  Last input 00:04:39, output 00:04:39
+  Last clearing of "show interface" counters never
+  5 minute input rate 15000 bits/sec, 19 packets/sec
+  5 minute output rate 14000 bits/sec, 19 packets/sec
+     215330 packets input, 21847735 bytes, 0 total input drops
+     0 drops for unrecognized upper-level protocol
+     Received 2 broadcast packets, 165393 multicast packets
+              0 runts, 0 giants, 0 throttles, 0 parity
+     0 input errors, 0 CRC, 0 frame, 0 overrun, 0 ignored, 0 abort
+     216086 packets output, 20861071 bytes, 0 total output drops
+     Output 4 broadcast packets, 86430 multicast packets
+     0 output errors, 0 underruns, 0 applique, 0 resets
+     0 output buffer failures, 0 output buffers swapped out
+     4 carrier transitions
+
