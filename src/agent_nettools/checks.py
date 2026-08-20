@@ -1582,29 +1582,72 @@ def _bgp_peer_count_drift(ctx: RuleContext) -> list[dict[str, Any]]:
 # --------------------------------------------------------------------------- #
 
 
-def _suspicious_baseline(ctx: RuleContext) -> list[dict[str, Any]]:
-    """Catches: a recorded baseline that a role invariant would itself call unhealthy.
+# B-465/OBS-146. The first version of this rule tested a VALUE
+# (``isis_adjacencies == 0``) where the defect is a RELATIONSHIP: a baseline
+# that disagrees with what the device's role requires, whatever the value is.
+# Testing only zero was measured wrong on the case that motivated the item --
+# PE1's recorded baseline was ``1``, `_isis_isolated` only requires ">= 1", so
+# ``1`` satisfies that invariant and a rule reusing it would have missed PE1
+# exactly as the old rule did (OBS-146).
+#
+# This fabric has no single-homed role: every device, including the leanest
+# ones (an edge PE or the route reflector, each dual-homed to two P-routers
+# by design), carries at least two IS-IS adjacencies once healthy -- the
+# 2026-08-19 re-derivation (B-465/B-516) measured every device in
+# ``inventory/lab.yaml`` at or above this floor except PE3, deliberately left
+# alone for its own still-open fault (B-496). A recorded baseline *below* the
+# floor for its role was learned while the device looked less connected than
+# this fabric's design ever allows, which is exactly the "learned from a
+# broken fabric" shape `suspicious_baseline` exists to catch -- one is as
+# telling as zero.
+#
+# A future role that is genuinely meant to be single-homed would need its own
+# entry here rather than reusing this table -- do not lower the floor to fit
+# a new role, add a role.
+ROLE_MIN_ISIS_ADJACENCIES: dict[str, int] = {
+    "core": 2,
+    "edge": 2,
+    "route-reflector": 2,
+}
 
-    Concretely, ``expected.isis_adjacencies == 0``: that value was learned
-    from a fabric that was already broken when ``learn-topology`` ran (see
-    ``inventory/lab.yaml``'s caution comment). This never depends on freshly
+
+def _suspicious_baseline(ctx: RuleContext) -> list[dict[str, Any]]:
+    """Catches: a recorded baseline that disagrees with its role's expected shape.
+
+    Not "is this value zero" -- "does this baseline fall below what
+    ``ROLE_MIN_ISIS_ADJACENCIES`` requires for this device's role". Zero is
+    still caught (it is always below the floor), but so is any other value
+    that undershoots the role, e.g. an edge device recorded at ``1`` when
+    every edge in this fabric is dual-homed. This never depends on freshly
     observed evidence -- it is a statement about the inventory itself -- so it
     is not gated on any intent's parse status.
+
+    Absence is never zero: a device with no recorded ``isis_adjacencies``
+    baseline at all has nothing to be suspicious of yet (`learn-topology`
+    never ran, or the field was never populated) -- that is "not
+    established", not "0 adjacencies", and must not fire.
     """
 
     expected = ctx.device.expected
-    if expected is None or expected.isis_adjacencies != 0:
+    if expected is None or expected.isis_adjacencies is None:
+        return []
+    actual = expected.isis_adjacencies
+    role = ctx.device.role
+    floor = ROLE_MIN_ISIS_ADJACENCIES.get(role, 1)
+    if actual >= floor:
         return []
     return [
         {
             "intent": None,
             "message": (
-                f"Recorded baseline for {ctx.device.name} encodes "
-                "isis_adjacencies=0, a broken state captured at learn-topology "
-                "time -- do not treat it as a healthy target."
+                f"Recorded baseline for {ctx.device.name} (role {role!r}) "
+                f"encodes isis_adjacencies={actual}, below the minimum of "
+                f"{floor} this fabric's design requires for that role -- a "
+                "broken state captured at learn-topology time, not a "
+                "healthy target."
             ),
-            "expected": ">0 (role invariant)",
-            "actual": 0,
+            "expected": f">={floor} (role {role!r} invariant)",
+            "actual": actual,
             "subject": None,
         }
     ]
