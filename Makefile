@@ -2,9 +2,9 @@ PYTHON ?= python3
 # PE1 matches agent_nettools.inventory.get_default_device_name()'s own
 # fallback, so this is an explicit spelling of the same default, not a new
 # one. Made explicit (rather than left empty) because the Phase 5 template
-# targets below take a *second* positional argument (PREFIX/ADDRESS/NAME);
-# with DEVICE left empty, `nettools route  10.255.0.31` collapses under
-# shell word-splitting to a single argument and the required second
+# targets below take a *second* positional argument (PREFIX/ADDRESS/NAME/
+# SUBJECT); with DEVICE left empty, `nettools route  10.255.0.31` collapses
+# under shell word-splitting to a single argument and the required second
 # positional goes missing.
 DEVICE ?= PE1
 PREFIX ?= 10.255.0.31
@@ -12,6 +12,7 @@ ADDRESS ?= 10.255.0.31
 NAME ?= GigabitEthernet0/0/0/1
 POLICY_ID ?= 20:10.255.0.13
 COUNT ?= 20
+SUBJECT ?= 10.255.0.31
 QUESTION ?= What, if anything, is wrong with the fabric right now?
 KEEP_DAYS ?= 30
 KEEP_COUNT ?= 20
@@ -20,7 +21,8 @@ KEEP_COUNT ?= 20
         fabric-bgp route bgp-neighbor interface sr-policy logging ping traceroute \
         analyze analyze-fabric agent demo diff capture learn-topology health health-fixtures \
         baseline-pin baseline-show flaps evidence-prune metrics version mcp inspect \
-        docker-build clean audit audit-fixtures config-check route-event
+        docker-build clean audit audit-fixtures config-check route-event \
+        investigate ledger-summary ledger-verdict
 
 # Self-maintaining: derived from the "## description" comment each target
 # below carries, in the order they appear in this file, rather than a
@@ -186,4 +188,18 @@ config-check:  ## Validate every NETTOOLS_*/provider env var; exit 1 on problems
 
 route-event:  ## Route an event from stdin (pipe an Alertmanager JSON or syslog line in)
 	nettools route-event
+
+# --- Investigation layer (MVP-0, B-485) -------------------------------------
+# investigate and ledger existed on the CLI with no make wrapper until now
+# (Wave 3 C5); added here, not spliced into the phase-ordered block above, to
+# match how the OPS wave targets above were themselves appended rather than
+# reordered in.
+investigate:  ## Deterministically descend a flow's dependency stack and report the cause (DEVICE=name SUBJECT=address; ARGS=--flow bgp_session|interface|isis_adjacency|ldp_session, --from-fixtures, etc.)
+	nettools investigate $(DEVICE) $(SUBJECT) $(ARGS)
+
+ledger-summary:  ## Diagnosis accuracy ledger: counts by outcome (unknown always shown)
+	nettools ledger summary
+
+ledger-verdict:  ## Record a human verdict on one diagnosis (DIAGNOSIS_ID=id OUTCOME=confirmed_correct|incorrect|unknown; ARGS=--by NAME optional)
+	nettools ledger verdict $(DIAGNOSIS_ID) $(OUTCOME) $(ARGS)
 
