@@ -78,7 +78,12 @@ its own, each module depending only on the ones above it in this list:
 | `investigation.py` | `investigate()` — the runner that wires the above together | all of the above, `network_tools` |
 
 `cli.py`'s `investigate` subcommand has MCP parity in `investigate_lab_session`
-(B-113, closed 2026-08-19); both wrap the same `investigate()` runner.
+— both wrap the same `investigate()` runner. (**Correction, 2026-08-20**: an
+earlier pass of this cleanup wave cited this as landing with "B-113, closed
+2026-08-19." That is wrong — `investigate_lab_session` already existed by
+2026-08-17, per `MCP-EXPERIMENT.md`'s own baseline; B-113 is MCP tool
+consolidation/wording, an unrelated item. No backlog item is cited here
+because none was found that specifically tracks this parity.)
 
 > The four invariants this layer inherits, the two modules that look like
 > ordinary code and are not, and the precondition every flow must satisfy are
