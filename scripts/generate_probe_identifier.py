@@ -64,6 +64,7 @@ generated address never appears anywhere in the tree it was checked against.
 from __future__ import annotations
 
 import argparse
+import functools
 import ipaddress
 import random
 import re
@@ -144,6 +145,7 @@ def reserved_from_inventory() -> set[str]:
     return reserved
 
 
+@functools.cache
 def reserved_from_repo_grep(root: Path = REPO_ROOT) -> set[str]:
     """Every IPv4-shaped string written down ANYWHERE under `root`.
 
@@ -158,6 +160,17 @@ def reserved_from_repo_grep(root: Path = REPO_ROOT) -> set[str]:
     same reason -- a decoding wrinkle must never make this check silently
     return fewer reserved addresses than are actually present, so anything it
     cannot cleanly read it treats as unreadable, not as empty of content.
+
+    `@functools.cache`, keyed on `root`: this is a pure function of the
+    filesystem (module docstring), and within one process -- one CLI
+    invocation, or one pytest session -- the tree does not change under it.
+    Memoizing in-process turns the ~15+ calls one `nettools` probe-identifier
+    test session made (each ~0.3-0.5s walking the whole repo) into one real
+    walk. Deliberately NOT a disk cache: a disk cache could go stale silently
+    across separate runs if the tree changed between them, which this check
+    exists to never do (B-511/OBS-195). A single `main()` invocation only
+    ever calls this once anyway, so production behaviour is unchanged; a
+    fresh process (a fresh `nettools`/pytest run) always gets a fresh walk.
     """
 
     reserved: set[str] = set()

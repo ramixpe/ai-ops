@@ -138,7 +138,16 @@ def test_generated_identifier_never_appears_anywhere_in_the_tree(G):
         identifier = G.generate_probe_identifier(rng=random.Random(seed))
         seen.add(identifier)
 
-    # Fresh, independent grep -- not reusing anything cached by the generator.
+    # An independent call, computing the check itself rather than trusting a
+    # set the generator already built. `reserved_from_repo_grep` is
+    # `@functools.cache`d for suite performance (P1, ~11s of every full pass
+    # was this file re-walking the repo tree on every draw) -- so within this
+    # process this returns the SAME memoized result `generate_probe_identifier`
+    # itself just used, not a fresh disk walk. That is still the right check:
+    # the cache is per-process/per-session only (never written to disk), the
+    # tree is not mutated by anything in this test session, and what this
+    # assertion guards against is a logic bug in the exclusion computation,
+    # not a stale answer -- a wrong `reserved` set would be wrong here too.
     written_down = G.reserved_from_repo_grep(REPO_ROOT)
     collisions = seen & written_down
     assert not collisions, f"generator produced address(es) already present in the tree: {collisions}"
