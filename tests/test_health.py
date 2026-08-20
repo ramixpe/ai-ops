@@ -485,9 +485,13 @@ def test_a_stale_baseline_no_longer_raises_a_healthy_device_to_warning():
     # This fixture supplies only `isis`, so the other three intents are
     # correctly `intent_collection_failed` -- absence is never health. What
     # matters is that **no warning comes from the drift rule**, which is what
-    # raised a repaired device to `warning` before B-465.
+    # raised a repaired device to `warning` before B-465. `suspicious_baseline`
+    # *does* legitimately warn here -- role "edge" has a floor of 2 and this
+    # baseline is recorded at 1, exactly the PE1 shape B-465/OBS-146 measured
+    # -- which is a real, separate signal about the stale baseline itself,
+    # not the direction-of-drift defect this test isolates.
     warnings = [f for f in verdict["findings"] if f["severity"] == "warning"]
-    assert {f["rule"] for f in warnings} == {"intent_collection_failed"}
+    assert {f["rule"] for f in warnings} == {"intent_collection_failed", "suspicious_baseline"}
     assert all(
         f["severity"] == "info"
         for f in verdict["findings"]
@@ -533,12 +537,57 @@ def test_bgp_peer_count_drift_fires_on_mismatch_and_skips_when_absent():
 # --------------------------------------------------------------------------- #
 
 
-def test_suspicious_baseline_only_fires_for_zero_isis_expectation():
-    zero_baseline = evaluate_device({"platform": "cisco_xr"}, _device("PE9", isis_adjacencies=0))
-    assert "suspicious_baseline" in {f["rule"] for f in zero_baseline["findings"]}
+def test_suspicious_baseline_fires_on_zero_regardless_of_role():
+    """The value the old, narrow rule already caught -- still caught."""
 
-    nonzero_baseline = evaluate_device({"platform": "cisco_xr"}, _device("PE9", isis_adjacencies=1))
-    assert "suspicious_baseline" not in {f["rule"] for f in nonzero_baseline["findings"]}
+    for role in ("core", "edge", "route-reflector"):
+        zero_baseline = evaluate_device(
+            {"platform": "cisco_xr"}, _device("D9", role=role, isis_adjacencies=0)
+        )
+        assert "suspicious_baseline" in {f["rule"] for f in zero_baseline["findings"]}, role
+
+
+def test_suspicious_baseline_catches_pe1s_nonzero_case_the_old_rule_missed():
+    """B-465/OBS-146: PE1's recorded baseline was ``isis_adjacencies: 1``, role
+    "edge". `_isis_isolated` only requires ">= 1", so `1` satisfies it and a
+    role invariant reused from there would still miss this -- which is
+    exactly what the first (narrow, value-only) version of this rule did. The
+    fix is a role-specific floor (`ROLE_MIN_ISIS_ADJACENCIES`): every role in
+    this fabric is dual-homed at minimum, so `1` is below the floor for
+    "edge" and must fire even though it is not zero."""
+
+    pe1_shaped = evaluate_device(
+        {"platform": "cisco_xr"}, _device("PE1", role="edge", isis_adjacencies=1)
+    )
+    findings = {f["rule"]: f for f in pe1_shaped["findings"]}
+    assert "suspicious_baseline" in findings
+    finding = findings["suspicious_baseline"]
+    assert finding["severity"] == "warning"
+    assert finding["actual"] == 1
+    # The finding must say why: which role, what was expected, what is
+    # recorded -- a bare "suspicious" is not actionable.
+    assert "edge" in finding["message"]
+    assert "1" in finding["message"]
+    assert "2" in finding["message"]
+
+
+def test_suspicious_baseline_does_not_fire_on_a_correct_baseline():
+    """Positive control: the rule must not fire on everything. A baseline at
+    or above its role's floor -- this fabric's real, re-derived values,
+    P-routers at 5 and edge/route-reflector devices at 2 -- is not
+    suspicious."""
+
+    for role, value in (("core", 5), ("edge", 2), ("route-reflector", 2)):
+        verdict = evaluate_device(
+            {"platform": "cisco_xr"}, _device("D9", role=role, isis_adjacencies=value)
+        )
+        assert "suspicious_baseline" not in {f["rule"] for f in verdict["findings"]}, (role, value)
+
+
+def test_suspicious_baseline_does_not_fire_on_a_missing_baseline():
+    """Absence is never zero: a device with no recorded isis_adjacencies
+    baseline at all has nothing established yet to be suspicious of -- that
+    is a different fact from a baseline recorded as 0, and must not fire."""
 
     no_baseline = evaluate_device({"platform": "cisco_xr"}, _device("PE9"))
     assert "suspicious_baseline" not in {f["rule"] for f in no_baseline["findings"]}
