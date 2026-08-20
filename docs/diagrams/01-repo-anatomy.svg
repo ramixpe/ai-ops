@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1580" height="1210" viewBox="0 0 1580 1210" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"><defs><marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6f6f6a"/></marker><marker id="arwb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#1f5fd0"/></marker><marker id="arwr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#c0392b"/></marker><marker id="arwp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6d28d9"/></marker><marker id="arwg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#15803d"/></marker></defs>
 <rect width="1580" height="1210" fill="#fbfbf9"/>
 <text x="48.0" y="56.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="27" font-weight="700" fill="#17171a" text-anchor="start">ios-xr-nettools — repo anatomy</text>
-<text x="48.0" y="82.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="14" font-weight="400" fill="#6f6f6a" text-anchor="start">39,368 lines of source + 2,419 in the MCP server · 43,953 lines of tests · read-only, single lab, 9 Cisco XRd nodes</text>
+<text x="48.0" y="82.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="14" font-weight="400" fill="#6f6f6a" text-anchor="start">39,514 lines of source + 2,419 in the MCP server · 44,426 lines of tests · read-only, single lab, 9 Cisco XRd nodes</text>
 <rect x="1472.4" y="38.0" width="59.6" height="24.0" rx="12" fill="#fff" stroke="#d8d8d2" stroke-width="1"/>
 <text x="1502.2" y="54.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="11.5" font-weight="400" fill="#6f6f6a" text-anchor="middle">v1.0.1</text>
 <line x1="48.0" y1="100.0" x2="1532.0" y2="100.0" stroke="#d8d8d2" stroke-width="1"/>
@@ -66,7 +66,7 @@
 <text x="536.1" y="448.8" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.5" font-weight="400" fill="#6f6f6a" text-anchor="start">485 · per-device/fabric concurrency gate</text>
 <rect x="65.0" y="466.0" width="298.4" height="26.0" rx="13.0" fill="#fff" stroke="#a7d6d0" stroke-width="1"/>
 <text x="76.0" y="483.5" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="12.5" font-weight="500" fill="#17171a" text-anchor="start">ticket.py</text>
-<text x="152.1" y="482.8" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.5" font-weight="400" fill="#6f6f6a" text-anchor="start">1,320 · append-only flight recorder</text>
+<text x="152.1" y="482.8" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.5" font-weight="400" fill="#6f6f6a" text-anchor="start">1,350 · append-only flight recorder</text>
 <rect x="371.4" y="466.0" width="315.3" height="26.0" rx="13.0" fill="#fff" stroke="#a7d6d0" stroke-width="1"/>
 <text x="382.4" y="483.5" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="12.5" font-weight="500" fill="#17171a" text-anchor="start">ownership.py</text>
 <text x="481.1" y="482.8" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.5" font-weight="400" fill="#6f6f6a" text-anchor="start">364 · declared who-gets-told table</text>
@@ -114,7 +114,7 @@
 <text x="283.8" y="788.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11.8" font-weight="400" fill="#6f6f6a" text-anchor="start">the only code in the repository that reads raw device text</text>
 <rect x="65.0" y="802.0" width="357.0" height="26.0" rx="13.0" fill="#fff" stroke="#d8d8d2" stroke-width="1"/>
 <text x="76.0" y="819.5" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="12.5" font-weight="500" fill="#17171a" text-anchor="start">network_tools.py</text>
-<text x="205.0" y="818.8" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.5" font-weight="400" fill="#6f6f6a" text-anchor="start">2,571 · the one transport chokepoint</text>
+<text x="205.0" y="818.8" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.5" font-weight="400" fill="#6f6f6a" text-anchor="start">2,585 · the one transport chokepoint</text>
 <rect x="430.0" y="802.0" width="134.2" height="26.0" rx="13.0" fill="#fff" stroke="#d8d8d2" stroke-width="1"/>
 <text x="441.0" y="819.5" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="12.5" font-weight="500" fill="#17171a" text-anchor="start">parsers.py</text>
 <text x="524.6" y="818.8" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.5" font-weight="400" fill="#6f6f6a" text-anchor="start">1,278</text>
@@ -123,7 +123,7 @@
 <text x="734.9" y="818.8" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.5" font-weight="400" fill="#6f6f6a" text-anchor="start">2,045</text>
 <rect x="65.0" y="836.0" width="267.3" height="26.0" rx="13.0" fill="#fff" stroke="#d8d8d2" stroke-width="1"/>
 <text x="76.0" y="853.5" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="12.5" font-weight="500" fill="#17171a" text-anchor="start">evidence_store.py</text>
-<text x="212.6" y="852.8" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.5" font-weight="400" fill="#6f6f6a" text-anchor="start">632 · json | sqlite</text>
+<text x="212.6" y="852.8" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.5" font-weight="400" fill="#6f6f6a" text-anchor="start">684 · json | sqlite</text>
 <rect x="340.3" y="836.0" width="145.5" height="26.0" rx="13.0" fill="#fff" stroke="#d8d8d2" stroke-width="1"/>
 <text x="351.3" y="853.5" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="12.5" font-weight="500" fill="#17171a" text-anchor="start">log_window.py</text>
 <text x="457.6" y="852.8" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.5" font-weight="400" fill="#6f6f6a" text-anchor="start">423</text>

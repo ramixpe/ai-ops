@@ -268,6 +268,20 @@ def _audit_log(entry: dict[str, Any]) -> None:
         record = {"timestamp": _timestamp(), "actor": _resolve_actor(), **entry}
         with open(path, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(record) + "\n")
+        # EER-019: owner-only, same fixed mode as every other durable write in
+        # this project (ledger, tickets, evidence, session memory). This one
+        # was missed by the wave that did the rest -- `NETTOOLS_LOG` is
+        # written from here, not from `audit.py` (which despite its name
+        # writes no files at all), so a search for the audit writer lands in
+        # the wrong module. It records every command run against every
+        # device, with the resolved actor: a world-readable copy of that is a
+        # map of the fabric and who touched it.
+        #
+        # chmod AFTER the append, every time, not once at creation: a log
+        # that already exists with loose permissions (created before this
+        # fix, or by an earlier umask) is corrected on the next write rather
+        # than left as it was found.
+        os.chmod(path, 0o600)
     except OSError:
         pass
 
