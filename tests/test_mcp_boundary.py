@@ -196,6 +196,84 @@ def test_registration_is_what_applies_the_boundary():
     assert "register(sanitized)" in source, "the *wrapped* function is what gets registered"
 
 
+def test_a_raised_exception_is_sanitised_not_only_a_returned_value(monkeypatch):
+    """EER-007: before this, `_register_sanitized_tool`'s `sanitized()` had
+    no `try/except` around `function(*call_args, **call_kwargs)` -- if the
+    wrapped function RAISED (rather than returning a `status: "error"`
+    envelope, the normal convention), the exception propagated past
+    `sanitize()` entirely, into FastMCP's own dispatcher, which turns it into
+    `CallToolResult(is_error=True, text=f"Error executing tool {name}:
+    {exc}")` -- the raw exception text, verbatim, never sanitised or
+    classified.
+
+    This is the positive control this exact defect needs (OBS-181): a tool
+    that raises with device-output-shaped text embedded in the exception
+    message. The client-visible payload must contain the classification
+    ("the device's prompt was not recognised...") and must NOT contain the
+    raw device-shaped text.
+    """
+
+    device_output_shaped_text = (
+        "Pattern not detected: '#' in output. "
+        "output='RP/0/RP0/CPU0:PE1#show bgp summary\nBGP router identifier 10.255.0.11'"
+    )
+
+    def raises(device_name):
+        raise RuntimeError(f"show bgp summary: {device_output_shaped_text}")
+
+    monkeypatch.setattr(server, "get_device_facts", raises)
+
+    result = server.get_lab_device_facts("PE1")
+
+    assert result["status"] == "error"
+    assert result["tool"] == "get_lab_device_facts"
+    assert result["device"] == "PE1"
+    [message] = result["errors"]
+    assert "the device's prompt was not recognised" in message
+    for leaked in ("RP/0/RP0/CPU0", "10.255.0.11", "output=", "BGP router identifier"):
+        assert leaked not in message, f"{leaked!r} reached the client"
+    payload = str(result)
+    for leaked in ("RP/0/RP0/CPU0", "10.255.0.11", "output=", "BGP router identifier"):
+        assert leaked not in payload, f"{leaked!r} reached the client payload"
+
+
+def test_a_raised_exception_with_no_classified_kind_is_withheld_not_leaked(monkeypatch):
+    """The unclassified-detail case: an exception whose text matches no
+    `ERROR_KINDS` entry must still not leak its raw text -- only the generic
+    'unclassified' phrase every other unmatched detail already gets."""
+
+    def raises(device_name):
+        raise ValueError("brand new failure mode quoting 10.0.0.99 verbatim")
+
+    monkeypatch.setattr(server, "get_device_facts", raises)
+
+    result = server.get_lab_device_facts("PE1")
+
+    assert result["status"] == "error"
+    [message] = result["errors"]
+    assert "unclassified" in message
+    assert "10.0.0.99" not in message
+    assert "brand new failure mode" not in message
+
+
+def test_a_normal_tool_call_still_returns_its_real_data(monkeypatch):
+    """The positive control for the two tests above: wrapping the call in
+    try/except must not change behaviour for a tool that does NOT raise."""
+
+    monkeypatch.setattr(
+        server, "get_device_facts",
+        lambda device_name: {
+            "tool": "get_device_facts", "device": device_name, "status": "success",
+            "data": {"commands": {}, "parsed": {"hostname": "PE1"}}, "errors": [],
+        },
+    )
+
+    result = server.get_lab_device_facts("PE1")
+
+    assert result["status"] == "success"
+    assert result["data"]["parsed"]["hostname"] == "PE1"
+
+
 def test_active_probe_tools_still_lose_a_canary_in_their_commands(monkeypatch):
     """B-473 added `_active_probe_tool`, a second registration wrapper for
     `get_lab_ping`/`get_lab_traceroute`. This is the direct check that the new
@@ -1014,11 +1092,10 @@ def test_external_source_gate_recognized_falsy_values_disable_it(monkeypatch, va
     assert called == []
 
 
-@pytest.mark.parametrize("value", ["", "nope", "2", "sure", "TRUE", "1"])
-def test_external_source_gate_unrecognized_or_truthy_values_stay_enabled(monkeypatch, value):
-    """Deliberately the OPPOSITE convention from NETTOOLS_MCP_ALLOW_ACTIVE_PROBES:
-    here only a recognized FALSY spelling closes the gate -- everything
-    else, typo included, stays at the documented default (enabled)."""
+@pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "on"])
+def test_external_source_gate_recognized_truthy_values_stay_enabled(monkeypatch, value):
+    """A recognized truthy spelling keeps the gate open -- the positive
+    control for the fail-closed test directly below."""
 
     monkeypatch.setenv("NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES", value)
     monkeypatch.setattr(
@@ -1029,6 +1106,33 @@ def test_external_source_gate_unrecognized_or_truthy_values_stay_enabled(monkeyp
     result = server.get_lab_logs("PE1")
 
     assert result["status"] == "success"
+
+
+@pytest.mark.parametrize("value", ["", "nope", "2", "sure"])
+def test_external_source_gate_fails_closed_on_unrecognized_values(monkeypatch, value):
+    """EER-008b: this used to be the OPPOSITE convention from
+    NETTOOLS_MCP_ALLOW_ACTIVE_PROBES -- only a recognized FALSY spelling
+    closed the gate, so a typo (e.g. 'sure', 'nope') silently left external
+    sources ENABLED. Now matches _mcp_active_probes_allowed's idiom: only a
+    recognized TRUTHY spelling opens the gate, so a typo fails closed the
+    same way it already does for NETTOOLS_MCP_ALLOW_ACTIVE_PROBES. The
+    documented DEFAULT (unset) is unaffected -- see
+    test_external_source_tools_run_by_default above, the positive control
+    that the default itself still resolves to enabled."""
+
+    monkeypatch.setenv("NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES", value)
+    called: list[str] = []
+    monkeypatch.setattr(
+        server.logs_loki, "run_named_query", lambda *a, **k: called.append(1) or {}
+    )
+
+    result = server.get_lab_logs("PE1")
+
+    assert result["status"] == "error"
+    assert called == [], "run_named_query must never fire on an unrecognized value"
+    [message] = result["errors"]
+    assert "unclassified" not in message
+    assert "external evidence sources are disabled" in message
 
 
 def test_external_source_gate_does_not_touch_a_passive_tool(monkeypatch):
