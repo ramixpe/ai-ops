@@ -22,11 +22,12 @@ is.
 
 from __future__ import annotations
 
+import json
 import sys
 
 import pytest
 
-from agent_nettools import cli, metrics
+from agent_nettools import cli, health, metrics
 from agent_nettools.inventory import InventoryError
 from agent_nettools.llm_analysis import LLMAnalysisError
 
@@ -90,6 +91,7 @@ def test_build_parser_includes_every_documented_subcommand():
         "metrics",
         "version",
         "inspect",
+        "watch",
     ):
         assert name in choices
 
@@ -360,7 +362,10 @@ def test_health_all_maps_severity_to_exit_code(monkeypatch, severity, expected_c
         lambda: {"status": "success", "data": {"devices": [{"name": "PE1"}]}},
     )
     monkeypatch.setattr(cli, "collect_evidence", lambda name: {"device": name})
-    monkeypatch.setattr(cli, "evaluate_fabric", lambda evidence_by_device: _health_result(severity))
+    monkeypatch.setattr(
+        cli, "evaluate_fabric_with_silences",
+        lambda evidence_by_device, *a, **k: _health_result(severity),
+    )
     parser = cli.build_parser()
     args = parser.parse_args(["health", "--all"])
 
@@ -378,7 +383,7 @@ def test_health_min_severity_filters_the_view_but_not_the_exit_code(monkeypatch,
     )
     monkeypatch.setattr(cli, "collect_evidence", lambda name: {"device": name})
 
-    def fake_evaluate_fabric(evidence_by_device):
+    def fake_evaluate_fabric(evidence_by_device, *a, **k):
         return {
             "severity": "critical",
             "counts": {"devices": 2, "by_severity": {"ok": 1, "critical": 1, "warning": 0, "info": 0}},
@@ -388,7 +393,7 @@ def test_health_min_severity_filters_the_view_but_not_the_exit_code(monkeypatch,
             },
         }
 
-    monkeypatch.setattr(cli, "evaluate_fabric", fake_evaluate_fabric)
+    monkeypatch.setattr(cli, "evaluate_fabric_with_silences", fake_evaluate_fabric)
     parser = cli.build_parser()
     args = parser.parse_args(["health", "--all", "--min-severity", "critical"])
 
@@ -407,6 +412,145 @@ def test_health_list_devices_failure_exits_critical(monkeypatch, capsys):
 
     assert args.func(args) == cli.EXIT_CRITICAL
     assert "bad inventory" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------- #
+# --silence-file (W2b): an explicit flag beats the NETTOOLS_SILENCE_FILE
+# env-var fallback health._resolve_silences already implements -- this is
+# just proving the CLI actually threads it through, not re-testing that
+# resolution order itself (test_silence.py already covers that at the
+# library level).
+# --------------------------------------------------------------------------- #
+
+
+def _fabric_fixture():
+    """Two devices, each with one real (critical) finding, on DIFFERENT
+    rules/subjects -- so a silence file scoped to PE1's finding cannot
+    silence PE2's by accident, which is exactly what the positive control
+    below needs to prove."""
+
+    def _verdict(device, rule, subject):
+        finding = {
+            "rule": rule, "severity": "critical", "intent": "bgp",
+            "message": f"{device}: {rule} on {subject}",
+            "expected": "Established", "actual": "Idle", "subject": subject,
+        }
+        return {"device": device, "severity": "critical", "unevaluated": [],
+                "findings": [finding]}
+
+    return {
+        "severity": "critical",
+        "counts": {"devices": 2, "by_severity": {"critical": 2, "warning": 0, "info": 0, "ok": 0},
+                   "unevaluated_devices": []},
+        "devices": {
+            "PE1": _verdict("PE1", "bgp_session_down", "10.255.0.12"),
+            "PE2": _verdict("PE2", "isis_adjacency_down", "Gi0/0/0/0"),
+        },
+    }
+
+
+def test_silence_file_flag_silences_a_subject_the_env_var_alone_would_not(monkeypatch, tmp_path):
+    """The load-bearing claim: `--silence-file` actually overrides, it does
+    not merely duplicate the env var. `NETTOOLS_SILENCE_FILE` is set to a
+    file that does NOT cover PE1's finding; `--silence-file` names a
+    different file that DOES -- and the flag wins."""
+
+    monkeypatch.setattr(
+        cli, "list_devices",
+        lambda: {"status": "success", "data": {"devices": [{"name": "PE1"}, {"name": "PE2"}]}},
+    )
+    monkeypatch.setattr(cli, "collect_evidence", lambda name: {"device": name})
+    monkeypatch.setattr(health, "evaluate_fabric", lambda evidence_by_device, devices=None: _fabric_fixture())
+
+    env_silences = tmp_path / "env-silences.yaml"
+    env_silences.write_text(
+        "- device: PE9\n  reason: irrelevant to this run\n  created_by: rami\n"
+        "  expires_at: '2027-01-01T00:00:00+00:00'\n"
+    )
+    monkeypatch.setenv(health.NETTOOLS_SILENCE_FILE_ENV, str(env_silences))
+
+    flag_silences = tmp_path / "flag-silences.yaml"
+    flag_silences.write_text(
+        "- device: PE1\n  rule: bgp_session_down\n  reason: planned maintenance\n"
+        "  created_by: rami\n  expires_at: '2027-01-01T00:00:00+00:00'\n"
+    )
+
+    parser = cli.build_parser()
+    args = parser.parse_args(["health", "--all", "--silence-file", str(flag_silences)])
+
+    code = args.func(args)
+
+    # PE1's only finding is silenced, so the fabric severity comes down to
+    # whatever PE2's unsilenced finding contributes -- still critical here,
+    # proving the roll-up is per-finding, not "one silence clears everything".
+    assert code == cli.EXIT_CRITICAL
+
+
+def test_silence_file_flag_leaves_an_unmatched_subject_paging_positive_control(monkeypatch, tmp_path):
+    """Positive control (OBS-181) for the test above: a silence file that
+    matches nothing must change nothing -- proving the flag's effect is
+    real annotation, not a mechanism that always suppresses once present."""
+
+    monkeypatch.setattr(
+        cli, "list_devices",
+        lambda: {"status": "success", "data": {"devices": [{"name": "PE1"}, {"name": "PE2"}]}},
+    )
+    monkeypatch.setattr(cli, "collect_evidence", lambda name: {"device": name})
+    monkeypatch.setattr(health, "evaluate_fabric", lambda evidence_by_device, devices=None: _fabric_fixture())
+    monkeypatch.delenv(health.NETTOOLS_SILENCE_FILE_ENV, raising=False)
+
+    flag_silences = tmp_path / "flag-silences.yaml"
+    flag_silences.write_text(
+        "- device: PE9\n  reason: does not match anything here\n  created_by: rami\n"
+        "  expires_at: '2027-01-01T00:00:00+00:00'\n"
+    )
+
+    parser = cli.build_parser()
+    args = parser.parse_args(["health", "--all", "--silence-file", str(flag_silences)])
+    code = args.func(args)
+
+    assert code == cli.EXIT_CRITICAL
+
+
+def test_silence_file_flag_actually_suppresses_severity_when_it_matches_everything(monkeypatch, tmp_path, capsys):
+    """A silence file covering BOTH devices' findings brings the fabric down
+    to ok -- the clearest end-to-end proof the flag reaches the real
+    annotation pass, not just that the run still completes."""
+
+    monkeypatch.setattr(
+        cli, "list_devices",
+        lambda: {"status": "success", "data": {"devices": [{"name": "PE1"}, {"name": "PE2"}]}},
+    )
+    monkeypatch.setattr(cli, "collect_evidence", lambda name: {"device": name})
+    monkeypatch.setattr(health, "evaluate_fabric", lambda evidence_by_device, devices=None: _fabric_fixture())
+    monkeypatch.delenv(health.NETTOOLS_SILENCE_FILE_ENV, raising=False)
+
+    flag_silences = tmp_path / "flag-silences.yaml"
+    flag_silences.write_text(
+        "- reason: fabric-wide maintenance window\n  created_by: rami\n"
+        "  expires_at: '2027-01-01T00:00:00+00:00'\n"
+    )
+
+    parser = cli.build_parser()
+    args = parser.parse_args(["health", "--all", "--silence-file", str(flag_silences)])
+    code = args.func(args)
+    out = json.loads(capsys.readouterr().out)
+
+    assert code == cli.EXIT_OK
+    assert out["severity"] == "ok"
+    assert out["devices"]["PE1"]["raw_severity"] == "critical"
+    assert out["devices"]["PE2"]["raw_severity"] == "critical"
+
+
+def test_silence_file_omitted_means_no_flag_wiring_positive_control(monkeypatch):
+    """Without --silence-file (default None), args.silence_file must reach
+    `evaluate_fabric_with_silences` as `silence_path=None` -- the same
+    "nothing configured" case that existed before this flag, unchanged."""
+
+    parser = cli.build_parser()
+    args = parser.parse_args(["health", "--all"])
+
+    assert args.silence_file is None
 
 
 # --------------------------------------------------------------------------- #
@@ -1030,3 +1174,310 @@ def test_cmd_sr_policy_refuses_a_malformed_policy_id_before_calling_run_template
 
     assert called == [], "run_template must never fire for a malformed policy id"
     assert exit_code == cli.EXIT_WARNING
+
+
+# --------------------------------------------------------------------------- #
+# `nettools watch` (W6) -- the read-only event_watch.py dry-run surface,
+# reachable through the CLI. `_cmd_watch` imports `watch_device`/
+# `watch_fabric` lazily from `.event_watch`, so these tests patch the real
+# module-level functions on `agent_nettools.event_watch` -- the same seam
+# `tests/test_event_watch.py` itself already uses for its own `_main` tests
+# -- rather than a `cli.watch_device` attribute that does not exist.
+# --------------------------------------------------------------------------- #
+
+
+def _watch_report(device, *, status="success", routable=False, errors=()):
+    from agent_nettools import event_routing, event_watch
+
+    observations = ()
+    if status == "success":
+        decision = event_routing.RoutingDecision(
+            routable=routable, source_kind="loki", matched="PKT_INFRA-LINK-3-UPDOWN",
+            device=device,
+            flow="interface" if routable else None,
+            subject="GigabitEthernet0/0/0/0" if routable else None,
+            reason="test fixture",
+        )
+        observations = (event_watch.LokiObservation(decision, 1, "t1", "t1"),)
+    return event_watch.WatchReport(
+        device=device, status=status, coverage={"source": "loki"} if status == "success" else None,
+        observations=observations, errors=tuple(errors),
+    )
+
+
+def test_watch_single_device_positive_control_something_routes(monkeypatch, capsys):
+    """A routable observation on the one named device exits WARNING (1) --
+    "something would fire" -- and the emitted JSON carries the report."""
+
+    from agent_nettools import event_watch
+
+    monkeypatch.setattr(
+        event_watch, "watch_device",
+        lambda device, **kw: _watch_report(device, routable=True),
+    )
+    parser = cli.build_parser()
+    args = parser.parse_args(["watch", "PE1"])
+
+    code = args.func(args)
+    out = json.loads(capsys.readouterr().out)
+
+    assert code == cli.EXIT_WARNING
+    assert out["tool"] == "watch"
+    assert out["routable_count"] == 1
+    assert out["reports"][0]["device"] == "PE1"
+    assert out["reports"][0]["observations"][0]["routable"] is True
+
+
+def test_watch_single_device_nothing_routable_exits_ok_positive_control(monkeypatch, capsys):
+    """Positive control (OBS-181) for the test above: no routable observation
+    must exit OK, proving the WARNING above is a real signal, not always-on."""
+
+    from agent_nettools import event_watch
+
+    monkeypatch.setattr(
+        event_watch, "watch_device",
+        lambda device, **kw: _watch_report(device, routable=False),
+    )
+    parser = cli.build_parser()
+    args = parser.parse_args(["watch", "PE1"])
+
+    code = args.func(args)
+    out = json.loads(capsys.readouterr().out)
+
+    assert code == cli.EXIT_OK
+    assert out["routable_count"] == 0
+
+
+def test_watch_all_calls_watch_fabric_and_aggregates_routable_count(monkeypatch, capsys):
+    from agent_nettools import event_watch
+
+    reports = (
+        _watch_report("PE1", routable=True),
+        _watch_report("PE2", routable=False),
+    )
+    monkeypatch.setattr(event_watch, "watch_fabric", lambda **kw: reports)
+    parser = cli.build_parser()
+    args = parser.parse_args(["watch", "--all"])
+
+    code = args.func(args)
+    out = json.loads(capsys.readouterr().out)
+
+    assert code == cli.EXIT_WARNING
+    assert out["routable_count"] == 1
+    assert [r["device"] for r in out["reports"]] == ["PE1", "PE2"]
+
+
+def test_watch_all_devices_erroring_exits_critical(monkeypatch, capsys):
+    """Every device's fetch failed -- the "could not run at all" bucket,
+    matching `event_watch._main`'s own 2-exit for the identical case."""
+
+    from agent_nettools import event_watch
+
+    reports = (
+        _watch_report("PE1", status="error", errors=("loki unreachable",)),
+        _watch_report("PE2", status="error", errors=("loki unreachable",)),
+    )
+    monkeypatch.setattr(event_watch, "watch_fabric", lambda **kw: reports)
+    parser = cli.build_parser()
+    args = parser.parse_args(["watch", "--all"])
+
+    code = args.func(args)
+
+    assert code == cli.EXIT_CRITICAL
+
+
+def test_watch_since_seconds_and_limit_are_threaded_through(monkeypatch):
+    from agent_nettools import event_watch
+
+    captured = {}
+
+    def fake_watch_device(device, **kw):
+        captured.update(kw)
+        return _watch_report(device)
+
+    monkeypatch.setattr(event_watch, "watch_device", fake_watch_device)
+    parser = cli.build_parser()
+    args = parser.parse_args(["watch", "PE1", "--since-seconds", "60", "--limit", "10"])
+
+    args.func(args)
+
+    assert captured["since_seconds"] == 60
+    assert captured["limit"] == 10
+
+
+def test_watch_is_read_only_never_touches_ticket_or_ledger():
+    """Structural guard (matches tests/test_oncall_runbook.py's own style):
+    `_cmd_watch` must have no import path to ticket/ledger writes -- this
+    command is named for observation only, per event_watch.py's own "What
+    this module is not"."""
+
+    import inspect
+
+    source = inspect.getsource(cli._cmd_watch)
+    for needle in (
+        "import ticket", "import ledger", "_open_ticket_for", "_record_in_ticket",
+        "_record_diagnosis_in_ledger", "_ledger_for_cli", "investigate(",
+    ):
+        assert needle not in source, needle
+
+
+def test_watch_end_to_end_through_a_fake_http_fetcher(monkeypatch, capsys):
+    """The deeper, fully-real pass: no `watch_device`/`watch_fabric` patch at
+    all -- only Loki's own HTTP layer (`logs_loki._http_fetcher`) is faked,
+    so this exercises the real event_watch grouping/decision code, invoked
+    through the real `nettools watch` CLI path end to end."""
+
+    from agent_nettools import logs_loki
+
+    def fake_http_fetcher(base_url, params):
+        return {"status": "success", "data": {"resultType": "streams", "result": []}}
+
+    monkeypatch.setattr(logs_loki, "_http_fetcher", fake_http_fetcher)
+    parser = cli.build_parser()
+    args = parser.parse_args(["watch", "PE1"])
+
+    code = args.func(args)
+    out = json.loads(capsys.readouterr().out)
+
+    # An empty window is a real success with nothing to route -- not an error.
+    assert code == cli.EXIT_OK
+    assert out["reports"][0]["status"] == "success"
+    assert out["reports"][0]["observations"] == []
+
+
+# --------------------------------------------------------------------------- #
+# P4 (release-1.0 cleanup), half 2: lazy submodule imports in cli.py itself.
+#
+# `import agent_nettools.cli` used to eagerly import ~12 of this project's
+# own submodules (agent_loop, fabric_analysis, fixtures, flow_selection,
+# health, inventory, inventory_model, investigation, llm_analysis,
+# network_tools, templates, topology) plus flows/metrics/output/settings, at
+# module-load time -- paid by every `nettools` invocation and by importing
+# this module as a library, regardless of which command actually ran.
+# `_require()`/`__getattr__()`/`_LAZY` replace that with resolve-on-first-
+# real-use, cached afterward. The design constraint that shaped this over
+# the more obvious "move each import into its own function" alternative:
+# dozens of tests in this very file monkeypatch `cli.<name>` directly
+# (`cli.collect_evidence`, `cli.list_devices`, ...) -- see this file's own
+# `evaluate_fabric_with_silences` patches above, for one -- and a local
+# import inside a function body would silently shadow that, running the
+# REAL function instead of the mock. `test_build_parser_includes_every_
+# documented_subcommand` and every other test in this file already exercise
+# the "does it still work, mocked" half of that claim; the tests below cover
+# the two halves nothing else in this file proves: real resolution actually
+# happens, and it does not happen too early.
+# --------------------------------------------------------------------------- #
+
+
+def test_bare_import_of_cli_loads_no_project_submodule():
+    """The KPI this task exists to move: `import agent_nettools.cli` alone
+    must not pull in network_tools, llm_analysis, agent_loop, or any other
+    submodule this file used to import eagerly. Run in a subprocess -- this
+    process has almost certainly already imported most of these via other
+    test modules collected earlier, which would make an in-process check
+    vacuous."""
+
+    import subprocess
+    import sys as _sys
+
+    proc = subprocess.run(
+        [
+            _sys.executable, "-c",
+            "import sys; import agent_nettools.cli; "
+            "loaded = sorted(n for n in sys.modules if n.startswith('agent_nettools.') "
+            "and n != 'agent_nettools.cli'); "
+            "print(','.join(loaded))",
+        ],
+        capture_output=True, text=True, check=True,
+    )
+    loaded = [n for n in proc.stdout.strip().split(",") if n]
+    assert loaded == [], f"import agent_nettools.cli eagerly loaded: {loaded}"
+
+
+def test_every_lazy_name_is_pre_declared_as_the_none_placeholder():
+    """Every name `_LAZY` promises must already exist as a module global
+    (the `None` placeholder `_require`'s own `is None` check relies on) --
+    otherwise `_require` would raise `KeyError`/behave inconsistently for a
+    name someone added to `_LAZY` without also declaring its placeholder."""
+
+    for name in cli._LAZY:
+        assert name in vars(cli), f"{name} is in _LAZY but has no None placeholder"
+        # Some may already be resolved by test collection order (a fixture
+        # or an earlier test triggered a real _require() call) -- both
+        # `None` (never touched yet) and the real resolved object are valid;
+        # what must never happen is the attribute being entirely absent.
+
+
+def test_require_resolves_every_lazy_name_to_the_real_object():
+    """Positive control (OBS-181): force every one of `_LAZY`'s names
+    through `_require`, then assert each one is the real object its
+    submodule defines -- not a stub, not still `None`. Catches a typo'd
+    `_LAZY` entry (wrong submodule, wrong real name) the same way a broken
+    refusal test would be caught by its own positive control."""
+
+    import importlib
+
+    cli._require(*cli._LAZY.keys())
+    for name, (submodule, real_name) in cli._LAZY.items():
+        value = getattr(cli, name)
+        assert value is not None, f"{name} is still the None placeholder after _require"
+        module = importlib.import_module(submodule, cli.__package__)
+        expected = module if real_name is None else getattr(module, real_name)
+        assert value is expected, f"{name} resolved to {value!r}, expected {expected!r}"
+
+
+def test_require_is_a_noop_once_a_name_is_monkeypatched(monkeypatch):
+    """The load-bearing guarantee for every existing `monkeypatch.setattr(cli,
+    name, fake)` test elsewhere in this file: once a name is patched to a
+    real (non-None) value, `_require` must never overwrite it back to the
+    real resolved function."""
+
+    sentinel = object()
+    monkeypatch.setattr(cli, "collect_evidence", sentinel)
+    cli._require("collect_evidence")
+    assert cli.collect_evidence is sentinel
+
+
+def test_require_resolves_a_still_none_name_for_real_no_mock_positive_control():
+    """Positive control for the test above: a name nobody has touched this
+    process (or one explicitly reset to the placeholder) DOES resolve to the
+    real object when required -- proving the no-op above is really about
+    "already resolved", not `_require` being broken outright."""
+
+    real_module_before = cli.collect_evidence
+    try:
+        cli.collect_evidence = None  # simulate "never yet required"
+        cli._require("collect_evidence")
+        assert cli.collect_evidence is not None
+        from agent_nettools.network_tools import collect_evidence as real_fn
+
+        assert cli.collect_evidence is real_fn
+    finally:
+        cli.collect_evidence = real_module_before
+
+
+def test_a_disabled_agent_command_never_imports_agent_loop(monkeypatch):
+    """`nettools agent` refuses before `_require("run_agent_loop", ...)` --
+    confirmed by never letting agent_loop.py (which pulls in the Anthropic
+    SDK) load for a refusal, run in a subprocess for the same "this process
+    already imported it elsewhere" reason as the bare-import test above."""
+
+    import os
+    import subprocess
+    import sys as _sys
+
+    env = dict(os.environ)
+    env["NETTOOLS_ENABLE_AGENT"] = "0"
+    proc = subprocess.run(
+        [
+            _sys.executable, "-c",
+            "import sys; from agent_nettools import cli; "
+            "cli.load_dotenv = lambda *a, **k: False; "
+            "cli.find_dotenv = lambda *a, **k: ''; "
+            "sys.argv = ['nettools', 'agent', 'anything']; "
+            "cli.main(); "
+            "print(','.join(n for n in sys.modules if n == 'agent_nettools.agent_loop'))",
+        ],
+        capture_output=True, text=True, env=env,
+    )
+    assert "agent_nettools.agent_loop" not in proc.stdout
