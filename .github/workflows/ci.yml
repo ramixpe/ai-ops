@@ -199,8 +199,19 @@ jobs:
           test "$t" = "2" || { echo "t0: expected 2, got $t"; exit 1; }
           echo "0 / 1 / 2 all reachable from the installed wheel"
 
-          "$NETTOOLS" investigate RR1 10.255.0.12 --from-fixtures --format json 2>/dev/null \
-            | "$RUNNER_TEMP/artifact-venv/bin/python" -c "import json,sys; assert json.load(sys.stdin)['finding']"
+          # NOT a pipeline into python: `set -o pipefail` is in force for this
+          # whole block, and `investigate` exits 1 BY DESIGN when it finds a
+          # fault, so piping it would fail the step on a correct run. (The
+          # offline-demo job gets away with the pipeline form only because
+          # each `run:` is its own shell and it never sets pipefail.) Caught
+          # on the first real CI run of this job -- the demo output above it
+          # was already correct. Redirect, assert the documented exit code,
+          # then parse the file.
+          "$NETTOOLS" investigate RR1 10.255.0.12 \
+            --from-fixtures --format json > demo.json 2>/dev/null && j=0 || j=$?
+          test "$j" = "1" || { echo "json run: expected exit 1, got $j"; exit 1; }
+          "$RUNNER_TEMP/artifact-venv/bin/python" \
+            -c "import json; assert json.load(open('demo.json'))['finding']"
           echo "json output parses without stripping anything"
 
       - name: nettools version matches the version this build declares
