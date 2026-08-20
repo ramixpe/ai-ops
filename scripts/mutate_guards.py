@@ -747,6 +747,50 @@ MUTATIONS = [
      '{"status": "error",',
      "test_probe_lab_unknown_kind_carries_the_full_envelope"),
 
+    # ---- EER boundary-repair guards (v1.1.0). Every anchor confirmed to
+    # occur exactly once with `grep -cF` before being written here. ----
+
+    ("EER-002-STRICT", "SSH host-key verification actually reaches netmiko",
+     "src/agent_nettools/network_tools.py",
+     '        "ssh_strict": effective_ssh_strict,\n',
+     '        "ssh_strict": False,\n',
+     "test_ssh_host_key_verification_params_reach_netmiko"),
+
+    ("EER-002-OWN-STORE", "the operator's own ~/.ssh/known_hosts is never "
+     "consulted -- trust comes only from this tool's own store",
+     "src/agent_nettools/network_tools.py",
+     '        "system_host_keys": False,\n',
+     '        "system_host_keys": True,\n',
+     "test_ssh_host_key_verification_params_reach_netmiko"),
+
+    ("EER-005-STORE", "flap detection reads through the backend-selectable "
+     "store, so sqlite cannot render a real flap as a clean result",
+     "src/agent_nettools/network_tools.py",
+     "    snapshots = get_store(base_dir).list_history(device_name)",
+     "    snapshots = []",
+     "test_detect_flaps_backend_parity_identical_sequences"),
+
+    ("EER-007-EXC", "a raised MCP tool exception is sanitised, not passed to "
+     "the client as raw text",
+     "mcp_server/server.py",
+     "            except Exception as exc:  # noqa: BLE001 - see the docstring above:\n",
+     "            except NameError as exc:  # noqa: BLE001 - see the docstring above:\n",
+     "test_a_raised_exception_is_sanitised_not_only_a_returned_value"),
+
+    ("EER-008B-EXTERNAL", "an unrecognised NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES "
+     "value fails closed, not open",
+     "mcp_server/server.py",
+     "    return value in _MCP_EXTERNAL_SOURCES_TRUTHY",
+     '    return value not in {"0", "false", "no", "off"}',
+     "test_external_source_gate_fails_closed_on_unrecognized_values"),
+
+    ("EER-011-FLOCK", "concurrent metrics updates are serialised by a "
+     "cross-process flock, so no increment is silently lost",
+     "src/agent_nettools/metrics.py",
+     "        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)\n",
+     "        pass\n",
+     "test_concurrent_increments_across_collectors_lose_nothing"),
+
     ("B-821-RUNID-EXCLUDED", "a ledger row missing run_id is excluded from "
      "same-cause correlation, never merged on cause alone",
      "src/agent_nettools/incident_correlation.py",

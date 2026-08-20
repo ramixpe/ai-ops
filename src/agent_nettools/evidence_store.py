@@ -19,11 +19,28 @@ wrappers over whichever store ``get_store()`` resolves, so ``diff_evidence``
 and everything downstream of it needs no change either way -- both backends
 hand back the exact same evidence dict shape that was saved.
 
-``detect_flaps`` deliberately keeps its own file-only history read in
-``network_tools.py`` rather than going through this abstraction: flap
-detection reads a device's *entire* history on every call, and moving that
-onto a second backend is future work, not something this phase's fabric-scale
-measurement asked for.
+``detect_flaps`` **used to** keep its own file-only history read in
+``network_tools.py`` rather than going through this abstraction, justified
+here as "flap detection reads a device's *entire* history on every call, and
+moving that onto a second backend is future work". That justification did not
+survive contact with the consequence: under ``NETTOOLS_EVIDENCE_BACKEND=
+sqlite`` the direct filesystem glob found nothing, so a device with real
+flapping history reported ``{"flapping": [], "snapshots_examined": 0}`` --
+byte-identical to a genuinely stable device, exit code 0. A silent false
+clean, in the one check whose entire job is spotting instability (EER-005).
+
+The stated reason was also the argument against itself: reading an entire
+history is exactly what ``list_history`` does, and it has been
+``@abstractmethod`` on ``EvidenceStore`` -- implemented by both backends --
+the whole time. ``detect_flaps`` now goes through ``get_store()`` like every
+other reader.
+
+One honest residue: ``snapshots_skipped`` (how many corrupt records were
+dropped, B-474) is still derived by a file-backend-only count, so the sqlite
+backend reports 0 there -- "not measurable yet", not "none were skipped".
+Closing that needs a store-contract addition (a ``count_history``, or a
+``list_history`` that returns the skip count alongside the rows); it is
+tracked rather than faked.
 """
 
 from __future__ import annotations

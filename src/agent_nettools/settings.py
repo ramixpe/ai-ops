@@ -71,8 +71,12 @@ class Setting:
 
     ``kind`` drives validation in :func:`_problem`: ``"int"``/``"float"``
     parse and range-check; ``"bool"`` checks against a recognized spelling
-    (see :data:`_BOOL_SPELLINGS` -- this catches ``NETTOOLS_ALLOW_ACTIVE_PROBES=fasle``,
-    which the *code* silently treats as truthy, exactly the P2-02 shape);
+    (see :data:`_BOOL_SPELLINGS`). The original example here was
+    ``NETTOOLS_ALLOW_ACTIVE_PROBES=fasle``, "which the *code* silently treats
+    as truthy" -- true when written (the P2-02 shape), no longer true since
+    EER-008a made that gate fail closed. The validator still earns its keep:
+    it reports the typo either way, and a gate that fails closed on a typo is
+    still a gate behaving differently than the operator wrote down;
     ``"enum"`` checks membership in ``choices``; ``"path"``/``"string"``/
     ``"secret"`` have no format to validate -- presence is all that is ever
     checked, and a ``"secret"``'s value is never inspected beyond that.
@@ -184,7 +188,31 @@ SETTINGS: tuple[Setting, ...] = (
     Setting(
         "NETTOOLS_ALLOW_ACTIVE_PROBES", "bool", True,
         "Gates the ping/traceroute templates, the only commands here that "
-        "generate device-side traffic. Default enabled.",
+        "generate device-side traffic. Default enabled -- but an unrecognised "
+        "value that IS set fails closed (disabled) since EER-008a. It used to "
+        "do the opposite: the gate read `value not in {falsy}`, so `=fasle` "
+        "silently ENABLED device-side traffic. Default-on and "
+        "typo-fails-closed are independent properties; this has both.",
+        "network_tools",
+        unknown_bool_disables=True,
+    ),
+    Setting(
+        "NETTOOLS_SSH_KNOWN_HOSTS", "path", "~/.config/nettools/known_hosts",
+        "Trust store for SSH host-key verification (EER-002) -- netmiko's "
+        "alt_key_file, loaded with alt_host_keys=True. Deliberately never the "
+        "operator's own ~/.ssh/known_hosts (system_host_keys is always False), "
+        "which would silently inherit unrelated trust. The only writer of a "
+        "real entry is scripts/enroll_host_keys.py, run deliberately.",
+        "network_tools",
+    ),
+    Setting(
+        "NETTOOLS_SSH_STRICT", "bool", True,
+        "Whether an unrecognised SSH host key is rejected rather than "
+        "silently trusted (netmiko ssh_strict). Fail-closed in BOTH "
+        "directions: unset means enabled, and an unrecognised set value also "
+        "means enabled. Note this is why unknown_bool_disables is NOT set "
+        "here -- for this gate 'enabled' is the secure state, so 'unknown "
+        "disables' would be exactly backwards.",
         "network_tools",
     ),
     Setting(

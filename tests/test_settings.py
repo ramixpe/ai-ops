@@ -128,7 +128,7 @@ def test_unknown_bool_disables_settings_actually_fail_closed(monkeypatch):
     typo-fails-closed are independent properties, and this setting now has
     both."""
 
-    from agent_nettools import cli, netbox
+    from agent_nettools import cli, netbox, network_tools
     from mcp_server import server as mcp_server_module
 
     unrecognized = "definitely-not-a-recognized-spelling"
@@ -141,7 +141,18 @@ def test_unknown_bool_disables_settings_actually_fail_closed(monkeypatch):
         "NETTOOLS_ENABLE_AGENT",
         "NETTOOLS_NETBOX_WRITE_ENABLED",
         "NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES",
+        "NETTOOLS_ALLOW_ACTIVE_PROBES",
     }
+
+    # NETTOOLS_ALLOW_ACTIVE_PROBES (EER-008a) is the setting whose old
+    # behaviour this whole field was named after: `_BOOL_SPELLINGS`'s comment
+    # still cites it as THE example of "a typo is silently treated as
+    # enabled". It no longer is. Same shape as the external-sources gate:
+    # default-on, typo-fails-closed.
+    monkeypatch.setenv("NETTOOLS_ALLOW_ACTIVE_PROBES", unrecognized)
+    assert network_tools._active_probes_allowed() is False
+    monkeypatch.delenv("NETTOOLS_ALLOW_ACTIVE_PROBES", raising=False)
+    assert network_tools._active_probes_allowed() is True  # positive control
 
     monkeypatch.setenv("NETTOOLS_MCP_ALLOW_ACTIVE_PROBES", unrecognized)
     assert mcp_server_module._mcp_active_probes_allowed() is False
