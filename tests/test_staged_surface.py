@@ -36,6 +36,41 @@ def test_the_default_surface_is_classic_and_unchanged():
     assert len(names) >= 23
 
 
+def test_unrecognized_surface_value_fails_closed_to_staged(monkeypatch):
+    """EER-008b: an unrecognized NETTOOLS_MCP_SURFACE (e.g. a typo like
+    'stage') used to fall back to 'classic' -- the WIDER surface -- with only
+    a `logging.warning`. It must now fail CLOSED to 'staged', the narrower
+    one, matching `_mcp_active_probes_allowed`'s idiom: a typo must not
+    silently grant more tool surface than was asked for."""
+
+    import mcp_server.server as server
+    from mcp_server.staged_surface import STAGED_TOOL_NAMES
+
+    monkeypatch.setenv("NETTOOLS_MCP_SURFACE", "stage")  # typo for "staged"
+    try:
+        importlib.reload(server)
+        assert server.ACTIVE_SURFACE == "staged"
+        assert _tool_names(server) == set(STAGED_TOOL_NAMES)
+    finally:
+        monkeypatch.delenv("NETTOOLS_MCP_SURFACE", raising=False)
+        importlib.reload(server)
+
+
+def test_a_genuinely_unset_surface_still_defaults_to_classic(monkeypatch):
+    """The positive control for the test above: the DEFAULT (unset) is
+    unaffected by the fail-closed change -- only an explicitly-set,
+    unrecognized value now resolves to the narrower surface, never the
+    absence of a value at all."""
+
+    import mcp_server.server as server
+
+    monkeypatch.delenv("NETTOOLS_MCP_SURFACE", raising=False)
+    importlib.reload(server)
+
+    assert server.ACTIVE_SURFACE == "classic"
+    assert "investigate_lab_session" in _tool_names(server)
+
+
 def test_staged_registers_exactly_the_six(staged_server):
     from mcp_server.staged_surface import STAGED_TOOL_NAMES
 

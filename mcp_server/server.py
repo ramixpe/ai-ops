@@ -237,20 +237,34 @@ def _active_probes_refused(tool_name: str, call_args: tuple, call_kwargs: dict) 
 #     `NETTOOLS_PROMETHEUS_TIMEOUT_SECONDS`, 10s default each) for a tool
 #     that can never succeed there -- an availability/UX gate, not only a
 #     security one.
-# Because the risk this gate guards is "an unwanted outbound call ran",
-# never "the network was changed", an unrecognized value follows the
-# ordinary (non-B-493) convention already used by most bool settings in this
-# codebase (`settings.Setting.unknown_bool_disables=False`): it resolves
-# toward the documented default (enabled), not toward a fixed "safe" pole --
-# see settings.py's own comment on why that footgun is accepted for every
-# setting except the ones that exist specifically to stay off.
+#
+# EER-008b (2026-08-20): this paragraph used to end here with "so an
+# unrecognized value follows the ordinary convention and resolves toward the
+# documented default (enabled)" -- i.e. `value not in _MCP_EXTERNAL_SOURCES_FALSY`,
+# so a TYPO enabled external sources. That reasoning conflated two different
+# questions: whether the DEFAULT (unset) should be enabled -- yes, for every
+# reason above -- and whether an UNRECOGNIZED, explicitly-set value should
+# resolve the same way. It should not: `NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES=fals`
+# (a typo) silently enabling a THIRD MCP-only gate is the identical footgun
+# `settings.Setting.unknown_bool_disables` exists to flag, and nothing about
+# "this gate's documented default is enabled" is a reason a *malformed* value
+# should also be treated as enabled -- that is exactly the B-493 shape this
+# gate's own sibling (`_mcp_active_probes_allowed`, above) already refuses to
+# repeat. So this now matches that function's idiom exactly: membership in a
+# TRUTHY set, not absence from a FALSY one. The default (unset) still
+# resolves to `"1"` (enabled, unchanged) -- `os.getenv(..., "1")` never
+# reaches the malformed-value path at all; only an explicitly-set,
+# unrecognized value now fails closed instead of silently widening. The
+# orchestrator-owned `settings.Setting` for this name should gain
+# `unknown_bool_disables=True` to match (proposed AS DATA in this task's
+# final report; this module does not own `settings.py`).
 NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES_ENV = "NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES"
-_MCP_EXTERNAL_SOURCES_FALSY = frozenset({"0", "false", "no", "off"})
+_MCP_EXTERNAL_SOURCES_TRUTHY = frozenset({"1", "true", "yes", "on"})
 
 
 def _mcp_external_sources_allowed() -> bool:
     value = os.getenv(NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES_ENV, "1").strip().lower()
-    return value not in _MCP_EXTERNAL_SOURCES_FALSY
+    return value in _MCP_EXTERNAL_SOURCES_TRUTHY
 
 
 def _external_sources_refused(tool_name: str, call_args: tuple, call_kwargs: dict) -> dict:
@@ -374,6 +388,31 @@ def _register_sanitized_tool(
     this process. See the module comment above `_external_source_tool` for
     why this gate exists and why it defaults to the opposite posture from
     `active_probe`'s.
+
+    **EER-007: a RAISED exception is sanitised too, not only a returned
+    value.** Before this, the bare `return sanitize(function(...))` below had
+    no `try/except` at all -- if `function` raised (rather than returning a
+    `status: "error"` envelope, the normal convention every tool here
+    follows), the exception propagated out of `sanitized`, past `sanitize`
+    entirely, straight into FastMCP's own dispatcher. That dispatcher catches
+    it and returns `CallToolResult(is_error=True, ...)` whose text is
+    ``f"Error executing tool {name}: {exc}"`` -- the raw exception text,
+    unclassified and unsanitised, which is exactly the invariant-4 hole this
+    module exists to close, just reached through the one path that skipped
+    the decorator instead of going through it. Confirmed live 2026-08-20
+    against the installed MCP SDK.
+
+    The fix is the same move as the two gate checks above: build an
+    error-shaped envelope (the same `tool`/`device`/`status`/`data`/`errors`
+    shape `_error_envelope` already returns for every other refusal) and run
+    it through `sanitize()`, so `boundary._classify_errors` gets a chance at
+    it -- an unrecognised exception message is withheld the same way an
+    unrecognised transport-error string already is, never passed through
+    raw. `device` is read the same way the two refusal helpers above read it
+    (`_device_name_from_call`), best-effort: most tools here take
+    `device_name` first, and a tool that does not simply gets `None`, which
+    is a valid envelope field already (`list_lab_devices`,
+    `read_lab_ticket`, ...).
     """
 
     if annotations is not None:
@@ -400,7 +439,30 @@ def _register_sanitized_tool(
                 return sanitize(
                     _external_sources_refused(function.__name__, call_args, call_kwargs)
                 )
-            return sanitize(function(*call_args, **call_kwargs))
+            try:
+                return sanitize(function(*call_args, **call_kwargs))
+            except Exception as exc:  # noqa: BLE001 - see the docstring above:
+                # EER-007. Every tool here is expected to report failure
+                # through its own envelope (`status: "error"`), never by
+                # raising -- but "expected to" is a convention, and the
+                # caller on this surface is a model, so an exception that
+                # slips through anyway (a bug, an unhandled transport
+                # exception, a KeyError from a malformed call) must still
+                # come out sanitised, not bypass `sanitize()` by leaving
+                # through the one door that has none. Rebuilt through
+                # `_error_envelope` -> `sanitize` -> `_classify_errors`, the
+                # SAME withhold-unless-declared discipline every other error
+                # on this surface already gets: the exception's raw text
+                # never reaches the client, only its classified kind (or, if
+                # unmatched, the same "an unclassified error" phrase every
+                # other unmatched detail gets).
+                return sanitize(
+                    _error_envelope(
+                        function.__name__,
+                        _device_name_from_call(call_args, call_kwargs),
+                        f"{type(exc).__name__}: {exc}",
+                    )
+                )
 
         # Registered under the *wrapped* function, so there is no route to the
         # unsanitised one through the MCP protocol. `functools.wraps` keeps the
@@ -1654,23 +1716,46 @@ def _select_surface() -> None:
     no-op everywhere except that one case. `staged_surface.apply()` clears
     and rebuilds the tool registry, so calling it twice with the same
     resolved value is idempotent.
+
+    EER-008b (2026-08-20): an unrecognized value (e.g. `stage`, a typo for
+    `staged`) used to fall back to `classic` -- the WIDER of the two surfaces
+    (the full per-function tool set vs. `staged`'s five stage-shaped tools
+    plus a probe) -- with only a `logging.warning`. That is fail-OPEN: a
+    misspelled env var silently handed an MCP client a larger tool manifest
+    than either the unset default or the value someone actually typed would
+    suggest was intended. This now fails CLOSED to `staged`, the narrower
+    surface, matching `_mcp_active_probes_allowed`'s idiom (a typo must not
+    silently grant more than was asked for) rather than `main()`/`import`
+    raising outright: raising here was considered and rejected, because this
+    function runs at IMPORT time (see the call below) as well as from
+    `main()`, and this module's own import-must-be-side-effect-free
+    discipline (R8/OBS-50x, see `main`'s docstring) means an exception here
+    would take down every process that merely imports `mcp_server.server` --
+    including a pytest collection run from a checkout with a stray malformed
+    `.env` -- for a setting whose failure mode (a slightly smaller or larger
+    tool list) is recoverable and worth surfacing loudly, not fatal. The
+    *default* (unset -> `"classic"`) is unaffected: only an explicitly-set,
+    unrecognized value now resolves to the narrower surface instead of the
+    wider one.
     """
 
     global ACTIVE_SURFACE
-    ACTIVE_SURFACE = os.getenv(NETTOOLS_MCP_SURFACE_ENV, "classic").strip().lower()
+    raw = os.getenv(NETTOOLS_MCP_SURFACE_ENV, "classic").strip().lower()
 
+    if raw not in ("classic", "staged"):
+        logging.getLogger(__name__).warning(
+            "NETTOOLS_MCP_SURFACE=%r is not 'classic' or 'staged'; failing "
+            "closed to 'staged' (the narrower surface) rather than widening "
+            "to 'classic'",
+            raw,
+        )
+        raw = "staged"
+
+    ACTIVE_SURFACE = raw
     if ACTIVE_SURFACE == "staged":
         from . import staged_surface as _staged
 
         _staged.apply(sys.modules[__name__])
-    elif ACTIVE_SURFACE != "classic":
-        # A typo (e.g. `stage`) silently fell back to classic -- inconsistent with
-        # apply()'s own fail-loud philosophy (2026-08-18 review). Warn; do not
-        # crash, since classic is a safe default.
-        logging.getLogger(__name__).warning(
-            "NETTOOLS_MCP_SURFACE=%r is not 'classic' or 'staged'; using classic",
-            ACTIVE_SURFACE,
-        )
 
 
 _select_surface()

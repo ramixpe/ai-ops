@@ -1,3 +1,4 @@
+import json
 import sys
 import types
 
@@ -123,14 +124,17 @@ class FakeStream:
         return self._message
 
 
-def install_fake_anthropic(monkeypatch, respond, *, captured=None):
+def install_fake_anthropic(monkeypatch, respond, *, captured=None, client_kwargs=None):
     """Install a fake anthropic module whose ``messages.stream``/``beta.messages.stream``
     call ``respond(**kwargs)`` to get a message (or let it raise).
 
     ``respond`` receives every keyword argument the real SDK call would (model,
     max_tokens, system, messages, tools, and -- on the beta path -- betas/
     fallbacks). If ``captured`` is a list, every call's kwargs are appended to
-    it so a test can inspect exactly what was sent.
+    it so a test can inspect exactly what was sent. If ``client_kwargs`` is a
+    list, every ``anthropic.Anthropic(**kwargs)`` construction's kwargs are
+    appended to it (EER-010: this is how a test observes the timeout the
+    client was actually constructed with).
     """
 
     module = types.ModuleType("anthropic")
@@ -160,6 +164,8 @@ def install_fake_anthropic(monkeypatch, respond, *, captured=None):
 
     class FakeAnthropic:
         def __init__(self, **kwargs):
+            if client_kwargs is not None:
+                client_kwargs.append(kwargs)
             self.messages = FakeMessages()
             self.beta = FakeBeta()
 
@@ -614,3 +620,237 @@ def test_openai_error_wording_is_unchanged_by_the_minimax_parameterisation(
 
     with pytest.raises(LLMAnalysisError, match=expected):
         analyze_with_openai({"device": "PE1"})
+
+
+# --------------------------------------------------------------------------- #
+# EER-010: every provider client now carries an enforceable timeout, resolved
+# through `_resolve_llm_timeout` -- an explicit `timeout=` argument wins,
+# then NETTOOLS_LLM_TIMEOUT_SECONDS, then DEFAULT_LLM_TIMEOUT_SECONDS. Before
+# this, Anthropic (`analyze_with_anthropic`/`complete_prompt`) and OpenAI/
+# MiniMax (`_openai_call`) clients had NO timeout at all, and Ollama
+# (`_ollama_call`) had a hardcoded `timeout=120` nothing here could configure.
+# --------------------------------------------------------------------------- #
+
+
+def test_resolve_llm_timeout_precedence(monkeypatch):
+    from agent_nettools.llm_analysis import DEFAULT_LLM_TIMEOUT_SECONDS, _resolve_llm_timeout
+
+    monkeypatch.delenv("NETTOOLS_LLM_TIMEOUT_SECONDS", raising=False)
+    assert _resolve_llm_timeout(None) == DEFAULT_LLM_TIMEOUT_SECONDS
+    assert _resolve_llm_timeout(12.5) == 12.5, "an explicit timeout always wins"
+
+    monkeypatch.setenv("NETTOOLS_LLM_TIMEOUT_SECONDS", "45")
+    assert _resolve_llm_timeout(None) == 45.0
+    assert _resolve_llm_timeout(5.0) == 5.0, "an explicit timeout wins over the env var too"
+
+
+@pytest.mark.parametrize("raw", ["not-a-number", "0", "-5", "  "])
+def test_resolve_llm_timeout_falls_back_to_default_on_malformed_or_nonpositive(monkeypatch, raw):
+    """A malformed or non-positive NETTOOLS_LLM_TIMEOUT_SECONDS must not
+    silently become "no timeout" or a negative timeout -- it falls back to
+    the default, the same "report, don't crash on a bad env value"
+    convention every other env-driven default in this codebase follows."""
+
+    from agent_nettools.llm_analysis import DEFAULT_LLM_TIMEOUT_SECONDS, _resolve_llm_timeout
+
+    monkeypatch.setenv("NETTOOLS_LLM_TIMEOUT_SECONDS", raw)
+    assert _resolve_llm_timeout(None) == DEFAULT_LLM_TIMEOUT_SECONDS
+
+
+def test_anthropic_analyze_client_uses_the_default_timeout(monkeypatch):
+    monkeypatch.delenv("NETTOOLS_LLM_TIMEOUT_SECONDS", raising=False)
+    from agent_nettools.llm_analysis import DEFAULT_LLM_TIMEOUT_SECONDS
+
+    client_kwargs = []
+    install_fake_anthropic(
+        monkeypatch, lambda **kwargs: fake_message("ok"), client_kwargs=client_kwargs
+    )
+
+    analyze_with_anthropic({"device": "PE1"})
+
+    assert client_kwargs[0]["timeout"] == DEFAULT_LLM_TIMEOUT_SECONDS
+
+
+def test_anthropic_analyze_client_honours_the_env_var(monkeypatch):
+    monkeypatch.setenv("NETTOOLS_LLM_TIMEOUT_SECONDS", "17.5")
+
+    client_kwargs = []
+    install_fake_anthropic(
+        monkeypatch, lambda **kwargs: fake_message("ok"), client_kwargs=client_kwargs
+    )
+
+    analyze_with_anthropic({"device": "PE1"})
+
+    assert client_kwargs[0]["timeout"] == 17.5
+
+
+def test_anthropic_analyze_explicit_timeout_wins_over_the_env_var(monkeypatch):
+    monkeypatch.setenv("NETTOOLS_LLM_TIMEOUT_SECONDS", "17.5")
+
+    client_kwargs = []
+    install_fake_anthropic(
+        monkeypatch, lambda **kwargs: fake_message("ok"), client_kwargs=client_kwargs
+    )
+
+    analyze_with_anthropic({"device": "PE1"}, timeout=3.0)
+
+    assert client_kwargs[0]["timeout"] == 3.0
+
+
+def test_complete_prompt_anthropic_client_carries_a_timeout(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
+    monkeypatch.delenv("NETTOOLS_LLM_TIMEOUT_SECONDS", raising=False)
+    from agent_nettools.llm_analysis import DEFAULT_LLM_TIMEOUT_SECONDS
+
+    client_kwargs = []
+    install_fake_anthropic(
+        monkeypatch, lambda **kwargs: fake_message("ok"), client_kwargs=client_kwargs
+    )
+
+    complete_prompt(RenderedPrompt(system="static", user="volatile"))
+
+    assert client_kwargs[0]["timeout"] == DEFAULT_LLM_TIMEOUT_SECONDS
+
+
+def test_openai_client_carries_a_timeout(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    monkeypatch.delenv("OPENAI_MODEL", raising=False)
+    monkeypatch.setenv("NETTOOLS_LLM_TIMEOUT_SECONDS", "22")
+    client_calls = []
+    install_fake_openai(
+        monkeypatch, lambda **kwargs: fake_openai_response("ok"), captured_client=client_calls,
+    )
+
+    analyze_with_openai({"device": "PE1"})
+
+    assert client_calls[0]["timeout"] == 22.0
+
+
+def test_openai_client_explicit_timeout_wins(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    monkeypatch.setenv("NETTOOLS_LLM_TIMEOUT_SECONDS", "22")
+    client_calls = []
+    install_fake_openai(
+        monkeypatch, lambda **kwargs: fake_openai_response("ok"), captured_client=client_calls,
+    )
+
+    analyze_with_openai({"device": "PE1"}, timeout=9.0)
+
+    assert client_calls[0]["timeout"] == 9.0
+
+
+def test_minimax_client_carries_a_timeout(monkeypatch):
+    monkeypatch.setenv("MINIMAX_API_KEY", "test-minimax-key")
+    monkeypatch.setenv("NETTOOLS_LLM_TIMEOUT_SECONDS", "33")
+    client_calls = []
+    install_fake_openai(
+        monkeypatch, lambda **kwargs: fake_openai_response("ok"), captured_client=client_calls,
+    )
+
+    analyze_with_minimax({"device": "PE1"})
+
+    assert client_calls[0]["timeout"] == 33.0
+
+
+# --------------------------------------------------------------------------- #
+# Ollama -- _ollama_call's HTTP layer had no direct test before this change.
+# --------------------------------------------------------------------------- #
+
+
+class _FakeOllamaResponse:
+    def __init__(self, body: dict):
+        self._body = json.dumps(body).encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+    def read(self):
+        return self._body
+
+
+def test_ollama_call_uses_the_default_timeout_not_the_old_hardcoded_120(monkeypatch):
+    """EER-010: `_ollama_call` used to hardcode `timeout=120` directly into
+    `urlopen` -- the one provider path that DID have a timeout, but with a
+    value nothing here could configure. It must now resolve through
+    `_resolve_llm_timeout` like every other provider path."""
+
+    import urllib.request as real_urllib_request
+
+    from agent_nettools.llm_analysis import DEFAULT_LLM_TIMEOUT_SECONDS, analyze_with_ollama
+
+    monkeypatch.delenv("NETTOOLS_LLM_TIMEOUT_SECONDS", raising=False)
+    captured_kwargs = []
+
+    def fake_urlopen(request, **kwargs):
+        captured_kwargs.append(kwargs)
+        return _FakeOllamaResponse({"message": {"content": "ok"}, "done_reason": "stop"})
+
+    monkeypatch.setattr(real_urllib_request, "urlopen", fake_urlopen)
+
+    analysis = analyze_with_ollama({"device": "PE1"})
+
+    assert captured_kwargs[0]["timeout"] == DEFAULT_LLM_TIMEOUT_SECONDS
+    assert captured_kwargs[0]["timeout"] != 120, "the old hardcoded value must be gone"
+    assert analysis == "ok"
+
+
+def test_ollama_call_honours_the_env_var(monkeypatch):
+    import urllib.request as real_urllib_request
+
+    from agent_nettools.llm_analysis import analyze_with_ollama
+
+    monkeypatch.setenv("NETTOOLS_LLM_TIMEOUT_SECONDS", "7")
+    captured_kwargs = []
+
+    def fake_urlopen(request, **kwargs):
+        captured_kwargs.append(kwargs)
+        return _FakeOllamaResponse({"message": {"content": "ok"}, "done_reason": "stop"})
+
+    monkeypatch.setattr(real_urllib_request, "urlopen", fake_urlopen)
+
+    analyze_with_ollama({"device": "PE1"})
+
+    assert captured_kwargs[0]["timeout"] == 7.0
+
+
+def test_ollama_call_explicit_timeout_wins_over_the_env_var(monkeypatch):
+    import urllib.request as real_urllib_request
+
+    from agent_nettools.llm_analysis import _ollama_call
+
+    monkeypatch.setenv("NETTOOLS_LLM_TIMEOUT_SECONDS", "7")
+    captured_kwargs = []
+
+    def fake_urlopen(request, **kwargs):
+        captured_kwargs.append(kwargs)
+        return _FakeOllamaResponse({"message": {"content": "ok"}, "done_reason": "stop"})
+
+    monkeypatch.setattr(real_urllib_request, "urlopen", fake_urlopen)
+
+    _ollama_call("prompt", timeout=2.5)
+
+    assert captured_kwargs[0]["timeout"] == 2.5
+
+
+def test_ollama_timeout_error_message_reflects_the_resolved_timeout_not_120(monkeypatch):
+    """The old message hardcoded "120s" regardless of what timeout was
+    actually used (it always was 120, since nothing could change it) -- now
+    that the value is configurable, the message must say the real one."""
+
+    import urllib.request as real_urllib_request
+
+    from agent_nettools.llm_analysis import LLMAnalysisError, _ollama_call
+
+    monkeypatch.setenv("NETTOOLS_LLM_TIMEOUT_SECONDS", "5")
+
+    def fake_urlopen(request, **kwargs):
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(real_urllib_request, "urlopen", fake_urlopen)
+
+    with pytest.raises(LLMAnalysisError, match=r"did not respond within 5\.0s"):
+        _ollama_call("prompt")
