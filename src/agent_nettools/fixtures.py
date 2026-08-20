@@ -24,6 +24,7 @@ from . import parsers
 from .interface_kind import is_physical_member
 from .inventory import get_device
 from .network_tools import collect_evidence, run_templates
+from .storage_key import is_valid_storage_key
 
 # Fixtures land here, relative to the working directory unless overridden.
 DEFAULT_FIXTURE_DIR = "tests/fixtures"
@@ -82,17 +83,14 @@ def scrub_output(text: str) -> str:
     return text
 
 
-#: The charset a fixture path component may use -- deliberately the same one
-#: `evidence_store._DEVICE_NAME_RE` allows, since both answer the identical
-#: question ("is this string safe to become one path segment?"). It covers
-#: every real value in the committed corpus: platform `cisco_xr`, devices
-#: `P1`..`RR1`, labels `t0`/`t1`/`broken`/`healthy`/`isis-broken`/`unit`.
-#:
-#: Duplicated rather than imported for this hotfix (v1.0.1): EER-001 asks for
-#: ONE storage-key policy shared by every boundary, which is a real
-#: consolidation across `evidence_store`, `fixtures`, inventory and the CLI --
-#: tracked as its own item rather than smuggled into a security fix.
-_FIXTURE_PART_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+#: EER-009: this used to be its own duplicate copy of the charset
+#: `evidence_store._DEVICE_NAME_RE` also carries (the v1.0.1 hotfix -- EER-001
+#: -- deliberately deferred that consolidation rather than smuggling it into
+#: a security fix). `is_valid_storage_key` (see `storage_key.py`) is the one
+#: shared policy now; `fixture_path` below is one of its two migrated call
+#: sites (`inventory_model.Device.name` is the other). It covers every real
+#: value in the committed corpus: platform `cisco_xr`, devices `P1`..`RR1`,
+#: labels `t0`/`t1`/`broken`/`healthy`/`isis-broken`/`unit`.
 
 
 def _fixture_dir(base_dir: str | None) -> Path:
@@ -188,7 +186,7 @@ def fixture_path(
         ("device name", str(device["name"])),
         ("label", str(label)),
     ):
-        if part in (".", "..") or not _FIXTURE_PART_RE.fullmatch(part):
+        if not is_valid_storage_key(part):
             raise ValueError(f"invalid {part_name} for a fixture path: {part!r}")
 
     path = root / str(device["platform"]) / str(device["name"]) / label / f"{command_slug(command)}.txt"
