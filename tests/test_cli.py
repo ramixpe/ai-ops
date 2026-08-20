@@ -1343,3 +1343,141 @@ def test_watch_end_to_end_through_a_fake_http_fetcher(monkeypatch, capsys):
     assert code == cli.EXIT_OK
     assert out["reports"][0]["status"] == "success"
     assert out["reports"][0]["observations"] == []
+
+
+# --------------------------------------------------------------------------- #
+# P4 (release-1.0 cleanup), half 2: lazy submodule imports in cli.py itself.
+#
+# `import agent_nettools.cli` used to eagerly import ~12 of this project's
+# own submodules (agent_loop, fabric_analysis, fixtures, flow_selection,
+# health, inventory, inventory_model, investigation, llm_analysis,
+# network_tools, templates, topology) plus flows/metrics/output/settings, at
+# module-load time -- paid by every `nettools` invocation and by importing
+# this module as a library, regardless of which command actually ran.
+# `_require()`/`__getattr__()`/`_LAZY` replace that with resolve-on-first-
+# real-use, cached afterward. The design constraint that shaped this over
+# the more obvious "move each import into its own function" alternative:
+# dozens of tests in this very file monkeypatch `cli.<name>` directly
+# (`cli.collect_evidence`, `cli.list_devices`, ...) -- see this file's own
+# `evaluate_fabric_with_silences` patches above, for one -- and a local
+# import inside a function body would silently shadow that, running the
+# REAL function instead of the mock. `test_build_parser_includes_every_
+# documented_subcommand` and every other test in this file already exercise
+# the "does it still work, mocked" half of that claim; the tests below cover
+# the two halves nothing else in this file proves: real resolution actually
+# happens, and it does not happen too early.
+# --------------------------------------------------------------------------- #
+
+
+def test_bare_import_of_cli_loads_no_project_submodule():
+    """The KPI this task exists to move: `import agent_nettools.cli` alone
+    must not pull in network_tools, llm_analysis, agent_loop, or any other
+    submodule this file used to import eagerly. Run in a subprocess -- this
+    process has almost certainly already imported most of these via other
+    test modules collected earlier, which would make an in-process check
+    vacuous."""
+
+    import subprocess
+    import sys as _sys
+
+    proc = subprocess.run(
+        [
+            _sys.executable, "-c",
+            "import sys; import agent_nettools.cli; "
+            "loaded = sorted(n for n in sys.modules if n.startswith('agent_nettools.') "
+            "and n != 'agent_nettools.cli'); "
+            "print(','.join(loaded))",
+        ],
+        capture_output=True, text=True, check=True,
+    )
+    loaded = [n for n in proc.stdout.strip().split(",") if n]
+    assert loaded == [], f"import agent_nettools.cli eagerly loaded: {loaded}"
+
+
+def test_every_lazy_name_is_pre_declared_as_the_none_placeholder():
+    """Every name `_LAZY` promises must already exist as a module global
+    (the `None` placeholder `_require`'s own `is None` check relies on) --
+    otherwise `_require` would raise `KeyError`/behave inconsistently for a
+    name someone added to `_LAZY` without also declaring its placeholder."""
+
+    for name in cli._LAZY:
+        assert name in vars(cli), f"{name} is in _LAZY but has no None placeholder"
+        # Some may already be resolved by test collection order (a fixture
+        # or an earlier test triggered a real _require() call) -- both
+        # `None` (never touched yet) and the real resolved object are valid;
+        # what must never happen is the attribute being entirely absent.
+
+
+def test_require_resolves_every_lazy_name_to_the_real_object():
+    """Positive control (OBS-181): force every one of `_LAZY`'s names
+    through `_require`, then assert each one is the real object its
+    submodule defines -- not a stub, not still `None`. Catches a typo'd
+    `_LAZY` entry (wrong submodule, wrong real name) the same way a broken
+    refusal test would be caught by its own positive control."""
+
+    import importlib
+
+    cli._require(*cli._LAZY.keys())
+    for name, (submodule, real_name) in cli._LAZY.items():
+        value = getattr(cli, name)
+        assert value is not None, f"{name} is still the None placeholder after _require"
+        module = importlib.import_module(submodule, cli.__package__)
+        expected = module if real_name is None else getattr(module, real_name)
+        assert value is expected, f"{name} resolved to {value!r}, expected {expected!r}"
+
+
+def test_require_is_a_noop_once_a_name_is_monkeypatched(monkeypatch):
+    """The load-bearing guarantee for every existing `monkeypatch.setattr(cli,
+    name, fake)` test elsewhere in this file: once a name is patched to a
+    real (non-None) value, `_require` must never overwrite it back to the
+    real resolved function."""
+
+    sentinel = object()
+    monkeypatch.setattr(cli, "collect_evidence", sentinel)
+    cli._require("collect_evidence")
+    assert cli.collect_evidence is sentinel
+
+
+def test_require_resolves_a_still_none_name_for_real_no_mock_positive_control():
+    """Positive control for the test above: a name nobody has touched this
+    process (or one explicitly reset to the placeholder) DOES resolve to the
+    real object when required -- proving the no-op above is really about
+    "already resolved", not `_require` being broken outright."""
+
+    real_module_before = cli.collect_evidence
+    try:
+        cli.collect_evidence = None  # simulate "never yet required"
+        cli._require("collect_evidence")
+        assert cli.collect_evidence is not None
+        from agent_nettools.network_tools import collect_evidence as real_fn
+
+        assert cli.collect_evidence is real_fn
+    finally:
+        cli.collect_evidence = real_module_before
+
+
+def test_a_disabled_agent_command_never_imports_agent_loop(monkeypatch):
+    """`nettools agent` refuses before `_require("run_agent_loop", ...)` --
+    confirmed by never letting agent_loop.py (which pulls in the Anthropic
+    SDK) load for a refusal, run in a subprocess for the same "this process
+    already imported it elsewhere" reason as the bare-import test above."""
+
+    import os
+    import subprocess
+    import sys as _sys
+
+    env = dict(os.environ)
+    env["NETTOOLS_ENABLE_AGENT"] = "0"
+    proc = subprocess.run(
+        [
+            _sys.executable, "-c",
+            "import sys; from agent_nettools import cli; "
+            "cli.load_dotenv = lambda *a, **k: False; "
+            "cli.find_dotenv = lambda *a, **k: ''; "
+            "sys.argv = ['nettools', 'agent', 'anything']; "
+            "cli.main(); "
+            "print(','.join(n for n in sys.modules if n == 'agent_nettools.agent_loop'))",
+        ],
+        capture_output=True, text=True, env=env,
+    )
+    assert "agent_nettools.agent_loop" not in proc.stdout

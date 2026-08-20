@@ -106,6 +106,7 @@ Python/platform it is running on.
 from __future__ import annotations
 
 import argparse
+import importlib
 import os
 import sys
 from pathlib import Path
@@ -113,50 +114,198 @@ from typing import Any
 
 from dotenv import find_dotenv, load_dotenv
 
-from . import __version__, flows, metrics, output, settings
-from .agent_loop import run_agent_loop
-from .fabric_analysis import analyze_fabric
-from .fixtures import capture_device, load_fixture_evidence
-from .flow_selection import looks_like_sentence, select_flow
-from .health import evaluate_fabric_with_silences, exit_code_for_severity, severity_rank
-from .inventory import InventoryError, get_default_device_name
-from .inventory_model import resolve_inventory_path
-from .investigation import investigate
-from .llm_analysis import (
-    LLMAnalysisError,
-    TokenUsage,
-    analyze_evidence,
-    complete_prompt,
-    get_provider,
-)
-from .network_tools import (
-    CHECK_TOOLS,
-    check_fabric,
-    collect_evidence,
-    detect_flaps,
-    diff_evidence,
-    get_bgp_neighbor,
-    get_interface,
-    get_logging,
-    get_route,
-    list_devices,
-    list_snapshot_history,
-    load_golden_snapshot,
-    load_latest_snapshot,
-    ping_device,
-    prune_snapshots,
-    run_template,
-    save_golden_snapshot,
-    save_snapshot,
-    traceroute_device,
-)
-from .templates import TemplateValidationError, split_sr_policy_id
-from .topology import (
-    build_anomaly_report,
-    derive_expected,
-    format_anomaly_report,
-    update_expected_in_yaml,
-)
+# `load_dotenv`/`find_dotenv` stay a real, eager module-level import
+# (unlike everything below) for the same reason `find_dotenv`/`load_dotenv`
+# themselves are tiny and third-party rather than one of this project's own
+# heavy submodules: dozens of existing tests do
+# `monkeypatch.setattr(cli, "load_dotenv", ...)` / `mock.patch.object(cli,
+# "find_dotenv", ...)`, and python-dotenv itself costs essentially nothing
+# to import (no netmiko/anthropic/openai transitively behind it).
+#
+# `__version__` also stays eager -- see agent_nettools/__init__.py's own
+# module-level comment for why (P4, half 1): other code very likely does
+# `from agent_nettools import __version__` expecting zero-cost access, and
+# it now genuinely IS zero-cost (that package's own __init__.py no longer
+# imports anything else just to produce this one string).
+from . import __version__
+
+# --------------------------------------------------------------------------- #
+# P4 (release-1.0 cleanup), half 2: lazy submodule imports (PEP 562).
+#
+# This file used to import ~12 of this project's own submodules eagerly, at
+# `import agent_nettools.cli` time -- `agent_loop`, `fabric_analysis`,
+# `fixtures`, `flow_selection`, `health`, `inventory`, `inventory_model`,
+# `investigation`, `llm_analysis`, `network_tools`, `templates`, `topology`,
+# plus whole-module references to `flows`/`metrics`/`output`/`settings` --
+# paid by every `nettools` invocation (including `--help`) and by importing
+# this module as a library, even when the command that ran never touches
+# most of them (`nettools version` does not need netmiko, `nettools ping`
+# does not need the Anthropic/OpenAI SDKs `llm_analysis` pulls in, ...).
+#
+# Every one of those ~50 names now resolves through `__getattr__` below, on
+# first access, cached on this module's own globals() afterward exactly like
+# `agent_nettools/__init__.py`'s own P4 half-1 rewrite.
+#
+# Why this could NOT simply become "move each import statement into the one
+# function that uses it" (the more obvious lazy-import shape, and this
+# task's own first instinct): dozens of existing tests do
+# `monkeypatch.setattr(cli, "collect_evidence", fake)` et al -- patching
+# THIS module's own global binding, not the source submodule
+# (`network_tools.collect_evidence`). A local `from .network_tools import
+# collect_evidence` inside a function body creates a function-LOCAL name
+# that shadows the module global for that call, so the monkeypatch would be
+# silently ignored and the REAL function would run instead -- in a suite
+# whose own docstring's central claim is "no network, no LLM call, ever"
+# (tests/test_cli.py). Confirmed empirically before choosing this shape:
+# PEP 562's module `__getattr__` fires only on EXTERNAL attribute access
+# (`cli.name`, `from .cli import name`, and -- load-bearing here --
+# `monkeypatch.setattr`'s own internal `getattr(target, name)` save-the-old-
+# value step) and is NEVER consulted for a bare name a function inside this
+# same module references internally; that resolves via a plain globals()
+# dict lookup and raises `NameError` immediately if absent. `_require()`
+# below is the fix for exactly that gap: every function that reads one of
+# these names as a bare global calls it once, at the top of its own body,
+# naming what it uses -- a no-op when a test (or an earlier call in this
+# same process) already populated the name, and a real, cached import
+# otherwise.
+# --------------------------------------------------------------------------- #
+
+_LAZY: dict[str, tuple[str, str | None]] = {
+    # Whole-module references, used as `flows.X`, `output.render(...)`, etc.
+    # `real_name=None` means "bind the submodule itself under this name".
+    "flows": (".flows", None),
+    "metrics": (".metrics", None),
+    "output": (".output", None),
+    "settings": (".settings", None),
+    # agent_loop
+    "run_agent_loop": (".agent_loop", "run_agent_loop"),
+    # fabric_analysis
+    "analyze_fabric": (".fabric_analysis", "analyze_fabric"),
+    # fixtures
+    "capture_device": (".fixtures", "capture_device"),
+    "load_fixture_evidence": (".fixtures", "load_fixture_evidence"),
+    # flow_selection
+    "looks_like_sentence": (".flow_selection", "looks_like_sentence"),
+    "select_flow": (".flow_selection", "select_flow"),
+    # health
+    "evaluate_fabric_with_silences": (".health", "evaluate_fabric_with_silences"),
+    "exit_code_for_severity": (".health", "exit_code_for_severity"),
+    "severity_rank": (".health", "severity_rank"),
+    # inventory
+    "InventoryError": (".inventory", "InventoryError"),
+    "get_default_device_name": (".inventory", "get_default_device_name"),
+    # inventory_model
+    "resolve_inventory_path": (".inventory_model", "resolve_inventory_path"),
+    # investigation
+    "investigate": (".investigation", "investigate"),
+    # llm_analysis
+    "LLMAnalysisError": (".llm_analysis", "LLMAnalysisError"),
+    "TokenUsage": (".llm_analysis", "TokenUsage"),
+    "analyze_evidence": (".llm_analysis", "analyze_evidence"),
+    "complete_prompt": (".llm_analysis", "complete_prompt"),
+    "get_provider": (".llm_analysis", "get_provider"),
+    # network_tools
+    "CHECK_TOOLS": (".network_tools", "CHECK_TOOLS"),
+    "check_fabric": (".network_tools", "check_fabric"),
+    "collect_evidence": (".network_tools", "collect_evidence"),
+    "detect_flaps": (".network_tools", "detect_flaps"),
+    "diff_evidence": (".network_tools", "diff_evidence"),
+    "get_bgp_neighbor": (".network_tools", "get_bgp_neighbor"),
+    "get_interface": (".network_tools", "get_interface"),
+    "get_logging": (".network_tools", "get_logging"),
+    "get_route": (".network_tools", "get_route"),
+    "list_devices": (".network_tools", "list_devices"),
+    "list_snapshot_history": (".network_tools", "list_snapshot_history"),
+    "load_golden_snapshot": (".network_tools", "load_golden_snapshot"),
+    "load_latest_snapshot": (".network_tools", "load_latest_snapshot"),
+    "ping_device": (".network_tools", "ping_device"),
+    "prune_snapshots": (".network_tools", "prune_snapshots"),
+    "run_template": (".network_tools", "run_template"),
+    "save_golden_snapshot": (".network_tools", "save_golden_snapshot"),
+    "save_snapshot": (".network_tools", "save_snapshot"),
+    "traceroute_device": (".network_tools", "traceroute_device"),
+    # templates
+    "TemplateValidationError": (".templates", "TemplateValidationError"),
+    "split_sr_policy_id": (".templates", "split_sr_policy_id"),
+    # topology
+    "build_anomaly_report": (".topology", "build_anomaly_report"),
+    "derive_expected": (".topology", "derive_expected"),
+    "format_anomaly_report": (".topology", "format_anomaly_report"),
+    "update_expected_in_yaml": (".topology", "update_expected_in_yaml"),
+}
+
+# Every name in `_LAZY`, pre-bound to `None` -- a real module-level binding,
+# not a runtime trick, so a static checker (this project's own `ruff check`)
+# sees every bare `collect_evidence(...)`, `output.render(...)`, etc. below
+# as a real, known name rather than flagging ~50 false-positive "undefined
+# name" hits across every function that uses one. `_require()` treats `is
+# None` as "not resolved yet" (never `name not in globals()`, which this
+# would make permanently false) -- correct because every REAL value these
+# ever resolve to is a module, a class, or a function, never actually
+# `None`, and it is exactly what lets `monkeypatch.setattr(cli, name, fake)`
+# keep working unchanged: pytest's own internal `getattr(cli, name)` (its
+# save-the-old-value step) now finds this placeholder directly rather than
+# going through `__getattr__` at all, which is fine -- the placeholder is
+# about to be overwritten with `fake` either way.
+flows = metrics = output = settings = None
+run_agent_loop = None
+analyze_fabric = None
+capture_device = load_fixture_evidence = None
+looks_like_sentence = select_flow = None
+evaluate_fabric_with_silences = exit_code_for_severity = severity_rank = None
+InventoryError = get_default_device_name = None
+resolve_inventory_path = None
+investigate = None
+LLMAnalysisError = TokenUsage = analyze_evidence = complete_prompt = get_provider = None
+CHECK_TOOLS = check_fabric = collect_evidence = detect_flaps = diff_evidence = None
+get_bgp_neighbor = get_interface = get_logging = get_route = list_devices = None
+list_snapshot_history = load_golden_snapshot = load_latest_snapshot = None
+ping_device = prune_snapshots = run_template = None
+save_golden_snapshot = save_snapshot = traceroute_device = None
+TemplateValidationError = split_sr_policy_id = None
+build_anomaly_report = derive_expected = format_anomaly_report = update_expected_in_yaml = None
+
+
+def __getattr__(name: str) -> Any:
+    """PEP 562: resolve a lazy name, then cache it.
+
+    Raises plain `AttributeError` for anything not in `_LAZY` -- this file
+    has no other names that need it. In practice this is called two ways:
+    directly, by `_require()` below (the path every real `_cmd_*` function
+    actually takes, since every one of `_LAZY`'s names already exists as the
+    `None` placeholder above -- see that block's own comment for why plain
+    external attribute access no longer reaches this function via Python's
+    own PEP 562 magic); and defensively, for a genuinely unknown name, which
+    still raises correctly and is the same contract `agent_nettools/
+    __init__.py`'s own `__getattr__` documents.
+    """
+
+    target = _LAZY.get(name)
+    if target is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, real_name = target
+    module = importlib.import_module(module_name, __package__)
+    value = module if real_name is None else getattr(module, real_name)
+    globals()[name] = value
+    return value
+
+
+def _require(*names: str) -> None:
+    """Force each name to resolve via `__getattr__` if it is still the
+    `None` placeholder. See this file's own P4 module-level comment above
+    for the full reasoning -- in short, a bare name a function in THIS
+    module reads internally is never routed through `__getattr__`
+    automatically (confirmed empirically; Python resolves it via a plain
+    globals() dict lookup), so every function using one of `_LAZY`'s names
+    calls this once, at the top of its own body, naming exactly what it uses
+    below.
+    """
+
+    g = globals()
+    for name in names:
+        if g.get(name) is None:
+            g[name] = __getattr__(name)
+
 
 # Exit codes, applied consistently across every command -- see the module
 # docstring's "Exit codes" section for the full rationale.
@@ -197,6 +346,7 @@ def _emit(payload: dict, args: argparse.Namespace) -> None:
 
     if getattr(args, "quiet", False):
         return
+    _require("output")
     print(output.render(payload, getattr(args, "format", "json")))
 
 
@@ -250,6 +400,7 @@ def _error_envelope(tool: str, *, device: str | None = None, errors: list[str], 
 
 
 def _add_output_arguments(parser: argparse.ArgumentParser) -> None:
+    _require("output")
     parser.add_argument(
         "--format",
         choices=output.FORMATS,
@@ -265,6 +416,7 @@ def _add_output_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def _resolve_device(name: str | None) -> str:
+    _require("get_default_device_name")
     return name or get_default_device_name()
 
 
@@ -287,12 +439,14 @@ def _envelope_exit(result: dict) -> int:
 
 
 def _cmd_inventory(args: argparse.Namespace) -> int:
+    _require("list_devices")
     result = list_devices()
     _emit(result, args)
     return EXIT_OK if result.get("status") == "success" else EXIT_WARNING
 
 
 def _cmd_check(args: argparse.Namespace) -> int:
+    _require("CHECK_TOOLS")
     device = _resolve_device(args.device)
     result = CHECK_TOOLS[args.check](device)
     _emit(result, args)
@@ -300,18 +454,21 @@ def _cmd_check(args: argparse.Namespace) -> int:
 
 
 def _cmd_fabric(args: argparse.Namespace) -> int:
+    _require("check_fabric")
     result = check_fabric(args.check)
     _emit(result, args)
     return EXIT_OK if result.get("status") == "success" else EXIT_WARNING
 
 
 def _cmd_route(args: argparse.Namespace) -> int:
+    _require("get_route")
     result = get_route(args.device, args.prefix)
     _emit(result, args)
     return _envelope_exit(result)
 
 
 def _cmd_bgp_neighbor(args: argparse.Namespace) -> int:
+    _require("get_bgp_neighbor")
     result = get_bgp_neighbor(args.device, args.address)
     _emit(result, args)
     return _envelope_exit(result)
@@ -326,6 +483,7 @@ def _cmd_interface(args: argparse.Namespace) -> int:
     # under the spelling the caller did not type (`tests/fixtures/` keys
     # interface captures by the SHORT form). See
     # tests/test_interface_canonicalization.py for the full audit.
+    _require("get_interface")
     result = get_interface(args.device, args.name)
     _emit(result, args)
     return _envelope_exit(result)
@@ -338,6 +496,7 @@ def _cmd_sr_policy(args: argparse.Namespace) -> int:
     own `policy` field reports, so a value copied from that output works
     here."""
 
+    _require("TemplateValidationError", "split_sr_policy_id", "run_template")
     try:
         color, endpoint = split_sr_policy_id(args.policy_id)
     except TemplateValidationError as exc:
@@ -353,6 +512,7 @@ def _cmd_sr_policy(args: argparse.Namespace) -> int:
 
 
 def _cmd_logging(args: argparse.Namespace) -> int:
+    _require("get_logging")
     result = get_logging(args.device, args.count)
     _emit(result, args)
     return _envelope_exit(result)
@@ -396,12 +556,14 @@ def _probe_exit(result: dict) -> int:
 
 
 def _cmd_ping(args: argparse.Namespace) -> int:
+    _require("ping_device")
     result = ping_device(args.device, args.address)
     _emit(result, args)
     return _probe_exit(result)
 
 
 def _cmd_traceroute(args: argparse.Namespace) -> int:
+    _require("traceroute_device")
     result = traceroute_device(args.device, args.address)
     _emit(result, args)
     # Traceroute has no received-count semantics -- an incomplete trace is
@@ -410,6 +572,10 @@ def _cmd_traceroute(args: argparse.Namespace) -> int:
 
 
 def _cmd_analyze(args: argparse.Namespace) -> int:
+    _require(
+        "list_devices", "collect_evidence", "save_snapshot", "output",
+        "analyze_fabric", "LLMAnalysisError", "analyze_evidence",
+    )
     if args.fabric:
         listed = list_devices()
         if listed.get("status") != "success":
@@ -490,6 +656,10 @@ def _cmd_agent(args: argparse.Namespace) -> int:
         )
         return EXIT_CRITICAL
 
+    # Only resolved past the gate above -- a refusal must cost nothing, and
+    # now genuinely does not even import agent_loop.py (which itself pulls
+    # in the Anthropic SDK).
+    _require("run_agent_loop", "LLMAnalysisError")
     try:
         result = run_agent_loop(
             args.question,
@@ -1054,6 +1224,7 @@ def _config_reconciliation_for(args, result, sender) -> dict | None:
     if not getattr(args, "reconcile_config", False):
         return None
 
+    _require("flows")
     if result.descent.finding != flows.CAUSE_NOT_LOCALISED:
         _note(
             f"# --reconcile-config: not applicable (finding is "
@@ -1164,6 +1335,8 @@ def _cmd_investigate(args: argparse.Namespace) -> int:
     model; only the correlation is qualified, and downgrading the exit code for
     it would report doubt about a diagnosis that has none.
     """
+
+    _require("flows", "looks_like_sentence", "select_flow", "investigate", "LLMAnalysisError")
 
     # B-407: a literal "it" DEVICE/SUBJECT resolves against this session's
     # last turn before anything else runs -- no fixtures loaded, no ticket
@@ -1362,6 +1535,7 @@ def _build_analyst():
     accident.
     """
 
+    _require("get_provider", "complete_prompt")
     provider = get_provider()
     # model/provider ride on the callable so a ticket can record WHICH model
     # produced an exchange, without `investigation.investigate` growing a
@@ -1390,6 +1564,7 @@ class _UsageRecordingAnalyst:
     """
 
     def __init__(self, complete, *, model=None, provider=None):
+        _require("TokenUsage")
         self.model = model
         self.provider = provider
         self._complete = complete
@@ -1402,6 +1577,7 @@ class _UsageRecordingAnalyst:
 
 
 def _cmd_demo(args: argparse.Namespace) -> int:
+    _require("list_devices", "collect_evidence", "analyze_evidence", "LLMAnalysisError")
     device = _resolve_device(args.device)
 
     print("## Agent Step 1: Discover devices")
@@ -1435,6 +1611,10 @@ def _cmd_demo(args: argparse.Namespace) -> int:
 
 
 def _cmd_diff(args: argparse.Namespace) -> int:
+    _require(
+        "load_golden_snapshot", "load_latest_snapshot", "collect_evidence",
+        "save_snapshot", "diff_evidence",
+    )
     device = _resolve_device(args.device)
     if args.against == "golden":
         previous = load_golden_snapshot(device)
@@ -1466,6 +1646,7 @@ def _cmd_diff(args: argparse.Namespace) -> int:
 
 
 def _cmd_baseline_pin(args: argparse.Namespace) -> int:
+    _require("load_latest_snapshot", "collect_evidence", "save_snapshot", "save_golden_snapshot")
     device = _resolve_device(args.device)
     if args.from_latest:
         evidence = load_latest_snapshot(device)
@@ -1485,6 +1666,7 @@ def _cmd_baseline_pin(args: argparse.Namespace) -> int:
 
 
 def _cmd_baseline_show(args: argparse.Namespace) -> int:
+    _require("load_golden_snapshot")
     device = _resolve_device(args.device)
     evidence = load_golden_snapshot(device)
     if evidence is None:
@@ -1495,6 +1677,7 @@ def _cmd_baseline_show(args: argparse.Namespace) -> int:
 
 
 def _cmd_flaps(args: argparse.Namespace) -> int:
+    _require("detect_flaps")
     device = _resolve_device(args.device)
     result = detect_flaps(device, min_transitions=args.min_transitions)
     _emit(result, args)
@@ -1505,6 +1688,7 @@ def _cmd_evidence_prune(args: argparse.Namespace) -> int:
     if args.keep_days is None and args.keep_count is None:
         _note("Nothing to do: pass --keep-days and/or --keep-count.", args)
         return EXIT_WARNING
+    _require("prune_snapshots")
     result = prune_snapshots(
         device_name=args.device, keep_days=args.keep_days, keep_count=args.keep_count
     )
@@ -1513,6 +1697,7 @@ def _cmd_evidence_prune(args: argparse.Namespace) -> int:
 
 
 def _cmd_evidence_history(args: argparse.Namespace) -> int:
+    _require("list_snapshot_history")
     device = _resolve_device(args.device)
     history = list_snapshot_history(device)
     _emit({"device": device, "count": len(history), "history": history}, args)
@@ -1520,6 +1705,10 @@ def _cmd_evidence_history(args: argparse.Namespace) -> int:
 
 
 def _cmd_health(args: argparse.Namespace) -> int:
+    _require(
+        "list_devices", "load_fixture_evidence", "collect_evidence",
+        "evaluate_fabric_with_silences", "severity_rank", "exit_code_for_severity", "output",
+    )
     if args.all:
         listed = list_devices()
         if listed.get("status") != "success":
@@ -1570,6 +1759,7 @@ def _cmd_health(args: argparse.Namespace) -> int:
 
 
 def _cmd_capture(args: argparse.Namespace) -> int:
+    _require("list_devices", "capture_device", "output")
     if args.all:
         listed = list_devices()
         if listed.get("status") != "success":
@@ -1607,6 +1797,11 @@ def _cmd_learn_topology(args: argparse.Namespace) -> int:
     every device's counts derive cleanly.
     """
 
+    _require(
+        "list_devices", "collect_evidence", "load_fixture_evidence", "derive_expected",
+        "resolve_inventory_path", "update_expected_in_yaml", "output",
+        "format_anomaly_report", "build_anomaly_report",
+    )
     listed = list_devices()
     if listed.get("status") != "success":
         print(output.render(listed, "json"))
@@ -1641,6 +1836,7 @@ def _cmd_metrics(args: argparse.Namespace) -> int:
 
     if args.quiet:
         return EXIT_OK
+    _require("metrics")
     if args.format == "prometheus":
         print(metrics.render_prometheus_text(), end="")
     else:
@@ -1660,6 +1856,7 @@ def _cmd_audit(args: argparse.Namespace) -> int:
     from .audit import run_audit
     from .lab import all_devices  # credential-free: fixture replay needs no .env
 
+    _require("load_fixture_evidence", "collect_evidence")
     names = list(all_devices())
     if args.from_fixtures:
         evidence_by_device = {
@@ -1693,6 +1890,7 @@ def _cmd_config(args: argparse.Namespace) -> int:
     health`` uses for "nothing actionable" vs. "found a problem".
     """
 
+    _require("settings")
     if args.config_command == "check":
         problems = settings.validate_environment()
         if not getattr(args, "quiet", False):
@@ -1857,6 +2055,13 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    # `CHECK_TOOLS` drives the per-check subparsers below and `fabric`'s own
+    # choices; `flows` drives `investigate`'s --flow choices further down.
+    # Neither is imported at `import agent_nettools.cli` time any more, but
+    # every real invocation calls this function (from `main()`), so this is
+    # the one place both genuinely need to resolve, once, regardless of
+    # which subcommand is actually invoked.
+    _require("CHECK_TOOLS", "flows")
     parser = argparse.ArgumentParser(
         prog="nettools",
         description=__doc__,
@@ -2408,6 +2613,7 @@ def main() -> int:
     # subcommand that has one, still never blocks startup, and still prints
     # before the command's own output -- only its position relative to
     # argparse's own parsing moved, not its content or default visibility.
+    _require("settings", "output", "InventoryError")
     quiet = getattr(args, "quiet", False)
     for problem in settings.validate_environment():
         if not quiet:
