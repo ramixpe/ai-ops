@@ -2230,3 +2230,49 @@ def test_list_devices_needs_no_credentials(monkeypatch):
     assert result["data"]["devices"], "the lab inventory is non-empty"
     for device in result["data"]["devices"]:
         assert {"name", "hostname", "platform"} <= device.keys()
+
+
+def test_the_snapshot_root_is_resolved_by_one_rule_not_two(monkeypatch):
+    """EER-015: ``network_tools`` must not re-spell the evidence-dir env key.
+
+    It used to hold a byte-identical copy of ``evidence_store._snapshot_dir``
+    that reached for ``"NETTOOLS_EVIDENCE_DIR"`` as a hardcoded literal while
+    its twin used ``NETTOOLS_EVIDENCE_DIR_ENV``. Both agreed, so nothing
+    failed -- which is exactly why the drift was invisible: renaming the
+    constant would have moved one resolver and silently left the other
+    reading a key nobody sets any more, and evidence would have quietly
+    started landing somewhere else.
+
+    Asserting the two functions are the same object would pin the current
+    implementation rather than the property. What matters is the *behaviour*:
+    the constant is the single source of the key. So this renames it and
+    requires ``network_tools`` to follow -- a test that fails if the literal
+    is ever inlined back, whatever form the delegation takes.
+    """
+
+    from agent_nettools import evidence_store
+
+    monkeypatch.setattr(evidence_store, "NETTOOLS_EVIDENCE_DIR_ENV", "NETTOOLS_EVIDENCE_DIR_RENAMED")
+    monkeypatch.setenv("NETTOOLS_EVIDENCE_DIR_RENAMED", "/tmp/renamed-evidence-root")
+    monkeypatch.setenv("NETTOOLS_EVIDENCE_DIR", "/tmp/stale-literal-root")
+
+    resolved = network_tools._snapshot_dir(None)
+
+    assert str(resolved) == "/tmp/renamed-evidence-root", (
+        "network_tools resolved the snapshot root from the old hardcoded "
+        f"literal instead of the constant -- got {resolved}"
+    )
+
+
+def test_an_explicit_base_dir_still_beats_the_environment(monkeypatch):
+    """Positive control for the test above.
+
+    Without this, a ``_snapshot_dir`` that ignored its argument entirely and
+    always read the environment would pass the drift test. Pinning the
+    precedence keeps that trivially-wrong implementation from satisfying it.
+    """
+
+    monkeypatch.setenv("NETTOOLS_EVIDENCE_DIR", "/tmp/env-root")
+
+    assert str(network_tools._snapshot_dir("/tmp/explicit-root")) == "/tmp/explicit-root"
+    assert str(network_tools._snapshot_dir(None)) == "/tmp/env-root"

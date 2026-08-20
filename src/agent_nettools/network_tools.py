@@ -2093,8 +2093,14 @@ DEFAULT_SNAPSHOT_DIR = evidence_store.DEFAULT_SNAPSHOT_DIR
 GOLDEN_SNAPSHOT_FILENAME = evidence_store.GOLDEN_SNAPSHOT_FILENAME
 
 
-def _snapshot_dir(base_dir: str | None) -> Path:
-    return Path(base_dir or os.getenv("NETTOOLS_EVIDENCE_DIR") or DEFAULT_SNAPSHOT_DIR)
+# EER-015. This was a byte-identical copy of ``evidence_store._snapshot_dir``
+# that reached for the env var by hardcoded literal while its twin used
+# ``NETTOOLS_EVIDENCE_DIR_ENV``. Two implementations of one rule, one of them
+# spelling the key by hand, is the drift the review named: renaming the
+# constant would have moved one resolver and silently left this one reading
+# the old key. Delegated rather than re-spelled, so there is one rule again --
+# same re-export pattern as ``DEFAULT_SNAPSHOT_DIR`` directly above.
+_snapshot_dir = evidence_store._snapshot_dir
 
 
 def _timestamped_snapshot_paths(directory: Path) -> list[Path]:
