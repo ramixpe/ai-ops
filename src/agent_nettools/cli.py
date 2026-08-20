@@ -604,6 +604,65 @@ def _record_in_ticket(handle, args, result, subject, flow, question=None, analys
         # supplied `resolver=` (were the CLI ever to grow one) would need a
         # new field to report honestly instead of this literal.
         handle.record_intent(flow=flow, resolved_subject=subject, resolver="inventory_resolver")
+        # W4d: the tool timeline and per-evidence provenance, straight off
+        # `result.observations` (W4c) -- `None` on the `collector=` path,
+        # same reason `session_summary` is `None` there.
+        #
+        # NOT every observation's `.envelope` is a dict: `EvidenceEpoch.
+        # collect_epoch` also emits three pass-through entries per device
+        # (`key` in "device"/"platform"/"timestamp") whose `.envelope` is a
+        # plain string, mirrored into `for_device()`'s dict for `checks.py`'s
+        # benefit -- `EvidenceEpoch.commands_run`'s own property already
+        # skips exactly these (`if not isinstance(o.envelope, dict): continue`)
+        # and this loop follows the same precedent; without it,
+        # `obs.envelope.get(...)` below would raise `AttributeError` on a str.
+        #
+        # The envelope shape (verified against `network_tools._base_result`,
+        # what every real observation's envelope actually is): `tool`,
+        # `device`, `status`, `timestamp`, `source`, `data`, `errors` -- no
+        # top-level `command`/`commands` key at all (per-command detail lives
+        # nested under `data["commands"]`, keyed by the command string), so
+        # `record_tool_event`'s `command=` is left at its own default.
+        if result.observations is not None:
+            evidence_keys = set(result.descent.evidence_keys)
+            for obs in result.observations:
+                if not isinstance(obs.envelope, dict):
+                    continue
+                handle.record_tool_event(
+                    tool=obs.envelope.get("tool", obs.key),
+                    status=obs.envelope.get("status", "unknown"),
+                    device=obs.device,
+                    duration_ms=obs.duration * 1000,
+                    started_at=obs.collected_at,
+                )
+                # Only the evidence that actually fed the descent, not every
+                # observation collected. `descent.evidence_keys` entries are
+                # built by `checks.evidence_key(device, intent_or_template,
+                # subject)` -> `f"{device}:{intent_or_template}[:subject]"`
+                # (verified by reading that helper) -- a DIFFERENT string
+                # from `obs.key` (the bare intent/template name, no device
+                # prefix), so a literal `obs.key in evidence_keys` check
+                # would never match anything at all. Reconstructed here as
+                # `f"{obs.device}:{obs.key}"`, matched either exactly (a
+                # template observation already keyed by its own subject,
+                # e.g. "interface:Gi0/0/0/0") or as a prefix of a longer
+                # evidence key (a whole-intent observation, e.g. "bgp",
+                # further narrowed to one peer's own citation by the check
+                # that read it) -- confirmed against a real fixture run
+                # (`--from-fixtures --label broken`): this reconstruction
+                # picks exactly the 7 observations behind the 7 real
+                # `evidence_keys` entries, one for one, neither more nor
+                # fewer.
+                prefix = f"{obs.device}:{obs.key}"
+                fed_the_descent = any(
+                    ek == prefix or ek.startswith(prefix + ":") for ek in evidence_keys
+                )
+                if fed_the_descent:
+                    handle.record_evidence_source(
+                        obs.key, device=obs.device,
+                        source=obs.envelope.get("source", "unknown"),
+                        collected_at=obs.collected_at,
+                    )
         sessions = getattr(result, "session_summary", None)
         if sessions:
             commands_by_device = (sessions.get("commands_run") or {}).get("by_device") or {}

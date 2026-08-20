@@ -789,6 +789,72 @@ def test_the_context_footprint_sums_every_exchanges_user_payload(monkeypatch, ca
 
 
 # --------------------------------------------------------------------------- #
+# W4c/W4d -- the ticket records the tool timeline and per-evidence
+# provenance, straight off `InvestigationResult.observations`
+# --------------------------------------------------------------------------- #
+
+
+def test_the_ticket_records_the_tool_timeline(tmp_path, monkeypatch):
+    """Every real (dict-envelope) observation becomes one `tool_event`
+    section -- read back through `ticket.read_ticket`, not just "the call
+    didn't raise". The pass-through "device"/"platform"/"timestamp" entries
+    `EvidenceEpoch` also carries (plain strings, not envelopes) must never
+    appear -- `obs.envelope.get(...)` would raise on one of those if this
+    loop did not skip them first."""
+
+    from agent_nettools import ticket
+
+    _main(ARGS, monkeypatch)
+
+    files = sorted((tmp_path / "tickets").glob("*.md"))
+    assert len(files) == 1
+    parsed = ticket.read_ticket(files[0])
+
+    timeline = parsed["timeline"]
+    assert timeline, "no tool events were recorded at all"
+    for entry in timeline:
+        assert entry["tool"] in ("run_approved_commands", "run_template")
+        assert entry["status"] in ("success", "error", "unsupported")
+        assert entry["device"] in ("RR1", "PE2")
+        assert entry["duration_ms"] is not None and entry["duration_ms"] >= 0
+        assert entry["started_at"]
+
+
+def test_the_ticket_records_only_the_evidence_that_fed_the_descent(tmp_path, monkeypatch):
+    """`evidence_source` sections are recorded only for observations whose
+    reconstructed `f"{device}:{key}"` matches (exactly, or as a prefix of) a
+    real `descent.evidence_keys` entry -- one for one against the "broken"
+    fixture's own real evidence_keys, not every observation collected."""
+
+    from agent_nettools import ticket
+
+    _main(ARGS, monkeypatch)
+
+    files = sorted((tmp_path / "tickets").glob("*.md"))
+    parsed = ticket.read_ticket(files[0])
+
+    evidence = parsed["evidence"]
+    assert len(evidence) == 7, (
+        "the 'broken' fixture's bgp_session descent cites exactly 7 "
+        "evidence_keys; this must be one evidence_source per key, no more"
+    )
+    for entry in evidence:
+        assert entry["source"] == "fixture"
+        assert entry["device"] in ("RR1", "PE2")
+
+    recorded_pairs = {(e["device"], e["evidence_key"]) for e in evidence}
+    assert recorded_pairs == {
+        ("RR1", "bgp"),
+        ("RR1", "bgp_neighbor:10.255.0.12"),
+        ("RR1", "route:10.255.0.12/32"),
+        ("PE2", "isis"),
+        ("PE2", "interface:Gi0/0/0/0"),
+        ("PE2", "interface:Gi0/0/0/1"),
+        ("PE2", "interface:Gi0/0/0/2"),
+    }
+
+
+# --------------------------------------------------------------------------- #
 # B-407 -- session memory wiring
 #
 # `session_memory.py` shipped with the exact call this wiring makes already
