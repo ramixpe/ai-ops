@@ -31,6 +31,13 @@ the change. That property is machine-checked in CI by the `offline-demo` job,
 which runs the README's opening command in a clean checkout with the credential
 environment asserted empty.
 
+Activating first is still the documented flow above, but `make` itself no longer
+requires it (EER-020): every target resolves `nettools`/`pytest`/`ruff` through
+`.venv/bin/` when `make setup` has created it, falling back to `$PATH` otherwise
+— so `make lint` or `make test` in a shell where you forgot to `source
+.venv/bin/activate` runs the same tool it would have if you had, instead of
+failing with a bare `command not found` that reads like a broken build.
+
 ## The rules that are not up for negotiation
 
 These exist because each one was learned expensively. `docs/build/FINDINGS.md`
