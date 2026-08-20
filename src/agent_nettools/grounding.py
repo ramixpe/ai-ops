@@ -59,6 +59,7 @@ from dataclasses import dataclass, field
 
 from .coverage import Coverage
 from .descent import DescentResult
+from .interface_kind import expansions_lower
 from .log_window import ShapedWindow
 from .render import next_check_for
 
@@ -258,21 +259,15 @@ _IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?\b")
 #: `GigabitEthernet0/0/0/0` are one identifier. Longest prefix wins, so the
 #: table is searched in descending length -- `TenGigE` must not be matched by
 #: a shorter `Te` rule that leaves `nGigE` behind as the port part.
-_IFACE_EXPANSIONS = {
-    "gi": "gigabitethernet",
-    "te": "tengige",
-    "fo": "fortygige",
-    "hu": "hundredgige",
-    "lo": "loopback",
-    "mg": "mgmteth",
-    "mgmt": "mgmteth",
-    "be": "bundle-ether",
-    "bvi": "bvi",
-    "bv": "bvi",
-    "nu": "null",
-    "ti": "tunnel-ip",
-    "tt": "tunnel-te",
-}
+#:
+#: Sourced from `interface_kind.expansions_lower()` (F3, release-1.0
+#: cleanup) rather than a second, independently-edited copy: before F3 this
+#: was a literal dict here that drifted from `interface_kind._EXPANSIONS` in
+#: both directions (this dict was missing `Twe`/`FH`, the 25G/400G
+#: abbreviations; `interface_kind` was missing `Nu`/`BV`, among others).
+#: `tests/test_interface_kind.py` pins that the two can never drift apart
+#: again.
+_IFACE_EXPANSIONS = expansions_lower()
 
 _IFACE = re.compile(
     r"\b([A-Za-z][A-Za-z-]{0,20}?)(\d+(?:[/.]\d+)*)\b"
