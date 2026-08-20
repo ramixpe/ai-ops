@@ -292,13 +292,97 @@ DEFAULT_BANNER_TIMEOUT_SECONDS = 15.0
 DEFAULT_COMMAND_RETRIES = 2  # total attempts, i.e. up to 1 retry by default.
 DEFAULT_RETRY_BACKOFF_SECONDS = 0.5
 
+# EER-002: SSH host-key verification -- the trust root every check in this
+# file implicitly relies on. Before this, ConnectHandler ran with netmiko's
+# own default (``ssh_strict=False`` -> ``paramiko.AutoAddPolicy``): the first
+# time this tool ever talks to a device it silently trusts whatever key
+# answers, and every later connection to the same address just as silently
+# trusts it again -- a management-path attacker able to sit in the path gets
+# to feed fabricated output to everything downstream, forever, with nothing
+# ever recorded and nothing ever refused.
+NETTOOLS_SSH_KNOWN_HOSTS_ENV = "NETTOOLS_SSH_KNOWN_HOSTS"
+NETTOOLS_SSH_STRICT_ENV = "NETTOOLS_SSH_STRICT"
+
+# Deliberately NOT the operator's own ~/.ssh/known_hosts: defaulting there
+# would silently inherit trust decisions this tool never made, for hosts that
+# have nothing to do with this lab -- an entry in an interactive known_hosts
+# says only "a human once accepted this key in a terminal", not "this tool
+# has verified it". A dedicated file under this tool's own config directory
+# means the only writer of a real entry is scripts/enroll_host_keys.py, run
+# deliberately, by an operator, once per device.
+DEFAULT_SSH_KNOWN_HOSTS = os.path.expanduser("~/.config/nettools/known_hosts")
+
+
+def _ssh_known_hosts_path() -> str:
+    """``NETTOOLS_SSH_KNOWN_HOSTS`` or :data:`DEFAULT_SSH_KNOWN_HOSTS`.
+
+    Same env-then-default ladder as the timeout settings just above; see
+    ``_netmiko_send_commands_admitted`` for where an explicit parameter still
+    wins over both, matching ``read_timeout``'s own precedence.
+    """
+
+    return os.getenv(NETTOOLS_SSH_KNOWN_HOSTS_ENV, "").strip() or DEFAULT_SSH_KNOWN_HOSTS
+
+
+def _ssh_strict_enabled() -> bool:
+    """Whether netmiko's ``ssh_strict`` (reject an unrecognised host key
+    instead of silently trusting it) is on.
+
+    Fail-closed in the direction that matters for a trust root: unset means
+    enabled (the secure default), and -- the opposite of the ordinary
+    ``_FALSY_ENV_VALUES`` convention this module otherwise uses (see
+    ``_active_probes_allowed`` before EER-008a, which is the footgun this
+    setting must not repeat) -- an unrecognised *set* value also means
+    enabled. ``NETTOOLS_SSH_STRICT=flase`` must never silently turn host-key
+    verification off: a typo can only ever make this setting MORE strict
+    than an operator perhaps intended, never less. The one way to actually
+    disable it is a correctly-spelled falsy value (0/false/no/off).
+    """
+
+    raw = os.getenv(NETTOOLS_SSH_STRICT_ENV)
+    if raw is None or not raw.strip():
+        return True
+    return raw.strip().lower() not in _FALSY_ENV_VALUES
+
+
+def _is_host_key_failure(exc: Exception) -> bool:
+    """Whether ``exc`` is netmiko/paramiko's way of saying the device's SSH
+    host key was rejected or did not match one already on file -- a genuine
+    trust failure, never a transient one, and never something a retry could
+    fix.
+
+    Matched on the exception's own text, not ``isinstance`` against
+    paramiko's classes: ``paramiko.RejectPolicy.missing_host_key`` (fired
+    when ``ssh_strict=True`` and the host has no key on file yet) raises a
+    bare ``paramiko.SSHException`` with no dedicated subclass, and
+    ``netmiko.exceptions.NetmikoTimeoutException`` -- which very much IS
+    transient -- is itself an ``SSHException`` subclass, so matching on
+    ``isinstance`` against the base class would silently stop retrying real
+    timeouts too. ``paramiko.BadHostKeyException`` (a key IS on file and does
+    not match what the device just presented) puts "Host key" in its own
+    message, so one text check covers both shapes. It also works unchanged
+    against the fake-netmiko test seam (``tests/helpers.py``), which raises
+    plain ``OSError`` rather than real paramiko types -- see
+    ``install_fake_netmiko``'s ``fail_host_key=``.
+    """
+
+    text = str(exc).lower()
+    return "not found in known_hosts" in text or "host key" in text
+
 
 def _is_transient_failure(exc: Exception) -> bool:
     """Whether a transport failure is worth retrying.
 
-    Authentication failures are never transient: retrying with the same
-    (wrong) credentials cannot succeed and only burns the whole retry budget
-    before reporting the real problem. Every other failure netmiko's
+    A rejected or mismatched SSH host key is never transient -- see
+    ``_is_host_key_failure`` -- and that check runs unconditionally, before
+    the netmiko-import fallback below, so it applies even when netmiko's own
+    exception hierarchy cannot be imported at all (the fake-netmiko test seam
+    has no ``.exceptions`` submodule): a host-key failure must be terminal
+    regardless of whether that import ever runs.
+
+    Authentication failures are never transient either: retrying with the
+    same (wrong) credentials cannot succeed and only burns the whole retry
+    budget before reporting the real problem. Every other failure netmiko's
     transport layer can raise -- read timeouts, connection resets, "pattern
     never detected" -- is treated as transient, which is exactly the class of
     failure bounded retries exist to smooth over on a reachable-but-slow
@@ -307,6 +391,9 @@ def _is_transient_failure(exc: Exception) -> bool:
     way to distinguish auth failures from anything else, so every failure is
     treated as transient rather than silently disabling retries.
     """
+
+    if _is_host_key_failure(exc):
+        return False
 
     try:
         from netmiko.exceptions import NetmikoAuthenticationException
@@ -370,6 +457,8 @@ def _netmiko_send_commands(
     banner_timeout: float | None = None,
     retries: int | None = None,
     retry_backoff: float | None = None,
+    ssh_known_hosts: str | None = None,
+    ssh_strict: bool | None = None,
 ) -> tuple[dict[str, str], list[str], dict[str, int]]:
     """Open one SSH session and run every approved command over it.
 
@@ -381,8 +470,9 @@ def _netmiko_send_commands(
     (ping/traceroute run much longer than a ``show`` command) and always win;
     every other caller passes ``None`` and gets ``NETTOOLS_READ_TIMEOUT_SECONDS``
     (env-then-default). ``connect_timeout``/``banner_timeout``/``retries``/
-    ``retry_backoff`` follow the same env-then-default resolution when left
-    ``None`` -- see the constants just above this function.
+    ``retry_backoff``/``ssh_known_hosts``/``ssh_strict`` follow the same
+    env-then-default resolution when left ``None`` -- see the constants just
+    above this function (EER-002 for the latter two).
 
     Both the initial connection and each individual command are retried up to
     ``retries`` total attempts (with exponential backoff) on a transient
@@ -419,6 +509,8 @@ def _netmiko_send_commands(
             banner_timeout=banner_timeout,
             retries=retries,
             retry_backoff=retry_backoff,
+            ssh_known_hosts=ssh_known_hosts,
+            ssh_strict=ssh_strict,
         )
 
 
@@ -431,6 +523,8 @@ def _netmiko_send_commands_admitted(
     banner_timeout: float | None = None,
     retries: int | None = None,
     retry_backoff: float | None = None,
+    ssh_known_hosts: str | None = None,
+    ssh_strict: bool | None = None,
 ) -> tuple[dict[str, str], list[str], dict[str, int]]:
     """The real transport body of ``_netmiko_send_commands``, run only once
     admission has already been granted. Split out purely so the admission
@@ -464,6 +558,12 @@ def _netmiko_send_commands_admitted(
         retry_backoff if retry_backoff is not None
         else _float_env(NETTOOLS_RETRY_BACKOFF_ENV, DEFAULT_RETRY_BACKOFF_SECONDS)
     )
+    effective_ssh_known_hosts = (
+        ssh_known_hosts if ssh_known_hosts is not None else _ssh_known_hosts_path()
+    )
+    effective_ssh_strict = (
+        ssh_strict if ssh_strict is not None else _ssh_strict_enabled()
+    )
 
     connection_params: dict[str, Any] = {
         "device_type": device_type,
@@ -472,6 +572,19 @@ def _netmiko_send_commands_admitted(
         "port": device.get("port", 22),
         "conn_timeout": effective_connect_timeout,
         "banner_timeout": effective_banner_timeout,
+        # EER-002: verify the device's SSH host key rather than trusting
+        # whatever key answers. ``system_host_keys=False`` deliberately never
+        # reads the operator's own ~/.ssh/known_hosts (see
+        # DEFAULT_SSH_KNOWN_HOSTS's docstring); ``alt_host_keys=True`` +
+        # ``alt_key_file`` is this tool's own dedicated trust store instead,
+        # populated only by scripts/enroll_host_keys.py. ``ssh_strict=True``
+        # (the default -- see _ssh_strict_enabled) makes an unrecognised key
+        # a hard refusal (paramiko.RejectPolicy) instead of netmiko's own
+        # default silent auto-accept (paramiko.AutoAddPolicy).
+        "ssh_strict": effective_ssh_strict,
+        "system_host_keys": False,
+        "alt_host_keys": True,
+        "alt_key_file": effective_ssh_known_hosts,
     }
     # Password and/or SSH key: a key file is used when provided, otherwise the
     # shared password. Netmiko accepts both together for key + passphrase setups.
@@ -493,8 +606,20 @@ def _netmiko_send_commands_admitted(
             on_retry=lambda used: retries_used.__setitem__("connection", used),
         )
     except Exception as exc:  # noqa: BLE001 - every attempt to connect failed.
-        errors.append(f"connection to {device['hostname']} failed: {exc}")
-        _audit_log({"device": device["name"], "status": "connection_error", "error": str(exc)})
+        if _is_host_key_failure(exc):
+            # EER-002: guarantee the literal phrase "host key" -- the one
+            # mcp_server.boundary/model_egress's ERROR_KINDS classifies on --
+            # actually appears in the text that crosses that boundary,
+            # regardless of paramiko's own wording. RejectPolicy's own
+            # message ("Server 'x' not found in known_hosts") does not
+            # contain "host key" at all, so left alone this would have been
+            # silently withheld as "an unclassified error" instead of the
+            # one thing an operator most needs to see plainly.
+            detail = f"SSH host key rejected: {exc}"
+        else:
+            detail = str(exc)
+        errors.append(f"connection to {device['hostname']} failed: {detail}")
+        _audit_log({"device": device["name"], "status": "connection_error", "error": detail})
         metrics.record_collection(
             device["name"], success=False, duration_s=time.monotonic() - session_started
         )

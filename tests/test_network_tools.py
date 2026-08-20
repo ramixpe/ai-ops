@@ -13,6 +13,8 @@ from agent_nettools import lab, network_tools
 from agent_nettools.network_tools import (
     CHECK_TOOLS,
     NETTOOLS_ALLOW_ACTIVE_PROBES_ENV,
+    NETTOOLS_SSH_KNOWN_HOSTS_ENV,
+    NETTOOLS_SSH_STRICT_ENV,
     _run_approved_commands,
     check_bgp_vpnv4_neighbors,
     check_fabric,
@@ -1244,6 +1246,168 @@ def test_auth_failure_is_never_retried(monkeypatch):
     # Exactly one attempt per command -- an auth failure must burn none of the
     # retry budget, since it can never succeed on a later attempt.
     assert attempts["count"] == len(commands_for(LAB_PLATFORM, "facts"))
+
+
+# --------------------------------------------------------------------------- #
+# EER-002: SSH host-key verification -- the trust root.
+# --------------------------------------------------------------------------- #
+
+
+def test_ssh_host_key_verification_params_reach_netmiko(monkeypatch, tmp_path):
+    """(a) The strict host-key params actually reach ConnectHandler, and
+    NETTOOLS_SSH_KNOWN_HOSTS overrides the default known-hosts path -- same
+    ``sessions[0]`` idiom test_netmiko_connection_uses_configured_timeouts
+    already uses for the timeout settings."""
+
+    set_device_environment(monkeypatch)
+    known_hosts = tmp_path / "known_hosts"
+    monkeypatch.setenv(NETTOOLS_SSH_KNOWN_HOSTS_ENV, str(known_hosts))
+    sessions = install_fake_netmiko(monkeypatch)
+
+    result = run_intent("PE1", "facts")
+
+    assert result["status"] == "success"
+    assert sessions[0]["ssh_strict"] is True
+    assert sessions[0]["system_host_keys"] is False
+    assert sessions[0]["alt_host_keys"] is True
+    assert sessions[0]["alt_key_file"] == str(known_hosts)
+
+
+def test_ssh_host_key_verification_defaults_to_strict_and_not_the_users_own_known_hosts(monkeypatch):
+    """Unset NETTOOLS_SSH_STRICT/NETTOOLS_SSH_KNOWN_HOSTS must still mean
+    "verify, against this tool's own trust store" -- never netmiko's own
+    default (ssh_strict=False, i.e. silently trust anything), and never the
+    operator's own ~/.ssh/known_hosts, which would inherit unrelated trust
+    decisions this tool never made."""
+
+    set_device_environment(monkeypatch)
+    monkeypatch.delenv(NETTOOLS_SSH_STRICT_ENV, raising=False)
+    monkeypatch.delenv(NETTOOLS_SSH_KNOWN_HOSTS_ENV, raising=False)
+    sessions = install_fake_netmiko(monkeypatch)
+
+    result = run_intent("PE1", "facts")
+
+    assert result["status"] == "success"
+    assert sessions[0]["ssh_strict"] is True
+    assert "known_hosts" in sessions[0]["alt_key_file"]
+    assert ".ssh" not in sessions[0]["alt_key_file"]
+
+
+def test_ssh_strict_fails_closed_on_an_unrecognised_value(monkeypatch):
+    """EER-002: an unrecognised NETTOOLS_SSH_STRICT value must leave
+    verification ON -- the opposite direction from a normal
+    _FALSY_ENV_VALUES-style gate, where an unrecognised value is treated as
+    the (usually risky) truthy default. Only a correctly-spelled falsy
+    value actually disables it."""
+
+    set_device_environment(monkeypatch)
+    sessions = install_fake_netmiko(monkeypatch)
+
+    for garbled in ("strikt", "1true", "definitely-not-a-recognized-spelling"):
+        monkeypatch.setenv(NETTOOLS_SSH_STRICT_ENV, garbled)
+        sessions.clear()
+        result = run_intent("PE1", "facts")
+        assert result["status"] == "success"
+        assert sessions[0]["ssh_strict"] is True, f"{garbled!r} must not disable verification"
+
+    monkeypatch.setenv(NETTOOLS_SSH_STRICT_ENV, "0")
+    sessions.clear()
+    result = run_intent("PE1", "facts")
+    assert result["status"] == "success"
+    assert sessions[0]["ssh_strict"] is False, "a correctly-spelled falsy value must still disable it"
+
+
+def test_host_key_failure_is_refused_once_not_retried(monkeypatch):
+    """(b) A rejected/mismatched host key must be terminal on the first
+    attempt -- never treated as transient and burned through the retry
+    budget the way it silently was before EER-002 (_is_transient_failure's
+    ImportError fallback used to return True for anything, host-key
+    failures included)."""
+
+    set_device_environment(monkeypatch)
+    monkeypatch.setenv("NETTOOLS_COMMAND_RETRIES", "5")
+    monkeypatch.setenv("NETTOOLS_RETRY_BACKOFF_SECONDS", "0")
+    sessions = install_fake_netmiko(monkeypatch, fail_host_key=True)
+
+    result = run_intent("PE1", "facts")
+
+    assert result["status"] == "error"
+    assert sessions.attempts == 1, "a host-key failure must not be retried"
+    assert len(sessions) == 0, "no session was ever actually established"
+    assert "host key" in result["errors"][0].lower()
+
+
+def test_host_key_failure_message_is_classified_not_withheld():
+    """Item 4: mcp_server.boundary/model_egress's ERROR_KINDS classifies on
+    the literal phrase "host key" (case-insensitive substring match against
+    the whole error text) -- verify network_tools' own connection-failure
+    message actually contains it, for both host-key failure shapes, so a
+    host-key rejection reaches a model as a named, explained refusal rather
+    than being withheld as "an unclassified error"."""
+
+    from agent_nettools.network_tools import _is_host_key_failure
+
+    unknown_host = Exception("Server '172.20.250.11' not found in known_hosts")
+    mismatched_key = Exception(
+        "Host key for server '172.20.250.11' does not match: got 'AAAA...', expected 'BBBB...'"
+    )
+    assert _is_host_key_failure(unknown_host)
+    assert _is_host_key_failure(mismatched_key)
+
+    # The exact message network_tools composes for the connection-failure
+    # path (see _netmiko_send_commands_admitted) always prefixes with
+    # "SSH host key rejected: " for either shape, guaranteeing the "host key"
+    # substring ERROR_KINDS keys on survives regardless of paramiko's own
+    # wording.
+    composed = f"connection to 172.20.250.11 failed: SSH host key rejected: {unknown_host}"
+    assert "host key" in composed.lower()
+
+
+def test_strict_ssh_params_do_not_block_normal_connections_and_transient_connect_failures_still_retry(
+    monkeypatch,
+):
+    """(c) Positive control for the two refusal tests above (OBS-181): the
+    new strict/known-hosts params must not turn an ordinary reachable device
+    into a refusal, and a genuinely transient CONNECTION failure (not a
+    host-key one) must still retry exactly as it did before EER-002."""
+
+    set_device_environment(monkeypatch)
+    monkeypatch.setenv("NETTOOLS_COMMAND_RETRIES", "3")
+    monkeypatch.setenv("NETTOOLS_RETRY_BACKOFF_SECONDS", "0")
+
+    attempts = {"count": 0}
+    recorded_params = []
+
+    class WorkingConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            return False
+
+        def send_command(self, command, **kwargs):
+            return f"output for {command}"
+
+    def fake_connect_handler(**params):
+        attempts["count"] += 1
+        if attempts["count"] < 2:
+            raise OSError("TCP connection to device failed")
+        recorded_params.append(params)
+        return WorkingConnection()
+
+    import sys
+    import types
+
+    fake_netmiko = types.ModuleType("netmiko")
+    fake_netmiko.ConnectHandler = fake_connect_handler
+    monkeypatch.setitem(sys.modules, "netmiko", fake_netmiko)
+
+    result = run_intent("PE1", "facts")
+
+    assert result["status"] == "success"
+    assert attempts["count"] == 2, "a genuinely transient connect failure must still retry"
+    assert recorded_params[0]["ssh_strict"] is True
+    assert recorded_params[0]["alt_host_keys"] is True
 
 
 # --------------------------------------------------------------------------- #
