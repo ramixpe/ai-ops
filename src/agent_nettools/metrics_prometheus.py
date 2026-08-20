@@ -292,7 +292,6 @@ __all__ = [
     "PrometheusQuery",
     "PrometheusQueryError",
     "PrometheusTransportError",
-    "UnknownPrometheusQueryError",
     "coverage_from_prometheus_history",
     "known_prometheus_queries",
     "run_named_query",
@@ -363,10 +362,6 @@ class PrometheusQueryError(ValueError):
     into a `status="error"` envelope, the same discipline
     `logs_loki.LokiQueryError` documents for the identical reason.
     """
-
-
-class UnknownPrometheusQueryError(PrometheusQueryError):
-    """The caller asked for a query name not in :data:`PROMETHEUS_QUERIES`."""
 
 
 class PrometheusTransportError(Exception):

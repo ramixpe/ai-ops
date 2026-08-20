@@ -989,13 +989,6 @@ DEFAULT_TIMEOUT_SECONDS = 10.0
 SOURCE_NETBOX = "netbox"
 
 
-class NetBoxReadError(ValueError):
-    """A named read query is unknown. Never raised out of
-    :func:`run_named_read` -- caught there and turned into a
-    ``status="error"`` envelope, the same discipline `logs_loki.py`'s
-    `LokiQueryError`/`run_named_query` already use."""
-
-
 class NetBoxTransportError(Exception):
     """The HTTP call to NetBox failed, or its response was not usable.
     `logs_loki.LokiTransportError`'s exact counterpart."""

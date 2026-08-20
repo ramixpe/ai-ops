@@ -135,7 +135,6 @@ __all__ = [
     "LokiQuery",
     "LokiQueryError",
     "LokiTransportError",
-    "UnknownLokiQueryError",
     "coverage_from_loki",
     "known_loki_queries",
     "run_named_query",
@@ -210,10 +209,6 @@ class LokiQueryError(ValueError):
     (§0.5) and governs a different command surface (device commands, not a
     log query), and this module must not couple to it.
     """
-
-
-class UnknownLokiQueryError(LokiQueryError):
-    """The caller asked for a query name not in :data:`LOKI_QUERIES`."""
 
 
 class LokiTransportError(Exception):
@@ -356,18 +351,6 @@ LOKI_QUERIES: dict[str, LokiQuery] = {
         ),
     ),
 }
-
-#: (record-context, field) pairs this module's records carry that are
-#: device-authored free text. Deliberately reuses `("logging", "text")` /
-#: `("logging", "code")`'s own field names under a new context
-#: (`"logs_for_device"`, the query name) -- see the module docstring's
-#: "Field-name choice" section for why that is the safe direction, not a
-#: shortcut. Merge this into `model_egress.FREE_TEXT_FIELDS` (this module
-#: does not import that module -- see `_base_envelope`'s docstring for why
-#: `agent_nettools` submodules stay independent of each other where nothing
-#: requires the coupling; `model_egress.py` is edited directly instead, in
-#: the same commit, per the build's own instruction).
-FREE_TEXT_CONTEXT = "logs_for_device"
 
 
 def known_loki_queries() -> tuple[str, ...]:
