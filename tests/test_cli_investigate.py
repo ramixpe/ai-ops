@@ -855,6 +855,82 @@ def test_the_ticket_records_only_the_evidence_that_fed_the_descent(tmp_path, mon
 
 
 # --------------------------------------------------------------------------- #
+# W4f -- `nettools ledger verdict` mirrors the outcome onto the ticket that
+# produced the diagnosis, found via the run_id join key (W3c)
+# --------------------------------------------------------------------------- #
+
+
+def test_ledger_verdict_mirrors_the_outcome_onto_the_tickets_own_run_id(
+    monkeypatch, capsys, tmp_path,
+):
+    from agent_nettools import ledger, ticket
+
+    monkeypatch.delenv("NETTOOLS_DIAGNOSIS_LEDGER_FILE", raising=False)
+    ledger.reset()
+    try:
+        _main(ARGS, monkeypatch)
+        capsys.readouterr()
+
+        recorded = ledger.diagnoses()
+        assert len(recorded) == 1
+        diagnosis_id = recorded[0]["id"]
+
+        code = _main(
+            ["ledger", "verdict", diagnosis_id, "confirmed_correct",
+             "--by", "tester", "--note", "checked by hand"],
+            monkeypatch,
+        )
+        err = capsys.readouterr().err
+
+        assert code == 0
+        assert "not mirrored" not in err
+
+        files = sorted((tmp_path / "tickets").glob("*.md"))
+        assert len(files) == 1
+        parsed = ticket.read_ticket(files[0])
+
+        assert parsed["outcome"]["outcome"] == "confirmed_correct"
+        assert parsed["outcome"]["by"] == "tester"
+        assert parsed["outcome"]["note"] == "checked by hand"
+    finally:
+        ledger.reset()
+
+
+def test_ledger_verdict_for_a_run_id_less_diagnosis_does_not_fabricate_a_ticket(
+    monkeypatch, capsys, tmp_path,
+):
+    """An old-format ledger row (recorded before run_id was wired through)
+    has genuinely no ticket to mirror onto -- the verdict still records and
+    still exits 0, and no ticket is fabricated out of thin air."""
+
+    from agent_nettools import ledger
+
+    monkeypatch.delenv("NETTOOLS_DIAGNOSIS_LEDGER_FILE", raising=False)
+    ledger.reset()
+    try:
+        write = ledger.record_diagnosis(
+            device="RR1", subject="10.255.0.12", flow="bgp_session",
+            finding="interface_line_down", trustworthy=True,
+            source=ledger.SOURCE_FIXTURE,
+        )  # no run_id -- the pre-W3c shape
+
+        code = _main(
+            ["ledger", "verdict", write.id, "confirmed_correct", "--by", "tester"],
+            monkeypatch,
+        )
+        err = capsys.readouterr().err
+
+        assert code == 0
+        assert "not mirrored" in err
+        assert "no run_id" in err
+
+        tickets_dir = tmp_path / "tickets"
+        assert not tickets_dir.exists() or list(tickets_dir.glob("*.md")) == []
+    finally:
+        ledger.reset()
+
+
+# --------------------------------------------------------------------------- #
 # B-407 -- session memory wiring
 #
 # `session_memory.py` shipped with the exact call this wiring makes already

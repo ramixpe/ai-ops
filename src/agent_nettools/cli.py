@@ -940,8 +940,9 @@ def _cmd_ledger(args) -> int:
         _emit(_ledger.summary(ledger=store), args)
         return 0
 
+    by = args.by or _default_actor()
     result = _ledger.record_verdict(
-        args.diagnosis_id, args.outcome, by=args.by or _default_actor(), note=args.note, ledger=store,
+        args.diagnosis_id, args.outcome, by=by, note=args.note, ledger=store,
     )
     _emit({"tool": "ledger verdict", "id": result.id,
            "diagnosis_id": args.diagnosis_id, "outcome": args.outcome,
@@ -951,6 +952,51 @@ def _cmd_ledger(args) -> int:
     if not result.diagnosis_found:
         _note(f"# no diagnosis {args.diagnosis_id!r} in this ledger -- recorded anyway, "
               "so a mismatch stays visible rather than being refused away", args)
+
+    # W4f: best-effort mirror of this verdict onto the ticket that produced
+    # the diagnosis, via the run_id join key W3c wires up. Never affects the
+    # ledger verdict's own success above -- same "bookkeeping never fails
+    # the primary action" posture `_open_ticket_for`/`_record_in_ticket`
+    # already take for their own writes. Wrapped broadly on purpose: a
+    # ticket mirror is commentary about where else this verdict landed, not
+    # part of the ledger write this command exists to perform.
+    try:
+        diagnosis_row = next(
+            (d for d in store.diagnoses() if d.get("id") == args.diagnosis_id), None
+        )
+        run_id = diagnosis_row.get("run_id") if diagnosis_row is not None else None
+        if run_id is None:
+            # Absence is never zero: a diagnosis recorded before W3c wired
+            # run_id through (or an unknown diagnosis_id) genuinely has no
+            # ticket to mirror onto -- skip silently-but-notably, never an
+            # error, and never a fabricated ticket.
+            _note(
+                "# ledger verdict not mirrored to a ticket: this diagnosis "
+                "carries no run_id (recorded before run_id was wired through, "
+                "or diagnosis_id not found in this ledger)",
+                args,
+            )
+        else:
+            from . import ticket_read as _ticket_read
+
+            path = _ticket_read.find_ticket_path_by_run_id(run_id)
+            if path is None:
+                _note(
+                    f"# ledger verdict not mirrored to a ticket: no ticket "
+                    f"found for run_id {run_id!r}",
+                    args,
+                )
+            else:
+                from . import ticket as _ticket
+
+                outcome_write = _ticket.record_ticket_outcome(
+                    path, args.outcome, by=by, note=args.note,
+                )
+                if not outcome_write.persisted:
+                    _note(f"# ticket outcome write failed: {outcome_write.warning}", args)
+    except Exception as exc:  # noqa: BLE001 -- a ticket mirror must never fail the ledger verdict
+        _note(f"# ledger verdict not mirrored to a ticket: {exc}", args)
+
     return 0
 
 

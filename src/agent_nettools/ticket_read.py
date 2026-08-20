@@ -154,6 +154,7 @@ __all__ = [
     "DEFAULT_LIST_LIMIT",
     "MAX_LIST_LIMIT",
     "MAX_RUN_ID_CHARS",
+    "find_ticket_path_by_run_id",
     "list_tickets",
     "read_ticket_by_run_id",
 ]
@@ -446,4 +447,37 @@ def read_ticket_by_run_id(run_id: str) -> dict[str, Any] | None:
         parsed = _safe_read(path)
         if parsed is not None and parsed["run_id"] == run_id:
             return _quote_untrusted_fields(_shape_ticket_payload(parsed))
+    return None
+
+
+def find_ticket_path_by_run_id(run_id: str) -> Path | None:
+    """The ticket file path for one run_id, or None. Unlike
+    `read_ticket_by_run_id`, returns a raw path for a caller that intends to
+    WRITE to it (`ticket.record_ticket_outcome`) -- never the
+    quoted/contained payload, which exists for model-safety on the read
+    path only and is the wrong shape for that.
+
+    Mirrors `read_ticket_by_run_id`'s validation (same length/type checks)
+    and its "most recently OPENED wins" tie-break (`_iter_ticket_files`
+    already yields newest-first and this returns on the first match) --
+    reusing the same `_iter_ticket_files`/`_safe_read` scanning logic, same
+    module, same conventions. `None` covers every reason a match did not
+    happen (malformed input, no tickets directory, nothing found), the same
+    "absence is a normal answer" shape `read_ticket_by_run_id` already uses,
+    since a write-side caller (W4f: `nettools ledger verdict`) treats "no
+    ticket for this run_id" as something to skip silently-but-notably, never
+    an error.
+    """
+
+    if (
+        not isinstance(run_id, str)
+        or not run_id
+        or len(run_id) > MAX_RUN_ID_CHARS
+    ):
+        return None
+
+    for path in _iter_ticket_files(_resolve_dir()):
+        parsed = _safe_read(path)
+        if parsed is not None and parsed["run_id"] == run_id:
+            return path
     return None
