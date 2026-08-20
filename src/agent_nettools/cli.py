@@ -1004,6 +1004,114 @@ def _cmd_ledger(args) -> int:
     return 0
 
 
+def _config_reconciliation_for(args, result, sender) -> dict | None:
+    """W5: config_diff.py's intent-vs-observed comparison, opt-in only.
+
+    Returns ``None`` whenever reconciliation did not run for a real reason --
+    ``--reconcile-config`` was not given, the finding/flow do not qualify, or
+    the underlying evidence could not be gathered. **Absence is never zero**:
+    a caller must never mistake this for "checked, found nothing". The
+    caller (`_cmd_investigate`) only attaches this as the sibling
+    ``"config_reconciliation"`` payload key at all when the flag was given --
+    with the flag omitted, the key is absent from the JSON entirely, not
+    present-and-null (see that call site).
+
+    Why this precondition and not another
+    --------------------------------------
+    `config_diff.gather_reconciliation_evidence` needs a SECOND live SSH
+    session (B-455: ~8s extra login cost beyond the one investigate() already
+    pays for its own evidence epoch) -- firing it on every investigation
+    whose finding is `flows.CAUSE_NOT_LOCALISED` would silently add live
+    network cost to a run this CLI's own docs describe as
+    `--from-fixtures`-compatible and no-lab-required. Hence the explicit
+    opt-in, checked first and cheaply, before anything below it runs.
+
+    `interface_kind.interface_scoped_flows()` names every flow whose SUBJECT
+    is an interface name -- `interface`, `isis_adjacency`, `ldp_session`,
+    never `bgp_session` -- which is exactly what `config_diff.
+    diff_isis_adjacency`/`diff_interface_admin_state` both need (a device +
+    interface pair). In practice only `isis_adjacency`/`ldp_session` can ever
+    reach `cause_not_localised` here: `flows.INTERFACE_FLOW` has a single
+    rung, and `descent.py`'s own rule for this finding requires more than one
+    rung in the walk (`lowest_index == 0 and len(outcomes) > 1`), so a
+    one-rung flow can never produce it. The flow check below is written
+    generally against `interface_scoped_flows()` rather than hand-listing the
+    two that happen to qualify today, for the same "don't hand-maintain a
+    second copy of a fact code already knows" reason that function's own
+    docstring gives.
+
+    `sender` is the exact same seam `_cmd_investigate` already built for
+    `investigate()` itself -- a fixture-replay sender under `--from-fixtures`,
+    `None` (real SSH) otherwise -- so a fixture-backed run stays fixture-
+    backed for this axis too, and a missing fixture surfaces the same
+    structured way any other fixture-replay gap does: `config_diff`'s own
+    `require_parsed` gate turns it into `CANNOT_COMPARE` fields with a stated
+    reason, never a crash and never a silently-empty pass (confirmed against
+    `tests/fixtures/cisco_xr/*/broken/`, which has no config_isis/
+    config_interface captures at all -- only `isis-broken` and `healthy` do).
+    """
+
+    if not getattr(args, "reconcile_config", False):
+        return None
+
+    if result.descent.finding != flows.CAUSE_NOT_LOCALISED:
+        _note(
+            f"# --reconcile-config: not applicable (finding is "
+            f"{result.descent.finding!r}, not cause_not_localised)", args,
+        )
+        return None
+
+    from . import interface_kind
+
+    if result.flow not in interface_kind.interface_scoped_flows():
+        _note(
+            f"# --reconcile-config: not applicable ({result.flow!r}'s subject "
+            "is not an interface name)", args,
+        )
+        return None
+
+    cause = result.descent.cause
+    device = cause.device if cause is not None else result.device
+    interface = result.subject
+
+    try:
+        # `from .config_diff import ...` (not `from . import config_diff`)
+        # deliberately: `docs/diagrams/facts.config_diff_consumers()` -- the
+        # scanner d1.py's self-invalidating guard reads -- only recognises an
+        # `ImportFrom` node whose own `module` names `config_diff` (or a
+        # plain `Import`), not a bare `from . import config_diff`. Using the
+        # form the guard actually detects is deliberate here: this file
+        # genuinely becomes config_diff.py's first live consumer, and the
+        # diagram's "unwired" pill label is now stale -- see this task's
+        # final report for the exact orchestrator hand-off (docs/diagrams/
+        # is out of scope for this lane to edit).
+        from .config_diff import gather_reconciliation_evidence, reconcile_interface
+
+        evidence = gather_reconciliation_evidence(device, [interface], sender=sender)
+        reconciliation = reconcile_interface(evidence, device, interface)
+    except Exception as exc:  # noqa: BLE001 -- an opt-in enrichment must never fail the investigation
+        _note(f"# --reconcile-config: could not gather reconciliation evidence: {exc}", args)
+        return None
+
+    return {
+        "device": reconciliation.device,
+        "subject": reconciliation.subject,
+        "has_disagreement": reconciliation.has_disagreement,
+        "fields": [
+            {
+                "field": f.field,
+                "outcome": f.outcome,
+                "intent": f.intent,
+                "observed": f.observed,
+                "reason": f.reason,
+                "intent_evidence_key": f.intent_evidence_key,
+                "observed_evidence_key": f.observed_evidence_key,
+            }
+            for f in reconciliation.fields
+        ],
+    }
+
+
 def _cmd_investigate(args: argparse.Namespace) -> int:
     """Run one deterministic investigation and report what it found.
 
@@ -1153,7 +1261,16 @@ def _cmd_investigate(args: argparse.Namespace) -> int:
         ), args)
         return EXIT_CRITICAL
 
-    _emit(result.to_payload(), args)
+    # W5: sibling key, never inside `result.to_payload()` -- that dict's
+    # shape (and, transitively, `prompt_library.descent_payload()`'s own
+    # pinned key set) is frozen behavior this enrichment must not touch.
+    # Present (possibly `null`) only when the flag was actually given --
+    # absence is never zero, so a run that never asked for this leaves the
+    # key out of the JSON entirely rather than always advertising it.
+    payload = result.to_payload()
+    if getattr(args, "reconcile_config", False):
+        payload["config_reconciliation"] = _config_reconciliation_for(args, result, sender)
+    _emit(payload, args)
 
     # B-446: the flight recorder. One markdown file per interaction, every
     # field code-observed. Opened here rather than at the top of the command so
@@ -1962,6 +2079,21 @@ def build_parser() -> argparse.ArgumentParser:
              "labels the turn this run records for a later one to resolve. "
              "Default: the parent process id (stable across every invocation "
              "from one shell, distinct across separate ones).",
+    )
+    p_investigate.add_argument(
+        "--reconcile-config",
+        action="store_true",
+        help=(
+            "W5, opt-in only (default off): compare configured intent against "
+            "observed state (config_diff.py) for the interface this descent "
+            "bottomed out on, when -- and only when -- the finding is "
+            "cause_not_localised on a flow whose subject is an interface name "
+            "(isis_adjacency, ldp_session). This is a SECOND live SSH login "
+            "(~8s extra per B-455's own measurement), never fired unless asked "
+            "for. Adds a sibling 'config_reconciliation' key to the emitted "
+            "JSON; absent entirely without this flag, and null when the flag "
+            "is given but does not apply or the evidence could not be read."
+        ),
     )
     p_investigate.set_defaults(func=_cmd_investigate)
 

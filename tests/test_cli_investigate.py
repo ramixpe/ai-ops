@@ -1086,3 +1086,144 @@ def test_two_different_sessions_do_not_see_each_others_turns(monkeypatch, capsys
 
     assert code == 2
     assert "does not resolve" in _payload(out)["errors"][0]
+
+
+# --------------------------------------------------------------------------- #
+# --reconcile-config (W5): opt-in config_diff.py enrichment, fired only on
+# cause_not_localised for an interface-scoped flow. B-496's own worked
+# example -- PE3 Gi0/0/0/0, isis_adjacency, the "isis-broken" fixture label --
+# is real, committed evidence that already produces this exact finding
+# (test_a_run_records_a_turn_session_memory_can_recall above pins its exit
+# code), so it doubles as this feature's end-to-end fixture too.
+# --------------------------------------------------------------------------- #
+
+_RECONCILE_ARGS = [
+    "investigate", "PE3", "Gi0/0/0/0", "--flow", "isis_adjacency",
+    "--from-fixtures", "--label", "isis-broken",
+]
+
+
+def test_without_the_flag_the_payload_has_no_config_reconciliation_key_at_all(
+    monkeypatch, capsys,
+):
+    """Positive-control baseline (OBS-181) for every test below: omitting
+    --reconcile-config must leave the key out of the JSON entirely, not
+    present as null -- proving the flag is what changes behavior."""
+
+    code = _main(_RECONCILE_ARGS, monkeypatch)
+    out, _ = capsys.readouterr()
+    payload = _payload(out)
+
+    assert code == 1  # cause_not_localised, unaffected by this feature
+    assert "config_reconciliation" not in payload
+
+
+def test_the_flag_produces_real_reconciliation_data_on_cause_not_localised(
+    monkeypatch, capsys,
+):
+    """The load-bearing case: with the flag, on the fixture that produces
+    cause_not_localised, the sibling key carries B-496's own worked
+    disagreement -- real data, not a stub."""
+
+    code = _main([*_RECONCILE_ARGS, "--reconcile-config"], monkeypatch)
+    out, _ = capsys.readouterr()
+    payload = _payload(out)
+
+    assert code == 1
+    recon = payload["config_reconciliation"]
+    assert recon is not None
+    assert recon["device"] == "PE3"
+    assert recon["subject"] == "Gi0/0/0/0"
+    assert recon["has_disagreement"] is True
+    isis_field = next(f for f in recon["fields"] if f["field"] == "isis_adjacency")
+    assert isis_field["outcome"] == "disagrees"
+    assert isis_field["intent"] is True
+    assert isis_field["observed"] is False
+
+    # Sibling of the descent payload, never inside it -- test_report_prompt.py
+    # pins prompt_library.descent_payload()'s own key set separately; this is
+    # a different, outer dict (InvestigationResult.to_payload()'s own).
+    assert "config_reconciliation" not in (payload.get("report") or {})
+
+
+def test_the_key_is_explicitly_null_when_the_flag_does_not_apply(monkeypatch, capsys):
+    """The flag was asked for, but the finding is not cause_not_localised --
+    the "healthy" fixture label finds no fault at all. The key must still be
+    explicitly null (the caller asked, and got an honest "does not apply"),
+    never a fabricated empty-but-present result."""
+
+    _main(
+        ["investigate", "PE1", "10.255.0.31", "--from-fixtures", "--label", "healthy",
+         "--reconcile-config"],
+        monkeypatch,
+    )
+    out, _ = capsys.readouterr()
+    payload = _payload(out)
+
+    assert payload["finding"] != "cause_not_localised"
+    assert "config_reconciliation" in payload
+    assert payload["config_reconciliation"] is None
+
+
+def test_the_flag_never_fires_for_bgp_session_even_if_asked(monkeypatch, capsys):
+    """bgp_session's subject is a peer address, not an interface --
+    interface_kind.interface_scoped_flows() excludes it, so the key stays
+    null for this flow regardless of finding."""
+
+    _main(
+        ["investigate", "RR1", "10.255.0.12", "--from-fixtures", "--label", "broken",
+         "--reconcile-config"],
+        monkeypatch,
+    )
+    out, _ = capsys.readouterr()
+    payload = _payload(out)
+
+    assert payload["flow"] == "bgp_session"
+    assert payload["config_reconciliation"] is None
+
+
+def test_reconciliation_never_attempts_a_live_connection_under_from_fixtures(
+    monkeypatch, capsys,
+):
+    """--from-fixtures --reconcile-config together must never open a real
+    SSH session for the reconciliation axis either -- `_no_environment`
+    (module-level autouse fixture) has already deleted every credential, so
+    a real connection attempt would raise and this run would not exit 1."""
+
+    code = _main([*_RECONCILE_ARGS, "--reconcile-config"], monkeypatch)
+
+    assert code == 1
+    capsys.readouterr()
+
+
+def test_a_label_missing_the_config_fixtures_degrades_to_cannot_compare_not_a_crash(
+    monkeypatch,
+):
+    """Absence is never zero, exercised directly: `--label broken` has no
+    config_isis/config_interface captures for any device (only "isis-broken"
+    and "healthy" do). Driven at the helper level with a constructed result,
+    since PE3/Gi0/0/0/0 under "broken" itself finds `all_layers_healthy` (no
+    fixture naturally reaches cause_not_localised AND lacks config fixtures
+    at once) -- this isolates the "evidence genuinely unavailable" path from
+    the "does not apply" path already covered above."""
+
+    from types import SimpleNamespace
+
+    from agent_nettools import cli, flows
+    from agent_nettools.fixtures import fixture_sender
+
+    fake_cause = SimpleNamespace(device="PE3")
+    fake_descent = SimpleNamespace(finding=flows.CAUSE_NOT_LOCALISED, cause=fake_cause)
+    fake_result = SimpleNamespace(descent=fake_descent, flow="isis_adjacency",
+                                   subject="Gi0/0/0/0", device="PE3")
+    fake_args = SimpleNamespace(reconcile_config=True, quiet=True)
+
+    sender = fixture_sender(label="broken")
+    reconciliation = cli._config_reconciliation_for(fake_args, fake_result, sender)
+
+    # A real, present dict -- reconciliation was genuinely attempted -- but
+    # every field honestly reports it could not compare, never a fabricated
+    # agreement and never an unhandled exception.
+    assert reconciliation is not None
+    assert all(f["outcome"] == "cannot_compare" for f in reconciliation["fields"])
+    assert all(f["reason"] for f in reconciliation["fields"])
