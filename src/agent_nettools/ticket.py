@@ -220,14 +220,19 @@ NETTOOLS_TICKET_DIR_ENV = "NETTOOLS_TICKET_DIR"
 DEFAULT_TICKETS_DIR = "tickets"
 
 #: Bound on `excerpt`/`detail`-shaped free-text fields. Same value and the
-#: same reasoning as `mcp_server/boundary.py`'s `MAX_ERROR_CHARS` (B-458: "a
-#: transport exception can embed device output in an error string") -- a
-#: bounded excerpt is what the spec asks for ("compact command excerpts --
-#: not only opaque evidence-key names"), and a caller passing a raw
-#: multi-kilobyte capture into one of these fields by mistake must not turn
-#: one ticket section into a second, unaccounted-for copy of the evidence
-#: store. This caps one call's contribution; it does not enforce a
-#: file-wide budget -- see the accompanying build report.
+#: same reasoning `mcp_server/boundary.py` once used for its own
+#: `MAX_ERROR_CHARS` (B-458: "a transport exception can embed device output
+#: in an error string") before that module replaced truncation with
+#: classify-and-rebuild and deleted the constant as dead code once nothing
+#: referenced it any more -- this is now the only place that bound survives
+#: (release-1.0 cleanup: the citation above was stale, naming a constant
+#: that no longer exists in `boundary.py`). A bounded excerpt is what the
+#: spec asks for ("compact command excerpts -- not only opaque evidence-key
+#: names"), and a caller passing a raw multi-kilobyte capture into one of
+#: these fields by mistake must not turn one ticket section into a second,
+#: unaccounted-for copy of the evidence store. This caps one call's
+#: contribution; it does not enforce a file-wide budget -- see the
+#: accompanying build report.
 _MAX_TEXT_FIELD_CHARS = 400
 
 #: Bound on a model's raw response text specifically -- deliberately larger
