@@ -211,6 +211,30 @@ _UNTRUSTED_TEXT_FIELDS = frozenset(
         "excerpt",
         "response_text",
         "previous_reason",
+        # OBS-691. These two were left out on the reasoning that a descent's
+        # `reason` is "code-typed, not free text" -- the exact words of the
+        # test that pinned it. Measured on a real run, that premise is false:
+        # `checks.py`'s `_last_reset_note` (B-430) and the route and transport
+        # rungs splice the device's own words into `reason` verbatim, so a
+        # single broken-fixture investigation puts
+        #   "the device reports the session state as 'No route to multi-hop
+        #    neighbor'; ... reason 'BGP Notification sent: hold time expired'"
+        #   "no route to 10.255.0.12/32 (device reports '% Network not in
+        #    table')"
+        # into this payload. The old test could not notice, because its
+        # fixture reason was the hand-written string "line protocol down",
+        # which contains no device text -- it asserted the field was bare
+        # using an example that had nothing to contain.
+        #
+        # Wrapping the whole string over-marks the code-authored prose around
+        # the quoted fragment. That is the deliberate direction of the error:
+        # the delimiters mean "treat as untrusted", which is true of a string
+        # that *contains* untrusted content, and over-marking costs a reader
+        # nothing while under-marking is the B-481 gap. The precise fix is to
+        # stop mixing the two in one field at the `checks.py` end (filed, not
+        # done here).
+        "reason",
+        "current_reason",
     }
 )
 

@@ -7175,3 +7175,50 @@ Three lessons worth the price:
 - **Needs human review:** yes — one decision: revert PE2 to `remote-as 65000`
   (restoring the state both fixtures agree on), after which round 6 can run.
 - **Blocks:** B-440 (round 6) until the fabric is at golden.
+
+## OBS-691 · Wave B · A test that proved a field was safe using an example that had nothing to be unsafe about
+
+- **Kind:** defect
+- **Where:** `ticket_read._UNTRUSTED_TEXT_FIELDS` / `tests/test_ticket_read.py`
+- **What was believed:** that a descent's `reason` needs no containment
+  because *"it is code-typed, not free text"* — the literal words of
+  `test_the_answer_is_the_deterministic_descents_own_unwrapped`, which
+  asserted `DEVICE_TEXT_OPEN not in str(answer)` and passed for months.
+- **Why it passed:** its fixture reason was the hand-written string
+  `"line protocol down"`. No device wrote that. The test asserted a field was
+  bare using an example with nothing in it to contain, so it could not have
+  failed whatever the code did. **This is OBS-089's anti-vacuity condition in
+  a containment test rather than a diagnostic trial** — and it is the second
+  time tonight that shape has surfaced (§OBS-690's round 6 is the first).
+- **What is actually true, measured:** one `investigate RR1 10.255.0.12
+  --from-fixtures --label broken` run puts the device's own words into
+  `reason` at three rungs — `'BGP Notification sent: hold time expired'`,
+  `'No route to multi-hop neighbor'`, `'% Network not in table'` — via
+  `checks.py`'s `_last_reset_note` (B-430) and the route/transport rungs.
+  Read back through `ticket_read`, one occurrence came out **bare**.
+- **How it surfaced:** Lane B2 added `record_answer(extra={"rungs": [...]})`,
+  copying every rung's `reason` into the ticket. It correctly contained
+  `previous_reason` *"proven necessary by evidence, not assumption"*, then
+  left `current_reason` bare by analogy to `answer.cause.reason`. The
+  analogy was sound and the conclusion backwards: both fields hold the same
+  kind of string, so the argument settles which way they should **match**,
+  not which one to skip — the already-bare one was the defect, not the
+  licence. Worth stating plainly because the lane's reasoning was careful
+  and still landed wrong: an existing test is only evidence of a decision,
+  never evidence the decision was right.
+- **Fix:** `"reason"` and `"current_reason"` added to
+  `_UNTRUSTED_TEXT_FIELDS`; both tests rewritten to assert what is true, with
+  fixtures that now carry real quoted device text so neither can pass again
+  by not exercising its own subject. Re-measured end to end: six
+  device-authored fragments across two tickets, **all contained, zero bare**.
+  `TICKET-READ-CONTAINMENT` still HOLDS (and now fails 5 tests under
+  mutation, up from fewer — the widening added real coverage).
+- **Deliberate imprecision, named:** wrapping the whole string over-marks the
+  code-authored prose around the quoted fragment. That is the chosen
+  direction of error — the delimiters mean *"treat as untrusted"*, which is
+  true of a string that contains untrusted content, and over-marking costs a
+  reader nothing where under-marking is the B-481 gap.
+- **Residual, not fixed here:** the precise repair is for `checks.py` to stop
+  mixing device text and code prose in one field, so containment can mark the
+  fragment rather than the sentence. Filed as **B-692**.
+- **Needs human review:** no.

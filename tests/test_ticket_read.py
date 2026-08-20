@@ -339,60 +339,108 @@ def test_the_model_claimed_warning_is_present_even_with_no_exchanges(tmp_path, m
     assert "OBS-165" in found["model_claimed"]["warning"] or "not verified evidence" in found["model_claimed"]["warning"]
 
 
-def test_the_answer_is_the_deterministic_descents_own_unwrapped(tmp_path, monkeypatch):
-    """`ticket.record_answer`'s own docstring: never a model's. Returned
-    exactly as `ticket.read_ticket` produced it -- no quoting, no wrapping --
-    because it is code-typed, not free text."""
+def test_the_descents_own_verdict_fields_stay_code_typed_but_its_reason_does_not(
+    tmp_path, monkeypatch
+):
+    """OBS-691. This test used to assert the whole answer came back unwrapped,
+    "because it is code-typed, not free text" -- and it passed, because its
+    fixture reason was the hand-written string "line protocol down", which
+    contains no device text. It asserted a field was safe using an example
+    that had nothing to be unsafe about.
+
+    Measured on a real broken-fixture run, the premise is false: the transport
+    and route rungs put the device's own words inside `reason` verbatim (see
+    `checks.py`'s `_last_reset_note`, B-430). So the split is not
+    answer-vs-handover, it is *field-by-field*: `finding` and `trustworthy`
+    are genuinely code-typed -- a fixed vocabulary and a bool, no device
+    string can reach them -- while `reason` is mixed prose and must be
+    contained.
+
+    The fixture now carries the real shape, quoted device text and all, so
+    this can never again pass by not exercising the thing it is about.
+    """
 
     _set_dir(monkeypatch, tmp_path)
     tk = _open(tmp_path)
+    device_words = "BGP Notification sent: hold time expired"
     tk.record_answer(
         "interface_line_down", trustworthy=True,
-        cause={"rung": "interface", "device": "PE2", "reason": "line protocol down"},
+        cause={
+            "rung": "interface", "device": "PE2",
+            "reason": f"the device last recorded a reset with reason '{device_words}'",
+        },
     )
 
     found = ticket_read.read_ticket_by_run_id(tk.run_id)
     answer = found["code_observed"]["answer"]
 
+    # Still code-typed, and still returned bare -- a fixed finding vocabulary
+    # and a bool are not places a device string can arrive.
     assert answer["finding"] == "interface_line_down"
     assert answer["trustworthy"] is True
-    assert answer["cause"] == {"rung": "interface", "device": "PE2", "reason": "line protocol down"}
-    assert model_egress.DEVICE_TEXT_OPEN not in str(answer)
+    assert model_egress.DEVICE_TEXT_OPEN not in answer["finding"]
+
+    # The rung and device names likewise: code-chosen identifiers.
+    assert answer["cause"]["rung"] == "interface"
+    assert answer["cause"]["device"] == "PE2"
+
+    # The reason is not. It carries the far end's own words and is contained.
+    reason = answer["cause"]["reason"]
+    assert model_egress.DEVICE_TEXT_OPEN in reason
+    assert model_egress.DEVICE_TEXT_CLOSE in reason
+    assert device_words in reason
 
 
-def test_handover_previous_reason_is_contained_current_reason_is_not(tmp_path, monkeypatch):
-    """B-446 (Lane B2): `previous_reason` is copied out of a DIFFERENT
-    ticket file (`checks.py`'s own `_last_reset_note`, B-430, is direct
-    evidence a `CheckResult.reason` can carry a verbatim, unauthenticated
-    far-end device string) and must be contained the same way
-    `response_text` already is. `current_reason` is this run's OWN cause
-    reason -- the identical field at the identical trust level
-    `answer.cause.reason` already has a few lines above in the same file --
-    so wrapping it here too would be inconsistent, not safer. This is the
-    positive control for that asymmetry: both fields present in the same
-    section, only one wrapped."""
+def test_both_handover_reasons_are_contained_not_just_the_previous_one(
+    tmp_path, monkeypatch
+):
+    """OBS-691. Lane B2 contained `previous_reason` for exactly the right
+    evidence -- `checks.py`'s `_last_reset_note` (B-430) proves a
+    `CheckResult.reason` can carry a verbatim, unauthenticated far-end string
+    -- and then left `current_reason` bare on the grounds that it sits at the
+    same trust level as `answer.cause.reason`.
+
+    That premise was true and the conclusion backwards. Both fields hold the
+    same kind of string, so the argument settles which way they should match,
+    not which one to skip: the one already bare was the defect, not the
+    licence. Both are contained now.
+
+    Being one run older does not make text less untrusted, and "this run's
+    own" is a statement about *when* it was collected, not about *who wrote
+    it* -- which is the only question containment asks.
+    """
 
     _set_dir(monkeypatch, tmp_path)
     tk = _open(tmp_path)
     tk.record_answer("all_layers_healthy", trustworthy=True)
+    previous_words = "administrative shutdown"
+    current_words = "% Network not in table"
     tk.record_handover(
         status=ticket.HANDOVER_COMPARED,
-        previous_reason="the far end reports: administrative shutdown",
-        current_reason="line protocol up",
+        previous_reason=f"the far end reports: {previous_words}",
+        current_reason=f"no route to 10.255.0.12/32 (device reports '{current_words}')",
         finding_changed=True,
     )
 
     found = ticket_read.read_ticket_by_run_id(tk.run_id)
     handover = found["code_observed"]["handover"]
 
-    assert model_egress.DEVICE_TEXT_OPEN in handover["previous_reason"]
-    assert model_egress.DEVICE_TEXT_CLOSE in handover["previous_reason"]
-    assert "administrative shutdown" in handover["previous_reason"]
+    for field, words in (
+        ("previous_reason", previous_words),
+        ("current_reason", current_words),
+    ):
+        value = handover[field]
+        assert model_egress.DEVICE_TEXT_OPEN in value, f"{field} is not contained"
+        assert model_egress.DEVICE_TEXT_CLOSE in value, f"{field} is not closed"
+        assert words in value, f"{field} lost the text it was supposed to carry"
 
-    # The positive control: current_reason carries real text and is NOT
-    # wrapped -- proving the asymmetry is deliberate, not a missing case.
-    assert handover["current_reason"] == "line protocol up"
-    assert model_egress.DEVICE_TEXT_OPEN not in handover["current_reason"]
+    # Positive control: containment must not be indiscriminate. `status` sits
+    # in the same section and is a code-declared constant, so it stays bare --
+    # without this, a walker that wrapped every string in the payload would
+    # satisfy the assertions above while telling a reader nothing.
+    assert handover["status"] == ticket.HANDOVER_COMPARED
+    assert model_egress.DEVICE_TEXT_OPEN not in handover["status"]
+    assert handover["finding_changed"] is True
 
 
 def test_handover_is_under_code_observed_never_model_claimed(tmp_path, monkeypatch):
