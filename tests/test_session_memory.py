@@ -245,6 +245,37 @@ def test_only_one_file_exists_per_session_after_multiple_turns(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# Durable-data permissions (EER-019). A turn names a device/subject/flow/
+# ticket path for one operator's recent interaction -- owner-only by default,
+# the same fixed mode `evidence_store.py`/`ticket.py`/`ledger.py` use.
+#
+# Both modes below come from `_atomic_write_text`'s mkstemp (files) and
+# `_secure_mkdir`'s explicit `os.chmod` (directories) -- see
+# `evidence_store._secure_mkdir`'s docstring for why that makes these exact
+# assertions rather than "no group/other bits", with no umask fixture needed.
+# --------------------------------------------------------------------------- #
+
+
+def test_session_memory_directory_is_0700(tmp_path):
+    # A subdirectory that does not exist yet, not `tmp_path` itself -- pytest's
+    # own `tmp_path` fixture already creates its directory at 0700, which
+    # would make this assertion pass whether or not `_secure_mkdir` ever ran
+    # (mkdir's `exist_ok=True` is a no-op on an already-existing directory).
+    base_dir = tmp_path / "session-memory"
+    store = sm.FileSessionMemoryStore(base_dir=str(base_dir))
+    store.record_turn("sess-1", device="PE1")
+
+    assert base_dir.stat().st_mode & 0o777 == 0o700
+
+
+def test_session_turn_file_is_0600(tmp_path):
+    store = _store(tmp_path)
+    store.record_turn("sess-1", device="PE1")
+
+    assert (tmp_path / "sess-1.json").stat().st_mode & 0o777 == 0o600
+
+
+# --------------------------------------------------------------------------- #
 # forget()
 # --------------------------------------------------------------------------- #
 

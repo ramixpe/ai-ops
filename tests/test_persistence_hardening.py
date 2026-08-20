@@ -428,3 +428,131 @@ def test_save_paths_actually_route_through_the_atomic_writer(tmp_path, monkeypat
     monkeypatch.setenv("NETTOOLS_METRICS_FILE", str(tmp_path / "metrics.json"))
     m.MetricsCollector().record_collection("PE1", success=True, duration_s=0.1)
     assert calls, "metrics._persist must route through _atomic_write_text"
+
+
+# --------------------------------------------------------------------------- #
+# 5. Durable-data permissions (EER-019). Evidence snapshots, metrics, and
+# (elsewhere: ticket.py, ledger.py, session_memory.py) hold device evidence
+# and, for tickets, full model prompts/responses -- restrictive-by-default
+# permissions, not left to whatever the caller's umask happens to be.
+#
+# A note on umask and why most assertions below are exact, not "no group/
+# other bits": every mode here is the result of an explicit `os.chmod` (for
+# directories, and for the sqlite db file) or of `tempfile.mkstemp`'s
+# hardcoded 0600 request (for atomically-written files). `os.chmod` sets the
+# exact bits requested -- it is not filtered through umask the way
+# `os.mkdir`/`os.open`'s own `mode=` argument is -- so these assertions are
+# deterministic regardless of the umask the test process happens to run
+# under. The one test below that exercises a *fresh* mkstemp file under an
+# adversarial umask (`test_atomic_write_text_result_is_0600_even_overwriting_
+# a_permissive_file`) sets the umask explicitly anyway, belt-and-suspenders,
+# since mkstemp's request is 0600 -- no group/other bits to begin with -- and
+# a sane umask can only ever clear bits, never add them.
+# --------------------------------------------------------------------------- #
+
+
+def test_atomic_write_text_result_is_0600_even_overwriting_a_permissive_file(tmp_path):
+    """Referenced by name in `evidence_store._atomic_write_text`'s docstring:
+    pins the claim that `os.replace` does not inherit the destination's
+    pre-existing permissions -- the tempfile's own 0600 mode survives the
+    rename onto a target that used to be 0644."""
+
+    path = tmp_path / "snapshot.json"
+    path.write_text("old", encoding="utf-8")
+    os.chmod(path, 0o644)
+
+    old_umask = os.umask(0o022)  # exact assertion below: pin this regardless of the ambient umask.
+    try:
+        from agent_nettools.evidence_store import _atomic_write_text
+
+        _atomic_write_text(path, "new")
+    finally:
+        os.umask(old_umask)
+
+    assert path.read_text(encoding="utf-8") == "new"
+    assert path.stat().st_mode & 0o777 == 0o600
+
+
+def test_atomic_write_text_creates_a_0700_directory(tmp_path):
+    from agent_nettools.evidence_store import _atomic_write_text
+
+    directory = tmp_path / "fresh"
+    _atomic_write_text(directory / "out.json", "{}")
+
+    assert directory.stat().st_mode & 0o777 == 0o700
+
+
+def test_atomic_write_text_self_heals_a_permissive_existing_directory(tmp_path):
+    """`Path.mkdir(exist_ok=True)` silently ignores `mode=` once the
+    directory already exists -- the whole reason `_secure_mkdir` chmods on
+    every call rather than only at creation. A directory left 0755 by, say,
+    a version of this code that predates EER-019 must come back to 0700 the
+    next time anything is written into it."""
+
+    directory = tmp_path / "evidence-dir"
+    directory.mkdir()
+    os.chmod(directory, 0o755)
+
+    from agent_nettools.evidence_store import _atomic_write_text
+
+    _atomic_write_text(directory / "out.json", "{}")
+
+    assert directory.stat().st_mode & 0o777 == 0o700
+
+
+def test_file_evidence_store_device_directory_is_0700(tmp_path):
+    store = FileEvidenceStore(str(tmp_path))
+    store.save_snapshot({"device": "PE1", "timestamp": "2026-08-17T00:00:00+00:00"})
+
+    assert (tmp_path / "PE1").stat().st_mode & 0o777 == 0o700
+
+
+def test_file_evidence_store_snapshot_and_golden_files_are_0600(tmp_path):
+    store = FileEvidenceStore(str(tmp_path))
+    store.save_snapshot({"device": "PE1", "timestamp": "2026-08-17T00:00:00+00:00"})
+    store.save_golden_snapshot({"device": "PE1"})
+
+    device_dir = tmp_path / "PE1"
+    snapshot_files = [p for p in device_dir.glob("*.json") if p.name != "golden.json"]
+    assert snapshot_files, "expected exactly one timestamped snapshot"
+    for path in snapshot_files + [device_dir / "golden.json"]:
+        assert path.stat().st_mode & 0o777 == 0o600, path
+
+
+def test_sqlite_evidence_store_db_file_and_directory_are_owner_only(tmp_path):
+    # A subdirectory that does not exist yet, not `tmp_path` itself -- pytest's
+    # own `tmp_path` fixture already creates its directory at 0700, which
+    # would make the directory assertion below pass whether or not
+    # `_secure_mkdir` ever ran (mkdir's `exist_ok=True` is a no-op on an
+    # already-existing directory).
+    base_dir = tmp_path / "store"
+    store = SQLiteEvidenceStore(str(base_dir))
+    store.save_snapshot({"device": "PE1", "timestamp": "2026-08-17T00:00:00+00:00"})
+
+    db_path = base_dir / "evidence.db"
+    assert db_path.is_file()
+    assert db_path.stat().st_mode & 0o777 == 0o600
+    assert base_dir.stat().st_mode & 0o777 == 0o700
+
+
+def test_sqlite_evidence_store_self_heals_a_pre_existing_permissive_db_file(tmp_path):
+    """Constructing the store re-chmods on every open (`_init_schema` runs
+    unconditionally in `__init__`), not just the first time the file is
+    created -- so a database left permissive by an older version of this
+    code, or opened by hand, self-heals the next time anything opens it."""
+
+    SQLiteEvidenceStore(str(tmp_path))  # creates evidence.db
+    db_path = tmp_path / "evidence.db"
+    os.chmod(db_path, 0o644)
+
+    SQLiteEvidenceStore(str(tmp_path))
+
+    assert db_path.stat().st_mode & 0o777 == 0o600
+
+
+def test_metrics_persist_file_is_0600(tmp_path):
+    path = tmp_path / "metrics.json"
+    collector = metrics.MetricsCollector(path=str(path))
+    collector.record_collection("PE1", success=True, duration_s=0.1)
+
+    assert path.stat().st_mode & 0o777 == 0o600

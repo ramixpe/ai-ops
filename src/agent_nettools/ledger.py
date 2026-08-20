@@ -181,6 +181,19 @@ def _new_id() -> str:
     return uuid.uuid4().hex
 
 
+# EER-019: a diagnosis entry can carry `cause`/`reason` detail lifted from
+# device evidence. Owner-only, the same fixed default `evidence_store.py`
+# and `ticket.py` use -- see `evidence_store._secure_mkdir`'s docstring for
+# why this is a chmod-on-every-call, not chmod-once-at-creation.
+_SECURE_DIR_MODE = 0o700
+_SECURE_FILE_MODE = 0o600
+
+
+def _secure_mkdir(directory: Path) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    os.chmod(directory, _SECURE_DIR_MODE)
+
+
 def _require_nonempty_str(name: str, value: Any) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{name} must be a non-empty string, got {value!r}")
@@ -284,11 +297,19 @@ class DiagnosisLedger:
         if self._path is None:
             return False, None
         try:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
+            _secure_mkdir(self._path.parent)
             with open(self._path, "a", encoding="utf-8") as handle:
                 handle.write(json.dumps(record, sort_keys=True) + "\n")
                 handle.flush()
                 os.fsync(handle.fileno())
+            # EER-019: plain `open(..., "a")` creates a missing file with the
+            # process's default mode (0o666 & ~umask), unlike
+            # `evidence_store._atomic_write_text`'s mkstemp-based files, which
+            # are 0600 from the moment they exist. Chmod unconditionally
+            # (every append, not just the file's first line) so a ledger left
+            # permissive by an older version of this code, or by hand,
+            # self-heals rather than staying wrong until someone deletes it.
+            os.chmod(self._path, _SECURE_FILE_MODE)
             return True, None
         except (OSError, TypeError, ValueError) as exc:
             # OSError: permission, full disk, a directory in the way.

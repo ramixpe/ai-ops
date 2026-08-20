@@ -259,6 +259,20 @@ _PROMPT_SIDECAR_DIRNAME = "_prompts"
 #: degrading. See `_claim_path`'s own docstring.
 _MAX_PATH_ATTEMPTS = 25
 
+# EER-019: a ticket is "full model prompts/responses" per this module's own
+# docstring, plus device evidence quoted into `record_answer`/`record_tool_
+# event` -- the most sensitive durable output this project writes. Owner-only
+# is the fixed default; see `evidence_store._secure_mkdir`'s docstring (same
+# module family) for why the directory chmod happens on every call rather
+# than only at first creation.
+_SECURE_DIR_MODE = 0o700
+_SECURE_FILE_MODE = 0o600
+
+
+def _secure_mkdir(directory: Path) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    os.chmod(directory, _SECURE_DIR_MODE)
+
 
 def _timestamp_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -352,8 +366,16 @@ def _write_sidecar_once(directory: Path, text: str) -> tuple[str, int, str | Non
     path = directory / _PROMPT_SIDECAR_DIRNAME / f"{digest}.txt"
     try:
         if not path.exists():
-            path.parent.mkdir(parents=True, exist_ok=True)
+            _secure_mkdir(path.parent)
             path.write_text(text, encoding="utf-8")
+            # EER-019: `Path.write_text` creates the file with the process's
+            # default mode (0o666 & ~umask). Content-addressed and written
+            # exactly once (see this function's own "write if it does not
+            # already exist" note above), so unlike the ledger/ticket files
+            # this fix cannot rely on "chmod again on the next write" to
+            # self-heal a pre-existing permissive file -- it only guarantees
+            # 0600 from the moment a sidecar is *first* written.
+            os.chmod(path, _SECURE_FILE_MODE)
         return digest, len(text), None
     except Exception as exc:  # noqa: BLE001 -- a sidecar write failure never fails the caller.
         warning = f"prompt sidecar write failed ({path}): {exc}"
@@ -490,11 +512,19 @@ def _write_block(
         parts.append("\n```\n\n")
         text = "".join(parts)
 
-        path.parent.mkdir(parents=True, exist_ok=True)
+        _secure_mkdir(path.parent)
         with open(path, open_mode, encoding="utf-8") as handle:
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
+        # EER-019: plain `open(path, "x"/"a", ...)` creates a missing file
+        # with the process's default mode (0o666 & ~umask). Chmod
+        # unconditionally on every block written (header AND every append),
+        # not just the header -- so a ticket left permissive by an older
+        # version of this code, or by hand, self-heals the next time
+        # anything is recorded onto it, the same "every write, not just
+        # creation" reasoning `ledger._append` uses.
+        os.chmod(path, _SECURE_FILE_MODE)
         return True, None
     except FileExistsError:
         # Deliberate, but ONLY for the exclusive-create claim: `_claim_path`
