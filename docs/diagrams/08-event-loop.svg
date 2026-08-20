@@ -3,7 +3,7 @@
 <text x="48.0" y="56.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="27" font-weight="700" fill="#17171a" text-anchor="start">The event-driven loop</text>
 <text x="48.0" y="82.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="14" font-weight="400" fill="#6f6f6a" text-anchor="start">event → notification → investigation → RCA → notification → the operator closes it. The operator's own scenario, built stage by stage — and honest about the one stage that is not.</text>
 <rect x="1472.4" y="38.0" width="59.6" height="24.0" rx="12" fill="#fff" stroke="#d8d8d2" stroke-width="1"/>
-<text x="1502.2" y="54.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="11.5" font-weight="400" fill="#6f6f6a" text-anchor="middle">v0.2.0</text>
+<text x="1502.2" y="54.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="11.5" font-weight="400" fill="#6f6f6a" text-anchor="middle">v1.0.0</text>
 <line x1="48.0" y1="100.0" x2="1532.0" y2="100.0" stroke="#d8d8d2" stroke-width="1"/>
 <text x="48.0" y="116.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12" font-weight="700" fill="#6f6f6a" text-anchor="start" letter-spacing="0.8">THE INTERACTION LADDER</text>
 <text x="252.5" y="116.0" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10.8" font-weight="400" fill="#6f6f6a" text-anchor="start">docs/design/interfaces.md — this loop lives at Stage 2</text>
