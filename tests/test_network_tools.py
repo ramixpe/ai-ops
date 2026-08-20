@@ -980,6 +980,55 @@ def test_detect_flaps_with_no_history_reports_nothing(tmp_path):
     }
 
 
+def test_detect_flaps_backend_parity_identical_sequences(tmp_path, monkeypatch):
+    """EER-005: detect_flaps now reads history through
+    ``get_store(base_dir).list_history()`` instead of the filesystem
+    directly, so it works under the sqlite backend at all (before this fix
+    it silently returned ``snapshots_examined: 0, flapping: []`` there --
+    byte-identical to a genuinely stable device). This is the backend-parity
+    test that did not exist before: the SAME evidence sequence, written
+    through each backend in turn, must produce identical flap output.
+
+    Asserts on the actual value SEQUENCES, not just which fields ended up
+    flapping -- ``_flap_sequences`` counts *adjacent* changes, and the two
+    backends order history differently under the hood (file: lexicographic
+    filename; sqlite: ``timestamp ASC, id ASC``), so a naive "same set of
+    flapping fields" check could pass even if one backend silently
+    reordered the underlying values.
+    """
+
+    states = ["Idle", "Established", "Idle", "Established", "Idle"]
+    snapshots = [_bgp_snapshot(state, up_down=f"00:0{i}:00") for i, state in enumerate(states)]
+
+    files_dir = tmp_path / "files-backend"
+    sqlite_dir = tmp_path / "sqlite-backend"
+
+    monkeypatch.delenv("NETTOOLS_EVIDENCE_BACKEND", raising=False)
+    for evidence in snapshots:
+        network_tools.save_snapshot(evidence, base_dir=str(files_dir))
+    files_result = network_tools.detect_flaps("PE9", base_dir=str(files_dir))
+
+    monkeypatch.setenv("NETTOOLS_EVIDENCE_BACKEND", "sqlite")
+    for evidence in snapshots:
+        network_tools.save_snapshot(evidence, base_dir=str(sqlite_dir))
+    sqlite_result = network_tools.detect_flaps("PE9", base_dir=str(sqlite_dir))
+
+    assert files_result["snapshots_examined"] == 5
+    assert sqlite_result["snapshots_examined"] == 5
+    assert files_result["snapshots_skipped"] == 0
+    assert sqlite_result["snapshots_skipped"] == 0
+
+    files_by_key = {(e["intent"], e["subject"], e["field"]): e for e in files_result["flapping"]}
+    sqlite_by_key = {(e["intent"], e["subject"], e["field"]): e for e in sqlite_result["flapping"]}
+
+    assert files_by_key.keys() == sqlite_by_key.keys()
+    assert files_by_key, "the fixture must actually produce a flapping field, or this proves nothing"
+    for key, files_entry in files_by_key.items():
+        sqlite_entry = sqlite_by_key[key]
+        assert files_entry["values"] == sqlite_entry["values"], key
+        assert files_entry["transitions"] == sqlite_entry["transitions"], key
+
+
 def test_fabric_default_check_is_bgp(monkeypatch):
     set_device_environment(monkeypatch)
 

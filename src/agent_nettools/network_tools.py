@@ -9,7 +9,6 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import os
-import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -2085,12 +2084,18 @@ def _snapshot_dir(base_dir: str | None) -> Path:
 
 
 def _timestamped_snapshot_paths(directory: Path) -> list[Path]:
-    """Return one device's timestamped snapshots, oldest first, golden excluded.
+    """Return one device's timestamped snapshot *paths*, golden excluded.
 
-    Used only by ``detect_flaps``, which reads a device's whole history
-    directly off the file store -- see ``evidence_store``'s module docstring
-    for why flap detection stays file-only rather than going through the
-    backend-selectable store below.
+    EER-005: ``detect_flaps`` used to read a device's whole history directly
+    off the file store through this function -- bypassing ``get_store()``
+    entirely, which meant it silently returned an empty (indistinguishable
+    from "stable") result under the sqlite backend. It now reads history
+    through ``get_store(base_dir).list_history()`` like everything else in
+    this module; this function's only remaining job is a best-effort raw file
+    count for ``snapshots_skipped`` (see ``_skipped_snapshot_count``) --
+    counting is safe to do by direct glob where ``list_history`` counting is
+    not, because it never has to interpret the *contents* of a file, only
+    that one exists.
     """
 
     if not directory.is_dir():
@@ -2448,6 +2453,45 @@ def _flap_sequences(
     return sequences
 
 
+def _skipped_snapshot_count(base_dir: str | None, device_name: str, examined: int) -> int:
+    """Best-effort count of snapshots present but dropped as corrupt (B-474's
+    ``snapshots_skipped``), for ``detect_flaps`` now that it reads history
+    through ``get_store(...).list_history()`` instead of the filesystem
+    directly (EER-005).
+
+    Neither backend's ``list_history`` (``evidence_store.py``, not owned by
+    this lane) surfaces how many entries it silently dropped -- both already
+    warn to stderr and move on (``_read_snapshot_json``/``_read_evidence_json``),
+    but the count itself never leaves the function. This derives it another
+    way rather than dropping the field: for the FILE backend, a raw
+    ``*.json`` glob (corrupt or not -- ``_timestamped_snapshot_paths``, which
+    mirrors ``FileEvidenceStore``'s own private listing) counts every entry
+    that exists on disk; the gap between that count and how many
+    ``list_history`` actually returned is exactly how many were dropped. This
+    is intentionally gated to the file backend only (checked via
+    ``NETTOOLS_EVIDENCE_BACKEND``, not by whether the directory happens to
+    exist) so a leftover ``evidence/<device>/*.json`` directory from a prior
+    file-backend run can never be mistaken for the live sqlite backend's own
+    history and produce a bogus count.
+
+    Under the SQLITE backend there is no filesystem listing to compare
+    against -- counting corrupt *rows* would need a change to
+    ``evidence_store.py``'s store contract (a raw/total count alongside
+    ``list_history``, or a ``skipped`` return value from ``list_history``
+    itself), which this lane does not own. This returns 0 in that case: not
+    a claim that sqlite history is never corrupt, but an honest "this layer
+    cannot see that yet" rather than a fabricated number. See this lane's
+    build report for the proposed store-contract change.
+    """
+
+    backend = os.getenv(evidence_store.EVIDENCE_BACKEND_ENV, evidence_store.DEFAULT_EVIDENCE_BACKEND)
+    if backend.strip().lower() == "sqlite":
+        return 0
+    directory = _snapshot_dir(base_dir) / device_name
+    raw_count = len(_timestamped_snapshot_paths(directory))
+    return max(0, raw_count - examined)
+
+
 def detect_flaps(
     device_name: str,
     *,
@@ -2459,31 +2503,50 @@ def detect_flaps(
     A peer that bounced up/down/up between collections can look clean in
     every single pairwise ``diff_evidence`` call -- each one only ever shows
     one change, never the pattern of repeated change. Reading the *whole*
-    history instead surfaces it. History is read from every timestamped
-    snapshot under this device's evidence directory (oldest first; the golden
-    snapshot is excluded, same as ``load_latest_snapshot``), grouped into
-    per-(intent, subject, field) value sequences, and a sequence is reported
-    once it has accumulated at least ``min_transitions`` changes in value.
+    history instead surfaces it. History is read via
+    ``get_store(base_dir).list_history(device_name)`` -- the same
+    backend-selectable store every other snapshot function in this module
+    already goes through (files by default, sqlite when
+    ``NETTOOLS_EVIDENCE_BACKEND=sqlite`` selects it) -- oldest first, golden
+    excluded, grouped into per-(intent, subject, field) value sequences. A
+    sequence is reported once it has accumulated at least ``min_transitions``
+    changes in value.
 
-    A truncated/corrupt snapshot file must not turn flap detection into a
-    stack trace, and one bad snapshot must not erase the rest of a device's
-    history either -- so a file that fails to parse is skipped (with a loud
-    stderr warning naming it, not a silent drop) and counted in
-    ``snapshots_skipped`` on the return payload, so the degradation is visible
-    in the result itself and not only on stderr (B-474 /
+    EER-005: this used to read the filesystem directly
+    (``_snapshot_dir``/``_timestamped_snapshot_paths``), bypassing the store
+    abstraction entirely -- under the sqlite backend that read an empty,
+    almost-certainly-nonexistent directory and returned
+    ``{"snapshots_examined": 0, "flapping": []}``, byte-identical to a
+    genuinely stable device. A real flap on a fabric running sqlite evidence
+    storage would have been reported as a clean bill of health. Reading
+    through ``list_history`` fixes that for both backends; note that
+    ``base_dir`` now means whatever ``get_store`` takes it to mean for the
+    active backend (the file snapshot root for "files", the directory
+    holding ``evidence.db`` for "sqlite") rather than always being a
+    file-snapshot root.
+
+    Ordering matters here in a way it does not for a single diff:
+    ``_flap_sequences`` counts *adjacent* changes, so a backend that orders
+    history differently would count different transitions over the same
+    underlying snapshots. Both backends already order oldest-first by
+    construction (the file backend lexicographically by filename timestamp;
+    sqlite by ``timestamp ASC, id ASC``), so this is not a new invariant --
+    just one this rewrite now actually depends on being true, where the old
+    file-only code never had to care.
+
+    A truncated/corrupt snapshot must not turn flap detection into a stack
+    trace, and one bad snapshot must not erase the rest of a device's
+    history either -- ``list_history`` already skips a corrupt entry (with
+    its own loud stderr warning naming it) and keeps going, for both
+    backends. ``snapshots_skipped`` on the return payload survives this
+    rewrite (see ``_skipped_snapshot_count``): still accurate for the file
+    backend, honestly 0 (a known gap, not a lie) for sqlite until
+    ``evidence_store.py`` gains a way to report it (B-474 /
     DEEP-REVIEW-2026-08-17 §2.4).
     """
 
-    directory = _snapshot_dir(base_dir) / device_name
-    paths = _timestamped_snapshot_paths(directory)
-    snapshots: list[dict[str, Any]] = []
-    snapshots_skipped = 0
-    for path in paths:
-        try:
-            snapshots.append(json.loads(path.read_text(encoding="utf-8")))
-        except (OSError, ValueError) as exc:
-            print(f"WARNING: corrupt snapshot file, skipping: {path} ({exc})", file=sys.stderr)
-            snapshots_skipped += 1
+    snapshots = get_store(base_dir).list_history(device_name)
+    snapshots_skipped = _skipped_snapshot_count(base_dir, device_name, len(snapshots))
 
     flapping: list[dict[str, Any]] = []
     for (intent, subject, field), values in _flap_sequences(snapshots).items():
