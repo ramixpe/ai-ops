@@ -729,6 +729,66 @@ def test_the_ticket_records_the_resolved_intent(monkeypatch, tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# W4b -- the ticket records the context footprint (what actually crossed
+# into a model prompt)
+# --------------------------------------------------------------------------- #
+
+
+def test_the_context_footprint_is_zero_when_no_model_ran(tmp_path, monkeypatch):
+    """`--from-fixtures` with no `--paraphrase` makes no model call at all
+    (`result.exchanges` is empty) -- a TRUE zero, not a stand-in for one
+    never measured, since nothing really was sent."""
+
+    from agent_nettools import ticket
+
+    _main(ARGS, monkeypatch)
+
+    files = sorted((tmp_path / "tickets").glob("*.md"))
+    assert len(files) == 1
+    parsed = ticket.read_ticket(files[0])
+
+    assert parsed["context_footprint"] is not None
+    assert parsed["context_footprint"]["chars_sent"] == 0
+    # No evidence-budget mechanism runs on this path today (verified against
+    # evidence_budget.py's own callers) -- honestly 0, not fabricated.
+    assert parsed["context_footprint"]["chars_withheld"] == 0
+
+
+def test_the_context_footprint_sums_every_exchanges_user_payload(monkeypatch, capsys, tmp_path):
+    """A real, non-zero measurement: `chars_sent` is the total length of
+    every recorded exchange's own `user_payload`, not a per-exchange or
+    truncated figure."""
+
+    from agent_nettools import ticket
+
+    result = _result(
+        "broken",
+        exchanges=(
+            investigation.ModelExchange(
+                purpose="report_paraphrase", prompt_ref=None,
+                system_prompt="sys", user_payload="x" * 37,
+                response_text="ok", stop_reason=None, usage=None,
+                grounding_ok=True, grounding_summary="ok",
+            ),
+            investigation.ModelExchange(
+                purpose="correlate_paraphrase", prompt_ref=None,
+                system_prompt="sys2", user_payload="y" * 5,
+                response_text="ok2", stop_reason=None, usage=None,
+                grounding_ok=True, grounding_summary="ok",
+            ),
+        ),
+    )
+    _drive(result, monkeypatch, capsys)
+
+    files = sorted((tmp_path / "tickets").glob("*.md"))
+    assert len(files) == 1
+    parsed = ticket.read_ticket(files[0])
+
+    assert parsed["context_footprint"]["chars_sent"] == 42
+    assert parsed["context_footprint"]["chars_withheld"] == 0
+
+
+# --------------------------------------------------------------------------- #
 # B-407 -- session memory wiring
 #
 # `session_memory.py` shipped with the exact call this wiring makes already

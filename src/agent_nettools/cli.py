@@ -614,6 +614,23 @@ def _record_in_ticket(handle, args, result, subject, flow, question=None, analys
                     commands_run=commands_by_device.get(device),
                     latency_ms=latency_by_device.get(device),
                 )
+        # W4b: what actually crossed into a model prompt. `chars_sent` is a
+        # real measurement -- the total length of every exchange's own
+        # `user_payload` (0 when `result.exchanges` is empty, e.g.
+        # `--no-model`/`--from-fixtures` with no `--paraphrase`, which is a
+        # true zero, not a stand-in for one never taken).
+        # `chars_withheld` is honestly `0` here, always: no evidence-budget
+        # mechanism (`evidence_budget.budget_device_evidence`/
+        # `budget_fabric_evidence`) runs on the `investigate()` path today --
+        # verified by reading `evidence_budget.py`'s only callers
+        # (`fabric_analysis.py`/`model_egress.py`) -- so there is no real
+        # input-truncation signal to report. This is deliberately NOT
+        # `paraphrase_status == WITHHELD`: that describes the model's OUTPUT
+        # being rejected by grounding, a different fact from something
+        # withheld from its INPUT, and conflating the two would misreport a
+        # rejected answer as a truncated prompt.
+        chars_sent = sum(len(exchange.user_payload) for exchange in getattr(result, "exchanges", ()))
+        handle.record_context_footprint(chars_sent=chars_sent, chars_withheld=0)
         # Every model exchange, recorded verbatim. This is the half of the
         # flight recorder that was missing: the deterministic path was well
         # instrumented and the model path invisible, which is backwards for
