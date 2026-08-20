@@ -105,6 +105,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 from dotenv import find_dotenv, load_dotenv
 
@@ -217,6 +218,33 @@ def _note(message: str, args: argparse.Namespace) -> None:
         print(message, file=sys.stderr)
 
 
+def _error_envelope(tool: str, *, device: str | None = None, errors: list[str], **extra: Any) -> dict[str, Any]:
+    """One ``{"status": "error", ...}`` envelope shape, factored out of the
+    seven hand-built error dicts this file used to construct separately
+    (release-1.0 cleanup, C3).
+
+    Pure de-duplication -- every call site's key SET and every value are
+    unchanged from what it built by hand; only key insertion order may now
+    differ, which is not a guarantee any caller of ``_emit`` relies on
+    (JSON objects, and this project's own tests, compare by key/value, never
+    by order).
+
+    ``device`` is omitted from the envelope entirely when ``None`` rather
+    than written as a null field -- `_cmd_route_event`'s error envelope
+    never carried a ``device`` key at all, and adding one here would change
+    what is emitted, not just how it is built. ``**extra`` carries whatever
+    else one call site needs beyond ``tool``/``device``/``status``/
+    ``errors`` -- ``subject`` for most `investigate` refusals, ``data: {}``
+    for `sr_policy_detail`'s.
+    """
+
+    envelope: dict[str, Any] = {"tool": tool, "status": "error", "errors": errors}
+    if device is not None:
+        envelope["device"] = device
+    envelope.update(extra)
+    return envelope
+
+
 def _add_output_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--format",
@@ -309,10 +337,9 @@ def _cmd_sr_policy(args: argparse.Namespace) -> int:
     try:
         color, endpoint = split_sr_policy_id(args.policy_id)
     except TemplateValidationError as exc:
-        result = {
-            "tool": "sr_policy_detail", "device": args.device, "status": "error",
-            "data": {}, "errors": [str(exc)],
-        }
+        result = _error_envelope(
+            "sr_policy_detail", device=args.device, data={}, errors=[str(exc)]
+        )
         _emit(result, args)
         return EXIT_WARNING
 
@@ -700,11 +727,10 @@ def _resolve_it_reference(args: argparse.Namespace) -> int | None:
     try:
         recalled = session_memory.recall(session_id)
     except ValueError as exc:
-        _emit({
-            "tool": "investigate", "status": "error",
-            "device": args.device, "subject": args.subject,
-            "errors": [f"invalid --session {session_id!r}: {exc}"],
-        }, args)
+        _emit(_error_envelope(
+            "investigate", device=args.device, subject=args.subject,
+            errors=[f"invalid --session {session_id!r}: {exc}"],
+        ), args)
         return EXIT_CRITICAL
 
     if recalled.outcome != session_memory.FOUND:
@@ -717,15 +743,14 @@ def _resolve_it_reference(args: argparse.Namespace) -> int | None:
             if recalled.outcome == session_memory.NOT_FOUND
             else recalled.reason
         )
-        _emit({
-            "tool": "investigate", "status": "error",
-            "device": args.device, "subject": args.subject,
-            "errors": [
+        _emit(_error_envelope(
+            "investigate", device=args.device, subject=args.subject,
+            errors=[
                 f"'it' does not resolve for session {session_id!r}: {reason}",
                 "give DEVICE/SUBJECT explicitly, or run an investigation "
                 "first so a later 'it' has a turn to point at",
             ],
-        }, args)
+        ), args)
         return EXIT_CRITICAL
 
     turn = recalled.turn
@@ -737,14 +762,13 @@ def _resolve_it_reference(args: argparse.Namespace) -> int | None:
         if wants and not have
     ]
     if missing:
-        _emit({
-            "tool": "investigate", "status": "error",
-            "device": args.device, "subject": args.subject,
-            "errors": [
+        _emit(_error_envelope(
+            "investigate", device=args.device, subject=args.subject,
+            errors=[
                 f"'it' does not resolve: the last recorded turn for session "
                 f"{session_id!r} has no {' or '.join(missing)}",
             ],
-        }, args)
+        ), args)
         return EXIT_CRITICAL
 
     if wants_device:
@@ -936,15 +960,14 @@ def _cmd_investigate(args: argparse.Namespace) -> int:
             # Unmatched is an answer, not an exception (flow_selection.py's
             # module docstring): say what was not understood and what to say
             # instead, the same shape every other error envelope here uses.
-            _emit({
-                "tool": "investigate", "status": "error", "device": args.device,
-                "subject": args.subject,
-                "errors": [
+            _emit(_error_envelope(
+                "investigate", device=args.device, subject=args.subject,
+                errors=[
                     f"free-text flow selection did not understand the subject: "
                     f"{selection.reason}",
                     *(f"try: {candidate}" for candidate in selection.candidates),
                 ],
-            }, args)
+            ), args)
             return EXIT_CRITICAL
         flow, subject = selection.flow, selection.subject
         _note(f"# Free-text selection: {selection.reason}", args)
@@ -976,8 +999,9 @@ def _cmd_investigate(args: argparse.Namespace) -> int:
     except (ValueError, KeyError) as exc:
         # A flow that does not exist, or a subject no device owns. The run
         # produced no answer at all, which is exit 2 by the rule above.
-        _emit({"tool": "investigate", "status": "error", "device": args.device,
-               "subject": subject, "errors": [str(exc)]}, args)
+        _emit(_error_envelope(
+            "investigate", device=args.device, subject=subject, errors=[str(exc)]
+        ), args)
         return EXIT_CRITICAL
 
     _emit(result.to_payload(), args)
@@ -1413,7 +1437,7 @@ def _cmd_route_event(args: argparse.Namespace) -> int:
         else:
             raw = sys.stdin.read()
     except OSError as exc:
-        _emit({"tool": "route_event", "status": "error", "errors": [str(exc)]}, args)
+        _emit(_error_envelope("route_event", errors=[str(exc)]), args)
         return EXIT_CRITICAL
 
     decisions = route_event(raw, device=getattr(args, "device", None))
