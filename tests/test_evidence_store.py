@@ -212,13 +212,50 @@ def test_get_store_selects_sqlite_via_env(monkeypatch, tmp_path):
     assert isinstance(get_store(str(tmp_path)), SQLiteEvidenceStore)
 
 
-def test_get_store_rejects_unknown_backend_by_falling_back_to_files(monkeypatch, tmp_path):
-    """An unrecognized backend value is not a hard error -- it keeps the safe
-    (file) default rather than raising, matching the "unset or anything else
-    means files" contract in the module docstring."""
+def test_get_store_rejects_unknown_backend_loudly(monkeypatch, tmp_path):
+    """EER-008c: an unrecognized backend value must fail closed, not silently
+    downgrade to the file store. A typo like 'sqlit' used to return
+    FileEvidenceStore with no signal at all -- history split across two
+    backends depending on which process had the typo, and nothing ever said
+    so. Now it raises, naming both valid choices."""
+
+    monkeypatch.setenv(EVIDENCE_BACKEND_ENV, "sqlit")
+
+    with pytest.raises(ValueError, match="files.*sqlite|sqlite.*files"):
+        get_store(str(tmp_path))
+
+
+def test_get_store_rejects_arbitrary_unknown_backend(monkeypatch, tmp_path):
+    """Same as above with an unrelated typo, not just a near-miss of 'sqlite'."""
 
     monkeypatch.setenv(EVIDENCE_BACKEND_ENV, "not-a-real-backend")
 
+    with pytest.raises(ValueError):
+        get_store(str(tmp_path))
+
+
+def test_get_store_positive_controls_still_resolve(monkeypatch, tmp_path):
+    """Positive control for the two tests above (OBS-181): both recognized
+    values -- including mixed case and incidental whitespace -- still resolve
+    to the right class, so the raise above is about *unrecognized* values
+    only, not evidence that get_store() now rejects everything."""
+
+    monkeypatch.setenv(EVIDENCE_BACKEND_ENV, "files")
+    assert isinstance(get_store(str(tmp_path)), FileEvidenceStore)
+
+    monkeypatch.setenv(EVIDENCE_BACKEND_ENV, "SQLite")
+    assert isinstance(get_store(str(tmp_path)), SQLiteEvidenceStore)
+
+    monkeypatch.setenv(EVIDENCE_BACKEND_ENV, "  sqlite  ")
+    assert isinstance(get_store(str(tmp_path)), SQLiteEvidenceStore)
+
+
+def test_get_store_blank_env_means_unset_default(monkeypatch, tmp_path):
+    """A set-but-blank value is treated the same as unset (the documented
+    default, 'files'), not as an unrecognized typo -- an empty/whitespace-only
+    override is not a deliberate choice of a backend."""
+
+    monkeypatch.setenv(EVIDENCE_BACKEND_ENV, "   ")
     assert isinstance(get_store(str(tmp_path)), FileEvidenceStore)
 
 

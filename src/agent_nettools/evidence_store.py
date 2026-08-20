@@ -6,8 +6,10 @@ the last week" means listing a directory and parsing every filename by hand,
 and pruning old history means the same walk plus manual deletion. This module
 adds a second backend, using only stdlib ``sqlite3`` (no new dependency), that
 answers those questions with an indexed query instead of a directory walk --
-selected with ``NETTOOLS_EVIDENCE_BACKEND=sqlite``; unset or any other value
-keeps the file store, so nothing existing breaks.
+selected with ``NETTOOLS_EVIDENCE_BACKEND=sqlite``; unset keeps the file
+store, so nothing existing breaks. Any value other than ``files``/``sqlite``
+is rejected loudly by ``get_store()`` rather than silently downgraded to the
+file store (EER-008c) -- see its own docstring.
 
 Both backends implement the same small ``EvidenceStore`` shape: save a
 snapshot, load the latest, save/load the golden (pinned) baseline, list a
@@ -568,15 +570,46 @@ def _row_epoch_seconds(row: sqlite3.Row) -> float:
     return parsed.timestamp()
 
 
+#: Recognized values for ``NETTOOLS_EVIDENCE_BACKEND`` (EER-008c). Mirrors
+#: settings.py's own ``_EVIDENCE_BACKEND_CHOICES`` -- duplicated rather than
+#: imported. settings.py's own module docstring is explicit that it is a
+#: *second, independent* read of the environment, not a shared authority the
+#: existing call sites are rewired through; evidence_store.py stays the
+#: source of truth for backend selection and must not depend on settings.py
+#: for it.
+_EVIDENCE_BACKEND_CHOICES = ("files", "sqlite")
+
+
 def get_store(base_dir: str | None = None) -> EvidenceStore:
     """Return the configured evidence store: files (default) or sqlite.
 
-    Selected by ``NETTOOLS_EVIDENCE_BACKEND``; any value other than
-    ``"sqlite"`` (including unset) keeps the pre-Phase-7 file store, so
-    nothing existing changes behavior by default.
+    Selected by ``NETTOOLS_EVIDENCE_BACKEND``. Unset (or set to only
+    whitespace) means the documented default, ``"files"`` -- that is a real
+    default, not a typo. Any other value that is not exactly ``"files"`` or
+    ``"sqlite"`` (case-insensitively) now **raises** instead of silently
+    choosing a backend (EER-008c): a typo such as
+    ``NETTOOLS_EVIDENCE_BACKEND=sqlit`` used to fall through to the file
+    store with no signal at all, which is exactly the shape of bug this
+    project treats as its worst kind -- some processes reading the typo and
+    some not silently splits one device's evidence history across two
+    backends, and nothing ever says so. ``ValueError`` matches this module's
+    own existing vocabulary for "bad input to this module" (see
+    ``_validate_device_name`` above) rather than introducing a new exception
+    type that no caller yet knows to catch; it is already caught, one level
+    up, everywhere a caller treats "the evidence store could not be
+    resolved" as a total failure for that run.
     """
 
-    backend = os.getenv(EVIDENCE_BACKEND_ENV, DEFAULT_EVIDENCE_BACKEND).strip().lower()
+    raw = os.getenv(EVIDENCE_BACKEND_ENV)
+    backend = DEFAULT_EVIDENCE_BACKEND if raw is None or not raw.strip() else raw.strip().lower()
     if backend == "sqlite":
         return SQLiteEvidenceStore(base_dir)
-    return FileEvidenceStore(base_dir)
+    if backend == DEFAULT_EVIDENCE_BACKEND:
+        return FileEvidenceStore(base_dir)
+    raise ValueError(
+        f"{EVIDENCE_BACKEND_ENV}={raw!r} is not a recognized evidence "
+        f"backend (expected one of {', '.join(_EVIDENCE_BACKEND_CHOICES)}, "
+        "or unset for the default 'files'); refusing rather than silently "
+        "picking one, since a wrong guess here silently splits evidence "
+        "history across two backends (EER-008c)."
+    )
