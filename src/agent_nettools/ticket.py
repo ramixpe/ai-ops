@@ -192,6 +192,22 @@ INCORRECT = "incorrect"
 UNKNOWN = "unknown"
 OUTCOMES: tuple[str, ...] = (CONFIRMED_CORRECT, INCORRECT, UNKNOWN)
 
+#: B-446 (Lane B2): what a handover comparison against the previous run for
+#: the same (device, subject, flow) actually found. Three outcomes, not two --
+#: `config_diff.CANNOT_COMPARE`/`session_memory.CANNOT_RECALL`'s own shape,
+#: applied here for the identical reason (see `record_handover`'s docstring):
+#: "no previous run" and "a previous run exists but could not be compared"
+#: must never collapse into the same "nothing changed" a caller would read
+#: from an empty `recovered`/`newly_broken` list. `HANDOVER_COMPARED` is the
+#: only status under which those lists carry a real, measured answer
+#: (possibly empty -- a real zero, not a fabricated one).
+HANDOVER_FIRST_RUN = "first_run"
+HANDOVER_COMPARED = "compared"
+HANDOVER_CANNOT_COMPARE = "cannot_compare"
+HANDOVER_STATUSES: tuple[str, ...] = (
+    HANDOVER_FIRST_RUN, HANDOVER_COMPARED, HANDOVER_CANNOT_COMPARE,
+)
+
 #: Section kinds. Stored inside each section's JSON block as "kind"; never
 #: in the markdown heading, which exists for a human, not the parser.
 KIND_QUESTION = "question"
@@ -209,6 +225,11 @@ KIND_CONTEXT_FOOTPRINT = "context_footprint"
 #: a call to the model itself).
 KIND_MODEL_EXCHANGE = "model_exchange"
 KIND_ANSWER = "answer"
+#: B-446 (Lane B2): the handover -- what changed since the previous ticket
+#: for the same (device, subject, flow), and what recovered. See
+#: `Ticket.record_handover`'s docstring for the full shape and the
+#: `HANDOVER_*` constants above for its `status`.
+KIND_HANDOVER = "handover"
 KIND_OUTCOME = "outcome"
 KIND_CLOSED = "closed"
 
@@ -1084,6 +1105,139 @@ class Ticket:
         )
         return self._write(KIND_ANSWER, fields, title="Answer")
 
+    # -- the handover (B-446, Lane B2) -----------------------------------------
+
+    def record_handover(
+        self,
+        *,
+        status: str,
+        previous_run_id: str | None = None,
+        previous_ticket_path: str | None = None,
+        previous_opened_at: str | None = None,
+        previous_finding: str | None = None,
+        current_finding: str | None = None,
+        finding_changed: bool | None = None,
+        previous_cause: dict[str, Any] | None = None,
+        current_cause: dict[str, Any] | None = None,
+        previous_reason: str | None = None,
+        current_reason: str | None = None,
+        cause_changed: bool | None = None,
+        previous_trustworthy: bool | None = None,
+        current_trustworthy: bool | None = None,
+        trustworthy_flipped: bool | None = None,
+        rung_comparison: str | None = None,
+        recovered: list[dict[str, Any]] | None = None,
+        newly_broken: list[dict[str, Any]] | None = None,
+        notes: str | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> TicketWriteResult:
+        """What changed since the previous ticket for this same (device,
+        subject, flow), and what recovered -- B-446's second gap. The caller
+        (`cli._record_handover`) finds the previous ticket and computes every
+        field below from two already-read `record_answer` payloads (this
+        one's own, and the previous ticket's); this method only writes what
+        it is handed, the same "no project type, no re-derivation" contract
+        every other `record_*` method here keeps.
+
+        **`status` is the whole point, and it is never optional.** Absence is
+        this module's single most repeated defect (see the module docstring),
+        and a handover is the sharpest place it could recur: an operator who
+        has never run this investigation before must see an explicit "no
+        previous run", never a `recovered`/`newly_broken` that reads as
+        "compared, and nothing changed" by rendering as empty. Three values,
+        `HANDOVER_STATUSES` above:
+
+        - `HANDOVER_FIRST_RUN` -- no earlier ticket matches this device/
+          subject/flow. Every other parameter below is left at its `None`
+          default; there is nothing to compare against, and constructing a
+          comparison against nothing would be exactly the fabricated zero
+          this status exists to prevent.
+        - `HANDOVER_CANNOT_COMPARE` -- a previous ticket WAS found (so
+          `previous_run_id`/`previous_ticket_path`/`previous_opened_at`
+          should be set) but it carries no usable answer to diff against
+          (e.g. a process crashed before `record_answer` ran) -- the
+          `config_diff.CANNOT_COMPARE`/`session_memory.CANNOT_RECALL` shape:
+          a real absence, with a reason, never silently read as "first run"
+          or as "nothing changed".
+        - `HANDOVER_COMPARED` -- a real comparison ran. `finding_changed`/
+          `cause_changed`/`trustworthy_flipped` are real booleans, and
+          `rung_comparison` says whether `recovered`/`newly_broken` are a
+          real (possibly empty) rung-by-rung diff (`"available"`) or could
+          not be computed because the previous ticket predates `record_answer`
+          carrying a `rungs` list, i.e. `extra={"rungs": [...]}` (`"unavailable"`)
+          -- `recovered`/`newly_broken` are `None`, not `[]`, whenever
+          `rung_comparison != "available"`, for the identical reason `status`
+          itself has three values instead of two.
+
+        **Two different trust levels for `reason` text, on purpose.**
+        `previous_reason` is copied out of a DIFFERENT ticket file -- a
+        different run, possibly a different process, possibly hours old --
+        and `checks.py`'s own `_last_reset_note` docstring (B-430) is direct
+        evidence this project already puts verbatim, unauthenticated,
+        far-end-device text into a `CheckResult.reason` string
+        (`last_reset_reason`, already one of `model_egress.FREE_TEXT_FIELDS`).
+        A model reading THIS ticket's handover section would otherwise see
+        that text presented as an established fact about a prior
+        investigation, immediately beside this run's own trusted fields --
+        the same shape `record_model_exchange`'s `response_text` already
+        gets extra containment for, one layer removed. `current_reason` is
+        this run's OWN cause reason, already written unwrapped a few lines
+        above in this same ticket's `Answer` section
+        (`tests/test_ticket_read.py::
+        test_the_answer_is_the_deterministic_descents_own_unwrapped`
+        establishes that as the standing, tested trust level for a
+        same-run cause reason) -- duplicating it here at a DIFFERENT trust
+        level than its first appearance in the same file would be
+        inconsistent, not safer. So `ticket_read._UNTRUSTED_TEXT_FIELDS`
+        covers `previous_reason` only, never `current_reason` -- see that
+        module's own comment on the field for the full reasoning and the
+        naming choice (flat, distinctly-named leaves rather than a nested
+        `reason` key in both `previous_cause`/`current_cause`, which would
+        make the two impossible to tell apart by key name alone at
+        containment time). `previous_cause`/`current_cause` themselves carry
+        only `rung`/`device` -- closed-vocabulary rung and device names, the
+        same trust level `device` already has everywhere else in this
+        module -- never a `reason` key, so containment cannot be bypassed by
+        nesting the text one level deeper than the declared field table
+        expects.
+
+        `previous_finding`/`current_finding` are `flows.py`'s own closed set
+        of finding literals (verified against every `flows.Flow` declaration
+        in this repo before this method shipped: every finding is a fixed
+        string a flow's own module declares, never text a device or an
+        operator supplies) -- safe unwrapped for the same reason `finding`
+        already is, in `record_answer` and every ticket read path built on
+        it.
+        """
+
+        if status not in HANDOVER_STATUSES:
+            raise ValueError(f"status must be one of {HANDOVER_STATUSES}, got {status!r}")
+        fields = _merge_extra(
+            {
+                "status": status,
+                "previous_run_id": previous_run_id,
+                "previous_ticket_path": previous_ticket_path,
+                "previous_opened_at": previous_opened_at,
+                "previous_finding": previous_finding,
+                "current_finding": current_finding,
+                "finding_changed": finding_changed,
+                "previous_cause": previous_cause,
+                "current_cause": current_cause,
+                "previous_reason": previous_reason,
+                "current_reason": current_reason,
+                "cause_changed": cause_changed,
+                "previous_trustworthy": previous_trustworthy,
+                "current_trustworthy": current_trustworthy,
+                "trustworthy_flipped": trustworthy_flipped,
+                "rung_comparison": rung_comparison,
+                "recovered": recovered,
+                "newly_broken": newly_broken,
+                "notes": notes,
+            },
+            extra,
+        )
+        return self._write(KIND_HANDOVER, fields, title="Handover", narrative=notes)
+
     # -- the outcome slot -------------------------------------------------------
 
     def record_outcome(self, outcome: str, *, by: str, note: str | None = None) -> TicketWriteResult:
@@ -1364,6 +1518,7 @@ def read_ticket(path: str | os.PathLike[str]) -> dict[str, Any]:
         "context_footprint": latest(KIND_CONTEXT_FOOTPRINT),
         "model_exchanges": all_of(KIND_MODEL_EXCHANGE),
         "answer": latest(KIND_ANSWER),
+        "handover": latest(KIND_HANDOVER),
         "outcome": outcome,
         "closed": latest(KIND_CLOSED),
     }

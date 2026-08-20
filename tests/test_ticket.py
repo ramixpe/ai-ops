@@ -328,6 +328,106 @@ def test_record_context_footprint_rejects_negative_chars(tmp_path):
         tk.record_context_footprint(chars_sent=0, chars_withheld=-1)
 
 
+def test_record_context_footprint_chars_withheld_defaults_to_not_measured(tmp_path):
+    """B-506's fix, applied to this field: `chars_withheld` used to default
+    to `0`, indistinguishable from "measured, and nothing was withheld".
+    `None` is the honest default -- "not measured" -- and is still accepted
+    as an explicit real measurement when a caller has one."""
+
+    import inspect
+
+    assert (
+        inspect.signature(ticket.Ticket.record_context_footprint)
+        .parameters["chars_withheld"].default
+        is None
+    )
+
+    tk = _open(tmp_path)
+    tk.record_context_footprint(chars_sent=10)
+    parsed = ticket.read_ticket(tk.path)
+    assert parsed["context_footprint"]["chars_withheld"] is None
+
+    tk.record_context_footprint(chars_sent=10, chars_withheld=3)
+    parsed = ticket.read_ticket(tk.path)
+    assert parsed["context_footprint"]["chars_withheld"] == 3
+
+
+def test_record_handover_rejects_an_unrecognized_status(tmp_path):
+    tk = _open(tmp_path)
+    with pytest.raises(ValueError):
+        tk.record_handover(status="probably-nothing-changed")
+
+
+def test_record_handover_round_trips_a_full_comparison(tmp_path):
+    """The `HANDOVER_COMPARED` shape, every field, read back exactly. The
+    two other statuses (`HANDOVER_FIRST_RUN`/`HANDOVER_CANNOT_COMPARE`) are
+    exercised end to end through the real CLI in
+    tests/test_cli_investigate.py, which is where their real callers live;
+    this is the module-level contract those callers rely on."""
+
+    tk = _open(tmp_path)
+    tk.record_handover(
+        status=ticket.HANDOVER_COMPARED,
+        previous_run_id="abc123",
+        previous_ticket_path="/tickets/older.md",
+        previous_opened_at="2026-08-19T00:00:00+00:00",
+        previous_finding="interface_line_down",
+        current_finding="all_layers_healthy",
+        finding_changed=True,
+        previous_cause={"rung": "interface", "device": "PE2"},
+        current_cause=None,
+        previous_reason="interface Gi0/0/0/0 is not up",
+        current_reason=None,
+        cause_changed=True,
+        previous_trustworthy=True,
+        current_trustworthy=True,
+        trustworthy_flipped=False,
+        rung_comparison="available",
+        recovered=[{"rung": "interface", "device": "PE2",
+                    "previous_reason": "down", "current_reason": "up"}],
+        newly_broken=[],
+        notes="full recovery",
+    )
+
+    parsed = ticket.read_ticket(tk.path)
+    handover = parsed["handover"]
+
+    assert handover["status"] == ticket.HANDOVER_COMPARED
+    assert handover["previous_run_id"] == "abc123"
+    assert handover["finding_changed"] is True
+    assert handover["previous_finding"] == "interface_line_down"
+    assert handover["current_finding"] == "all_layers_healthy"
+    assert handover["cause_changed"] is True
+    assert handover["previous_cause"] == {"rung": "interface", "device": "PE2"}
+    assert handover["current_cause"] is None
+    assert handover["trustworthy_flipped"] is False
+    assert handover["rung_comparison"] == "available"
+    assert handover["recovered"] == [
+        {"rung": "interface", "device": "PE2", "previous_reason": "down", "current_reason": "up"}
+    ]
+    assert handover["newly_broken"] == []
+    assert handover["notes"] == "full recovery"
+
+
+def test_record_handover_first_run_leaves_comparison_fields_none(tmp_path):
+    """No previous ticket exists -- every comparison field this method
+    accepts stays at its `None` default rather than a caller having to
+    invent placeholder values for a comparison that never happened."""
+
+    tk = _open(tmp_path)
+    tk.record_handover(status=ticket.HANDOVER_FIRST_RUN, notes="first run")
+
+    parsed = ticket.read_ticket(tk.path)
+    handover = parsed["handover"]
+
+    assert handover["status"] == ticket.HANDOVER_FIRST_RUN
+    assert handover["previous_run_id"] is None
+    assert handover["finding_changed"] is None
+    assert handover["recovered"] is None
+    assert handover["newly_broken"] is None
+    assert handover["rung_comparison"] is None
+
+
 def test_record_answer_rejects_empty_finding_and_non_bool_trustworthy(tmp_path):
     tk = _open(tmp_path)
     with pytest.raises(ValueError):
@@ -458,6 +558,7 @@ def test_a_full_lifecycle_against_an_unwritable_directory_never_raises(tmp_path)
         tk.record_evidence_source("bgp_summary", device="PE1", source="live"),
         tk.record_context_footprint(chars_sent=0),
         tk.record_answer("undetermined", trustworthy=False),
+        tk.record_handover(status=ticket.HANDOVER_FIRST_RUN),
         tk.record_outcome(ticket.UNKNOWN, by="ops@example.com"),
         tk.close(),
     ]
