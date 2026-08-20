@@ -14,17 +14,22 @@ reasons it is not used here:
    depend on the caller noticing. ``time_budget_s`` is now enforced at every
    turn boundary *and* before every individual tool dispatch (B-472/P1-01),
    closing the gap where one slow turn or one slow tool batch used to
-   overrun the budget unboundedly -- but a single in-flight model call can
-   still run past the deadline; that call is bounded only by the ``timeout=``
-   ceiling passed at Anthropic client construction (see ``run_agent_loop``'s
-   TODO on why that ceiling covers the *whole* budget rather than the
-   *remaining* time -- the seam that would let it shrink per turn lives in
-   ``llm_analysis._stream_anthropic_message``, off-limits to this change).
-   The returned ``overran_budget`` flag is how a caller learns whether that
-   ceiling, not the turn/tool boundary check, is what actually stopped the
-   call. The tool runner does not expose a wall-clock budget, and layering
-   one on top of it means intercepting its iteration internally anyway, at
-   which point the manual loop is no bigger.
+   overrun the budget unboundedly. **EER-010 closed the remaining gap**: a
+   single in-flight model call used to be bounded only by a ``timeout=``
+   ceiling fixed at Anthropic client construction, sized to the *whole*
+   ``time_budget_s`` rather than whatever was left of it -- the seam that
+   would let it shrink per turn was ``llm_analysis._stream_anthropic_message``
+   accepting a per-call ``timeout``, which that module did not expose at the
+   time this loop was written. It does now: the client is constructed with no
+   fixed ceiling, and every call passes ``timeout=max(5.0, deadline -
+   time.monotonic())`` -- the actual remaining budget at the moment the call
+   is made, floored at 5s so a deliberately tiny ``time_budget_s`` (e.g. in a
+   test) never starves a real call outright. The returned ``overran_budget``
+   flag is still how a caller learns whether an in-flight call, not the
+   turn/tool boundary check, is what actually stopped the run. The tool
+   runner does not expose a wall-clock budget, and layering one on top of it
+   means intercepting its iteration internally anyway, at which point the
+   manual loop is no bigger.
 2. **The loop shape must stay provider-agnostic.** This package already
    supports three providers (Anthropic, OpenAI, Ollama) for single-shot
    analysis, and Task D's OpenAI/Ollama support is explicitly deferred, not
@@ -129,6 +134,18 @@ of context. Before this change, ``tool_result`` content was
 ``json.dumps(result)`` on the raw envelope, ``data.commands`` included -- the
 same gap B-467/B-470 already closed on the single-shot analysis path
 (``llm_analysis.py``), just not yet on this one.
+
+**EER-006 closed the one branch that still skipped this.** A tool that
+RAISES (rather than returning a ``status: "error"`` envelope, the normal
+convention) used to build ``content`` directly from ``str(exc)`` in
+``_run_tool_block``'s ``except`` clause -- no projection at all, the same
+exposure class B-470 closed for a returned envelope, just reached through
+the one path that raised instead of returning. Now that branch builds an
+error-shaped envelope (``{"tool", "device", "status": "error", "data": {},
+"errors": [str(exc)]}`` -- the same key set every hand-built envelope in this
+package uses) and routes it through ``model_egress.project_envelope`` like
+every other result, so ``_classify_errors`` gets the same chance at it an
+exception on the returned-envelope path always had.
 """
 
 from __future__ import annotations
@@ -429,8 +446,31 @@ def _run_tool_block(block: Any) -> tuple[dict[str, Any], dict[str, Any]]:
             detail = "; ".join(str(e) for e in (result.get("errors") or [])) or None
     except Exception as exc:  # noqa: BLE001 - a failed tool becomes is_error, not dropped.
         is_error = True
-        content = f"{type(exc).__name__}: {exc}"
-        detail = content
+        # EER-006: this used to set `content = f"{type(exc).__name__}: {exc}"`
+        # directly -- no projection at all. Every OTHER path through this
+        # function routes its result through `model_egress.project_envelope`/
+        # `project_evidence` (see the module docstring's "Every tool result is
+        # projected" section) before it becomes `content`, which is what ends
+        # up in the `tool_result` block -> `messages` -> the next model call.
+        # An exception here is the one branch that skipped that projector
+        # entirely: `content` went straight from a raw exception's `str()` to
+        # the model, and a transport exception can embed raw device output
+        # (netmiko 4.7's `ReadException` interpolates `output={repr(output)}`
+        # directly -- the same measured fact `mcp_server/boundary.py`'s
+        # docstring names for the identical class of bug on the MCP surface,
+        # EER-007). `detail` (the raw, UNPROJECTED text) is kept as-is for the
+        # internal audit trail (`call_entry`, below) -- never sent to the
+        # model, same as the success path's own `detail` extraction three
+        # lines above this except block.
+        detail = f"{type(exc).__name__}: {exc}"
+        error_envelope = {
+            "tool": block.name,
+            "device": (block.input or {}).get("device_name"),
+            "status": STATUS_ERROR,
+            "data": {},
+            "errors": [detail],
+        }
+        content = json.dumps(model_egress.project_envelope(error_envelope))
 
     call_entry = {
         "tool": block.name,
@@ -584,24 +624,22 @@ def run_agent_loop(
 
     import anthropic
 
-    # B-472/P1-01: propagate the wall-clock budget to the model call itself,
-    # not just the between-turn/between-tool checks below -- otherwise one
-    # slow request can hang well past `time_budget_s` with no bound at all.
-    # The precise fix would shrink this to the *remaining* budget on every
-    # turn, but that needs `_stream_anthropic_message` (llm_analysis.py) to
-    # accept a `timeout=` kwarg and pass it through to
-    # `client.messages.stream(...)` -- which the installed anthropic SDK
-    # (0.122.0) supports per-request -- and `llm_analysis.py` is off-limits
-    # to this wave (see the allowed-file list). So this is a ceiling of the
-    # *whole* budget, applied once at client construction, floored at 5s so a
-    # deliberately tiny `time_budget_s` (e.g. in a test) never starves a
-    # real call outright. TODO(B-472): once llm_analysis.py can take the
-    # remaining-time seam, pass `timeout=max(5.0, deadline -
-    # time.monotonic())` per call instead of this fixed ceiling.
-    client = anthropic.Anthropic(
-        api_key=os.getenv("ANTHROPIC_API_KEY"),
-        timeout=max(5.0, time_budget_s),
-    )
+    # EER-010 (closes the B-472/P1-01 TODO this comment used to carry): the
+    # wall-clock budget must bound the model call itself, not just the
+    # between-turn/between-tool checks below -- otherwise one slow request
+    # can hang well past `time_budget_s` with no bound at all. This used to
+    # be a ceiling of the *whole* budget (`timeout=max(5.0, time_budget_s)`),
+    # fixed once at client construction, because `_stream_anthropic_message`
+    # (llm_analysis.py) did not yet accept a per-call `timeout` and that
+    # module was off-limits to the wave that added this loop. It does now
+    # (see `_stream_anthropic_message`'s own `timeout` parameter): the client
+    # below carries no fixed timeout at all, and every call passes
+    # `timeout=max(5.0, deadline - time.monotonic())` -- the ACTUAL remaining
+    # budget at the moment the call is made, floored at 5s so a deliberately
+    # tiny `time_budget_s` (e.g. in a test) never starves a real call
+    # outright. A late turn in a long-running loop now gets a correctly
+    # SHRUNK timeout instead of the whole original budget on every call.
+    client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
     model = os.getenv("ANTHROPIC_MODEL", ANTHROPIC_MODEL_DEFAULT)
 
     system = _system_blocks()
@@ -635,12 +673,26 @@ def run_agent_loop(
         if iteration >= max_iterations:
             stopped_because = "max_iterations"
             break
-        if time.monotonic() >= deadline:
+        # `now` is read once and reused for the per-call timeout below --
+        # not re-read a second time right before the model call. Two reasons:
+        # it is the ACTUAL instant this turn was admitted (a second read
+        # moments later would only be a smaller, equally-approximate remaining
+        # budget), and re-reading would add a second `time.monotonic()` call
+        # per turn that a fake-clock test (tests/test_agent_loop_hardening.py's
+        # per-block deadline test) advances one step per call -- an extra call
+        # here would shift every later per-block check by one step against a
+        # schedule sized for exactly one call per turn at this point.
+        now = time.monotonic()
+        if now >= deadline:
             stopped_because = "time_budget"
             break
 
         iteration += 1
         usage_before_turn = dict(usage_totals)
+        # EER-010: the ACTUAL remaining budget at the moment this turn was
+        # admitted, not the whole `time_budget_s` -- see the client-
+        # construction comment above for the full history of why this used
+        # to be a fixed ceiling instead.
         message = _call_anthropic_or_raise(
             client,
             model=model,
@@ -648,6 +700,7 @@ def run_agent_loop(
             messages=messages,
             tools=TOOLS,
             max_tokens=ANTHROPIC_MAX_OUTPUT_TOKENS,
+            timeout=max(5.0, deadline - now),
         )
         _accumulate_usage(usage_totals, message.usage)
         final_message = message

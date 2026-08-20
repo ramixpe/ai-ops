@@ -232,6 +232,103 @@ def test_canary_nested_under_check_fabric_devices_does_not_survive(monkeypatch):
     assert "commands_withheld" in content
 
 
+# --------------------------------------------------------------------------- #
+# EER-006: an exception a tool RAISES (rather than returning a
+# status:"error" envelope) must be projected the same way a returned
+# envelope already is -- the same exposure class B-470 closed above, for the
+# one branch (_run_tool_block's except clause) that used to build `content`
+# straight from `str(exc)` with no projection at all.
+# --------------------------------------------------------------------------- #
+
+
+def test_a_raised_tool_exception_is_projected_not_sent_raw(monkeypatch):
+    """The positive control this exact defect needs (OBS-181): a tool that
+    raises with device-output-shaped text embedded in the exception message.
+    The content actually sent to the model must carry the classification and
+    must NOT carry the raw device-shaped text."""
+
+    device_output_shaped_text = (
+        "Pattern not detected: '#' in output. "
+        "output='RP/0/RP0/CPU0:PE1#show bgp summary\nBGP router identifier 10.255.0.11'"
+    )
+
+    def raises(*a, **kw):
+        raise RuntimeError(f"show bgp summary: {device_output_shaped_text}")
+
+    monkeypatch.setattr("agent_nettools.agent_loop.run_intent", raises)
+
+    captured = []
+    responses = [
+        lambda **kw: _tool_use_message(
+            {"id": "toolu_1", "name": "run_lab_intent", "input": {"device_name": "PE1", "intent": "facts"}}
+        ),
+        lambda **kw: _text_message("done"),
+    ]
+    install_scripted_anthropic(monkeypatch, responses, captured=captured)
+
+    run_agent_loop("facts for PE1")
+
+    content = captured[1]["messages"][-1]["content"][0]["content"]
+    assert "the device's prompt was not recognised" in content
+    for leaked in ("RP/0/RP0/CPU0", "10.255.0.11", "output=", "BGP router identifier"):
+        assert leaked not in content, f"{leaked!r} reached the model"
+
+
+def test_a_raised_tool_exception_with_no_classified_kind_is_withheld(monkeypatch):
+    """The unclassified-detail case: an exception whose text matches no
+    ERROR_KINDS entry must still not leak its raw text to the model."""
+
+    def raises(*a, **kw):
+        raise ValueError("brand new failure mode quoting 10.0.0.99 verbatim")
+
+    monkeypatch.setattr("agent_nettools.agent_loop.run_intent", raises)
+
+    captured = []
+    responses = [
+        lambda **kw: _tool_use_message(
+            {"id": "toolu_1", "name": "run_lab_intent", "input": {"device_name": "PE1", "intent": "facts"}}
+        ),
+        lambda **kw: _text_message("done"),
+    ]
+    install_scripted_anthropic(monkeypatch, responses, captured=captured)
+
+    run_agent_loop("facts for PE1")
+
+    content = captured[1]["messages"][-1]["content"][0]["content"]
+    assert "unclassified" in content
+    assert "10.0.0.99" not in content
+    assert "brand new failure mode" not in content
+
+
+def test_a_raised_tool_exception_still_marks_is_error_and_still_stops_the_loop(monkeypatch):
+    """Non-vacuous companion: the exception path must still behave like a
+    failed tool call in every other respect (is_error on the tool_result
+    block, and the internal audit trail still recording something), not just
+    happen to pass the two content assertions above."""
+
+    def raises(*a, **kw):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("agent_nettools.agent_loop.run_intent", raises)
+
+    captured = []
+    responses = [
+        lambda **kw: _tool_use_message(
+            {"id": "toolu_1", "name": "run_lab_intent", "input": {"device_name": "PE1", "intent": "facts"}}
+        ),
+        lambda **kw: _text_message("done"),
+    ]
+    install_scripted_anthropic(monkeypatch, responses, captured=captured)
+
+    result = run_agent_loop("facts for PE1")
+
+    tool_result_block = captured[1]["messages"][-1]["content"][0]
+    assert tool_result_block["is_error"] is True
+    [call] = result["tool_calls"]
+    assert call["is_error"] is True
+    assert "RuntimeError: boom" in call["error"]
+
+
 def test_collect_lab_evidence_routes_through_project_evidence(monkeypatch):
     """collect_lab_evidence returns a full evidence dict (one envelope per
     intent), not a single envelope -- it must go through project_evidence,
@@ -421,22 +518,40 @@ def test_deadline_exhaustion_skips_later_blocks_in_the_same_batch(monkeypatch):
     assert third["skipped"] is True
 
 
-def test_client_constructed_with_timeout_ceiling_from_time_budget(monkeypatch):
-    """The chosen B-472 plumbing: since llm_analysis.py cannot be touched to
-    pass a per-turn remaining-time timeout through
-    `_stream_anthropic_message`, the ceiling is applied once at Anthropic
-    client construction, using the *whole* budget, floored at 5s."""
+def test_model_call_receives_the_remaining_time_budget_as_a_per_call_timeout(monkeypatch):
+    """EER-010 closes the B-472 TODO this test used to pin (the contract has
+    legitimately changed -- see agent_loop.py's own comment at the client
+    construction site for the full history). This module now accepts a
+    per-call `timeout` seam (`_stream_anthropic_message`'s own `timeout`
+    parameter), so the Anthropic client below is constructed with NO fixed
+    ceiling at all, and every call instead passes `timeout=max(5.0, deadline
+    - time.monotonic())` -- the ACTUAL remaining budget at the moment the
+    call is made, floored at 5s.
 
+    A fake, constant clock makes the "remaining budget" arithmetic exact and
+    reproducible for the assertion: with `time.monotonic()` always returning
+    0.0, `deadline - now` equals `time_budget_s` exactly (the same technique
+    the deadline-exhaustion test above already uses for a moving clock).
+    """
+
+    monkeypatch.setattr("agent_nettools.agent_loop.time.monotonic", lambda: 0.0)
+
+    captured = []
     client_kwargs = []
     install_scripted_anthropic(
-        monkeypatch, [lambda **kw: _text_message("ok")], client_kwargs=client_kwargs
+        monkeypatch, [lambda **kw: _text_message("ok")],
+        captured=captured, client_kwargs=client_kwargs,
     )
 
     run_agent_loop("question", time_budget_s=30)
-    assert client_kwargs[-1]["timeout"] == 30
+    assert "timeout" not in client_kwargs[-1], (
+        "the client itself must carry no fixed ceiling any more -- every "
+        "call passes its own remaining-budget timeout instead"
+    )
+    assert captured[-1]["timeout"] == 30
 
     run_agent_loop("question", time_budget_s=1)
-    assert client_kwargs[-1]["timeout"] == 5.0
+    assert captured[-1]["timeout"] == 5.0
 
 
 # --------------------------------------------------------------------------- #
