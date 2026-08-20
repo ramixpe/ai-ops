@@ -725,6 +725,34 @@ MUTATIONS = [
      "                if key in _UNTRUSTED_TEXT_FIELDS and isinstance(value, str)\n",
      "                if False\n",
      "test_a_forged_verdict_inside_a_models_prior_response_is_contained_on_read"),
+
+    # ---- release-1.0 cleanup guards (Wave 1). Each anchor's count was
+    # confirmed with `grep -c` against its file before this entry was
+    # written. ----
+    #
+    # R8 (the .env-at-import leak) has no guard here, deliberately: the
+    # candidate anchor sits inside `main()`, but the only test pinning R8's
+    # behaviour (`test_importing_the_server_does_not_load_dotenv`) asserts
+    # something about *import*, never calls `main()`, and so cannot observe
+    # a mutation there -- confirmed VACUOUS on the first live run, not
+    # assumed. The fix itself (moving the load out of module scope) is
+    # exercised by that real pytest already; there is no second invariant
+    # here for a mutation guard to protect that isn't already a plain
+    # assertion.
+
+    ("F1-STAGED-ENVELOPE", "a staged-surface error envelope carries the full "
+     "tool/device/status/data/errors key set, not a truncated one",
+     "mcp_server/staged_surface.py",
+     '{"tool": "probe_lab", "device": device_name, "status": "error", "data": {},',
+     '{"status": "error",',
+     "test_probe_lab_unknown_kind_carries_the_full_envelope"),
+
+    ("B-821-RUNID-EXCLUDED", "a ledger row missing run_id is excluded from "
+     "same-cause correlation, never merged on cause alone",
+     "src/agent_nettools/incident_correlation.py",
+     "        if d.run_id is None:\n",
+     "        if False:\n",
+     "test_an_unknown_run_id_is_excluded_never_merged_despite_matching_cause"),
 ]
 
 
