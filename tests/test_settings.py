@@ -116,7 +116,17 @@ def test_unknown_bool_disables_settings_actually_fail_closed(monkeypatch):
     NETTOOLS_NETBOX_WRITE_ENABLED joined this set with the netbox.py
     collector (Stage-2 M3b) -- the same reasoning as the other two: a gate
     that exists to keep a real write off by default must not reopen on a
-    typo."""
+    typo.
+
+    NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES joined it at EER-008b. Note what is
+    and is not being claimed: that setting's *default* is still ENABLED, and
+    deliberately so (its own declaration argues why -- the destination is
+    operator-configured, never caller-chosen). `unknown_bool_disables` is not
+    about the default; it is about what an explicitly-set but unrecognized
+    spelling means. Before EER-008b that read `value not in {falsy}`, so
+    `=flase` silently ENABLED external sources. Default-on and
+    typo-fails-closed are independent properties, and this setting now has
+    both."""
 
     from agent_nettools import cli, netbox
     from mcp_server import server as mcp_server_module
@@ -130,6 +140,7 @@ def test_unknown_bool_disables_settings_actually_fail_closed(monkeypatch):
         "NETTOOLS_MCP_ALLOW_ACTIVE_PROBES",
         "NETTOOLS_ENABLE_AGENT",
         "NETTOOLS_NETBOX_WRITE_ENABLED",
+        "NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES",
     }
 
     monkeypatch.setenv("NETTOOLS_MCP_ALLOW_ACTIVE_PROBES", unrecognized)
@@ -140,6 +151,18 @@ def test_unknown_bool_disables_settings_actually_fail_closed(monkeypatch):
 
     monkeypatch.setenv("NETTOOLS_NETBOX_WRITE_ENABLED", unrecognized)
     assert netbox.write_enabled() is False
+
+    monkeypatch.setenv("NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES", unrecognized)
+    assert mcp_server_module._mcp_external_sources_allowed() is False
+
+    # Positive control (OBS-181): the gate is not simply stuck off. Its
+    # documented default-on behaviour must survive the fail-closed change --
+    # otherwise this test would pass equally well against a gate that refuses
+    # everything, which is a different bug wearing the same green tick.
+    monkeypatch.delenv("NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES", raising=False)
+    assert mcp_server_module._mcp_external_sources_allowed() is True
+    monkeypatch.setenv("NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES", "1")
+    assert mcp_server_module._mcp_external_sources_allowed() is True
 
 
 def test_enum_typo_is_flagged(monkeypatch):

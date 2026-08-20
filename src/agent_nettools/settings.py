@@ -353,8 +353,11 @@ SETTINGS: tuple[Setting, ...] = (
         "destination is operator-configured (NETTOOLS_LOKI_URL/"
         "NETTOOLS_PROMETHEUS_URL), never a caller-chosen value, so there is "
         "no traffic-steering risk to gate closed by default. A refusal here "
-        "is a classified, structured error, never a silent no-op.",
+        "is a classified, structured error, never a silent no-op. "
+        "An unrecognised value that IS set fails closed (disabled) since "
+        "EER-008b -- the default-on applies to unset, not to a typo.",
         "mcp_server.server",
+        unknown_bool_disables=True,
     ),
     # -- inventory_model.py --
     Setting(
@@ -369,6 +372,19 @@ SETTINGS: tuple[Setting, ...] = (
         "Requests server-side refusal fallbacks on Anthropic calls, only for "
         "models in the Opus-5/Fable-5/Mythos-5 family. No effect elsewhere.",
         "llm_analysis",
+    ),
+    Setting(
+        "NETTOOLS_LLM_TIMEOUT_SECONDS", "float", 60.0,
+        "Timeout (seconds) applied to every LLM provider client/call in "
+        "llm_analysis.py (Anthropic, OpenAI, MiniMax, Ollama) when a caller "
+        "does not pass its own explicit timeout -- `nettools agent` passes "
+        "its per-turn remaining wall-clock budget instead. Replaces Ollama's "
+        "previous hardcoded timeout=120, which nothing could configure: "
+        "every other outbound call in this project already had a settable "
+        "deadline, and the model calls were the one path that could block "
+        "for an unbounded time (EER-010).",
+        "llm_analysis",
+        minimum=0.001,
     ),
     Setting(
         "LLM_PROVIDER", "enum", "auto",
