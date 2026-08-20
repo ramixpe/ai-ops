@@ -14,7 +14,7 @@ reasoning layer, and an MCP server — all over the same narrow allowlist of
 ```bash
 make setup                  # python -m venv .venv + pip install -e ".[dev,llm]"
 source .venv/bin/activate
-make test                   # pytest -q  (the full suite, about 1,800 tests; the exact count moves — CI is authoritative; no network, no credentials, no API key needed)
+make test                   # pytest -q  (the full suite, about 3,200 tests; the exact count moves — CI is authoritative; no network, no credentials, no API key needed)
 make lint                   # ruff check .
 make help                   # full target list
 ```
@@ -189,11 +189,22 @@ test.
 `tests/test_docs.py` parses `README.md` and `mcp_server/README.md` by *literal
 marker sentences* and asserts the backticked lists match the code exactly:
 
-- README: between `Approved read-only commands:` and `There is no configuration mode`
-- MCP README: between `## Exposed Tools` and `There is no shell`
+- **README, per platform.** For every platform in `known_platforms()`, the
+  block from its own `### {platform}` heading to the next platform heading (or
+  to the closing prose `Only \`cisco_xr\` is verified` for the last one) must
+  backtick exactly `APPROVED_COMMANDS[platform]` — a separate assertion per
+  platform, not one span covering all of them, so a platform added to the code
+  without its own README section fails immediately (`test_readme_documents_
+  every_known_platform` catches the missing heading itself).
+- **MCP README.** Between `## Exposed Tools` and `There is no shell`, the
+  backticked names must equal the MCP server's own tool **registry**, read at
+  test time rather than compared against a list frozen in the test — a prefix
+  allowlist here once let a newly-added tool go undocumented and the test still
+  pass; reading the registry removes that failure mode rather than widening the
+  list by hand each time.
 
-Rewording those sentences, or adding backticked text inside those spans, breaks
-the tests. Update code and docs in the same change.
+Rewording those marker sentences, or adding backticked text inside those spans,
+breaks the tests. Update code and docs in the same change.
 
 ### .env loading
 

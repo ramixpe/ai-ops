@@ -13,7 +13,7 @@ This is not a greenfield LLD. The repository already implements a substantial fr
 
 Three things follow from that:
 
-1. Where the repo and the design document disagree on **vocabulary**, the repo wins. It has a large test suite and generated documentation pinned to its terms (554 at the time this was written; 1776 today).
+1. Where the repo and the design document disagree on **vocabulary**, the repo wins. It has a large test suite and generated documentation pinned to its terms (554 at the time this was written; the suite has grown by roughly 6x since — the exact count moves, CI is authoritative).
 2. Where the repo and the design document disagree on **mechanism**, the repo usually wins too — several existing mechanisms are stronger than what the design specified, and Section 2 records which.
 3. New code inherits the existing safety invariant unchanged. Section 3 states it as a hard constraint on every module added below.
 
@@ -48,11 +48,11 @@ Mapped against the twenty design decisions. This section exists so nobody rebuil
 | **D2** Structural enforcement, not prompt | **Done, stronger than specified** | `platforms.APPROVED_COMMANDS` exact-match frozenset, checked *before credentials load or a socket opens* |
 | **D9** Vendor never reaches the model | **Done** | `PLATFORM_INTENTS` is platform-major; `lab.platform_for()` is credential-free by design; `test_commands_do_not_leak_across_platforms` |
 | **D10** Tools parameterised by a closed enum | **Partly** | `agent_loop` exposes 6 tools with JSON-schema `enum` drawn from `all_intents()`. The MCP server does not — see §4.1 |
-| **D11** Tool only if the model decides when to call it | **Partly** | True of `agent_loop`; the MCP server exposed ~22 tools at the time of this review (21 today, after B-438 removed two writers and MVP-0 added `investigate_lab_session`) including several a model never needs to choose |
+| **D11** Tool only if the model decides when to call it | **Partly** | True of `agent_loop`; the MCP server exposed ~22 tools at the time of this review (the surface has grown substantially since, on a `classic`/`staged` split behind `NETTOOLS_MCP_SURFACE` — `mcp_server/README.md` is the current count) including several a model never needs to choose |
 | **D13** Active probes as a separate class | **Done — this was listed "open" and is in fact built** | `Template.active_probe`, `NETTOOLS_ALLOW_ACTIVE_PROBES`, refused before rendering |
 | **D14** Memory derived, keyed by object, historical only | **Substantially done** | `evidence_store` (files or SQLite), `save_snapshot`, `save_golden_snapshot`, `detect_flaps`, `diff_evidence` keyed by `parsers.record_key` excluding `volatile_fields` |
 | **D15** Template parsing, never model extraction | **Done for static intents, absent for templates** | `parsers.PARSERS[(platform, intent)]` — six entries, `cisco_xr` only. See §4.2 |
-| **D16** Context is a budget | **Partly** | `evidence_budget.py` — per-intent 4,000 / total 40,000 chars, middle truncation with an explicit marker, parsed-preferred-over-raw. Config sections are not retrieved at all yet |
+| **D16** Context is a budget | **Partly** | `evidence_budget.py` — per-intent 4,000 / total 40,000 chars, middle truncation with an explicit marker, parsed-preferred-over-raw. Config sections are retrieved now (`config_section.py`, 2026-08-19 — see §4.3) but bypass this budget entirely: `config_diff.py` reconciles intent against observed state in code, and it is the typed `FieldDiff` result, never raw config text, that could ever reach a model |
 | **D17** Source of truth for inventory | **Done** | `inventory/lab.yaml` + pydantic `extra="forbid"`; `expected:` derived by `learn-topology`, never hand-invented |
 | **D18** Allowlist in three places | **Done** | `AGENTS`-style guidance in `CLAUDE.md`, `APPROVED_COMMANDS` in code, `tests/test_safety.py` + `tests/test_template_security.py` |
 | **D19** Guardrails as tests | **Done, stronger than specified** | 11 safety tests including `test_refuses_unapproved_commands_before_loading_credentials`, which runs with an empty environment |
@@ -106,6 +106,20 @@ This is D10 and D11's failure mode made concrete: one tool per command, so the m
 Every rung of the dependency descent below the top one reads exactly those commands. **Without template parsers there is no descent** — only a model reading raw text, which §3 forbids. This is the first piece of work.
 
 ### 4.3 No configuration axis
+
+**[SUPERSEDED, checked 2026-08-20 — this section describes the pre-build gap, since closed.]**
+At the time this was written, the only config command on the allowlist was
+`show running-config hostname`, so the design's three evidence axes were
+really two: observed and historical. That changed 2026-08-19: B-104 added
+`config_section.py` plus two parameterized templates (`config_isis`,
+`config_interface`, in `templates.py` — a different allowlist path than the
+static `platforms.APPROVED_COMMANDS` this section checked), and B-106's
+`config_diff.py` reconciles that configured intent against observed state,
+deterministically, wired to `nettools investigate --reconcile-config`. B-105
+(inheritance resolution) was investigated and refused — this fabric uses no
+`neighbor-group`/`session-group`/`af-group`, so there was nothing to resolve.
+The paragraph below is kept as the historical record of the gap this section
+was written to close, not as a current claim.
 
 The only config command on the allowlist is `show running-config hostname`. The design's three evidence axes are therefore two: observed and historical. D16's five reductions have nothing to reduce yet.
 
@@ -233,6 +247,11 @@ Returns the rung path taken, each rung's `CheckResult`, and the accumulated evid
 The collector is injected so a descent can run against `fixtures.load_fixture_evidence` with no lab access. That is what makes §8's acceptance test possible today.
 
 ### 5.5 `config_section.py` — the config axis (D16)
+
+**As-built note, 2026-08-20:** only `config_isis` and `config_interface` below
+shipped (B-104). `config_bgp`/`config_bgp_neighbor` were refused — config-shaped
+the same way, but no captured fixture demonstrated a fault they would explain,
+so building them would have been scope grown from analogy rather than evidence.
 
 Retrieval of intended state, built inside the existing template mechanism.
 

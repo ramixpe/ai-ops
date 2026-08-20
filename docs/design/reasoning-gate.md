@@ -1,8 +1,12 @@
 # The reasoning gate — design for operator sign-off
 
 **Status: approved by the operator 2026-08-19. B-101 and B-102 BUILT to this
-shape (`reasoning_gate.py`); B-103 deliberately not built — see the
-recommendation at the end.**
+shape (`reasoning_gate.py`, which as of 2026-08-20 has no caller anywhere in
+`src/` or `mcp_server/` — the type exists, nothing constructs one yet); B-103
+was held pending the measurement below §"honest risks" #2 asks for, and that
+measurement has since run: B-103 is `CLOSED-AS-REFUSED` (BACKLOG.md, decided
+by measurement 2026-08-19, the day after this document). See the note at
+§"honest risks" #2 and the recommendation for what the measurement found.**
 
 > This document supersedes `lld-investigation-layer.md` §5.6, which sketched a
 > wider three-field decision schema (`sufficient`/`narrow` carrying `finding`
@@ -95,6 +99,17 @@ demand for this gate.** I do not think it removes all of it, but I would rather
 build the gate against cases that survive B-106's intent-vs-observed diff than
 against today's list.
 
+> **Answered, 2026-08-19 (B-103, `CLOSED-AS-REFUSED`).** It removes all of it,
+> measured rather than guessed: the entire fixture corpus — every device ×
+> label × flow × subject, 953 investigations — produced exactly 8
+> `cause_not_localised` occurrences, all one underlying case (this same PE3
+> interface, seen from both ends, under two flows, across three captures).
+> `config_diff` explains all 8 wherever the config axis was captured; the
+> pre-B-104 fixtures return `CANNOT_COMPARE`, correctly, not a false
+> agreement. **Zero cases survived to build a narrowing pass against.** Two
+> tests carry the measurement as an executable witness. This is exactly the
+> shape of test this recommendation asked for before committing to B-103.
+
 **3. The candidate list is a disclosure.** Handing a model every interface on a
 device is more context than a targeted question needs, and B-501/B-518 are about
 manifest size. Worth measuring before assuming it is free.
@@ -110,6 +125,16 @@ intended against observed configuration. If that closes the `cause_not_localised
 cases the gate was designed for, B-103's scope changes materially — and a
 narrowing pass built for cases that no longer exist is a feature we would then
 have to justify keeping.
+
+> **Resolved, 2026-08-19: B-103 is refused, not merely held.** B-106 landed and
+> closed every measured `cause_not_localised` case (see §"honest risks" #2
+> above). `reasoning_gate.py`'s two types (B-101/B-102) stand as built and
+> unused — a mechanism that could be wired in if a future fault produces a
+> genuine `cause_not_localised` the config axis cannot explain, but there is
+> currently no such case in the corpus to build or test the narrowing pass
+> against, so it was not built. `docs/diagrams/d9.py` refuses to regenerate
+> `09-model-boundary.svg` if `reasoning_gate` ever gains a live caller — that
+> guard is this decision's tripwire.
 
 ## What I need from you
 

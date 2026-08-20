@@ -176,10 +176,12 @@ as "checked and clean" rather than "nothing we checked found a problem."
 
 ## 5. Silencing something during a planned change
 
-**The mechanism exists and is tested. It is not wired to anything you can
-run today.** Read both halves before you act on this section.
+**[Corrected 2026-08-20] The mechanism is wired for `nettools health` now.**
+This section originally said it was not reachable from the command line at
+all; that stopped being true when `--silence-file` shipped. Read both halves
+below — what changed and what is still genuinely missing.
 
-**What it does, once it's reachable.** `health.py` implements a maintenance
+**What it does.** `health.py` implements a maintenance
 window (`Silence`): `device`/`rule`/`subject` (each optional, each an AND), a
 mandatory `expires_at` (there is no such thing as a silence that never ends),
 and a `reason`/`created_by` that are also mandatory — an unexplained silence
@@ -195,21 +197,26 @@ critical" can never be misread as "ok". `--notify`'s narrower rule (in
 `notifier.py`) is the one place a silence actually stops delivery outright,
 because paging is a single channel with nothing to tag.
 
-**The gap, stated plainly.** There is no `nettools silence` subcommand, no
-`--silence-file` flag on `nettools health` or `nettools investigate`, and no
-`NETTOOLS_*` environment variable for a silence file's path — `settings.py`
-declares none. `nettools health`'s own CLI handler calls `evaluate_fabric()`
-directly and never calls `apply_silences`/`apply_silences_to_fabric` at all.
-**So today, filing a silence and having it actually suppress paging is not a
-thing you can do from the command line, at all** — the library function is a
-correct, tested implementation waiting for a caller that does not exist yet
-in `cli.py`. The same is true of `ownership.py` (who gets told) and
-`incident_correlation.py` (grouping related pages) — both are tested,
-neither has a CLI or MCP surface. `ownership.py`'s docstring is explicit that
-this wiring — a `NETTOOLS_SILENCE_FILE`/ownership-table env var, read once in
-`cli.py` — is described, not built.
+**What's reachable now.** `nettools health --silence-file PATH` exists and
+calls `evaluate_fabric_with_silences`, which resolves through `health.
+_resolve_silences`: an explicit `--silence-file` wins; omit it and the
+`NETTOOLS_SILENCE_FILE` environment variable (declared in `settings.py`) is
+tried instead; neither present, and behaviour is unchanged from before the
+flag existed — no silences applied. So filing a silence and having it
+actually suppress `nettools health`'s verdict severity **is** something you
+can do from the command line today, for `health`.
 
-**What to actually do during a planned change, until that lands:** tell your
+**The gap that's still real.** `nettools investigate` has **no**
+`--silence-file` flag — the mechanism only reaches the fabric health check,
+not a single investigation. There is still no dedicated `nettools silence`
+subcommand for authoring a silence file (you write the JSON/YAML by hand
+against `health.Silence`'s fields). And `ownership.py` (who gets told) and
+`incident_correlation.py` (grouping related pages) remain unwired: tested,
+but neither has a CLI or MCP surface — grepping both for either module name
+turns up nothing but one code comment.
+
+**What to actually do about an `investigate`-triggered page during a planned
+change, until that has a silence flag too:** tell your
 team out of band (the channel this system does not have), and if you need to
 stop pages mechanically, disable or pause whatever *external* scheduler is
 calling `nettools investigate --notify` for the device in question (the

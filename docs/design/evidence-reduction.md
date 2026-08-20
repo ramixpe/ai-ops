@@ -286,7 +286,7 @@ So proximity thresholds must accommodate **protocol timers, not human intuitions
 
 ## 7. Coverage metadata
 
-**This is the `unevaluated` discipline applied to evidence sources**, and it is the highest-priority item here because the gap exists today.
+**This is the `unevaluated` discipline applied to evidence sources.** It was the highest-priority item here when this section was written, because the gap existed then; B-420 closed it 2026-08-19 — see the note after §7's design below for what shipped.
 
 "No BGP events were found" is an incomplete statement unless the completeness of the source is known. Logs can be missing because of severity filtering, a collector outage, source configuration, transport loss, ingestion delay, parsing failure, or a wrapped device buffer.
 
@@ -337,11 +337,20 @@ The difference is the one `health.py` already enforces between `unevaluated` and
 
 **Grounding must enforce it.** A claim of absence without coverage metadata behind it fails, exactly as an uncited claim of presence does.
 
-> Grounding today enforces citation for claims of **presence**. It enforces nothing for claims of **absence** — so "no correlating events in window" passes with nothing behind it, on a source already known to drop severity 5 and 6.
+> Grounding, before B-420, enforced citation for claims of **presence** and
+> nothing for claims of **absence** — so "no correlating events in window"
+> passed with nothing behind it, on a source already known to drop severity 5
+> and 6.
 
 That asymmetry is the same one `check_chain_coverage` exists to close, arriving on a different axis: **a check that inspects only what is present cannot see what was omitted.** Which is why absence enforcement is a *peer* check rather than a rule inside the existing one — the input it needs (the coverage record) is not in the report.
 
 The correction in §3.2 raised the stakes: `correlate.v2`'s refusal case is now nine irrelevant records rather than an empty list, so the model has material to build a wrong answer out of, and the refusal is a positive claim rather than the absence of output. **T-029a / B-420**, and it lands before T-032.
+
+**Shipped, verified 2026-08-20.** `grounding.check_absence_coverage` exists,
+is exported, and is merged into `check_chain_coverage`'s result exactly as
+this section specifies — a peer check reading the coverage record, not a rule
+folded into the presence check. The gap this section calls urgent above is
+closed; the design below is what was actually built, not a proposal.
 
 ---
 
@@ -447,7 +456,7 @@ Each needs a corpus whose correct answer is known in advance.
 | **Empty result** | An explicit "no correlating events in the available coverage", never an empty set reading as "nothing was wrong" | **Covered twice** — the degenerate empty window, and the harder case of nine present-but-irrelevant records |
 | **Sequence loss** | A known causal chain must appear as one episode in the correct order, across a 154-second gap | **Not covered** — B-416 |
 | **Clock skew** | Devices with disagreeing clocks must be detected and reported, never silently ordered | **Not covered** — B-415. Untestable today for an honest reason: every window this layer reads is single-device, so there are no two clocks to disagree |
-| **Incomplete coverage** | A window missing a severity class must report it, and a claim of absence must fail grounding without it | **Not covered** — T-029a / B-420. The gap exists today |
+| **Incomplete coverage** | A window missing a severity class must report it, and a claim of absence must fail grounding without it | **Covered — B-420 shipped 2026-08-19.** `grounding.check_absence_coverage` |
 | **Projection failure** | A cause outside the subject identifier but inside the topology neighbourhood must be retained | **Partially covered** — the identifier-match failure is measured (0 of 28); neighbourhood retention is B-417 |
 
 Two of these are the same failure seen from two ends. **A filter aggressive enough to guarantee an empty window has already deleted the evidence that would have filled it** — which is why correcting over-reach is what produced the harder empty-result test rather than merely fixing a filter.
@@ -499,12 +508,12 @@ Reduced records carry evidence keys and are cited by grounding like any other ev
 | **B-417** | Relationship-aware projection over a bounded topology neighbourhood | MVP-1 |
 | **B-418** | Temporal shape — `max_rate_1m`, burst detection | MVP-1 |
 | **B-419** | `expand_evidence` and the four evidence tiers | MVP-1 |
-| **B-420** | Coverage metadata, and grounding enforcement of absence claims | **now — T-029a, before T-032** |
+| **B-420** | Coverage metadata, and grounding enforcement of absence claims | **DONE, 2026-08-19** — the only row in this table that is not deferred any more |
 | **B-203/204** | Historical baselines and rarity — the same capability as operational memory | Stage 2 |
 | **B-206** | Centralised log source, for reach rather than fidelity | blocked |
 | **B-206a/b** | Platform fixes blocking B-206 | — |
 
-**B-420 is the one pulled forward.** The others are MVP-1 or Stage 2. Coverage metadata closes a gap that exists today, on a source measured to return a plausible wrong answer rather than an empty one, and grounding is the natural place to enforce it.
+**B-420 was the one pulled forward, and it has since shipped.** The others are still MVP-1 or Stage 2. Coverage metadata closed a gap that existed on a source measured to return a plausible wrong answer rather than an empty one, with grounding as the enforcement point — see the "Shipped, verified 2026-08-20" note in §7 above.
 
 ---
 

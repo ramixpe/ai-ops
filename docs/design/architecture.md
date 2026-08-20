@@ -77,8 +77,8 @@ its own, each module depending only on the ones above it in this list:
 | `grounding.py` | The gate. Citation integrity, chain coverage, timeline citations, absence coverage | `descent`, `coverage`, `log_window` |
 | `investigation.py` | `investigate()` — the runner that wires the above together | all of the above, `network_tools` |
 
-`cli.py`'s `investigate` subcommand is the only front end so far; MCP parity is
-backlog (B-113).
+`cli.py`'s `investigate` subcommand has MCP parity in `investigate_lab_session`
+(B-113, closed 2026-08-19); both wrap the same `investigate()` runner.
 
 > The four invariants this layer inherits, the two modules that look like
 > ordinary code and are not, and the precondition every flow must satisfy are
@@ -447,7 +447,11 @@ CLI: `nettools route|bgp-neighbor|interface|logging|ping|traceroute DEVICE
 `get_lab_logging`/`get_lab_ping`/`get_lab_traceroute`, named to keep the
 `get_lab_*` prefix `test_mcp_readme_lists_exactly_the_exposed_tools` already
 filters on, each with a docstring stating the accepted parameter form so an
-MCP client can narrow iteratively.
+MCP client can narrow iteratively. `nettools sr-policy`/`get_lab_sr_policy_detail`
+(B-515) joined this set later with a compound `<colour>:<endpoint>` parameter
+(`templates.split_sr_policy_id`) rather than one of the three typed-parser
+kinds above — the same canonicalize-by-reconstruction discipline, applied to a
+two-part identifier instead of an address, an int, or an interface name.
 
 ---
 

@@ -9,6 +9,26 @@ not building one.
 Baseline at the time of this spike: 2302 passed, 24 skipped, `ruff check .`
 clean, on this worktree.
 
+> **[PARTIALLY SUPERSEDED, checked 2026-08-20]** This spike's central premise —
+> "the config axis (B-104/105/106) is unbuilt, so there is nothing to cache" —
+> is no longer true. B-104 and B-106 shipped 2026-08-19: `config_section.py`
+> parses `show running-config router isis` / `show running-config interface
+> <name>` (two new templates in `templates.py`, not the single
+> `platforms.py:74` hostname command this spike's evidence trail checked), and
+> `config_diff.py` reconciles that intent against observed state, wired to
+> `nettools investigate --reconcile-config`. B-105 (inheritance resolution)
+> was investigated and refused on evidence — this fabric uses no
+> `neighbor-group`/`session-group`/`af-group`, so there was nothing to
+> resolve. **This does not by itself reopen the cache question**: the new
+> config reads are fetched fresh on every `--reconcile-config` invocation
+> (an explicit second SSH login, opt-in, never cached), so §4's Q4 answer
+> ("nothing is cacheable") is now factually wrong but the practical
+> conclusion it fed — no cache exists, none is being requested — still holds
+> by a different route. Read §1-§3's mechanism analysis (age-bounds skew,
+> the clock problem, the re-read problem) as still-accurate engineering; read
+> §4's specific claim that config is unbuilt, and the "Conclusion" paragraph
+> that depends on it, as **historical, true of 2026-08-1x, not of today**.
+
 ---
 
 ## 1. Where does a cached value's age enter the skew computation? It doesn't, today.

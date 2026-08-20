@@ -316,6 +316,23 @@ records, and that the MCP boundary re-taught at B-481).
 
 ## 4. Answered 2026-08-18 — the operator's decisions [DECIDED]
 
+> **[SUPERSEDED, checked 2026-08-20]** This section records what the operator
+> decided *in that session* — it is kept verbatim as the historical record of
+> the decision, not edited to look right in hindsight. But two of its central
+> execution directives were never built: no n8n docker was spun up (`examples/n8n/`
+> holds two example workflow JSON files — wiring documentation, not a running
+> orchestrator), and no new MCP hub exists (`mcp_server/server.py` is still the
+> one MCP server, with a `classic`/`staged` surface toggle rather than a second
+> hub). What shipped instead, in later waves, is a different shape entirely: a
+> deterministic event-to-flow router (`src/agent_nettools/event_watch.py`,
+> `ownership.py`, `incident_correlation.py`, and the `nettools route-event` /
+> `nettools audit` CLI commands), with `nettools investigate` as the thing being
+> triggered rather than a workflow engine holding logic. The NetBox and neo4j
+> decisions below did ship (`netbox.py`, `topology.py`/graph collection exist).
+> The log/telemetry/Alertmanager discovery findings are historical fact about
+> 2026-08-18 and independently still true. Read the rest of this section as
+> **what was decided then**, not as **what exists now**.
+
 Every §4 pending item was answered in session:
 
 - **"RACE vs P.E.N.E" → resolved: GRACE won.** The prompt-discipline comparison

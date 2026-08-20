@@ -355,8 +355,9 @@ when the evidence does not support a conclusion. It restates and contextualises
 a conclusion the code already reached and grounding already checked; it does
 not diagnose.
 
-Prompts live in `prompts/` as versioned files (`report.v1.txt`,
-`correlate.v3.txt`), reviewed like code, each with golden cases in
+Prompts live in `prompts/` as versioned files (`report.v2.txt`,
+`correlate.v4.txt` are current; older versions stay in the tree, superseded but
+kept), reviewed like code, each with golden cases in
 `prompts/tests/cases/`. A prompt change is a **version bump, never an in-place
 edit** — a report has to be attributable to the exact text that produced it.
 
@@ -994,6 +995,14 @@ docs/                              Design, the build record, and three external 
                                    -- see docs/README.md for the map
 ```
 
+**The product surface for 1.0 is the `nettools` CLI and the MCP server — not
+`agent_nettools` as an importable library.** Nothing above is a stability
+promise. `import agent_nettools` and call into a module directly if it helps
+you today, but function signatures, module boundaries and internal package
+layout can all change in a later release without that counting as a breaking
+change; only the CLI's documented commands/flags and the MCP server's
+documented tools carry that guarantee.
+
 ---
 
 ## Audit, event routing, and configuration
@@ -1017,6 +1026,29 @@ nettools config show|check                     # every env var's effective value
 
 `examples/` wires these into n8n or systemd — plumbing only; the boundary rule inside
 that directory's README is part of the design, not a suggestion.
+
+`nettools watch [DEVICE|--all] [--since-seconds N] [--limit N]` (W6) is a
+read-only, dry-run preview of the same event-driven loop `route-event` feeds:
+it fetches a device's (or the whole fabric's) recent Loki log window, collapses
+repeated lines down to one root cause, and prints the routing decision that
+*would* fire — it never calls `investigate`, never opens a ticket, and never
+writes anything. Exit 2 if every device's fetch failed, 1 if at least one
+collapsed group is routable, 0 if it ran clean with nothing to act on.
+
+`nettools investigate ... --reconcile-config` (W5, opt-in) adds a second,
+deliberate SSH login to compare a device's configured intent against its
+observed state (`config_diff.py`) when a descent bottoms out on
+`cause_not_localised` for an interface-named subject — the sentence "PE3's
+`Gi0/0/0/0` is enabled under `router isis CORE` but has no `ipv4 address`" that
+operational state alone cannot produce. Off by default; absent from the JSON
+entirely unless the flag is given.
+
+`nettools health --silence-file PATH` (W2b) applies a maintenance-window
+silence to the fabric-wide verdict: a silenced finding stays in the report
+(never invisible) but stops contributing to `severity`, moving into its own
+`counts["silenced"]` bucket instead — `raw_severity` always preserves what the
+verdict would have been unsilenced. Falls back to `NETTOOLS_SILENCE_FILE` if
+the flag is omitted; neither present, nothing changes.
 
 ## Diagnosis accuracy ledger and the ticket flight recorder
 

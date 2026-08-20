@@ -223,7 +223,7 @@ All correct. None urgent at thirteen devices with one flow. Recorded so their de
 
 | Item | Reviewer | Deferred until |
 |---|---|---|
-| Deterministic authoritative report rendering | A | after the epoch contract lands |
+| ~~Deterministic authoritative report rendering~~ **DONE** (B-439, 2026-08-20 check) | A | shipped after the epoch contract (B-436) landed, as planned — the authoritative report is now generated from typed fields and any model paraphrase is marked non-authoritative |
 | BGP object identity: `(device, instance, bgp-instance, peer, afi-safi)` | A, B | before a second address family or VRF-scoped session |
 | Passive-read admission control and fan-out limits | A, B | before any multi-device concurrent deployment |
 | Both-end session evidence | B | before escalation-grade output |

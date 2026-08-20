@@ -4,6 +4,20 @@
 candidates are marked and the operator picks. Companion to `design-thinking.md` (the
 tier hierarchy, D1–D20) and `MCP-EXPERIMENT.md` (what LM Studio taught).
 
+> **The model question this document treats as open (§7's "two-model station",
+> and the casual "LM Studio, 4B" throughout) was settled by operator decision
+> on 2026-08-19, months after this was written (B-495).** Production is
+> `qwen3.8-27b`; the test arm is `gemma-4-e4b`. Every other model named below
+> or elsewhere in this repo's history — `gemma-4-31b-it` chief among them — is
+> no longer a live candidate. The evidence the decision rests on is not this
+> document: it is `docs/build/MCP-EXPERIMENT.md` §11–§14b (kept, marked
+> historical from §11 onward rather than deleted) — §12/§13 are the paired-arm
+> comparison showing capability is not monotonic in model size, §14/§14b are
+> `qwen3.8-27b`'s premise-refusal and diagnostic behaviour, the property that
+> actually decided production. Tier I/II/III's feature proposals below are
+> otherwise unaffected by this — they were never about which model, only about
+> what surface a model (any model) navigates.
+
 ---
 
 ## 1. The synthesis, in one claim
@@ -52,6 +66,12 @@ down" — which is where the operator's *real* work starts.
 ## 3. Tier II — tools worth adding (typed contracts, no new authority)
 
 ### 3.1 `nettools watch DEVICE SUBJECT --seconds N` ★ — productise the round samplers
+
+**[Name since taken, 2026-08-20]** `nettools watch` shipped (W6) as a different
+command — `event_watch.py`'s read-only Loki-window preview (see the corrected
+note on item 2 of the candidate ranking below). The proposal in this
+subsection, a repeated-descent sampler, is unbuilt and would need a different
+name if the operator still wants it.
 
 Rounds 5, 7 and 8 each hand-built the same thing: a bounded, read-only loop invoking the
 descent and recording transitions. That is not test tooling — **it is the capability an
@@ -181,7 +201,12 @@ means adding items, never changing the rules about what the model may do with th
 ### Candidate ranking, if the operator wants a shortlist
 
 1. **`verify_fix`** — closes the operational loop; `PARTIAL` is the masked-fault detector.
-2. **`nettools watch`** — the samplers proved it; B-466 gets measured for free.
+2. ~~**`nettools watch`**~~ — **the name shipped, the proposal did not.** `nettools watch`
+   exists (W6), but as `event_watch.py`'s read-only dry-run preview — fetch a Loki
+   window, collapse repeated lines to one root cause, print a routing decision, never
+   call `investigate`. §3.1's repeated-descent sampler (one device+subject, watched at a
+   cadence, with B-466's skew distribution falling out) is a different capability under
+   a now-taken name; still open if the operator wants it, under a different command.
 3. **Optics rung** — the descent's missing physical layer.
 4. **The webhook listener** — completes an already-built loop end to end.
 5. **`fabric investigate`** — the daily-ritual surface.

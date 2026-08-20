@@ -22,7 +22,7 @@ path for that.
 
 ```bash
 make setup && source .venv/bin/activate
-make test      # the full suite (about 1,800 tests; the exact count moves — CI is authoritative)
+make test      # the full suite (about 3,200 tests; the exact count moves — CI is authoritative)
 make lint
 ```
 

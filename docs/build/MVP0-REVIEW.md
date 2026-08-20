@@ -150,7 +150,15 @@ So what the trial is evidence for is **discovery** — one live run found a hole
 
 **Why this one is worth flagging rather than quietly fixing.** It inverted a finding into its opposite and made the system look better tested than it was, in the document that serves as the M4 gate — the same failure `peer-review-response.md` §4 catalogued. Two of that section's corrections were applied to this file (§4, §5) and this sentence was not, because nobody was looking here. **A correction pass that fixes the claims it was handed does not find the ones it was not** (OBS-137).
 
-**What does this cost per investigation?** Not instrumented (B-425). ~5k tokens of prompt is a character-count proxy, response excluded. A number this project will be asked for and cannot currently give.
+**What does this cost per investigation?** ~~Not instrumented (B-425). ~5k tokens of
+prompt is a character-count proxy, response excluded. A number this project will be
+asked for and cannot currently give.~~ **B-425 shipped (checked 2026-08-20).**
+`TokenUsage`/`Completion` now carry real provider-reported usage through
+`complete_prompt`, into `InvestigationResult` and the payload. Measured live: **1 call,
+2,286 tokens (1,840 in / 446 out)** for a healthy investigation — about half the
+character-count proxy this review originally cited, which is itself the argument for
+measuring rather than estimating. `reported=False` distinguishes a provider that did
+not surface usage from a call that genuinely cost nothing.
 
 **Does any of this hold on a second vendor?** `cisco_iosxe` and `juniper_junos` are declared from documentation with no device to test against. The abstraction is honest in shape and unverified in fact.
 
