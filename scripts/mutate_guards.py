@@ -753,6 +753,25 @@ MUTATIONS = [
      "        if d.run_id is None:\n",
      "        if False:\n",
      "test_an_unknown_run_id_is_excluded_never_merged_despite_matching_cause"),
+
+    # ---- release-1.0 cleanup guards (Wave 2, CLI-A). ----
+
+    ("W3C-RUNID", "a ledger row carries the run_id of the ticket opened for "
+     "the same investigation",
+     "src/agent_nettools/cli.py",
+     "            run_id=run_id,\n",
+     "            run_id=None,\n",
+     "test_a_run_writes_a_ledger_row_carrying_a_real_run_id_and_cause_subject"),
+
+    ("W4D-EVIDENCE-FILTER", "a ticket's evidence-source sections are only "
+     "the evidence that actually fed the descent, not every observation "
+     "collected",
+     "src/agent_nettools/cli.py",
+     "                fed_the_descent = any(\n"
+     "                    ek == prefix or ek.startswith(prefix + \":\") for ek in evidence_keys\n"
+     "                )\n",
+     "                fed_the_descent = True\n",
+     "test_the_ticket_records_only_the_evidence_that_fed_the_descent"),
 ]
 
 

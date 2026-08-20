@@ -123,22 +123,23 @@ def test_notify_call_site_does_not_yet_pass_the_rca_fields():
         )
 
 
-def test_the_ledger_diagnosis_id_and_the_ticket_run_id_are_still_independent():
-    """§2/§7 both rely on this: a diagnosis is recorded in the ledger before
-    the ticket is even opened, and no run_id is threaded from one to the
-    other. If `_record_diagnosis_in_ledger` is ever called with a shared
-    id, that claim is stale."""
+def test_the_ticket_is_opened_before_the_ledger_write_and_shares_its_run_id():
+    """§2/§7's premise changed by design in the release-1.0 cleanup: wiring
+    every unwired capability (the operator's own instruction) included
+    threading the ticket's run_id into the ledger row, so a diagnosis and
+    its ticket can be joined later (`ticket_read.find_ticket_path_by_run_id`,
+    used by `nettools ledger verdict` to mirror a human's verdict into the
+    ticket's Outcome section). The ticket must therefore now open FIRST, so
+    its run_id exists in time to pass to the ledger call -- the reverse of
+    this test's pre-cleanup assertion."""
 
     source = inspect.getsource(cli._cmd_investigate)
     ledger_call = source.index("_record_diagnosis_in_ledger(")
     ticket_open = source.index("_open_ticket_for(")
-    # The ledger write happens first in the function body, textually --
-    # exactly what makes "the ticket's run_id can't have been passed to the
-    # ledger call, because the ticket doesn't exist yet" true.
-    assert ledger_call < ticket_open
+    assert ticket_open < ledger_call
 
-    call_line = source[ledger_call: source.index("\n", ledger_call)]
-    assert "run_id=" not in call_line
+    call_span = source[ledger_call: source.index(")\n", ledger_call)]
+    assert "run_id=" in call_span
 
 
 def test_record_diagnosis_has_no_outcome_parameter():
