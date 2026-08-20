@@ -1,0 +1,21 @@
+
+Wed Aug 19 14:08:06.891 UTC
+BGP router identifier 10.255.0.13, local AS number 65000
+BGP generic scan interval 60 secs
+Non-stop routing is enabled
+BGP table state: Active
+Table ID: 0x0
+BGP table nexthop route policy: 
+BGP main routing table version 122
+BGP NSR Initial initsync version 7 (Reached)
+BGP NSR/ISSU Sync-Group versions 0/0
+BGP scan interval 60 secs
+
+BGP is operating in STANDALONE mode.
+
+
+Process       RcvTblVer   bRIB/RIB   LabelVer  ImportVer  SendTblVer  StandbyVer
+Speaker             122        122        122        122         122           0
+
+Neighbor        Spk    AS MsgRcvd MsgSent   TblVer  InQ OutQ  Up/Down  St/PfxRcd
+10.255.0.31       0 65000    8668    8477      122    0    0    1d09h          3

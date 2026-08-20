@@ -1,0 +1,17 @@
+
+Wed Aug 19 14:08:03.354 UTC
+Cisco IOS XR Software, Version 7.11.2 LNT
+Copyright (c) 2013-2024 by Cisco Systems, Inc.
+
+Build Information:
+ Built By     : swtools
+ Built On     : Fri Mar 29 19:18:18 UTC 2024
+ Build Host   : iox-lnx-162
+ Workspace    : /auto/srcarchive11/prod/7.11.2/xrd-control-plane/ws/
+ Version      : 7.11.2
+ Label        : 7.11.2
+
+cisco XRd Control Plane
+cisco XRd-CP-C-01 processor with 256GB of memory
+PE1 uptime is 5 days, 20 hours, 50 minutes
+XRd Control Plane Container

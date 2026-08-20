@@ -1,0 +1,11 @@
+
+Wed Aug 19 14:07:59.203 UTC
+
+IS-IS CORE neighbors:
+System Id      Interface        SNPA           State Holdtime Type IETF-NSF
+P1             Gi0/0/0/0        *PtoP*         Up    21       L2   Capable 
+P4             Gi0/0/0/1        *PtoP*         Up    22       L2   Capable 
+P3             Gi0/0/0/2        *PtoP*         Up    22       L2   Capable 
+PE1            Gi0/0/0/3        *PtoP*         Up    20       L2   Capable 
+
+Total neighbor count: 4

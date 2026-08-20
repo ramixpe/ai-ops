@@ -84,7 +84,10 @@ nettools-mcp = "mcp_server.server:main"
 # data/prompts/*.txt: the six runtime-required prompt versions (EER-003) --
 # report.v1/v2, correlate.v1..v4. `.txt` needs its own entry; the yaml glob
 # above does not cover it.
-agent_nettools = ["data/*.yaml", "data/prompts/*.txt"]
+# data/fixtures/**/*.txt: the packaged demo fixture subset (EER-004) -- the
+# files the README-documented `--from-fixtures` commands actually read, not
+# the full tests/fixtures/ corpus. See fixtures.py's `_packaged_fixture_root`.
+agent_nettools = ["data/*.yaml", "data/prompts/*.txt", "data/fixtures/**/*.txt"]
 
 [tool.setuptools.packages.find]
 where = ["src", "."]

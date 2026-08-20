@@ -1,0 +1,151 @@
+
+Sun Aug 16 07:49:10.142 UTC
+
+BGP neighbor is 10.255.0.12
+ Remote AS 65000, local AS 65000, internal link
+ Remote router ID 0.0.0.0
+ Cluster ID 10.255.0.31
+  BGP state = Idle (No route to multi-hop neighbor)
+  Previous State: Closing
+  Last Received Message: KeepAlive
+  NSR State: None
+  BFD enabled (session down, BFD not configured on remote neighbor)
+  Last read 00:00:00, Last read before reset 00:08:03
+  Hold time is 180, keepalive interval is 60 seconds
+  Configured hold time: 180, keepalive: 60, min acceptable hold time: 3
+  Last write 00:05:03, attempted 21, written 21
+  Second last write 00:05:48, attempted 19, written 19
+  Last write before reset 00:05:48, attempted 19, written 19
+  Second last write before reset 00:06:48, attempted 49, written 49
+  Last write pulse rcvd  Aug 16 07:41:28.298 last full not set pulse count 7510
+  Last write pulse rcvd before reset 00:07:41
+  Socket not armed for io, not armed for read, not armed for write
+  Last write thread event before reset 00:05:24, second last 00:05:25
+  Last KA expiry before reset 00:05:48, second last 00:07:42
+  Last KA error before reset 00:00:00, KA not sent 00:00:00
+  Last KA start before reset 00:05:48, second last 00:06:48
+  Precedence: internet
+  Non-stop routing is enabled
+  Multi-protocol capability received
+  Received 3763 messages, 0 notifications, 0 in queue
+  Sent 3802 messages, 1 notifications, 0 in queue
+  Minimum time between advertisement runs is 0 secs
+  Inbound message logging enabled, 3 messages buffered
+  Outbound message logging enabled, 3 messages buffered
+
+ For Address Family: IPv4 Unicast
+  BGP neighbor version 0
+  Update group: 0.2 Filter-group: 0.0  No Refresh request being processed
+  Route-Reflector Client
+  NEXT_HOP is always this router
+  Route refresh request: received 0, sent 0
+  Policy for incoming advertisements is PASS
+  Policy for outgoing advertisements is PASS
+  0 accepted prefixes, 0 are bestpaths
+  Exact no. of prefixes denied : 0.
+  Cumulative no. of prefixes denied: 0. 
+  Prefix advertised 0, suppressed 0, withdrawn 0
+  AIGP is enabled
+  An EoR was received during read-only mode
+  Last ack version 0, Last synced ack version 0
+  Outstanding version objects: current 0, max 0, refresh 0
+  Additional-paths operation: None
+  Send Multicast Attributes
+  Advertise routes with local-label via Unicast SAFI
+  Slow Peer State: Detection-only
+    Detected state: FALSE, Detection threshold: 300
+    Detection Count: 0, Recovery Count: 0
+
+ For Address Family: VPNv4 Unicast
+  BGP neighbor version 0
+  Update group: 0.2 Filter-group: 0.0  No Refresh request being processed
+  Route-Reflector Client
+  Route refresh request: received 0, sent 0
+  Policy for incoming advertisements is PASS
+  Policy for outgoing advertisements is PASS
+  0 accepted prefixes, 0 are bestpaths
+  Exact no. of prefixes denied : 0.
+  Cumulative no. of prefixes denied: 0. 
+  Prefix advertised 0, suppressed 0, withdrawn 0
+  AIGP is enabled
+  An EoR was received during read-only mode
+  Last ack version 0, Last synced ack version 0
+  Outstanding version objects: current 0, max 2, refresh 0
+  Additional-paths operation: None
+  Send Multicast Attributes
+  Slow Peer State: Detection-only
+    Detected state: FALSE, Detection threshold: 300
+    Detection Count: 0, Recovery Count: 0
+
+ For Address Family: IPv6 Labeled-unicast
+  BGP neighbor version 0
+  Update group: 0.3 Filter-group: 0.0  No Refresh request being processed
+  Route-Reflector Client
+  NEXT_HOP is always this router
+  Route refresh request: received 0, sent 0
+  Policy for incoming advertisements is PASS
+  Policy for outgoing advertisements is PASS
+  0 accepted prefixes, 0 are bestpaths
+  Exact no. of prefixes denied : 0.
+  Cumulative no. of prefixes denied: 0. 
+  Prefix advertised 0, suppressed 0, withdrawn 0
+  AIGP is enabled
+  An EoR was received during read-only mode
+  Last ack version 0, Last synced ack version 0
+  Outstanding version objects: current 0, max 1, refresh 0
+  Additional-paths operation: None
+  Send Multicast Attributes
+  Slow Peer State: Detection-only
+    Detected state: FALSE, Detection threshold: 300
+    Detection Count: 0, Recovery Count: 0
+
+ For Address Family: VPNv6 Unicast
+  BGP neighbor version 0
+  Update group: 0.1 Filter-group: 0.0  No Refresh request being processed
+  Route-Reflector Client
+  Route refresh request: received 0, sent 0
+  Policy for incoming advertisements is PASS
+  Policy for outgoing advertisements is PASS
+  0 accepted prefixes, 0 are bestpaths
+  Exact no. of prefixes denied : 0.
+  Cumulative no. of prefixes denied: 0. 
+  Prefix advertised 0, suppressed 0, withdrawn 0
+  AIGP is enabled
+  An EoR was not received during read-only mode
+  Last ack version 0, Last synced ack version 0
+  Outstanding version objects: current 0, max 1, refresh 0
+  Additional-paths operation: None
+  Send Multicast Attributes
+  Slow Peer State: Detection-only
+    Detected state: FALSE, Detection threshold: 300
+    Detection Count: 0, Recovery Count: 0
+
+ For Address Family: L2VPN EVPN
+  BGP neighbor version 0
+  Update group: 0.2 Filter-group: 0.0  No Refresh request being processed
+  Route-Reflector Client
+  Route refresh request: received 0, sent 0
+  Policy for incoming advertisements is PASS
+  Policy for outgoing advertisements is PASS
+  0 accepted prefixes, 0 are bestpaths
+  Exact no. of prefixes denied : 0.
+  Cumulative no. of prefixes denied: 0. 
+  Prefix advertised 0, suppressed 0, withdrawn 0
+  AIGP is enabled
+  An EoR was received during read-only mode
+  Last ack version 0, Last synced ack version 0
+  Outstanding version objects: current 0, max 2, refresh 0
+  Additional-paths operation: None
+  Send Multicast Attributes
+  Slow Peer State: Detection-only
+    Detected state: FALSE, Detection threshold: 300
+    Detection Count: 0, Recovery Count: 0
+
+  Connections established 3; dropped 3
+  Local host: 10.255.0.31, Local port: 58844, IF Handle: 0x00000000
+  Foreign host: 10.255.0.12, Foreign port: 179
+  Last reset 00:05:03, due to BGP Notification sent: hold time expired
+  Time since last notification sent to neighbor: 00:05:03
+  Error Code: hold time expired
+  Notification data sent:
+    None
