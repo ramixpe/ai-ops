@@ -840,14 +840,38 @@ def run_intent(
 # -- and they are table stakes for troubleshooting, which is why the default
 # favors availability. Set to "0"/"false"/"no"/"off" to disable them entirely,
 # e.g. for a stricter deployment that wants zero device-generated traffic ever;
-# every other truthy-looking value (including unset) leaves them enabled.
+# unset leaves them enabled (unchanged default posture).
 NETTOOLS_ALLOW_ACTIVE_PROBES_ENV = "NETTOOLS_ALLOW_ACTIVE_PROBES"
 _FALSY_ENV_VALUES = frozenset({"0", "false", "no", "off"})
 
+# EER-008a: matches the sibling gates' own convention
+# (mcp_server.server._mcp_active_probes_allowed's _MCP_ACTIVE_PROBES_TRUTHY,
+# netbox.write_enabled's _WRITE_ENABLED_TRUTHY) -- a RECOGNISED truthy
+# spelling is required to enable, rather than "anything not recognised as
+# falsy" being enough.
+_ACTIVE_PROBES_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
 
 def _active_probes_allowed() -> bool:
-    value = os.getenv(NETTOOLS_ALLOW_ACTIVE_PROBES_ENV, "1").strip().lower()
-    return value not in _FALSY_ENV_VALUES
+    """Whether NETTOOLS_ALLOW_ACTIVE_PROBES permits ping/traceroute templates.
+
+    EER-008a: this used to be ``value not in _FALSY_ENV_VALUES``, so ANY
+    unrecognised spelling -- ``NETTOOLS_ALLOW_ACTIVE_PROBES=flase``, a plain
+    typo -- fell through to "allowed", silently defeating the one thing an
+    operator setting this var was trying to do (turn active probing off).
+    Fixed to fail closed: unset still defaults to enabled (the documented,
+    unchanged default), but once the var is actually SET, only a recognised
+    truthy spelling enables it; anything else -- including a typo of either
+    the truthy or the falsy spelling -- disables probes. The refusal is
+    never silent: every call site that checks this already composes a
+    message naming NETTOOLS_ALLOW_ACTIVE_PROBES and explaining how to enable
+    probes (see run_template/collect_evidence_and_templates/render_templates),
+    so a disabled-by-typo outcome is exactly as visible as a
+    deliberately-disabled one.
+    """
+
+    raw = os.getenv(NETTOOLS_ALLOW_ACTIVE_PROBES_ENV, "1")
+    return raw.strip().lower() in _ACTIVE_PROBES_TRUTHY
 
 
 def _unsupported_template_result(

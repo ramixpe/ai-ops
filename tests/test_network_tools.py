@@ -419,7 +419,7 @@ def test_ping_and_traceroute_are_active_probes_gated_by_environment(monkeypatch)
     assert result["status"] == "success"
 
 
-def test_active_probe_gate_accepts_common_falsy_spellings(monkeypatch):
+def test_active_probe_gate_accepts_common_falsy_and_truthy_spellings(monkeypatch):
     set_device_environment(monkeypatch)
 
     def recording_sender(device, command):
@@ -430,10 +430,36 @@ def test_active_probe_gate_accepts_common_falsy_spellings(monkeypatch):
         result = ping_device("PE1", "10.255.0.31", sender=recording_sender)
         assert result["status"] == "error", f"{falsy!r} should disable active probes"
 
-    for truthy in ("1", "true", "yes", "anything-else"):
+    # Positive control (OBS-181): a RECOGNISED truthy spelling really does
+    # still enable probes -- the refusal tests below would be meaningless if
+    # everything refused regardless of value.
+    for truthy in ("1", "true", "TRUE", "yes", "on"):
         monkeypatch.setenv(NETTOOLS_ALLOW_ACTIVE_PROBES_ENV, truthy)
         result = ping_device("PE1", "10.255.0.31", sender=recording_sender)
         assert result["status"] == "success", f"{truthy!r} should leave active probes enabled"
+
+
+def test_active_probe_gate_fails_closed_on_an_unrecognised_value(monkeypatch):
+    """EER-008a: ``_active_probes_allowed`` used to be ``value not in
+    _FALSY_ENV_VALUES``, so a typo of the falsy spelling (e.g. "flase") fell
+    through to "allowed" -- the exact opposite of what an operator setting
+    this var was trying to do. An unrecognised SET value must now disable
+    probes, same as a recognised falsy one; only unset keeps the original
+    enabled-by-default posture."""
+
+    set_device_environment(monkeypatch)
+
+    def recording_sender(device, command):
+        return "output"
+
+    for garbled in ("flase", "yebs", "disable", "2", ""):
+        if garbled == "":
+            monkeypatch.delenv(NETTOOLS_ALLOW_ACTIVE_PROBES_ENV, raising=False)
+        else:
+            monkeypatch.setenv(NETTOOLS_ALLOW_ACTIVE_PROBES_ENV, garbled)
+        result = ping_device("PE1", "10.255.0.31", sender=recording_sender)
+        expected = "success" if garbled == "" else "error"
+        assert result["status"] == expected, f"{garbled!r} unexpected status {result['status']!r}"
 
 
 def test_get_route_bgp_neighbor_interface_logging_use_the_expected_commands(monkeypatch):
