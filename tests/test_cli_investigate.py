@@ -703,6 +703,32 @@ def test_the_ledger_run_id_matches_the_tickets_own_run_id(monkeypatch, tmp_path)
 
 
 # --------------------------------------------------------------------------- #
+# W4a -- the ticket records how the raw question became the resolved intent
+# --------------------------------------------------------------------------- #
+
+
+def test_the_ticket_records_the_resolved_intent(monkeypatch, tmp_path):
+    """`record_intent` fires once per ticket, carrying the resolved flow and
+    subject and the literal resolver name the CLI path always uses (it never
+    passes `resolver=` to `investigate()`, so `investigate()`'s own
+    `resolve = resolver or inventory_resolver` always falls through to the
+    module default)."""
+
+    from agent_nettools import ticket
+
+    _main(ARGS, monkeypatch)
+
+    files = sorted((tmp_path / "tickets").glob("*.md"))
+    assert len(files) == 1
+    parsed = ticket.read_ticket(files[0])
+
+    assert parsed["intent"] is not None
+    assert parsed["intent"]["flow"] == "bgp_session"
+    assert parsed["intent"]["resolved_subject"] == "10.255.0.12"
+    assert parsed["intent"]["resolver"] == "inventory_resolver"
+
+
+# --------------------------------------------------------------------------- #
 # B-407 -- session memory wiring
 #
 # `session_memory.py` shipped with the exact call this wiring makes already

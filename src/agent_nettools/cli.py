@@ -593,6 +593,17 @@ def _record_in_ticket(handle, args, result, subject, flow, question=None, analys
         if question is not None:
             handle.record_question(question, device=getattr(args, "device", None),
                                    subject=subject, flow_hint=flow)
+        # W4a: how the raw question became this resolved intent. `resolver`
+        # is hardcoded to the literal "inventory_resolver" -- not a value
+        # this function invents, but the one true fact of the CLI path:
+        # `_cmd_investigate` never passes `resolver=` to `investigate()`
+        # (see that call, a few lines above this one's own caller), so
+        # `investigate()`'s own `resolve = resolver or inventory_resolver`
+        # always falls through to the module-level default here. Nothing on
+        # `InvestigationResult` names which resolver ran, so a caller-
+        # supplied `resolver=` (were the CLI ever to grow one) would need a
+        # new field to report honestly instead of this literal.
+        handle.record_intent(flow=flow, resolved_subject=subject, resolver="inventory_resolver")
         sessions = getattr(result, "session_summary", None)
         if sessions:
             commands_by_device = (sessions.get("commands_run") or {}).get("by_device") or {}
