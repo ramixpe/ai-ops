@@ -162,7 +162,6 @@ def _capturable_interfaces(evidence: dict[str, Any]) -> list[str]:
 
 
 def template_manifest_for(
-    device_name: str,
     *,
     interfaces: list[str],
     router_id: str | None = None,
@@ -172,6 +171,15 @@ def template_manifest_for(
     Implements docs/build/capture-manifest.md section 5b. Returned as
     ``(template_name, params)`` pairs for ``run_templates``, which validates
     every one of them by reconstruction before any credential is loaded.
+
+    Takes no device identity of its own -- ``router_id`` (to skip a device's
+    own loopback and pick its ping/traceroute target) and ``interfaces`` (the
+    per-interface entries) are the only per-device facts this manifest is
+    built from. A ``device_name`` parameter was here through B-511-era
+    callers and never read in this body (unused-params sweep, release-1.0
+    cleanup); all four callers -- the one production call site and three
+    direct test calls -- passed a string whose value never once reached an
+    assertion or a manifest entry.
     """
 
     manifest: list[tuple[str, dict[str, str]]] = []
@@ -296,7 +304,6 @@ def capture_device(
 
         entry = find_device(device_name)
         manifest = template_manifest_for(
-            device_name,
             interfaces=_capturable_interfaces(evidence),
             router_id=getattr(entry, "router_id", None),
         )

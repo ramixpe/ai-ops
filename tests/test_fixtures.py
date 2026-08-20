@@ -330,7 +330,7 @@ def test_template_manifest_skips_the_devices_own_loopback():
 
     from agent_nettools.fixtures import template_manifest_for
 
-    manifest = template_manifest_for("RR1", interfaces=[], router_id="10.255.0.31")
+    manifest = template_manifest_for(interfaces=[], router_id="10.255.0.31")
     addresses = [p.get("address") for _n, p in manifest if _n == "bgp_neighbor"]
 
     assert "10.255.0.31" not in addresses
@@ -342,8 +342,8 @@ def test_template_manifest_probes_a_different_target_from_rr1():
 
     from agent_nettools.fixtures import template_manifest_for
 
-    rr1 = dict(template_manifest_for("RR1", interfaces=[], router_id="10.255.0.31"))
-    pe1 = dict(template_manifest_for("PE1", interfaces=[], router_id="10.255.0.11"))
+    rr1 = dict(template_manifest_for(interfaces=[], router_id="10.255.0.31"))
+    pe1 = dict(template_manifest_for(interfaces=[], router_id="10.255.0.11"))
 
     assert rr1["ping"] == {"address": "10.255.0.11"}
     assert pe1["ping"] == {"address": "10.255.0.31"}
