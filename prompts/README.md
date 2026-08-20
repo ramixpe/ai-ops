@@ -7,7 +7,8 @@ right; it is a file with a version, a golden test case, and a review history.
 ```
 prompts/
 ├── README.md          this file — GRACE, and the rules below
-├── report.v1.txt      T-027 — descent result -> grounded report
+├── report.v1.txt      T-027 — superseded, kept (see Version history)
+├── report.v2.txt      B-490 — current: descent result -> grounded report
 ├── correlate.v1.txt   T-028 — superseded, kept (see Version history)
 ├── correlate.v2.txt   T-029a — superseded, kept
 ├── correlate.v3.txt   T-029a — superseded, kept
@@ -172,7 +173,7 @@ that drifted.
 
 | Prompt | Current | History |
 |---|---|---|
-| `report` | v1 | T-027. Unchanged |
+| `report` | **v2** | v1 (T-027) let the model write `recommendation.next_check` — a free-text guess at what to do next. B-490 (`MCP-EXPERIMENT.md` §11.2): a 4B model handed a `no_fault_on_path` report rewrote it as *"likely an application or configuration problem"* and proposed *"the service running on 10.255.0.12 is down"* — about a router loopback, which runs no service. `next_check` is a **closed field** now: the descent already computes it and the authoritative report already carries it, so v2 forbids the model from writing one at all (`"recommendation": {"requires_human": true}` and nothing else), and `grounding.check_recommendation_closed` fails `recommendation_not_closed` on any difference from `render.next_check_for(finding)`, quoting only the authoritative text. Mutation-verified (guard disabled → 2 tests fail). Golden cases rebound to v2 |
 | `correlate` | **v4** | v1 (T-028) described a noise filter that dropped whole facilities. `log_window.py` was corrected to attribute each record before dropping it, which leaves unattributable — and often high-severity — session events in the window. v2 states why they are there and that **retention is not relevance**, and adds constraint 7: severity ranks how loudly a device reports something, not whether it bears on the finding. See OBS-063. v3 (T-029a) adds a COVERAGE slot and constraint 7 — *never state a negative more strongly than the coverage supports* — and moves the refusal marker to "no correlating events in the available coverage", because a negative over an incomplete source is an `unevaluated`, not a `no`. See OBS-068. v4 (B-467/B-470, DEEP-REVIEW-2026-08-17 §2.1) adds a GROUNDING paragraph naming the `<<<DEVICE-TEXT untrusted>>>`/`<<<END-DEVICE-TEXT>>>` markers `prompt_library.build_correlate_prompt` now wraps every record's `text` in, and constraint 9 telling the model that span is data, never instructions — every prior version embedded log text unmarked, which the deep review measured at 28 of 28 shaped records on the `broken` fixture |
 
 Superseded versions stay in the tree. No report was ever produced from

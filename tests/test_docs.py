@@ -116,6 +116,27 @@ def _registered_tool_names() -> set[str]:
     }
 
 
+def test_readme_mentions_the_newest_subcommands():
+    """A README that never mentions a shipped capability is the same defect
+    class as a stale claim, just the other direction.
+
+    This doesn't try to be exhaustive over all 37 `nettools` subcommands --
+    that would just be `test_readme_lists_exactly_the_approved_commands_per_
+    platform` rewritten badly, and CLI subcommands are not the per-platform
+    allowlist that test defends. It pins only the newest, highest-value
+    additions, on the theory that a doc that has gone stale does so at the
+    leading edge first: `nettools watch` (event-driven dry-run preview),
+    `investigate --reconcile-config` (the config axis, B-104/B-106), and
+    `health --silence-file` (W2b) all shipped without a single mention landing
+    in README.md, caught only by a docs-cleanup pass reading the CLI by hand.
+    """
+
+    readme = _readme()
+    assert "nettools watch" in readme, "README never mentions the `watch` subcommand"
+    assert "--reconcile-config" in readme, "README never mentions `investigate --reconcile-config`"
+    assert "--silence-file" in readme, "README never mentions `health --silence-file`"
+
+
 def test_the_devices_doc_generator_still_renders_from_the_inventory():
     """`docs/devices.md` was deleted at M0 (2026-08-18, operator sign-off): a
     generated file committed beside its generator is a second copy that can
