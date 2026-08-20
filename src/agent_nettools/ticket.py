@@ -181,6 +181,12 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
+from ._persist import (
+    _SECURE_FILE_MODE,
+    _require_nonempty_str,
+    _secure_mkdir,
+    _timestamp_now,
+)
 
 #: The human verdict on one ticket's answer. Deliberately the same three
 #: spellings `ledger.py` uses for the same concept (a human confirming
@@ -280,29 +286,15 @@ _PROMPT_SIDECAR_DIRNAME = "_prompts"
 #: degrading. See `_claim_path`'s own docstring.
 _MAX_PATH_ATTEMPTS = 25
 
-# EER-019: a ticket is "full model prompts/responses" per this module's own
-# docstring, plus device evidence quoted into `record_answer`/`record_tool_
-# event` -- the most sensitive durable output this project writes. Owner-only
-# is the fixed default; see `evidence_store._secure_mkdir`'s docstring (same
-# module family) for why the directory chmod happens on every call rather
-# than only at first creation.
-_SECURE_DIR_MODE = 0o700
-_SECURE_FILE_MODE = 0o600
-
-
-def _secure_mkdir(directory: Path) -> None:
-    directory.mkdir(parents=True, exist_ok=True)
-    os.chmod(directory, _SECURE_DIR_MODE)
-
-
-def _timestamp_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _require_nonempty_str(name: str, value: Any) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{name} must be a non-empty string, got {value!r}")
-    return value
+# EER-015: `_SECURE_DIR_MODE`/`_SECURE_FILE_MODE`/`_secure_mkdir`,
+# `_timestamp_now` and `_require_nonempty_str` used to be defined here,
+# byte-identically, in up to three of `evidence_store.py`/`ledger.py`/
+# `session_memory.py` too. Collapsed into `_persist.py` -- see its module
+# docstring for the exact duplication count and why importing that leaf
+# module does not reopen the "don't hard-import a sibling that's plausibly
+# mid-edit" risk this module's own docstring names for `ledger.py`.
+# `_require_nonneg_int` below stays local: it never duplicated, so there was
+# nothing to collapse.
 
 
 def _require_nonneg_int(name: str, value: Any) -> int:

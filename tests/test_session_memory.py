@@ -251,7 +251,8 @@ def test_only_one_file_exists_per_session_after_multiple_turns(tmp_path):
 #
 # Both modes below come from `_atomic_write_text`'s mkstemp (files) and
 # `_secure_mkdir`'s explicit `os.chmod` (directories) -- see
-# `evidence_store._secure_mkdir`'s docstring for why that makes these exact
+# `_persist._secure_mkdir`'s docstring (EER-015: the shared implementation
+# every module in this family imports) for why that makes these exact
 # assertions rather than "no group/other bits", with no umask fixture needed.
 # --------------------------------------------------------------------------- #
 

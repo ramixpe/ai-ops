@@ -208,12 +208,17 @@ def validate_prewalk_collection(flow: flows.Flow) -> None:
 
 
 def _wall_clock_now() -> str:
-    """UTC ISO-8601, this module's own copy of the one-liner `ticket.py`,
-    `ledger.py` and `network_tools.py` each already define independently
-    (`_timestamp_now`/`_timestamp`) rather than importing one another's --
-    same convention, restated here for the same reason: a private helper this
-    small is cheaper to repeat than to couple two modules that do not
-    otherwise depend on each other."""
+    """UTC ISO-8601, this module's own copy of the one-liner
+    `network_tools.py`'s `_timestamp` still defines independently, and
+    `ticket.py`/`ledger.py`/`evidence_store.py`/`session_memory.py`'s
+    `_timestamp_now` defined independently before EER-015 collapsed those
+    four into `_persist._timestamp_now`. `_persist.py` was left out of that
+    collapse deliberately: it is a small utility leaf, not a sibling with
+    logic of its own, but importing it here would still make `epoch.py` --
+    which this project keeps model-call-free and dependency-light on
+    purpose -- pull in a module whose docstring is scoped to a different
+    extraction's reasoning. Same "cheaper to repeat than to couple" trade as
+    always, restated for this one remaining copy."""
 
     return datetime.now(timezone.utc).isoformat()
 
