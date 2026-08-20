@@ -91,6 +91,7 @@ def test_build_parser_includes_every_documented_subcommand():
         "metrics",
         "version",
         "inspect",
+        "watch",
     ):
         assert name in choices
 
@@ -1173,3 +1174,172 @@ def test_cmd_sr_policy_refuses_a_malformed_policy_id_before_calling_run_template
 
     assert called == [], "run_template must never fire for a malformed policy id"
     assert exit_code == cli.EXIT_WARNING
+
+
+# --------------------------------------------------------------------------- #
+# `nettools watch` (W6) -- the read-only event_watch.py dry-run surface,
+# reachable through the CLI. `_cmd_watch` imports `watch_device`/
+# `watch_fabric` lazily from `.event_watch`, so these tests patch the real
+# module-level functions on `agent_nettools.event_watch` -- the same seam
+# `tests/test_event_watch.py` itself already uses for its own `_main` tests
+# -- rather than a `cli.watch_device` attribute that does not exist.
+# --------------------------------------------------------------------------- #
+
+
+def _watch_report(device, *, status="success", routable=False, errors=()):
+    from agent_nettools import event_routing, event_watch
+
+    observations = ()
+    if status == "success":
+        decision = event_routing.RoutingDecision(
+            routable=routable, source_kind="loki", matched="PKT_INFRA-LINK-3-UPDOWN",
+            device=device,
+            flow="interface" if routable else None,
+            subject="GigabitEthernet0/0/0/0" if routable else None,
+            reason="test fixture",
+        )
+        observations = (event_watch.LokiObservation(decision, 1, "t1", "t1"),)
+    return event_watch.WatchReport(
+        device=device, status=status, coverage={"source": "loki"} if status == "success" else None,
+        observations=observations, errors=tuple(errors),
+    )
+
+
+def test_watch_single_device_positive_control_something_routes(monkeypatch, capsys):
+    """A routable observation on the one named device exits WARNING (1) --
+    "something would fire" -- and the emitted JSON carries the report."""
+
+    from agent_nettools import event_watch
+
+    monkeypatch.setattr(
+        event_watch, "watch_device",
+        lambda device, **kw: _watch_report(device, routable=True),
+    )
+    parser = cli.build_parser()
+    args = parser.parse_args(["watch", "PE1"])
+
+    code = args.func(args)
+    out = json.loads(capsys.readouterr().out)
+
+    assert code == cli.EXIT_WARNING
+    assert out["tool"] == "watch"
+    assert out["routable_count"] == 1
+    assert out["reports"][0]["device"] == "PE1"
+    assert out["reports"][0]["observations"][0]["routable"] is True
+
+
+def test_watch_single_device_nothing_routable_exits_ok_positive_control(monkeypatch, capsys):
+    """Positive control (OBS-181) for the test above: no routable observation
+    must exit OK, proving the WARNING above is a real signal, not always-on."""
+
+    from agent_nettools import event_watch
+
+    monkeypatch.setattr(
+        event_watch, "watch_device",
+        lambda device, **kw: _watch_report(device, routable=False),
+    )
+    parser = cli.build_parser()
+    args = parser.parse_args(["watch", "PE1"])
+
+    code = args.func(args)
+    out = json.loads(capsys.readouterr().out)
+
+    assert code == cli.EXIT_OK
+    assert out["routable_count"] == 0
+
+
+def test_watch_all_calls_watch_fabric_and_aggregates_routable_count(monkeypatch, capsys):
+    from agent_nettools import event_watch
+
+    reports = (
+        _watch_report("PE1", routable=True),
+        _watch_report("PE2", routable=False),
+    )
+    monkeypatch.setattr(event_watch, "watch_fabric", lambda **kw: reports)
+    parser = cli.build_parser()
+    args = parser.parse_args(["watch", "--all"])
+
+    code = args.func(args)
+    out = json.loads(capsys.readouterr().out)
+
+    assert code == cli.EXIT_WARNING
+    assert out["routable_count"] == 1
+    assert [r["device"] for r in out["reports"]] == ["PE1", "PE2"]
+
+
+def test_watch_all_devices_erroring_exits_critical(monkeypatch, capsys):
+    """Every device's fetch failed -- the "could not run at all" bucket,
+    matching `event_watch._main`'s own 2-exit for the identical case."""
+
+    from agent_nettools import event_watch
+
+    reports = (
+        _watch_report("PE1", status="error", errors=("loki unreachable",)),
+        _watch_report("PE2", status="error", errors=("loki unreachable",)),
+    )
+    monkeypatch.setattr(event_watch, "watch_fabric", lambda **kw: reports)
+    parser = cli.build_parser()
+    args = parser.parse_args(["watch", "--all"])
+
+    code = args.func(args)
+
+    assert code == cli.EXIT_CRITICAL
+
+
+def test_watch_since_seconds_and_limit_are_threaded_through(monkeypatch):
+    from agent_nettools import event_watch
+
+    captured = {}
+
+    def fake_watch_device(device, **kw):
+        captured.update(kw)
+        return _watch_report(device)
+
+    monkeypatch.setattr(event_watch, "watch_device", fake_watch_device)
+    parser = cli.build_parser()
+    args = parser.parse_args(["watch", "PE1", "--since-seconds", "60", "--limit", "10"])
+
+    args.func(args)
+
+    assert captured["since_seconds"] == 60
+    assert captured["limit"] == 10
+
+
+def test_watch_is_read_only_never_touches_ticket_or_ledger():
+    """Structural guard (matches tests/test_oncall_runbook.py's own style):
+    `_cmd_watch` must have no import path to ticket/ledger writes -- this
+    command is named for observation only, per event_watch.py's own "What
+    this module is not"."""
+
+    import inspect
+
+    source = inspect.getsource(cli._cmd_watch)
+    for needle in (
+        "import ticket", "import ledger", "_open_ticket_for", "_record_in_ticket",
+        "_record_diagnosis_in_ledger", "_ledger_for_cli", "investigate(",
+    ):
+        assert needle not in source, needle
+
+
+def test_watch_end_to_end_through_a_fake_http_fetcher(monkeypatch, capsys):
+    """The deeper, fully-real pass: no `watch_device`/`watch_fabric` patch at
+    all -- only Loki's own HTTP layer (`logs_loki._http_fetcher`) is faked,
+    so this exercises the real event_watch grouping/decision code, invoked
+    through the real `nettools watch` CLI path end to end."""
+
+    from agent_nettools import logs_loki
+
+    def fake_http_fetcher(base_url, params):
+        return {"status": "success", "data": {"resultType": "streams", "result": []}}
+
+    monkeypatch.setattr(logs_loki, "_http_fetcher", fake_http_fetcher)
+    parser = cli.build_parser()
+    args = parser.parse_args(["watch", "PE1"])
+
+    code = args.func(args)
+    out = json.loads(capsys.readouterr().out)
+
+    # An empty window is a real success with nothing to route -- not an error.
+    assert code == cli.EXIT_OK
+    assert out["reports"][0]["status"] == "success"
+    assert out["reports"][0]["observations"] == []

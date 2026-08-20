@@ -30,6 +30,7 @@ Exposed as the ``nettools`` console script. Subcommands:
     nettools capture [DEVICE ...] [--all] [--label t0] [--out DIR] [--no-scrub] [--templates]
     nettools learn-topology [--from-fixtures|--live] [--label t0] [--out PATH] [--write]
     nettools health [DEVICE ...] [--all] [--from-fixtures] [--label t0] [--min-severity S]
+                    [--silence-file PATH]
     nettools baseline pin [DEVICE] [--from-latest]
     nettools baseline show [DEVICE]
     nettools flaps [DEVICE]
@@ -39,6 +40,9 @@ Exposed as the ``nettools`` console script. Subcommands:
     nettools config show
     nettools config check [--quiet]
     nettools route-event [--file PATH] [--device DEVICE]
+    nettools watch [DEVICE] [--all] [--since-seconds N] [--limit N]
+                   (read-only dry run -- never runs investigate, never opens
+                   a ticket; W6)
     nettools inspect [DEVICE]
     nettools version
 
@@ -1616,6 +1620,44 @@ def _cmd_route_event(args: argparse.Namespace) -> int:
     return EXIT_OK if any(d.routable for d in decisions) else EXIT_WARNING
 
 
+def _cmd_watch(args: argparse.Namespace) -> int:
+    """W6: the read-only dry-run surface `event_watch.py` already builds,
+    reachable through `nettools` instead of only `python -m agent_nettools.
+    event_watch`. **Never runs `investigate`, never opens a ticket, never
+    writes anything** -- `watch_device`/`watch_fabric` fetch a Loki window,
+    collapse repeated lines from one root cause, and return a routing
+    DECISION, never a call (see event_watch.py's own module docstring,
+    "What this module is not"). This command only prints that decision.
+
+    Exit codes follow this project's own scheme, applied to the same three
+    outcomes `event_watch._main` already distinguishes: 2 -- every device's
+    fetch failed, so nothing here is trustworthy (the "could not run at all"
+    bucket); 1 -- at least one collapsed group is routable (something WOULD
+    fire, if a human wired this up to `investigate`); 0 -- ran cleanly and
+    nothing is routable.
+    """
+
+    from .event_watch import watch_device, watch_fabric
+
+    if args.all:
+        reports = watch_fabric(since_seconds=args.since_seconds, limit=args.limit)
+    else:
+        device = _resolve_device(args.device)
+        reports = (watch_device(device, since_seconds=args.since_seconds, limit=args.limit),)
+
+    _emit({
+        "tool": "watch",
+        "reports": [r.as_dict() for r in reports],
+        "routable_count": sum(r.routable_count() for r in reports),
+    }, args)
+
+    if reports and all(r.status == "error" for r in reports):
+        return EXIT_CRITICAL
+    if sum(r.routable_count() for r in reports):
+        return EXIT_WARNING
+    return EXIT_OK
+
+
 def _cmd_version(args: argparse.Namespace) -> int:
     import platform as platform_module
 
@@ -2171,6 +2213,29 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_output_arguments(p_route)
     p_route.set_defaults(func=_cmd_route_event)
+
+    p_watch = sub.add_parser(
+        "watch",
+        help="Read-only dry run: fetch each device's recent Loki window, collapse "
+             "repeated lines from one root cause, and print what WOULD route. "
+             "Never runs investigate, never opens a ticket -- a human reads this.",
+    )
+    p_watch.add_argument("device", nargs="?", help="Device name; defaults to PE1 (or use --all).")
+    p_watch.add_argument("--all", action="store_true", help="Watch every inventory device.")
+    # Defaults mirror `event_watch.DEFAULT_WATCH_WINDOW_SECONDS`/`DEFAULT_WATCH_LIMIT`
+    # literally rather than importing that module at parser-build time -- the
+    # values themselves are what a --help reader needs, and `_cmd_watch` below
+    # already imports the real module lazily, only when `watch` actually runs.
+    p_watch.add_argument(
+        "--since-seconds", type=int, default=900,
+        help="Lookback window in seconds (default: 900).",
+    )
+    p_watch.add_argument(
+        "--limit", type=int, default=500,
+        help="Maximum log lines fetched per device (default: 500).",
+    )
+    _add_output_arguments(p_watch)
+    p_watch.set_defaults(func=_cmd_watch)
 
     p_version = sub.add_parser("version", help="Print the installed nettools version.")
     _add_output_arguments(p_version)
