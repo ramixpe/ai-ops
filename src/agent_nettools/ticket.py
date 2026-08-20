@@ -832,22 +832,41 @@ class Ticket:
         self,
         *,
         chars_sent: int,
-        chars_withheld: int = 0,
+        chars_withheld: int | None = None,
         per_section_chars: dict[str, int] | None = None,
         notes: str | None = None,
         extra: dict[str, Any] | None = None,
     ) -> TicketWriteResult:
         """What actually crossed into a model prompt, and what did not --
-        the `evidence_budget.py`/grounding "withheld" shape, measured in
-        characters (this project's own established proxy for tokens; see
-        `evidence_budget.py`). `chars_withheld` includes both truncation
-        (`evidence_budget._truncate_middle`) and an outright withheld
-        paraphrase (`investigation.py`'s `WITHHELD` status) -- the caller
-        knows which, this field only needs the total a reader can weigh
-        against `chars_sent`."""
+        the `evidence_budget.py` "withheld" shape, measured in characters
+        (this project's own established proxy for tokens; see
+        `evidence_budget.py`). `chars_withheld` is specifically INPUT
+        truncation (`evidence_budget._truncate_middle`, reachable today only
+        via `evidence_budget.budget_device_evidence`/`budget_fabric_evidence`,
+        called from `fabric_analysis.py`/`model_egress.py` -- NOT from
+        `investigation.py`'s `investigate()` path). It is deliberately never
+        `paraphrase_status == WITHHELD`: that is `investigation.py` rejecting
+        the model's OUTPUT on grounding failure, a fact about what came back,
+        not about what was withheld going in, and conflating the two would
+        misreport a rejected answer as a truncated prompt.
+
+        `chars_withheld` defaults to `None`, not `0` -- the identical fix
+        `record_device_interaction`'s `retries` already made and documents in
+        full: a caller on a path with no evidence-budget mechanism in it at
+        all (today, every caller reaching this method through
+        `investigation.investigate()`) has no truncation to report, and `0`
+        there would claim "measured, and nothing was withheld" when the truer
+        fact is "this path never runs anything that could withhold". Pass an
+        actual int only when `budget_device_evidence`/`budget_fabric_evidence`
+        (or an equivalent real accounting) actually ran; `None` means "not
+        measured," matching `chars_withheld`'s new default and every other
+        "not measured" field this module already carries
+        (`record_device_interaction`'s `retries`, `record_model_exchange`'s
+        `tokens`/`grounding_ok`)."""
 
         chars_sent = _require_nonneg_int("chars_sent", chars_sent)
-        chars_withheld = _require_nonneg_int("chars_withheld", chars_withheld)
+        if chars_withheld is not None:
+            chars_withheld = _require_nonneg_int("chars_withheld", chars_withheld)
         fields = _merge_extra(
             {
                 "chars_sent": chars_sent, "chars_withheld": chars_withheld,

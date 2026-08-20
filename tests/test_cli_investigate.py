@@ -736,8 +736,15 @@ def test_the_ticket_records_the_resolved_intent(monkeypatch, tmp_path):
 
 def test_the_context_footprint_is_zero_when_no_model_ran(tmp_path, monkeypatch):
     """`--from-fixtures` with no `--paraphrase` makes no model call at all
-    (`result.exchanges` is empty) -- a TRUE zero, not a stand-in for one
-    never measured, since nothing really was sent."""
+    (`result.exchanges` is empty) -- `chars_sent` is a TRUE zero, not a
+    stand-in for one never measured, since nothing really was sent.
+
+    `chars_withheld` is `None`, not `0`: no evidence-budget mechanism runs on
+    the `investigate()` path today (verified against `evidence_budget.py`'s
+    own callers), so there is nothing to honestly measure as zero -- `0`
+    would claim a measurement that never happened. See `ticket.py`'s
+    `record_context_footprint` docstring and B-506's identical fix for
+    `record_device_interaction`'s `retries`."""
 
     from agent_nettools import ticket
 
@@ -749,9 +756,7 @@ def test_the_context_footprint_is_zero_when_no_model_ran(tmp_path, monkeypatch):
 
     assert parsed["context_footprint"] is not None
     assert parsed["context_footprint"]["chars_sent"] == 0
-    # No evidence-budget mechanism runs on this path today (verified against
-    # evidence_budget.py's own callers) -- honestly 0, not fabricated.
-    assert parsed["context_footprint"]["chars_withheld"] == 0
+    assert parsed["context_footprint"]["chars_withheld"] is None
 
 
 def test_the_context_footprint_sums_every_exchanges_user_payload(monkeypatch, capsys, tmp_path):
@@ -785,7 +790,8 @@ def test_the_context_footprint_sums_every_exchanges_user_payload(monkeypatch, ca
     parsed = ticket.read_ticket(files[0])
 
     assert parsed["context_footprint"]["chars_sent"] == 42
-    assert parsed["context_footprint"]["chars_withheld"] == 0
+    # Not measured on this path -- see the sibling test's docstring.
+    assert parsed["context_footprint"]["chars_withheld"] is None
 
 
 # --------------------------------------------------------------------------- #

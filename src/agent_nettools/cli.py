@@ -852,18 +852,24 @@ def _record_in_ticket(handle, args, result, subject, flow, question=None, analys
         # `user_payload` (0 when `result.exchanges` is empty, e.g.
         # `--no-model`/`--from-fixtures` with no `--paraphrase`, which is a
         # true zero, not a stand-in for one never taken).
-        # `chars_withheld` is honestly `0` here, always: no evidence-budget
-        # mechanism (`evidence_budget.budget_device_evidence`/
-        # `budget_fabric_evidence`) runs on the `investigate()` path today --
-        # verified by reading `evidence_budget.py`'s only callers
-        # (`fabric_analysis.py`/`model_egress.py`) -- so there is no real
-        # input-truncation signal to report. This is deliberately NOT
+        # `chars_withheld` is `None` here, always -- NOT `0`. `0` would claim
+        # "measured, and nothing was withheld"; the true fact on this path is
+        # "not measured at all". No evidence-budget mechanism
+        # (`evidence_budget.budget_device_evidence`/`budget_fabric_evidence`)
+        # runs on the `investigate()` path today -- verified by reading
+        # `evidence_budget.py`'s only callers (`fabric_analysis.py`/
+        # `model_egress.py`) and `investigation.py`'s own imports, which pull
+        # in neither -- so there is no real input-truncation signal to
+        # report, the identical "no seam carries this measurement" shape
+        # `record_device_interaction`'s `retries` documents for itself (see
+        # `ticket.py`'s `record_context_footprint` docstring, updated
+        # alongside this call). This is deliberately NOT
         # `paraphrase_status == WITHHELD`: that describes the model's OUTPUT
         # being rejected by grounding, a different fact from something
         # withheld from its INPUT, and conflating the two would misreport a
         # rejected answer as a truncated prompt.
         chars_sent = sum(len(exchange.user_payload) for exchange in getattr(result, "exchanges", ()))
-        handle.record_context_footprint(chars_sent=chars_sent, chars_withheld=0)
+        handle.record_context_footprint(chars_sent=chars_sent, chars_withheld=None)
         # Every model exchange, recorded verbatim. This is the half of the
         # flight recorder that was missing: the deterministic path was well
         # instrumented and the model path invisible, which is backwards for
