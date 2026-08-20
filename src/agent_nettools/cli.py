@@ -1413,16 +1413,17 @@ def _cmd_health(args: argparse.Namespace) -> int:
     else:
         evidence_by_device = {name: collect_evidence(name) for name in names}
 
-    # W1 (release-1.0 cleanup): every finding still passes through
+    # W1/W2b (release-1.0 cleanup): every finding still passes through
     # `evaluate_device`/`evaluate_fabric` unchanged -- this only adds the
-    # annotation pass `evaluate_fabric_with_silences` already performs on
-    # top of it. No explicit path is given here, so resolution falls
-    # through to this module's env-var fallback (`health._resolve_silences`'
-    # own documented order); with nothing configured either way this is
-    # byte-for-byte the old `evaluate_fabric` result plus the always-present
-    # `silenced: False` tag and the `raw_severity`/`counts`/`silences_applied`
-    # fields the annotation pass always adds.
-    result = evaluate_fabric_with_silences(evidence_by_device)
+    # annotation pass `evaluate_fabric_with_silences` already performs on top
+    # of it. `--silence-file` (W2b), when given, wins; omitted, resolution
+    # falls through to this project's own env-var fallback for the same
+    # purpose (`health._resolve_silences`'s own documented order). With
+    # neither configured this is byte-for-byte the old `evaluate_fabric`
+    # result plus the always-present `silenced: False` tag and the
+    # `raw_severity`/`counts`/`silences_applied` fields the annotation pass
+    # always adds.
+    result = evaluate_fabric_with_silences(evidence_by_device, silence_path=args.silence_file)
 
     # One JSON document, like every other subcommand: a stream of concatenated
     # pretty-printed objects is not parseable, and `nettools health --all | jq`
@@ -2006,6 +2007,17 @@ def build_parser() -> argparse.ArgumentParser:
         default="ok",
         choices=("ok", "info", "warning", "critical"),
         help="Only print devices at or above this severity (default: ok, i.e. every device).",
+    )
+    p_health.add_argument(
+        "--silence-file",
+        default=None,
+        help=(
+            "Path to a silence rules file (W2b). An explicit flag here wins over "
+            "this project's own env-var fallback for the same purpose (see "
+            "health._resolve_silences); omit it and that fallback still applies "
+            "when it is set. Neither present: no silences are applied, unchanged "
+            "from before this flag existed."
+        ),
     )
     _add_output_arguments(p_health)
     p_health.set_defaults(func=_cmd_health)

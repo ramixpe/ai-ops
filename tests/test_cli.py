@@ -22,11 +22,12 @@ is.
 
 from __future__ import annotations
 
+import json
 import sys
 
 import pytest
 
-from agent_nettools import cli, metrics
+from agent_nettools import cli, health, metrics
 from agent_nettools.inventory import InventoryError
 from agent_nettools.llm_analysis import LLMAnalysisError
 
@@ -410,6 +411,145 @@ def test_health_list_devices_failure_exits_critical(monkeypatch, capsys):
 
     assert args.func(args) == cli.EXIT_CRITICAL
     assert "bad inventory" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------- #
+# --silence-file (W2b): an explicit flag beats the NETTOOLS_SILENCE_FILE
+# env-var fallback health._resolve_silences already implements -- this is
+# just proving the CLI actually threads it through, not re-testing that
+# resolution order itself (test_silence.py already covers that at the
+# library level).
+# --------------------------------------------------------------------------- #
+
+
+def _fabric_fixture():
+    """Two devices, each with one real (critical) finding, on DIFFERENT
+    rules/subjects -- so a silence file scoped to PE1's finding cannot
+    silence PE2's by accident, which is exactly what the positive control
+    below needs to prove."""
+
+    def _verdict(device, rule, subject):
+        finding = {
+            "rule": rule, "severity": "critical", "intent": "bgp",
+            "message": f"{device}: {rule} on {subject}",
+            "expected": "Established", "actual": "Idle", "subject": subject,
+        }
+        return {"device": device, "severity": "critical", "unevaluated": [],
+                "findings": [finding]}
+
+    return {
+        "severity": "critical",
+        "counts": {"devices": 2, "by_severity": {"critical": 2, "warning": 0, "info": 0, "ok": 0},
+                   "unevaluated_devices": []},
+        "devices": {
+            "PE1": _verdict("PE1", "bgp_session_down", "10.255.0.12"),
+            "PE2": _verdict("PE2", "isis_adjacency_down", "Gi0/0/0/0"),
+        },
+    }
+
+
+def test_silence_file_flag_silences_a_subject_the_env_var_alone_would_not(monkeypatch, tmp_path):
+    """The load-bearing claim: `--silence-file` actually overrides, it does
+    not merely duplicate the env var. `NETTOOLS_SILENCE_FILE` is set to a
+    file that does NOT cover PE1's finding; `--silence-file` names a
+    different file that DOES -- and the flag wins."""
+
+    monkeypatch.setattr(
+        cli, "list_devices",
+        lambda: {"status": "success", "data": {"devices": [{"name": "PE1"}, {"name": "PE2"}]}},
+    )
+    monkeypatch.setattr(cli, "collect_evidence", lambda name: {"device": name})
+    monkeypatch.setattr(health, "evaluate_fabric", lambda evidence_by_device, devices=None: _fabric_fixture())
+
+    env_silences = tmp_path / "env-silences.yaml"
+    env_silences.write_text(
+        "- device: PE9\n  reason: irrelevant to this run\n  created_by: rami\n"
+        "  expires_at: '2027-01-01T00:00:00+00:00'\n"
+    )
+    monkeypatch.setenv(health.NETTOOLS_SILENCE_FILE_ENV, str(env_silences))
+
+    flag_silences = tmp_path / "flag-silences.yaml"
+    flag_silences.write_text(
+        "- device: PE1\n  rule: bgp_session_down\n  reason: planned maintenance\n"
+        "  created_by: rami\n  expires_at: '2027-01-01T00:00:00+00:00'\n"
+    )
+
+    parser = cli.build_parser()
+    args = parser.parse_args(["health", "--all", "--silence-file", str(flag_silences)])
+
+    code = args.func(args)
+
+    # PE1's only finding is silenced, so the fabric severity comes down to
+    # whatever PE2's unsilenced finding contributes -- still critical here,
+    # proving the roll-up is per-finding, not "one silence clears everything".
+    assert code == cli.EXIT_CRITICAL
+
+
+def test_silence_file_flag_leaves_an_unmatched_subject_paging_positive_control(monkeypatch, tmp_path):
+    """Positive control (OBS-181) for the test above: a silence file that
+    matches nothing must change nothing -- proving the flag's effect is
+    real annotation, not a mechanism that always suppresses once present."""
+
+    monkeypatch.setattr(
+        cli, "list_devices",
+        lambda: {"status": "success", "data": {"devices": [{"name": "PE1"}, {"name": "PE2"}]}},
+    )
+    monkeypatch.setattr(cli, "collect_evidence", lambda name: {"device": name})
+    monkeypatch.setattr(health, "evaluate_fabric", lambda evidence_by_device, devices=None: _fabric_fixture())
+    monkeypatch.delenv(health.NETTOOLS_SILENCE_FILE_ENV, raising=False)
+
+    flag_silences = tmp_path / "flag-silences.yaml"
+    flag_silences.write_text(
+        "- device: PE9\n  reason: does not match anything here\n  created_by: rami\n"
+        "  expires_at: '2027-01-01T00:00:00+00:00'\n"
+    )
+
+    parser = cli.build_parser()
+    args = parser.parse_args(["health", "--all", "--silence-file", str(flag_silences)])
+    code = args.func(args)
+
+    assert code == cli.EXIT_CRITICAL
+
+
+def test_silence_file_flag_actually_suppresses_severity_when_it_matches_everything(monkeypatch, tmp_path, capsys):
+    """A silence file covering BOTH devices' findings brings the fabric down
+    to ok -- the clearest end-to-end proof the flag reaches the real
+    annotation pass, not just that the run still completes."""
+
+    monkeypatch.setattr(
+        cli, "list_devices",
+        lambda: {"status": "success", "data": {"devices": [{"name": "PE1"}, {"name": "PE2"}]}},
+    )
+    monkeypatch.setattr(cli, "collect_evidence", lambda name: {"device": name})
+    monkeypatch.setattr(health, "evaluate_fabric", lambda evidence_by_device, devices=None: _fabric_fixture())
+    monkeypatch.delenv(health.NETTOOLS_SILENCE_FILE_ENV, raising=False)
+
+    flag_silences = tmp_path / "flag-silences.yaml"
+    flag_silences.write_text(
+        "- reason: fabric-wide maintenance window\n  created_by: rami\n"
+        "  expires_at: '2027-01-01T00:00:00+00:00'\n"
+    )
+
+    parser = cli.build_parser()
+    args = parser.parse_args(["health", "--all", "--silence-file", str(flag_silences)])
+    code = args.func(args)
+    out = json.loads(capsys.readouterr().out)
+
+    assert code == cli.EXIT_OK
+    assert out["severity"] == "ok"
+    assert out["devices"]["PE1"]["raw_severity"] == "critical"
+    assert out["devices"]["PE2"]["raw_severity"] == "critical"
+
+
+def test_silence_file_omitted_means_no_flag_wiring_positive_control(monkeypatch):
+    """Without --silence-file (default None), args.silence_file must reach
+    `evaluate_fabric_with_silences` as `silence_path=None` -- the same
+    "nothing configured" case that existed before this flag, unchanged."""
+
+    parser = cli.build_parser()
+    args = parser.parse_args(["health", "--all"])
+
+    assert args.silence_file is None
 
 
 # --------------------------------------------------------------------------- #
