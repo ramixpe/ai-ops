@@ -20,9 +20,12 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install
+        # constraints.txt (EER-013): pins the exact versions verified to work
+        # together, so this resolves the same graph every run instead of
+        # whatever each package's index happens to serve on a given day.
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,llm]"
+          pip install -c constraints.txt -e ".[dev,llm]"
       - name: Lint
         run: ruff check .
       - name: Test
@@ -54,10 +57,11 @@ jobs:
       - name: Install without the LLM extra
         # Deliberately not ".[dev,llm]". No provider SDK is installed, so an
         # import of one would fail here rather than succeeding by accident on a
-        # machine that happens to have it.
+        # machine that happens to have it. constraints.txt (EER-013) still
+        # applies -- it only constrains packages actually being installed.
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
+          pip install -c constraints.txt -e .
 
       - name: Prove there is no .env and no credentials
         run: |

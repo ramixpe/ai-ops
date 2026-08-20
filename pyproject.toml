@@ -21,11 +21,17 @@ classifiers = [
     "Topic :: System :: Networking :: Monitoring",
 ]
 dependencies = [
-    "netmiko>=4.4.0",
-    "mcp>=1.9.0",
-    "python-dotenv>=1.0.1",
-    "pydantic>=2.7",
-    "pyyaml>=6.0",
+    "netmiko>=4.4.0,<5.0",
+    # mcp: floor >=1.9.0 predates the 1.x/2.x high-level-server rename that
+    # mcp_server/server.py already carries a compatibility shim for (imports
+    # MCPServer, falls back to the pre-2.0 FastMCP name). Verified installed
+    # is 2.0.0 (EER-013, 2026-08-20) -- the upper bound is set to admit that
+    # major version rather than exclude it, since the shim already covers
+    # both sides of the rename.
+    "mcp>=1.9.0,<3.0",
+    "python-dotenv>=1.0.1,<2.0",
+    "pydantic>=2.7,<3.0",
+    "pyyaml>=6.0,<7.0",
     # Template parsing for parameterized command output (template_parsers.py).
     # A core dependency, not an extra: run_template attaches parsed data on
     # every call, so the package cannot do its job without it. Base install is
