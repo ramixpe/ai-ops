@@ -4,6 +4,7 @@ verdict counts by severity, and both output forms (JSON, Prometheus text)."""
 from __future__ import annotations
 
 import json
+import threading
 
 from helpers import install_fake_netmiko, set_device_environment
 
@@ -86,6 +87,56 @@ def test_persists_across_separate_collector_instances_when_a_path_is_configured(
     second.record_collection("PE1", success=True, duration_s=1.0)
     third = metrics.MetricsCollector(path=path)
     assert third.snapshot()["collections"]["PE1"]["success"] == 2
+
+
+def test_concurrent_increments_across_collectors_lose_nothing(tmp_path):
+    """EER-011 regression guard: genuine concurrent read-modify-write against
+    one shared metrics file must not lose an increment.
+
+    The sequential test above (`test_persists_across_separate_collector_
+    instances_when_a_path_is_configured`) only ever has one collector
+    mutating at a time, so it exercises the accumulate path but not the lost-
+    update path: two collectors both reading `success: 10` and both writing
+    back `success: 11` is a race a purely sequential test can never trigger.
+
+    Each thread here gets its OWN `MetricsCollector` instance -- its own
+    `threading.Lock`, its own in-memory baseline -- so the only thing
+    coordinating them is the cross-process flock on the shared file, the
+    same shape as N separate `nettools` OS processes racing on
+    NETTOOLS_METRICS_FILE (see admission.py's "forty syslog lines, forty
+    processes" scenario, which this module's own docstring cross-references).
+    A `threading.Barrier` starts every thread's burst at once to maximize
+    actual overlap rather than relying on scheduling luck.
+
+    This assertion is exact, not "at least" or "roughly": with the
+    cross-process lock in place there is no window left in which an update
+    can be lost, so the total is deterministic regardless of how the OS
+    happens to interleave the threads -- which is what keeps this test fast
+    and non-flaky rather than a race dressed up as a probability.
+    """
+
+    path = str(tmp_path / "metrics.json")
+    threads_n = 8
+    increments_per_thread = 15
+    barrier = threading.Barrier(threads_n)
+
+    def worker() -> None:
+        collector = metrics.MetricsCollector(path=path)
+        barrier.wait()  # every thread starts its burst together
+        for _ in range(increments_per_thread):
+            collector.record_collection("PE1", success=True, duration_s=0.001, retries=1)
+
+    workers = [threading.Thread(target=worker) for _ in range(threads_n)]
+    for worker_thread in workers:
+        worker_thread.start()
+    for worker_thread in workers:
+        worker_thread.join()
+
+    expected = threads_n * increments_per_thread
+    final = metrics.MetricsCollector(path=path).snapshot()["collections"]["PE1"]
+    assert final["success"] == expected
+    assert final["latency_count"] == expected
+    assert final["retries_total"] == expected
 
 
 def test_in_memory_only_when_no_path_is_configured(monkeypatch, tmp_path):
