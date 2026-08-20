@@ -93,6 +93,22 @@ None of the following have been designed for, tested against, or reviewed:
 
 ## Reporting a security issue
 
-Open a GitHub issue describing the path. There is nothing sensitive to
-withhold: there are no production deployments and no secrets in this
-repository.
+**Please report privately first**, via [GitHub's private vulnerability
+reporting](https://github.com/ramixpe/ai-ops/security/advisories/new) on this
+repository. A public issue is fine for anything you have already confirmed is
+not exploitable, but start private if you are unsure.
+
+This reverses the policy this file carried until 2026-08-20, which said to open
+a public issue because "there is nothing sensitive to withhold: there are no
+production deployments and no secrets in this repository." Both halves of that
+are true and both are beside the point. The question is not whether *this
+repository* holds a secret — it is what a defect here does in *someone's
+deployment*. This tool reads device credentials from the environment, opens SSH
+sessions to production-shaped infrastructure, and writes evidence, tickets and
+logs to local disk. EER-001 is the worked example: a path-traversal bug in
+`evidence prune` deleted a JSON file outside the evidence root, and it was found
+by an external reviewer reading the tagged release. A finding of that shape
+deserves a fix released before it is described publicly.
+
+What to expect: an acknowledgement, a fix or an explicit "won't fix, here is
+why", and credit in `CHANGELOG.md` unless you would rather not be named.
