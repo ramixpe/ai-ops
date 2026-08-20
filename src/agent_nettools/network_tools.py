@@ -9,7 +9,6 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import os
-import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -292,13 +291,97 @@ DEFAULT_BANNER_TIMEOUT_SECONDS = 15.0
 DEFAULT_COMMAND_RETRIES = 2  # total attempts, i.e. up to 1 retry by default.
 DEFAULT_RETRY_BACKOFF_SECONDS = 0.5
 
+# EER-002: SSH host-key verification -- the trust root every check in this
+# file implicitly relies on. Before this, ConnectHandler ran with netmiko's
+# own default (``ssh_strict=False`` -> ``paramiko.AutoAddPolicy``): the first
+# time this tool ever talks to a device it silently trusts whatever key
+# answers, and every later connection to the same address just as silently
+# trusts it again -- a management-path attacker able to sit in the path gets
+# to feed fabricated output to everything downstream, forever, with nothing
+# ever recorded and nothing ever refused.
+NETTOOLS_SSH_KNOWN_HOSTS_ENV = "NETTOOLS_SSH_KNOWN_HOSTS"
+NETTOOLS_SSH_STRICT_ENV = "NETTOOLS_SSH_STRICT"
+
+# Deliberately NOT the operator's own ~/.ssh/known_hosts: defaulting there
+# would silently inherit trust decisions this tool never made, for hosts that
+# have nothing to do with this lab -- an entry in an interactive known_hosts
+# says only "a human once accepted this key in a terminal", not "this tool
+# has verified it". A dedicated file under this tool's own config directory
+# means the only writer of a real entry is scripts/enroll_host_keys.py, run
+# deliberately, by an operator, once per device.
+DEFAULT_SSH_KNOWN_HOSTS = os.path.expanduser("~/.config/nettools/known_hosts")
+
+
+def _ssh_known_hosts_path() -> str:
+    """``NETTOOLS_SSH_KNOWN_HOSTS`` or :data:`DEFAULT_SSH_KNOWN_HOSTS`.
+
+    Same env-then-default ladder as the timeout settings just above; see
+    ``_netmiko_send_commands_admitted`` for where an explicit parameter still
+    wins over both, matching ``read_timeout``'s own precedence.
+    """
+
+    return os.getenv(NETTOOLS_SSH_KNOWN_HOSTS_ENV, "").strip() or DEFAULT_SSH_KNOWN_HOSTS
+
+
+def _ssh_strict_enabled() -> bool:
+    """Whether netmiko's ``ssh_strict`` (reject an unrecognised host key
+    instead of silently trusting it) is on.
+
+    Fail-closed in the direction that matters for a trust root: unset means
+    enabled (the secure default), and -- the opposite of the ordinary
+    ``_FALSY_ENV_VALUES`` convention this module otherwise uses (see
+    ``_active_probes_allowed`` before EER-008a, which is the footgun this
+    setting must not repeat) -- an unrecognised *set* value also means
+    enabled. ``NETTOOLS_SSH_STRICT=flase`` must never silently turn host-key
+    verification off: a typo can only ever make this setting MORE strict
+    than an operator perhaps intended, never less. The one way to actually
+    disable it is a correctly-spelled falsy value (0/false/no/off).
+    """
+
+    raw = os.getenv(NETTOOLS_SSH_STRICT_ENV)
+    if raw is None or not raw.strip():
+        return True
+    return raw.strip().lower() not in _FALSY_ENV_VALUES
+
+
+def _is_host_key_failure(exc: Exception) -> bool:
+    """Whether ``exc`` is netmiko/paramiko's way of saying the device's SSH
+    host key was rejected or did not match one already on file -- a genuine
+    trust failure, never a transient one, and never something a retry could
+    fix.
+
+    Matched on the exception's own text, not ``isinstance`` against
+    paramiko's classes: ``paramiko.RejectPolicy.missing_host_key`` (fired
+    when ``ssh_strict=True`` and the host has no key on file yet) raises a
+    bare ``paramiko.SSHException`` with no dedicated subclass, and
+    ``netmiko.exceptions.NetmikoTimeoutException`` -- which very much IS
+    transient -- is itself an ``SSHException`` subclass, so matching on
+    ``isinstance`` against the base class would silently stop retrying real
+    timeouts too. ``paramiko.BadHostKeyException`` (a key IS on file and does
+    not match what the device just presented) puts "Host key" in its own
+    message, so one text check covers both shapes. It also works unchanged
+    against the fake-netmiko test seam (``tests/helpers.py``), which raises
+    plain ``OSError`` rather than real paramiko types -- see
+    ``install_fake_netmiko``'s ``fail_host_key=``.
+    """
+
+    text = str(exc).lower()
+    return "not found in known_hosts" in text or "host key" in text
+
 
 def _is_transient_failure(exc: Exception) -> bool:
     """Whether a transport failure is worth retrying.
 
-    Authentication failures are never transient: retrying with the same
-    (wrong) credentials cannot succeed and only burns the whole retry budget
-    before reporting the real problem. Every other failure netmiko's
+    A rejected or mismatched SSH host key is never transient -- see
+    ``_is_host_key_failure`` -- and that check runs unconditionally, before
+    the netmiko-import fallback below, so it applies even when netmiko's own
+    exception hierarchy cannot be imported at all (the fake-netmiko test seam
+    has no ``.exceptions`` submodule): a host-key failure must be terminal
+    regardless of whether that import ever runs.
+
+    Authentication failures are never transient either: retrying with the
+    same (wrong) credentials cannot succeed and only burns the whole retry
+    budget before reporting the real problem. Every other failure netmiko's
     transport layer can raise -- read timeouts, connection resets, "pattern
     never detected" -- is treated as transient, which is exactly the class of
     failure bounded retries exist to smooth over on a reachable-but-slow
@@ -307,6 +390,9 @@ def _is_transient_failure(exc: Exception) -> bool:
     way to distinguish auth failures from anything else, so every failure is
     treated as transient rather than silently disabling retries.
     """
+
+    if _is_host_key_failure(exc):
+        return False
 
     try:
         from netmiko.exceptions import NetmikoAuthenticationException
@@ -370,6 +456,8 @@ def _netmiko_send_commands(
     banner_timeout: float | None = None,
     retries: int | None = None,
     retry_backoff: float | None = None,
+    ssh_known_hosts: str | None = None,
+    ssh_strict: bool | None = None,
 ) -> tuple[dict[str, str], list[str], dict[str, int]]:
     """Open one SSH session and run every approved command over it.
 
@@ -381,8 +469,9 @@ def _netmiko_send_commands(
     (ping/traceroute run much longer than a ``show`` command) and always win;
     every other caller passes ``None`` and gets ``NETTOOLS_READ_TIMEOUT_SECONDS``
     (env-then-default). ``connect_timeout``/``banner_timeout``/``retries``/
-    ``retry_backoff`` follow the same env-then-default resolution when left
-    ``None`` -- see the constants just above this function.
+    ``retry_backoff``/``ssh_known_hosts``/``ssh_strict`` follow the same
+    env-then-default resolution when left ``None`` -- see the constants just
+    above this function (EER-002 for the latter two).
 
     Both the initial connection and each individual command are retried up to
     ``retries`` total attempts (with exponential backoff) on a transient
@@ -419,6 +508,8 @@ def _netmiko_send_commands(
             banner_timeout=banner_timeout,
             retries=retries,
             retry_backoff=retry_backoff,
+            ssh_known_hosts=ssh_known_hosts,
+            ssh_strict=ssh_strict,
         )
 
 
@@ -431,6 +522,8 @@ def _netmiko_send_commands_admitted(
     banner_timeout: float | None = None,
     retries: int | None = None,
     retry_backoff: float | None = None,
+    ssh_known_hosts: str | None = None,
+    ssh_strict: bool | None = None,
 ) -> tuple[dict[str, str], list[str], dict[str, int]]:
     """The real transport body of ``_netmiko_send_commands``, run only once
     admission has already been granted. Split out purely so the admission
@@ -464,6 +557,12 @@ def _netmiko_send_commands_admitted(
         retry_backoff if retry_backoff is not None
         else _float_env(NETTOOLS_RETRY_BACKOFF_ENV, DEFAULT_RETRY_BACKOFF_SECONDS)
     )
+    effective_ssh_known_hosts = (
+        ssh_known_hosts if ssh_known_hosts is not None else _ssh_known_hosts_path()
+    )
+    effective_ssh_strict = (
+        ssh_strict if ssh_strict is not None else _ssh_strict_enabled()
+    )
 
     connection_params: dict[str, Any] = {
         "device_type": device_type,
@@ -472,6 +571,19 @@ def _netmiko_send_commands_admitted(
         "port": device.get("port", 22),
         "conn_timeout": effective_connect_timeout,
         "banner_timeout": effective_banner_timeout,
+        # EER-002: verify the device's SSH host key rather than trusting
+        # whatever key answers. ``system_host_keys=False`` deliberately never
+        # reads the operator's own ~/.ssh/known_hosts (see
+        # DEFAULT_SSH_KNOWN_HOSTS's docstring); ``alt_host_keys=True`` +
+        # ``alt_key_file`` is this tool's own dedicated trust store instead,
+        # populated only by scripts/enroll_host_keys.py. ``ssh_strict=True``
+        # (the default -- see _ssh_strict_enabled) makes an unrecognised key
+        # a hard refusal (paramiko.RejectPolicy) instead of netmiko's own
+        # default silent auto-accept (paramiko.AutoAddPolicy).
+        "ssh_strict": effective_ssh_strict,
+        "system_host_keys": False,
+        "alt_host_keys": True,
+        "alt_key_file": effective_ssh_known_hosts,
     }
     # Password and/or SSH key: a key file is used when provided, otherwise the
     # shared password. Netmiko accepts both together for key + passphrase setups.
@@ -493,8 +605,20 @@ def _netmiko_send_commands_admitted(
             on_retry=lambda used: retries_used.__setitem__("connection", used),
         )
     except Exception as exc:  # noqa: BLE001 - every attempt to connect failed.
-        errors.append(f"connection to {device['hostname']} failed: {exc}")
-        _audit_log({"device": device["name"], "status": "connection_error", "error": str(exc)})
+        if _is_host_key_failure(exc):
+            # EER-002: guarantee the literal phrase "host key" -- the one
+            # mcp_server.boundary/model_egress's ERROR_KINDS classifies on --
+            # actually appears in the text that crosses that boundary,
+            # regardless of paramiko's own wording. RejectPolicy's own
+            # message ("Server 'x' not found in known_hosts") does not
+            # contain "host key" at all, so left alone this would have been
+            # silently withheld as "an unclassified error" instead of the
+            # one thing an operator most needs to see plainly.
+            detail = f"SSH host key rejected: {exc}"
+        else:
+            detail = str(exc)
+        errors.append(f"connection to {device['hostname']} failed: {detail}")
+        _audit_log({"device": device["name"], "status": "connection_error", "error": detail})
         metrics.record_collection(
             device["name"], success=False, duration_s=time.monotonic() - session_started
         )
@@ -715,14 +839,38 @@ def run_intent(
 # -- and they are table stakes for troubleshooting, which is why the default
 # favors availability. Set to "0"/"false"/"no"/"off" to disable them entirely,
 # e.g. for a stricter deployment that wants zero device-generated traffic ever;
-# every other truthy-looking value (including unset) leaves them enabled.
+# unset leaves them enabled (unchanged default posture).
 NETTOOLS_ALLOW_ACTIVE_PROBES_ENV = "NETTOOLS_ALLOW_ACTIVE_PROBES"
 _FALSY_ENV_VALUES = frozenset({"0", "false", "no", "off"})
 
+# EER-008a: matches the sibling gates' own convention
+# (mcp_server.server._mcp_active_probes_allowed's _MCP_ACTIVE_PROBES_TRUTHY,
+# netbox.write_enabled's _WRITE_ENABLED_TRUTHY) -- a RECOGNISED truthy
+# spelling is required to enable, rather than "anything not recognised as
+# falsy" being enough.
+_ACTIVE_PROBES_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
 
 def _active_probes_allowed() -> bool:
-    value = os.getenv(NETTOOLS_ALLOW_ACTIVE_PROBES_ENV, "1").strip().lower()
-    return value not in _FALSY_ENV_VALUES
+    """Whether NETTOOLS_ALLOW_ACTIVE_PROBES permits ping/traceroute templates.
+
+    EER-008a: this used to be ``value not in _FALSY_ENV_VALUES``, so ANY
+    unrecognised spelling -- ``NETTOOLS_ALLOW_ACTIVE_PROBES=flase``, a plain
+    typo -- fell through to "allowed", silently defeating the one thing an
+    operator setting this var was trying to do (turn active probing off).
+    Fixed to fail closed: unset still defaults to enabled (the documented,
+    unchanged default), but once the var is actually SET, only a recognised
+    truthy spelling enables it; anything else -- including a typo of either
+    the truthy or the falsy spelling -- disables probes. The refusal is
+    never silent: every call site that checks this already composes a
+    message naming NETTOOLS_ALLOW_ACTIVE_PROBES and explaining how to enable
+    probes (see run_template/collect_evidence_and_templates/render_templates),
+    so a disabled-by-typo outcome is exactly as visible as a
+    deliberately-disabled one.
+    """
+
+    raw = os.getenv(NETTOOLS_ALLOW_ACTIVE_PROBES_ENV, "1")
+    return raw.strip().lower() in _ACTIVE_PROBES_TRUTHY
 
 
 def _unsupported_template_result(
@@ -1936,12 +2084,18 @@ def _snapshot_dir(base_dir: str | None) -> Path:
 
 
 def _timestamped_snapshot_paths(directory: Path) -> list[Path]:
-    """Return one device's timestamped snapshots, oldest first, golden excluded.
+    """Return one device's timestamped snapshot *paths*, golden excluded.
 
-    Used only by ``detect_flaps``, which reads a device's whole history
-    directly off the file store -- see ``evidence_store``'s module docstring
-    for why flap detection stays file-only rather than going through the
-    backend-selectable store below.
+    EER-005: ``detect_flaps`` used to read a device's whole history directly
+    off the file store through this function -- bypassing ``get_store()``
+    entirely, which meant it silently returned an empty (indistinguishable
+    from "stable") result under the sqlite backend. It now reads history
+    through ``get_store(base_dir).list_history()`` like everything else in
+    this module; this function's only remaining job is a best-effort raw file
+    count for ``snapshots_skipped`` (see ``_skipped_snapshot_count``) --
+    counting is safe to do by direct glob where ``list_history`` counting is
+    not, because it never has to interpret the *contents* of a file, only
+    that one exists.
     """
 
     if not directory.is_dir():
@@ -2299,6 +2453,45 @@ def _flap_sequences(
     return sequences
 
 
+def _skipped_snapshot_count(base_dir: str | None, device_name: str, examined: int) -> int:
+    """Best-effort count of snapshots present but dropped as corrupt (B-474's
+    ``snapshots_skipped``), for ``detect_flaps`` now that it reads history
+    through ``get_store(...).list_history()`` instead of the filesystem
+    directly (EER-005).
+
+    Neither backend's ``list_history`` (``evidence_store.py``, not owned by
+    this lane) surfaces how many entries it silently dropped -- both already
+    warn to stderr and move on (``_read_snapshot_json``/``_read_evidence_json``),
+    but the count itself never leaves the function. This derives it another
+    way rather than dropping the field: for the FILE backend, a raw
+    ``*.json`` glob (corrupt or not -- ``_timestamped_snapshot_paths``, which
+    mirrors ``FileEvidenceStore``'s own private listing) counts every entry
+    that exists on disk; the gap between that count and how many
+    ``list_history`` actually returned is exactly how many were dropped. This
+    is intentionally gated to the file backend only (checked via
+    ``NETTOOLS_EVIDENCE_BACKEND``, not by whether the directory happens to
+    exist) so a leftover ``evidence/<device>/*.json`` directory from a prior
+    file-backend run can never be mistaken for the live sqlite backend's own
+    history and produce a bogus count.
+
+    Under the SQLITE backend there is no filesystem listing to compare
+    against -- counting corrupt *rows* would need a change to
+    ``evidence_store.py``'s store contract (a raw/total count alongside
+    ``list_history``, or a ``skipped`` return value from ``list_history``
+    itself), which this lane does not own. This returns 0 in that case: not
+    a claim that sqlite history is never corrupt, but an honest "this layer
+    cannot see that yet" rather than a fabricated number. See this lane's
+    build report for the proposed store-contract change.
+    """
+
+    backend = os.getenv(evidence_store.EVIDENCE_BACKEND_ENV, evidence_store.DEFAULT_EVIDENCE_BACKEND)
+    if backend.strip().lower() == "sqlite":
+        return 0
+    directory = _snapshot_dir(base_dir) / device_name
+    raw_count = len(_timestamped_snapshot_paths(directory))
+    return max(0, raw_count - examined)
+
+
 def detect_flaps(
     device_name: str,
     *,
@@ -2310,31 +2503,50 @@ def detect_flaps(
     A peer that bounced up/down/up between collections can look clean in
     every single pairwise ``diff_evidence`` call -- each one only ever shows
     one change, never the pattern of repeated change. Reading the *whole*
-    history instead surfaces it. History is read from every timestamped
-    snapshot under this device's evidence directory (oldest first; the golden
-    snapshot is excluded, same as ``load_latest_snapshot``), grouped into
-    per-(intent, subject, field) value sequences, and a sequence is reported
-    once it has accumulated at least ``min_transitions`` changes in value.
+    history instead surfaces it. History is read via
+    ``get_store(base_dir).list_history(device_name)`` -- the same
+    backend-selectable store every other snapshot function in this module
+    already goes through (files by default, sqlite when
+    ``NETTOOLS_EVIDENCE_BACKEND=sqlite`` selects it) -- oldest first, golden
+    excluded, grouped into per-(intent, subject, field) value sequences. A
+    sequence is reported once it has accumulated at least ``min_transitions``
+    changes in value.
 
-    A truncated/corrupt snapshot file must not turn flap detection into a
-    stack trace, and one bad snapshot must not erase the rest of a device's
-    history either -- so a file that fails to parse is skipped (with a loud
-    stderr warning naming it, not a silent drop) and counted in
-    ``snapshots_skipped`` on the return payload, so the degradation is visible
-    in the result itself and not only on stderr (B-474 /
+    EER-005: this used to read the filesystem directly
+    (``_snapshot_dir``/``_timestamped_snapshot_paths``), bypassing the store
+    abstraction entirely -- under the sqlite backend that read an empty,
+    almost-certainly-nonexistent directory and returned
+    ``{"snapshots_examined": 0, "flapping": []}``, byte-identical to a
+    genuinely stable device. A real flap on a fabric running sqlite evidence
+    storage would have been reported as a clean bill of health. Reading
+    through ``list_history`` fixes that for both backends; note that
+    ``base_dir`` now means whatever ``get_store`` takes it to mean for the
+    active backend (the file snapshot root for "files", the directory
+    holding ``evidence.db`` for "sqlite") rather than always being a
+    file-snapshot root.
+
+    Ordering matters here in a way it does not for a single diff:
+    ``_flap_sequences`` counts *adjacent* changes, so a backend that orders
+    history differently would count different transitions over the same
+    underlying snapshots. Both backends already order oldest-first by
+    construction (the file backend lexicographically by filename timestamp;
+    sqlite by ``timestamp ASC, id ASC``), so this is not a new invariant --
+    just one this rewrite now actually depends on being true, where the old
+    file-only code never had to care.
+
+    A truncated/corrupt snapshot must not turn flap detection into a stack
+    trace, and one bad snapshot must not erase the rest of a device's
+    history either -- ``list_history`` already skips a corrupt entry (with
+    its own loud stderr warning naming it) and keeps going, for both
+    backends. ``snapshots_skipped`` on the return payload survives this
+    rewrite (see ``_skipped_snapshot_count``): still accurate for the file
+    backend, honestly 0 (a known gap, not a lie) for sqlite until
+    ``evidence_store.py`` gains a way to report it (B-474 /
     DEEP-REVIEW-2026-08-17 §2.4).
     """
 
-    directory = _snapshot_dir(base_dir) / device_name
-    paths = _timestamped_snapshot_paths(directory)
-    snapshots: list[dict[str, Any]] = []
-    snapshots_skipped = 0
-    for path in paths:
-        try:
-            snapshots.append(json.loads(path.read_text(encoding="utf-8")))
-        except (OSError, ValueError) as exc:
-            print(f"WARNING: corrupt snapshot file, skipping: {path} ({exc})", file=sys.stderr)
-            snapshots_skipped += 1
+    snapshots = get_store(base_dir).list_history(device_name)
+    snapshots_skipped = _skipped_snapshot_count(base_dir, device_name, len(snapshots))
 
     flapping: list[dict[str, Any]] = []
     for (intent, subject, field), values in _flap_sequences(snapshots).items():
