@@ -6,7 +6,7 @@ tier hierarchy, D1–D20) and `MCP-EXPERIMENT.md` (what LM Studio taught).
 
 > **The model question this document treats as open (§7's "two-model station",
 > and the casual "LM Studio, 4B" throughout) was settled by operator decision
-> on 2026-08-19, months after this was written (B-495).** Production is
+> on 2026-08-19, two days after this was written (B-495).** Production is
 > `qwen3.8-27b`; the test arm is `gemma-4-e4b`. Every other model named below
 > or elsewhere in this repo's history — `gemma-4-31b-it` chief among them — is
 > no longer a live candidate. The evidence the decision rests on is not this
