@@ -7129,3 +7129,49 @@ Three lessons worth the price:
 - **Needs human review:** yes
 - **Blocks:** nothing today; the CI job is report-only by design
   (`continue-on-error`), so this surfaces without wedging the pipeline.
+
+## OBS-690 · Wave D · A round-8 fault is still applied to PE2, and it aborted round 6
+
+- **Kind:** defect
+- **What happened:** Round 6's preflight found the subject `RR1 -> 10.255.0.12`
+  already at `transport_blocked` — **the exact finding round 6 exists to
+  predict**. Reading both ends: RR1 is correct (`remote_as 65000`), PE2 has
+  **`remote_as 65001`** toward RR1 with `last_reset_reason: BGP Notification
+  sent: peer in wrong AS`. That is byte-for-byte `fault_lab.py` option 7
+  (`bgp_remote_as_wrong`), still applied.
+- **Why it is not the lab's intended state:** neither committed fixture encodes
+  it. `PE2/healthy` records `Remote AS 65000` + `Established`; `PE2/broken`
+  records `Remote AS 65000` + `Idle (No route to multi-hop neighbor)` — a
+  different fault entirely. No `65001` appears anywhere in the corpus.
+- **Not the last recorded injector run, either.** `fault_lab.py`'s own sealed
+  truth log ends with `loopback_shut` → `restore_verified` (2026-08-17), and
+  round 8b's final samples are `post_restore` with `remote_as: "65000"`,
+  `Established` (2026-08-18T12:11). Both restored cleanly. Something re-applied
+  it after that and left it.
+- **Round 6 aborted, per the protocol rather than despite it.** chaos-harness
+  §6.1 step 1 is *"supervisor confirms fabric matches golden (abort if not)"*.
+  Running it would have been worse than not running it: the seal predicts
+  `transport_blocked`, the fabric already reads `transport_blocked`, so the
+  round would have "confirmed" a prediction that was true before the fault was
+  applied — a vacuous pass indistinguishable from a real one. This is §0.12's
+  vacuity, arriving in a live round instead of a test.
+- **This is the failure class B-412 and OBS-075 exist for**, reaching the
+  fabric rather than the harness: a fault whose restore nobody verified
+  afterwards, sitting in the lab for two days, quietly making every
+  `RR1 -> 10.255.0.12` investigation return a real-looking fault. It has been
+  read as genuine at least twice today — by a model under evaluation in the
+  LM Studio run, and by me, before this check.
+- **Evidence:** `nettools bgp-neighbor PE2 10.255.0.31` → `remote_as: 65001`;
+  `nettools bgp-neighbor RR1 10.255.0.12` → `remote_as: 65000`, reset reason
+  *"peer in wrong AS"*; `tests/fixtures/cisco_xr/PE2/{healthy,broken}/
+  show-bgp-neighbor-10-255-0-31.txt`; round 8b session `20260818-115402`
+  samples n=1725..1729.
+- **What I did:** aborted round 6 and did NOT revert it. The revert is a
+  device write — one line, reversible, and `fault_lab.py` option 7's own
+  documented revert — but I did not apply it: I cannot establish who applied
+  the fault or why, nothing in the tree records it as deliberate, and silently
+  reconfiguring a router nobody asked me to touch is not a call to make
+  unsupervised. Escalated to the operator instead.
+- **Needs human review:** yes — one decision: revert PE2 to `remote-as 65000`
+  (restoring the state both fixtures agree on), after which round 6 can run.
+- **Blocks:** B-440 (round 6) until the fabric is at golden.
