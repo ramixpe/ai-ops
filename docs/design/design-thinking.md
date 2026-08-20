@@ -678,6 +678,22 @@ Inventory only. Scope resolution absorbs it. The tool surface, flow count, and m
 
 These are genuinely undecided, and deciding them from first principles would be guessing.
 
+> **[Status check, 2026-08-20 — pre-build questions, mostly since resolved.]**
+> This list predates the build; nothing below was rewritten to look prescient,
+> but a reader should not take it as the current state. **1** shipped as a
+> separate class (`Template.active_probe`, `NETTOOLS_ALLOW_ACTIVE_PROBES`,
+> refused before rendering). **2** was answered a different way than posed —
+> B-103's measurement (2026-08-19, `CLOSED-AS-REFUSED`) found zero cases in
+> the entire fixture corpus that need a narrowing pass at all, once the config
+> axis exists, so "is one pass enough" never got tested because the case that
+> would need it hasn't occurred. **3** resolved: `inventory/lab.yaml` is the
+> declarative, credential-free source of truth (D17 below), with NetBox added
+> later as a populated-not-authored inventory surface. **4** resolved:
+> `nettools health` shipped as exactly this shape — breadth-first, no descent,
+> deterministic verdicts. **5** resolved by operator decision (B-495,
+> 2026-08-19): production is `qwen3.8-27b`, the test arm is `gemma-4-e4b`; see
+> `docs/build/MCP-EXPERIMENT.md` §11-§14b for the evidence.
+
 1. **Active probes** (D13) — separate class and budget, or ordinary reads?
 2. **Is one narrowing pass enough?** Only running the descent against a real broken session on `sota-xrd` will say.
 3. **Inventory authority** (D17) — Nautobot, Containerlab topology, or a reconciliation. Needs the repo.
