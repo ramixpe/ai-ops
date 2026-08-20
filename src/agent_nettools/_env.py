@@ -20,13 +20,21 @@ identical: two independent axes had drifted --
   all; `notifier.py`/`logs_loki.py`/`netbox.py`/`metrics_prometheus.py`
   rejected non-positive values (`value > 0 else default`).
 
-This module's `_float_env`/`_int_env` are the LOOSEST union of all of that:
-whatever any one of the old copies used to accept, this still accepts, so
-routing every call site through this module changes no currently-passing
-behaviour (F2 commit 1). A later, deliberate commit narrows `_float_env` to
-reject inf/nan for every caller, not just the two that already did (F2
-commit 2) -- a semantics change, not a mechanical merge, so it is not folded
-into this first version.
+F2 commit 1 made this module's `_float_env`/`_int_env` the LOOSEST union of
+all of that: whatever any one of the old copies used to accept, it still
+accepted, so routing every call site through this module changed no
+currently-passing behaviour. F2 commit 2 (this version) narrows `_float_env`
+one axis: inf/nan now fall back to `default` for every caller, not just the
+two (`admission.py`/`network_tools.py`) that already guarded against it --
+a deliberate safety tightening, not a mechanical merge. A `NETTOOLS_*_
+SECONDS=nan` or `=inf` typo silently sailing through every range check and
+becoming a timeout that never fires is exactly the failure the 2026-08-18
+review added `math.isfinite` to catch in those two copies; this commit gives
+the other four callers (`notifier.py`, `netbox.py`, `logs_loki.py`,
+`metrics_prometheus.py`) the same guarantee they never had. The sign axis
+(zero/negative accepted) is untouched -- it is a separate concern this task
+does not ask this module to resolve; see the F2 commit 1 report for the
+full difference table.
 
 Absence is never coerced to a number: unset, blank, or unparseable all fall
 back to the caller's own `default`, exactly like a malformed string --
@@ -42,10 +50,11 @@ import os
 def _float_env(name: str, default: float) -> float:
     """Read a float-valued env var. Unset, blank, or unparseable -> default.
 
-    Rejects only NaN and `-inf` -- values none of the six pre-existing
-    copies ever accepted. `+inf` and zero/negative finite values pass
-    through, matching whichever of the old copies already allowed them (see
-    the module docstring's inf/nan and sign axes).
+    inf/nan fall back to `default` exactly like a malformed string does
+    (F2 commit 2) -- `math.isnan`/`math.isinf` both false is the same test
+    as `math.isfinite`, spelled out so the "same as malformed" framing is
+    explicit at the call site. Zero/negative finite values still pass
+    through unchanged (the sign axis is not this commit's concern).
     """
 
     raw = os.getenv(name, "").strip()
@@ -55,7 +64,7 @@ def _float_env(name: str, default: float) -> float:
         value = float(raw)
     except ValueError:
         return default
-    if math.isnan(value) or value == float("-inf"):
+    if not math.isfinite(value):
         return default
     return value
 
