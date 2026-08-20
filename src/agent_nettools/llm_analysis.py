@@ -118,6 +118,61 @@ TRUNCATION_NOTICE = (
     "Treat the sections above as incomplete.]"
 )
 
+# EER-010: every provider client used to be constructed with NO enforceable
+# timeout at all (Anthropic at `analyze_with_anthropic`/`complete_prompt`,
+# OpenAI/MiniMax via `_openai_call`) -- a hung upstream connection blocked a
+# call forever, bounded only by whatever the SDK's own transport default
+# happens to be (httpx's is effectively unbounded for a streaming response
+# that never sends a byte). Ollama's own path (`_ollama_call`) was the one
+# exception, but with a value nothing here could configure: `timeout=120`
+# was hardcoded directly into the `urllib.request.urlopen(...)` call.
+#
+# `NETTOOLS_LLM_TIMEOUT_SECONDS` is the one setting this module now reads for
+# every provider's DEFAULT timeout (declared AS DATA for `settings.py`, which
+# this module does not own -- see this task's final report for the exact
+# `Setting(...)` entry and `.env.example` text). 60s is a deliberately
+# generous default: a full four-section analysis or an agent-loop turn can
+# legitimately take tens of seconds once "thinking" is on by default
+# (`ANTHROPIC_MAX_OUTPUT_TOKENS`/streaming, see the module docstring above),
+# and this is a ceiling meant to catch a genuinely hung connection, not to
+# race an ordinarily-slow one.
+NETTOOLS_LLM_TIMEOUT_SECONDS_ENV = "NETTOOLS_LLM_TIMEOUT_SECONDS"
+DEFAULT_LLM_TIMEOUT_SECONDS = 60.0
+
+
+def _resolve_llm_timeout(timeout: float | None) -> float:
+    """The effective per-call/client timeout: an explicit ``timeout=``
+    argument wins, then ``NETTOOLS_LLM_TIMEOUT_SECONDS``, then
+    :data:`DEFAULT_LLM_TIMEOUT_SECONDS`.
+
+    Every entry point in this module (``analyze_with_anthropic``,
+    ``analyze_with_openai``, ``analyze_with_minimax``, ``analyze_with_ollama``,
+    ``analyze_evidence``, ``complete_prompt``) takes an optional ``timeout``
+    keyword precisely so a caller with its own deadline -- ``agent_loop.py``'s
+    per-turn remaining wall-clock budget is the motivating one, see
+    ``run_agent_loop`` -- can pass it straight through instead of this module
+    silently applying its own unrelated default underneath a caller that
+    thought it was already bounding the call.
+
+    A malformed ``NETTOOLS_LLM_TIMEOUT_SECONDS`` (not a number, or <= 0)
+    falls back to the default rather than raising -- the same "report, don't
+    crash on a bad env value" convention every other env-driven default in
+    this codebase follows (``settings.py``'s own ``validate_environment`` is
+    what surfaces the malformed value as a *problem*, separately; this
+    function's job is only to keep running).
+    """
+
+    if timeout is not None:
+        return timeout
+    raw = os.getenv(NETTOOLS_LLM_TIMEOUT_SECONDS_ENV)
+    if raw is None or not raw.strip():
+        return DEFAULT_LLM_TIMEOUT_SECONDS
+    try:
+        parsed = float(raw)
+    except ValueError:
+        return DEFAULT_LLM_TIMEOUT_SECONDS
+    return parsed if parsed > 0 else DEFAULT_LLM_TIMEOUT_SECONDS
+
 
 class LLMAnalysisError(RuntimeError):
     """Raised when the configured provider could not produce an analysis."""
@@ -311,6 +366,7 @@ def _stream_anthropic_message(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
     max_tokens: int = ANTHROPIC_MAX_OUTPUT_TOKENS,
+    timeout: float | None = None,
 ) -> Any:
     """Stream one Anthropic Messages call and return the accumulated message.
 
@@ -320,6 +376,17 @@ def _stream_anthropic_message(
     says this model supports them; every other model gets the plain path, so
     a model outside the fallback family never gets a beta parameter it does
     not support.
+
+    EER-010: ``timeout``, when given, is passed straight through as a
+    per-request override -- the installed anthropic SDK (0.122.0) accepts a
+    ``timeout=`` keyword on ``messages.stream()``/``beta.messages.stream()``
+    that overrides whatever timeout the client itself was constructed with.
+    This is the seam ``agent_loop.run_agent_loop`` uses to pass its ACTUAL
+    remaining wall-clock budget on every turn, instead of a fixed ceiling
+    applied once at client construction (see that function's own comment for
+    the history). ``None`` (the default) omits the keyword entirely, so a
+    caller that does not pass one gets exactly the client's own configured
+    timeout, unchanged.
     """
 
     kwargs: dict[str, Any] = {
@@ -330,6 +397,8 @@ def _stream_anthropic_message(
     }
     if tools is not None:
         kwargs["tools"] = tools
+    if timeout is not None:
+        kwargs["timeout"] = timeout
 
     if _fallbacks_enabled(model):
         with client.beta.messages.stream(
@@ -360,17 +429,24 @@ def _call_anthropic_or_raise(client: Any, *, model: str, **kwargs: Any) -> Any:
         raise LLMAnalysisError(f"Could not reach the Anthropic API: {exc}") from exc
 
 
-def analyze_with_anthropic(evidence: dict[str, Any]) -> str:
+def analyze_with_anthropic(evidence: dict[str, Any], *, timeout: float | None = None) -> str:
     """Analyze evidence with Anthropic Claude.
 
     Uses the cacheable system/messages split (see the module docstring) and
     streams the response. ``stop_details`` is only read when ``stop_reason``
     is ``"refusal"`` -- it is ``null`` for every other stop reason.
+
+    EER-010: the client used to be constructed with no timeout at all. It is
+    now constructed with ``_resolve_llm_timeout(timeout)`` -- an explicit
+    ``timeout`` argument wins, else ``NETTOOLS_LLM_TIMEOUT_SECONDS``, else
+    :data:`DEFAULT_LLM_TIMEOUT_SECONDS`.
     """
 
     import anthropic
 
-    client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    client = anthropic.Anthropic(
+        api_key=os.getenv("ANTHROPIC_API_KEY"), timeout=_resolve_llm_timeout(timeout)
+    )
     model = os.getenv("ANTHROPIC_MODEL", ANTHROPIC_MODEL_DEFAULT)
 
     message = _call_anthropic_or_raise(
@@ -410,6 +486,7 @@ def _openai_call(
     model_env: str = "OPENAI_MODEL",
     model_default: str = "gpt-5.5",
     provider_label: str = "OpenAI",
+    timeout: float | None = None,
     _return_usage: bool = False,
 ) -> str:
     """Send one prompt string to an OpenAI-Responses-API-compatible endpoint.
@@ -430,11 +507,22 @@ def _openai_call(
     sends them to the wrong service and the wrong credential -- the same
     class of misattribution this package already avoids by formatting per-
     command errors as ``"<command>: <detail>"``.
+
+    EER-010: ``timeout`` (``_resolve_llm_timeout``'s usual precedence -- an
+    explicit value, else ``NETTOOLS_LLM_TIMEOUT_SECONDS``, else
+    :data:`DEFAULT_LLM_TIMEOUT_SECONDS`) is always passed to the client
+    constructor -- the openai SDK accepts a plain float there, applied to
+    every request the client makes. Before this, neither the plain OpenAI
+    path nor the MiniMax path (which reuses this function) had any timeout
+    at all.
     """
 
     import openai
 
-    client_kwargs: dict[str, Any] = {"api_key": os.getenv(api_key_env)}
+    client_kwargs: dict[str, Any] = {
+        "api_key": os.getenv(api_key_env),
+        "timeout": _resolve_llm_timeout(timeout),
+    }
     if base_url is not None:
         client_kwargs["base_url"] = base_url
     client = openai.OpenAI(**client_kwargs)
@@ -482,10 +570,10 @@ def _openai_call_with_usage(prompt: str, **kwargs: Any) -> Completion:
     return _openai_call(prompt, _return_usage=True, **kwargs)
 
 
-def analyze_with_openai(evidence: dict[str, Any]) -> str:
+def analyze_with_openai(evidence: dict[str, Any], *, timeout: float | None = None) -> str:
     """Analyze evidence with OpenAI Responses API."""
 
-    return _openai_call(build_analysis_prompt(evidence))
+    return _openai_call(build_analysis_prompt(evidence), timeout=timeout)
 
 
 def _minimax_call_kwargs() -> dict[str, Any]:
@@ -504,7 +592,7 @@ def _minimax_call_kwargs() -> dict[str, Any]:
     }
 
 
-def analyze_with_minimax(evidence: dict[str, Any]) -> str:
+def analyze_with_minimax(evidence: dict[str, Any], *, timeout: float | None = None) -> str:
     """Analyze evidence with MiniMax, over the OpenAI Responses API.
 
     MiniMax implements the OpenAI Responses API (verified live at
@@ -515,7 +603,7 @@ def analyze_with_minimax(evidence: dict[str, Any]) -> str:
     needed here.
     """
 
-    return _openai_call(build_analysis_prompt(evidence), **_minimax_call_kwargs())
+    return _openai_call(build_analysis_prompt(evidence), timeout=timeout, **_minimax_call_kwargs())
 
 
 @dataclass(frozen=True)
@@ -633,7 +721,7 @@ def _usage_from(raw: Any) -> TokenUsage:
     )
 
 
-def complete_prompt(prompt: RenderedPrompt) -> Completion:
+def complete_prompt(prompt: RenderedPrompt, *, timeout: float | None = None) -> Completion:
     """Send one rendered prompt and return the model's raw text.
 
     The prompt library (T-026-T-029) renders a complete, self-contained prompt
@@ -661,6 +749,10 @@ def complete_prompt(prompt: RenderedPrompt) -> Completion:
     cache to hit, so those three branches concatenate `prompt.system` and
     `prompt.user` back into one string and send it exactly as the single
     pre-B-421 string would have been -- unchanged behaviour on those paths.
+
+    EER-010: ``timeout`` (the same ``_resolve_llm_timeout`` precedence every
+    other entry point in this module uses) threads through to whichever
+    provider client this call actually constructs.
     """
 
     provider = get_provider()
@@ -668,7 +760,9 @@ def complete_prompt(prompt: RenderedPrompt) -> Completion:
     if provider == "anthropic":
         import anthropic
 
-        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        client = anthropic.Anthropic(
+            api_key=os.getenv("ANTHROPIC_API_KEY"), timeout=_resolve_llm_timeout(timeout)
+        )
         message = _call_anthropic_or_raise(
             client,
             model=os.getenv("ANTHROPIC_MODEL", ANTHROPIC_MODEL_DEFAULT),
@@ -698,17 +792,19 @@ def complete_prompt(prompt: RenderedPrompt) -> Completion:
     # back into the one string these paths have always sent.
     concatenated = f"{prompt.system}\n\n{prompt.user}"
     if provider == "openai":
-        return _openai_call_with_usage(concatenated)
+        return _openai_call_with_usage(concatenated, timeout=timeout)
     if provider == "minimax":
-        return _openai_call_with_usage(concatenated, **_minimax_call_kwargs())
+        return _openai_call_with_usage(concatenated, timeout=timeout, **_minimax_call_kwargs())
     if provider == "ollama":
         # No usage on this route -- reported=False rather than zeros.
-        return Completion(_ollama_call(concatenated), TokenUsage(calls=1, reported=False))
+        return Completion(
+            _ollama_call(concatenated, timeout=timeout), TokenUsage(calls=1, reported=False)
+        )
 
     raise LLMAnalysisError(f"Provider {provider!r} cannot send a rendered prompt.")
 
 
-def _ollama_call(prompt: str) -> str:
+def _ollama_call(prompt: str, *, timeout: float | None = None) -> str:
     """Send one prompt string to a local Ollama model via its native chat API.
 
     Factored out of ``analyze_with_ollama`` for the same reason as
@@ -721,6 +817,11 @@ def _ollama_call(prompt: str) -> str:
 
     ``think`` is disabled so thinking-capable models return their answer in
     ``message.content`` instead of an empty string.
+
+    EER-010: this used to hardcode ``timeout=120`` directly into the
+    ``urlopen`` call -- the one provider path in this module that DID have a
+    timeout, but with a value nothing here could configure. It now resolves
+    through ``_resolve_llm_timeout`` like every other provider path.
     """
 
     import urllib.error
@@ -728,6 +829,7 @@ def _ollama_call(prompt: str) -> str:
 
     host = os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
     model = os.getenv("OLLAMA_MODEL", "ornith:9b-q8_0")
+    resolved_timeout = _resolve_llm_timeout(timeout)
 
     payload = {
         "model": model,
@@ -743,7 +845,7 @@ def _ollama_call(prompt: str) -> str:
     )
 
     try:
-        with urllib.request.urlopen(request, timeout=120) as response:
+        with urllib.request.urlopen(request, timeout=resolved_timeout) as response:
             body = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace").strip()
@@ -753,7 +855,9 @@ def _ollama_call(prompt: str) -> str:
             f"Could not reach Ollama at {host}: {exc.reason}. Is `ollama serve` running?"
         ) from exc
     except TimeoutError as exc:
-        raise LLMAnalysisError(f"Ollama at {host} did not respond within 120s.") from exc
+        raise LLMAnalysisError(
+            f"Ollama at {host} did not respond within {resolved_timeout}s."
+        ) from exc
     except json.JSONDecodeError as exc:
         raise LLMAnalysisError(f"Ollama at {host} returned a non-JSON response.") from exc
 
@@ -766,20 +870,25 @@ def _ollama_call(prompt: str) -> str:
     return analysis
 
 
-def analyze_with_ollama(evidence: dict[str, Any]) -> str:
+def analyze_with_ollama(evidence: dict[str, Any], *, timeout: float | None = None) -> str:
     """Analyze evidence with a local Ollama model via its native chat API."""
 
-    return _ollama_call(build_analysis_prompt(evidence))
+    return _ollama_call(build_analysis_prompt(evidence), timeout=timeout)
 
 
-def analyze_evidence(evidence: dict[str, Any]) -> str:
-    """Analyze network evidence using the configured provider."""
+def analyze_evidence(evidence: dict[str, Any], *, timeout: float | None = None) -> str:
+    """Analyze network evidence using the configured provider.
+
+    EER-010: ``timeout`` passes straight through to whichever
+    ``analyze_with_*`` this dispatches to -- see ``_resolve_llm_timeout`` for
+    the precedence every one of them applies.
+    """
 
     provider = get_provider()
     if provider == "anthropic":
-        return analyze_with_anthropic(evidence)
+        return analyze_with_anthropic(evidence, timeout=timeout)
     if provider == "ollama":
-        return analyze_with_ollama(evidence)
+        return analyze_with_ollama(evidence, timeout=timeout)
     if provider == "minimax":
-        return analyze_with_minimax(evidence)
-    return analyze_with_openai(evidence)
+        return analyze_with_minimax(evidence, timeout=timeout)
+    return analyze_with_openai(evidence, timeout=timeout)
