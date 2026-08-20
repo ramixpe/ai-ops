@@ -61,6 +61,9 @@ dev = [
     "hypothesis>=6",
     "pytest>=8.3.0",
     "ruff>=0.8.0",
+    # EER-012: builds the wheel/sdist that CI installs and exercises from
+    # outside the checkout, instead of only ever testing an editable install.
+    "build>=1.0",
 ]
 # The neo4j driver, needed only by graph.write_graph -- the thin half of the
 # topology collector. Never a core dependency: graph.build_graph (the pure
