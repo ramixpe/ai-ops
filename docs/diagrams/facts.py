@@ -206,11 +206,25 @@ def current_branch() -> str:
 
 
 def header_tag() -> str:
-    return f"{last_commit_date()} · {current_branch()}"
+    """The version string -- a CONTENT fact, safe in a byte-pinned SVG.
+
+    The previous form, `last_commit_date() · current_branch()`, baked two
+    VOLATILE facts (see the block comment above `commit_count`) into every
+    pinned diagram: a day rollover, a branch rename, or tagging a release
+    changed bytes the pin had frozen, so the very act of releasing turned CI
+    red (R1, release-1.0 campaign). The version is read from
+    pyproject.toml's bytes, so an unchanged tree regenerates identically on
+    any day, branch, or detached-HEAD checkout.
+    """
+    text = (REPO_ROOT / "pyproject.toml").read_text()
+    m = re.search(r'^version\s*=\s*"([^"]+)"', text, re.M)
+    if not m:
+        raise UnmeasuredError("pyproject.toml has no version line")
+    return f"v{m.group(1)}"
 
 
 # --------------------------------------------------------------------------
-# on-disk cache for the expensive measurements (a full pytest run, a real
+# on-disk cache for the expensive measurements (a pytest collection, a real
 # `nettools investigate --from-fixtures` invocation) — keyed by a signature
 # of everything those measurements depend on, so a change anywhere in the
 # code or fixtures they exercise invalidates it, and an unchanged tree reuses
@@ -224,24 +238,19 @@ def _tree_signature() -> str:
     py_roots = (SRC, MCP, TESTS_DIR, SCRIPTS)
     for root in py_roots:
         for p in sorted(root.rglob("*.py")):
-            st = p.stat()
             h.update(str(p.relative_to(REPO_ROOT)).encode())
-            h.update(str(st.st_mtime_ns).encode())
-            h.update(str(st.st_size).encode())
+            h.update(hashlib.sha256(p.read_bytes()).digest())
     extra_files = (REPO_ROOT / "inventory" / "lab.yaml", REPO_ROOT / "pyproject.toml")
     for f in extra_files:
         if f.is_file():
-            st = f.stat()
             h.update(str(f.relative_to(REPO_ROOT)).encode())
-            h.update(str(st.st_mtime_ns).encode())
+            h.update(hashlib.sha256(f.read_bytes()).digest())
     fixtures_dir = TESTS_DIR / "fixtures"
     if fixtures_dir.is_dir():
         for p in sorted(fixtures_dir.rglob("*")):
             if p.is_file():
-                st = p.stat()
                 h.update(str(p.relative_to(REPO_ROOT)).encode())
-                h.update(str(st.st_mtime_ns).encode())
-                h.update(str(st.st_size).encode())
+                h.update(hashlib.sha256(p.read_bytes()).digest())
     return h.hexdigest()
 
 
@@ -307,22 +316,12 @@ def _run_pytest(*extra_args: str) -> subprocess.CompletedProcess:
     with tempfile.TemporaryDirectory() as td:
         env["NETTOOLS_TICKET_DIR"] = td
         return subprocess.run(
-            # -rs: a one-line-per-reason skip summary, so `_compute_pytest_full`
-            # can single out this module's own recursion-guard skips (see
-            # `_GUARD_SKIP_RE`) instead of just a bare count.
-            [sys.executable, "-m", "pytest", "-q", "-rs", *extra_args],
+            [sys.executable, "-m", "pytest", "-q", *extra_args],
             cwd=REPO_ROOT,
             env=env,
             capture_output=True,
             text=True,
         )
-
-
-#: Matches pytest's `-rs` summary line for `tests/test_diagrams.py`'s
-#: recursion guard, e.g. "SKIPPED [7] tests/test_diagrams.py:70: running
-#: inside facts.py's own pytest subprocess ...". The `[N]` is how many
-#: parametrized cases hit it -- currently one per diagram.
-_GUARD_SKIP_RE = re.compile(r"SKIPPED \[(\d+)\][^\n]*own pytest subprocess")
 
 
 class UnmeasuredError(RuntimeError):
@@ -337,56 +336,6 @@ class UnmeasuredError(RuntimeError):
     """
 
 
-def _parse_pytest_summary(text: str) -> dict:
-    tail = "\n".join(text.strip().splitlines()[-40:])
-    counts: dict[str, int] = {}
-    for m in re.finditer(
-        r"(\d+)\s+(passed|failed|skipped|error|errors|xfailed|xpassed|warning|warnings)",
-        tail,
-    ):
-        n, kind = int(m.group(1)), m.group(2)
-        if kind in ("errors", "warnings"):
-            kind = kind[:-1]
-        counts[kind] = n
-    return counts
-
-
-def _compute_pytest_full() -> dict:
-    start = time.monotonic()
-    proc = _run_pytest()
-    duration = time.monotonic() - start
-    counts = _parse_pytest_summary(proc.stdout)
-    # This run was itself spawned with the recursion guard set (see
-    # `_run_pytest`), so `tests/test_diagrams.py`'s own regeneration tests
-    # self-skipped rather than recursing -- see that test's docstring. Left
-    # alone, that would make every diagram's "tests passing" KPI permanently
-    # undercount by exactly the number of diagrams, and "skipped" overcount
-    # by the same, relative to what `pytest -q` shows a human or CI. Those
-    # guard-skips are a measurement artifact, not a real skip: by
-    # construction, if the diagram this measurement is feeding IS being
-    # regenerated to match right now, that same test would pass for real in
-    # the outer, non-recursive run -- so it is counted there instead.
-    guard_skips = 0
-    m = _GUARD_SKIP_RE.search(proc.stdout)
-    if m:
-        guard_skips = int(m.group(1))
-    if "passed" not in counts:
-        raise UnmeasuredError(
-            "pytest produced no parseable summary line "
-            f"(returncode={proc.returncode}). Last stdout lines:\n"
-            + "\n".join(proc.stdout.strip().splitlines()[-15:])
-            + "\nstderr:\n"
-            + "\n".join(proc.stderr.strip().splitlines()[-10:])
-        )
-    return {
-        "passed": counts["passed"] + guard_skips,
-        "skipped": counts.get("skipped", 0) - guard_skips,
-        "failed": counts.get("failed", 0),
-        "warnings": counts.get("warning", 0),
-        "duration_s": round(duration, 1),
-    }
-
-
 def _compute_pytest_collect() -> dict:
     proc = _run_pytest("--collect-only")
     m = re.search(r"(\d+)\s+tests? collected", proc.stdout)
@@ -399,35 +348,8 @@ def _compute_pytest_collect() -> dict:
 
 
 @functools.lru_cache(maxsize=1)
-def pytest_full() -> dict:
-    return _cached("pytest_full", _compute_pytest_full)
-
-
-@functools.lru_cache(maxsize=1)
 def pytest_collect() -> dict:
     return _cached("pytest_collect", _compute_pytest_collect)
-
-
-def tests_passed() -> int:
-    return pytest_full()["passed"]
-
-
-def tests_skipped() -> int:
-    return pytest_full()["skipped"]
-
-
-def tests_run_duration_s() -> float:
-    """Wall-clock time of the full-suite measurement, unbucketed.
-
-    Not used in any diagram's visible text — on a machine shared with other
-    concurrent work (this repo's own agent harness runs many worktrees at
-    once) it swings widely enough between otherwise-identical runs, 23s to
-    45s observed back to back on an unchanged tree, that no fixed rounding
-    bucket kept two fresh regenerations byte-identical. Exposed anyway
-    because it is still a real measurement, just one this project's own
-    generators have chosen not to print.
-    """
-    return pytest_full()["duration_s"]
 
 
 def tests_collected() -> int:

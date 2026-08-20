@@ -17,7 +17,7 @@ W, H = 1580, 940
 s = Svg(W, H)
 header(s, "Where we are",
        "Part 1 (MVP-0) is built, reviewed and green. What remains before publication needs a lab window and a human — not more code.",
-       f"branch {facts.current_branch()}")
+       facts.header_tag())
 
 # ---------- journey ----------
 jy = 132
