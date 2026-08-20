@@ -154,6 +154,7 @@ __all__ = [
     "DEFAULT_LIST_LIMIT",
     "MAX_LIST_LIMIT",
     "MAX_RUN_ID_CHARS",
+    "find_previous_ticket_path",
     "find_ticket_path_by_run_id",
     "list_tickets",
     "read_ticket_by_run_id",
@@ -179,6 +180,25 @@ __all__ = [
 #: collides_with_the_device_record_table`, so extending this table can never
 #: silently widen what `mcp_server.boundary.sanitize` wraps in every OTHER
 #: tool's payload, and vice versa.
+#: `previous_reason` (B-446, Lane B2's handover section, `ticket.Ticket.
+#: record_handover`) joins them for a reason specific to what a handover
+#: does: it copies a `CheckResult.reason` string OUT OF A DIFFERENT TICKET
+#: FILE and re-presents it, next to this run's own trusted fields, as an
+#: established fact about a prior investigation. `reason` text is not
+#: code-authored the way `finding`/`rung`/`device` are -- `checks.py`'s
+#: `_last_reset_note` (B-430) appends a BGP peer's own, unauthenticated
+#: `last_reset_reason` (already in `model_egress.FREE_TEXT_FIELDS`) straight
+#: into the `reason` a rung reports, so `previous_reason` can carry the same
+#: device-authored text `response_text`/`excerpt` already get contained for.
+#: `current_reason` -- this run's OWN cause reason, the identical field at
+#: the identical trust level `answer.cause.reason` already has (see
+#: `test_the_answer_is_the_deterministic_descents_own_unwrapped`) -- is
+#: deliberately NOT here: it is not foreign to this ticket, and wrapping it
+#: only in the handover section while leaving its first appearance in the
+#: same file's `Answer` section unwrapped would be inconsistent, not safer.
+#: `ticket.Ticket.record_handover`'s own docstring gives the full reasoning,
+#: including why `previous_cause`/`current_cause` carry no `reason` key of
+#: their own (so containment cannot be bypassed by nesting).
 _UNTRUSTED_TEXT_FIELDS = frozenset(
     {
         "question",
@@ -190,6 +210,7 @@ _UNTRUSTED_TEXT_FIELDS = frozenset(
         "detail",
         "excerpt",
         "response_text",
+        "previous_reason",
     }
 )
 
@@ -388,6 +409,11 @@ def _shape_ticket_payload(parsed: dict[str, Any]) -> dict[str, Any]:
         # descent's own answer... never a model's". Passed through exactly
         # as ticket.read_ticket returned it.
         "answer": answer,
+        # B-446 (Lane B2): a diff of two code-observed answers is itself
+        # code-observed, computed by `cli._record_handover`, never a model's
+        # account of what changed -- belongs beside `answer`, not under
+        # `model_claimed`, for the same reason `answer` does.
+        "handover": parsed["handover"],
     }
     model_claimed = {
         "warning": (
@@ -479,5 +505,58 @@ def find_ticket_path_by_run_id(run_id: str) -> Path | None:
     for path in _iter_ticket_files(_resolve_dir()):
         parsed = _safe_read(path)
         if parsed is not None and parsed["run_id"] == run_id:
+            return path
+    return None
+
+
+def find_previous_ticket_path(
+    device: str | None,
+    subject: str | None,
+    flow: str | None,
+    *,
+    exclude_run_id: str | None = None,
+) -> Path | None:
+    """The most recently OPENED ticket whose header names this same
+    (device, subject, flow), other than ``exclude_run_id`` -- the join key
+    B-446's handover section (Lane B2, `ticket.Ticket.record_handover`)
+    diffs the current run against.
+
+    A raw path, like `find_ticket_path_by_run_id` and unlike
+    `read_ticket_by_run_id` -- see that function's own docstring for why: a
+    caller computing a diff needs the SAME strings the previous run itself
+    wrote (a finding literal, a rung name) to compare by equality, not a
+    copy with untrusted-content delimiters wrapped around some of them,
+    which both breaks equality and is the wrong layer -- this is an internal
+    cli.py caller, not a model.
+
+    ``exclude_run_id`` exists because the CURRENT ticket's header is already
+    on disk (`ticket.TicketRecorder.open` writes it before
+    `cli._record_in_ticket` runs) by the time this scans -- without it, a
+    run would find itself and report a handover against itself: `status`
+    would read `HANDOVER_COMPARED` with `finding_changed=False`, a
+    fabricated "nothing changed" masquerading as a real comparison, which is
+    exactly the defect class this whole feature exists to avoid.
+
+    Matching is by header equality on all three fields, not `run_id` -- a
+    fresh run of the SAME question, the case this function exists to find.
+    `None` covers "no earlier ticket matches" and "no tickets directory yet"
+    alike -- the same "no history yet" shape `list_tickets` already gives an
+    empty directory; the caller (`cli._record_handover`) is the one that
+    turns that into the explicit `HANDOVER_FIRST_RUN` a reader must see
+    rather than a silently-empty comparison.
+    """
+
+    for path in _iter_ticket_files(_resolve_dir()):
+        parsed = _safe_read(path)
+        if parsed is None:
+            continue
+        if exclude_run_id is not None and parsed["run_id"] == exclude_run_id:
+            continue
+        header = parsed["header"] or {}
+        if (
+            header.get("device") == device
+            and header.get("subject") == subject
+            and header.get("flow") == flow
+        ):
             return path
     return None

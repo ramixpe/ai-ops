@@ -736,8 +736,15 @@ def test_the_ticket_records_the_resolved_intent(monkeypatch, tmp_path):
 
 def test_the_context_footprint_is_zero_when_no_model_ran(tmp_path, monkeypatch):
     """`--from-fixtures` with no `--paraphrase` makes no model call at all
-    (`result.exchanges` is empty) -- a TRUE zero, not a stand-in for one
-    never measured, since nothing really was sent."""
+    (`result.exchanges` is empty) -- `chars_sent` is a TRUE zero, not a
+    stand-in for one never measured, since nothing really was sent.
+
+    `chars_withheld` is `None`, not `0`: no evidence-budget mechanism runs on
+    the `investigate()` path today (verified against `evidence_budget.py`'s
+    own callers), so there is nothing to honestly measure as zero -- `0`
+    would claim a measurement that never happened. See `ticket.py`'s
+    `record_context_footprint` docstring and B-506's identical fix for
+    `record_device_interaction`'s `retries`."""
 
     from agent_nettools import ticket
 
@@ -749,9 +756,7 @@ def test_the_context_footprint_is_zero_when_no_model_ran(tmp_path, monkeypatch):
 
     assert parsed["context_footprint"] is not None
     assert parsed["context_footprint"]["chars_sent"] == 0
-    # No evidence-budget mechanism runs on this path today (verified against
-    # evidence_budget.py's own callers) -- honestly 0, not fabricated.
-    assert parsed["context_footprint"]["chars_withheld"] == 0
+    assert parsed["context_footprint"]["chars_withheld"] is None
 
 
 def test_the_context_footprint_sums_every_exchanges_user_payload(monkeypatch, capsys, tmp_path):
@@ -785,7 +790,8 @@ def test_the_context_footprint_sums_every_exchanges_user_payload(monkeypatch, ca
     parsed = ticket.read_ticket(files[0])
 
     assert parsed["context_footprint"]["chars_sent"] == 42
-    assert parsed["context_footprint"]["chars_withheld"] == 0
+    # Not measured on this path -- see the sibling test's docstring.
+    assert parsed["context_footprint"]["chars_withheld"] is None
 
 
 # --------------------------------------------------------------------------- #
@@ -852,6 +858,147 @@ def test_the_ticket_records_only_the_evidence_that_fed_the_descent(tmp_path, mon
         ("PE2", "interface:Gi0/0/0/1"),
         ("PE2", "interface:Gi0/0/0/2"),
     }
+
+
+# --------------------------------------------------------------------------- #
+# B-446 (Lane B2) -- the handover: what changed since the previous ticket for
+# the same (device, subject, flow), and what recovered
+# --------------------------------------------------------------------------- #
+
+
+def test_the_handover_reports_first_run_explicitly_not_as_nothing_changed(
+    tmp_path, monkeypatch,
+):
+    """The first investigation of a subject has no previous ticket to
+    compare against -- `status` must say so explicitly. This codebase's
+    most-repeated defect is absence read as zero, and a handover is the
+    sharpest place it could recur: `recovered`/`newly_broken`/
+    `rung_comparison` must stay `None` here, never a fabricated empty
+    comparison."""
+
+    from agent_nettools import ticket
+
+    _main(ARGS, monkeypatch)
+
+    files = sorted((tmp_path / "tickets").glob("*.md"))
+    assert len(files) == 1
+    parsed = ticket.read_ticket(files[0])
+
+    handover = parsed["handover"]
+    assert handover is not None
+    assert handover["status"] == ticket.HANDOVER_FIRST_RUN
+    assert handover["previous_run_id"] is None
+    assert handover["previous_ticket_path"] is None
+    assert handover["recovered"] is None
+    assert handover["newly_broken"] is None
+    assert handover["rung_comparison"] is None
+
+
+def test_the_handover_reports_a_recovery_between_two_runs_for_the_same_subject(
+    tmp_path, monkeypatch,
+):
+    """The end-to-end proof this lane's own acceptance test asks for: run
+    `broken` then `healthy` against the same (device, subject, flow) and the
+    SECOND ticket's handover section reports the recovery -- the half
+    nobody builds. All five rungs of `bgp_session` cascade broken under
+    `broken` (verified directly against `investigation.investigate()`) and
+    all five are healthy under `healthy`, so this is a full-ladder recovery,
+    not a partial one."""
+
+    from agent_nettools import ticket
+
+    _main([*ARGS, "--label", "broken"], monkeypatch)
+    _main([*ARGS, "--label", "healthy"], monkeypatch)
+
+    files = sorted((tmp_path / "tickets").glob("*.md"))
+    assert len(files) == 2
+    first = ticket.read_ticket(files[0])
+    second = ticket.read_ticket(files[1])
+
+    assert first["handover"]["status"] == ticket.HANDOVER_FIRST_RUN
+
+    handover = second["handover"]
+    assert handover["status"] == ticket.HANDOVER_COMPARED
+    assert handover["previous_run_id"] == first["run_id"]
+    assert handover["previous_ticket_path"] == str(files[0])
+    assert handover["finding_changed"] is True
+    assert handover["previous_finding"] == "interface_line_down"
+    assert handover["current_finding"] == "all_layers_healthy"
+    assert handover["cause_changed"] is True
+    assert handover["previous_cause"] == {"rung": "interface", "device": "PE2"}
+    assert handover["current_cause"] is None
+    assert handover["trustworthy_flipped"] is False, "both runs are trustworthy"
+    assert handover["rung_comparison"] == "available"
+
+    recovered_rungs = {r["rung"] for r in handover["recovered"]}
+    assert recovered_rungs == {
+        "bgp_session", "transport", "route_to_peer", "igp_adjacency", "interface",
+    }
+    assert handover["newly_broken"] == [], (
+        "an empty list here is a REAL, measured zero (rung_comparison is "
+        "'available'), not a fabricated one"
+    )
+
+
+def test_the_handover_reports_newly_broken_as_the_inverse_positive_control(
+    tmp_path, monkeypatch,
+):
+    """OBS-181: the recovery test above needs a positive control proving the
+    comparison has a real direction, not just that SOME list gets
+    populated. Reverse the label order -- healthy then broken -- and
+    `newly_broken` must fill instead of `recovered`."""
+
+    from agent_nettools import ticket
+
+    _main([*ARGS, "--label", "healthy"], monkeypatch)
+    _main([*ARGS, "--label", "broken"], monkeypatch)
+
+    files = sorted((tmp_path / "tickets").glob("*.md"))
+    assert len(files) == 2
+    second = ticket.read_ticket(files[1])
+    handover = second["handover"]
+
+    assert handover["status"] == ticket.HANDOVER_COMPARED
+    assert handover["recovered"] == []
+    newly_broken_rungs = {r["rung"] for r in handover["newly_broken"]}
+    assert newly_broken_rungs == {
+        "bgp_session", "transport", "route_to_peer", "igp_adjacency", "interface",
+    }
+    entry = next(r for r in handover["newly_broken"] if r["rung"] == "interface")
+    assert entry["device"] == "PE2"
+    assert entry["previous_reason"]  # a real reason string from the healthy run
+    assert entry["current_reason"]
+
+
+def test_the_handover_reports_cannot_compare_when_the_previous_ticket_has_no_answer(
+    tmp_path, monkeypatch,
+):
+    """A previous ticket that exists (same device/subject/flow header) but
+    never recorded an answer -- a crashed or interrupted run -- must be
+    reported as `cannot_compare`, never silently treated as `first_run`
+    (which would hide that an earlier attempt happened at all) or as
+    `compared` with a fabricated diff against nothing."""
+
+    from agent_nettools import ticket
+
+    recorder = ticket.TicketRecorder(tickets_dir=str(tmp_path / "tickets"))
+    incomplete = recorder.open(
+        "10.255.0.12", entry_point="cli:investigate", device="RR1", flow="bgp_session",
+    )
+    incomplete.record_question("why is it down?")
+    # No record_answer -- this ticket never reached an answer.
+
+    _main([*ARGS, "--label", "broken"], monkeypatch)
+
+    files = sorted((tmp_path / "tickets").glob("*.md"))
+    assert len(files) == 2
+    second = ticket.read_ticket(files[1])
+    handover = second["handover"]
+
+    assert handover["status"] == ticket.HANDOVER_CANNOT_COMPARE
+    assert handover["previous_run_id"] == incomplete.run_id
+    assert handover["recovered"] is None
+    assert handover["newly_broken"] is None
 
 
 # --------------------------------------------------------------------------- #

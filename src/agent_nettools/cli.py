@@ -852,18 +852,24 @@ def _record_in_ticket(handle, args, result, subject, flow, question=None, analys
         # `user_payload` (0 when `result.exchanges` is empty, e.g.
         # `--no-model`/`--from-fixtures` with no `--paraphrase`, which is a
         # true zero, not a stand-in for one never taken).
-        # `chars_withheld` is honestly `0` here, always: no evidence-budget
-        # mechanism (`evidence_budget.budget_device_evidence`/
-        # `budget_fabric_evidence`) runs on the `investigate()` path today --
-        # verified by reading `evidence_budget.py`'s only callers
-        # (`fabric_analysis.py`/`model_egress.py`) -- so there is no real
-        # input-truncation signal to report. This is deliberately NOT
+        # `chars_withheld` is `None` here, always -- NOT `0`. `0` would claim
+        # "measured, and nothing was withheld"; the true fact on this path is
+        # "not measured at all". No evidence-budget mechanism
+        # (`evidence_budget.budget_device_evidence`/`budget_fabric_evidence`)
+        # runs on the `investigate()` path today -- verified by reading
+        # `evidence_budget.py`'s only callers (`fabric_analysis.py`/
+        # `model_egress.py`) and `investigation.py`'s own imports, which pull
+        # in neither -- so there is no real input-truncation signal to
+        # report, the identical "no seam carries this measurement" shape
+        # `record_device_interaction`'s `retries` documents for itself (see
+        # `ticket.py`'s `record_context_footprint` docstring, updated
+        # alongside this call). This is deliberately NOT
         # `paraphrase_status == WITHHELD`: that describes the model's OUTPUT
         # being rejected by grounding, a different fact from something
         # withheld from its INPUT, and conflating the two would misreport a
         # rejected answer as a truncated prompt.
         chars_sent = sum(len(exchange.user_payload) for exchange in getattr(result, "exchanges", ()))
-        handle.record_context_footprint(chars_sent=chars_sent, chars_withheld=0)
+        handle.record_context_footprint(chars_sent=chars_sent, chars_withheld=None)
         # Every model exchange, recorded verbatim. This is the half of the
         # flight recorder that was missing: the deterministic path was well
         # instrumented and the model path invisible, which is backwards for
@@ -886,6 +892,21 @@ def _record_in_ticket(handle, args, result, subject, flow, question=None, analys
             )
         cause = result.descent.cause
         coherence = result.descent.coherence
+        # B-446 (Lane B2): every rung's own outcome, not just the cause --
+        # the extra half of `prompt_library.descent_payload`'s own "rungs"
+        # shape, computed here rather than imported (this module has no
+        # dependency on `prompt_library.py`, and the reduction is three
+        # lines). This is what lets a LATER run's handover section tell
+        # "recovered" apart from "still broken" for a rung that was never
+        # the cause -- `cause` alone only ever names the lowest ONE. Passed
+        # as `extra=` rather than a new `record_answer` parameter: still the
+        # descent's own field (`result.descent.outcomes`), still passed
+        # through unchanged, so `record_answer`'s own "never re-derived"
+        # contract is unaffected.
+        rungs = [
+            {"rung": o.rung, "device": o.device, "status": o.status, "reason": o.result.reason}
+            for o in result.descent.outcomes
+        ]
         handle.record_answer(
             finding=result.descent.finding,
             trustworthy=result.trustworthy,
@@ -894,10 +915,156 @@ def _record_in_ticket(handle, args, result, subject, flow, question=None, analys
             coherence=(coherence.as_dict() if coherence is not None else None),
             report_status=result.report_status,
             correlation_status=result.correlation_status,
+            extra={"rungs": rungs},
         )
+        _record_handover(handle, args, result, subject, flow)
         handle.close()
     except Exception as exc:  # noqa: BLE001 -- bookkeeping never fails a run
         _note(f"# ticket incomplete: {exc}", args)
+
+
+def _record_handover(handle, args, result, subject, flow) -> None:
+    """B-446 (Lane B2): what changed since the previous ticket for this same
+    (device, subject, flow), and what recovered. Never raises -- the same
+    "bookkeeping must not take down a diagnosis" posture
+    `_record_diagnosis_in_ledger`/`_record_session_turn` already take for
+    theirs, and deliberately its OWN try/except rather than sharing
+    `_record_in_ticket`'s: a bug in this brand-new comparison must not be
+    able to suppress the `Closed` marker for a ticket whose question/intent/
+    timeline/evidence/answer all wrote successfully.
+
+    Called from `_record_in_ticket`, after `record_answer` (whose `extra=
+    {"rungs": [...]}` this run's own comparison needs) and before
+    `handle.close()` -- a handover recorded after `close()` would still
+    round-trip correctly (`read_ticket` takes the LAST section of each kind,
+    and `close()` is idempotent), but a ticket whose last recorded action is
+    `Closed` is the honest shape for "this interaction is over".
+    """
+
+    if handle is None:
+        return
+    try:
+        from . import ticket as _ticket
+        from . import ticket_read as _ticket_read
+        from .checks import BROKEN, HEALTHY
+
+        device = getattr(args, "device", None)
+        prev_path = _ticket_read.find_previous_ticket_path(
+            device, subject, flow, exclude_run_id=handle.run_id,
+        )
+        if prev_path is None:
+            handle.record_handover(
+                status=_ticket.HANDOVER_FIRST_RUN,
+                notes=(
+                    f"no previous ticket found for device={device!r} "
+                    f"subject={subject!r} flow={flow!r} -- first run recorded"
+                ),
+            )
+            return
+
+        prev_parsed = _ticket.read_ticket(prev_path)
+        prev_header = prev_parsed.get("header") or {}
+        prev_answer = prev_parsed.get("answer")
+        if not prev_answer:
+            handle.record_handover(
+                status=_ticket.HANDOVER_CANNOT_COMPARE,
+                previous_run_id=prev_parsed.get("run_id"),
+                previous_ticket_path=str(prev_path),
+                previous_opened_at=prev_header.get("opened_at_utc"),
+                notes=(
+                    "a previous ticket exists for this device/subject/flow "
+                    "but recorded no answer to compare against (an "
+                    "incomplete or crashed run)"
+                ),
+            )
+            return
+
+        cause = result.descent.cause
+        current_cause = (
+            {"rung": cause.rung, "device": cause.device} if cause is not None else None
+        )
+        current_reason = cause.result.reason if cause is not None else None
+        current_finding = result.descent.finding
+        current_trustworthy = result.trustworthy
+
+        prev_finding = prev_answer.get("finding")
+        prev_trustworthy = prev_answer.get("trustworthy")
+        prev_cause_raw = prev_answer.get("cause") or {}
+        prev_cause = (
+            {"rung": prev_cause_raw.get("rung"), "device": prev_cause_raw.get("device")}
+            if prev_answer.get("cause") is not None else None
+        )
+        prev_reason = prev_cause_raw.get("reason") if prev_answer.get("cause") is not None else None
+        prev_rungs = prev_answer.get("rungs")
+
+        finding_changed = current_finding != prev_finding
+        cause_changed = current_cause != prev_cause
+        trustworthy_flipped = (
+            prev_trustworthy is not None and prev_trustworthy != current_trustworthy
+        )
+
+        recovered: list[dict] | None = None
+        newly_broken: list[dict] | None = None
+        rung_comparison = "unavailable"
+        if isinstance(prev_rungs, list):
+            rung_comparison = "available"
+            prev_by_key = {
+                (r.get("rung"), r.get("device")): r
+                for r in prev_rungs if isinstance(r, dict)
+            }
+            recovered = []
+            newly_broken = []
+            for outcome in result.descent.outcomes:
+                prev_entry = prev_by_key.get((outcome.rung, outcome.device))
+                if prev_entry is None:
+                    continue
+                prev_status = prev_entry.get("status")
+                entry = {
+                    "rung": outcome.rung, "device": outcome.device,
+                    "previous_reason": prev_entry.get("reason"),
+                    "current_reason": outcome.result.reason,
+                }
+                if prev_status == BROKEN and outcome.status == HEALTHY:
+                    recovered.append(entry)
+                elif prev_status == HEALTHY and outcome.status == BROKEN:
+                    newly_broken.append(entry)
+
+        summary = []
+        if finding_changed:
+            summary.append(f"finding changed: {prev_finding!r} -> {current_finding!r}")
+        if cause_changed:
+            summary.append(f"cause changed: {prev_cause!r} -> {current_cause!r}")
+        if trustworthy_flipped:
+            summary.append(f"trustworthy flipped: {prev_trustworthy!r} -> {current_trustworthy!r}")
+        if recovered:
+            summary.append(f"{len(recovered)} rung(s) recovered")
+        if newly_broken:
+            summary.append(f"{len(newly_broken)} rung(s) newly broken")
+        notes = "; ".join(summary) if summary else "no change since the previous run"
+
+        handle.record_handover(
+            status=_ticket.HANDOVER_COMPARED,
+            previous_run_id=prev_parsed.get("run_id"),
+            previous_ticket_path=str(prev_path),
+            previous_opened_at=prev_header.get("opened_at_utc"),
+            previous_finding=prev_finding,
+            current_finding=current_finding,
+            finding_changed=finding_changed,
+            previous_cause=prev_cause,
+            current_cause=current_cause,
+            previous_reason=prev_reason,
+            current_reason=current_reason,
+            cause_changed=cause_changed,
+            previous_trustworthy=prev_trustworthy,
+            current_trustworthy=current_trustworthy,
+            trustworthy_flipped=trustworthy_flipped,
+            rung_comparison=rung_comparison,
+            recovered=recovered,
+            newly_broken=newly_broken,
+            notes=notes,
+        )
+    except Exception as exc:  # noqa: BLE001 -- bookkeeping never fails a run
+        _note(f"# handover not recorded: {exc}", args)
 
 
 def _record_diagnosis_in_ledger(result, args, subject, flow, run_id=None) -> None:

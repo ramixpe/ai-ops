@@ -230,6 +230,73 @@ def test_find_ticket_path_skips_an_unreadable_ticket_file(tmp_path, monkeypatch)
 
 
 # --------------------------------------------------------------------------- #
+# find_previous_ticket_path (B-446, Lane B2): the handover's own join,
+# device/subject/flow header equality, not run_id
+# --------------------------------------------------------------------------- #
+
+
+def test_find_previous_ticket_path_matches_on_device_subject_flow(tmp_path, monkeypatch):
+    _set_dir(monkeypatch, tmp_path)
+    older = _open(tmp_path, subject="10.255.0.12", device="RR1", flow="bgp_session")
+
+    found = ticket_read.find_previous_ticket_path("RR1", "10.255.0.12", "bgp_session")
+
+    assert found == Path(older.path)
+
+
+def test_find_previous_ticket_path_excludes_the_given_run_id(tmp_path, monkeypatch):
+    """Without `exclude_run_id`, a ticket already on disk by the time the
+    CURRENT run's own handover section is being built would find ITSELF and
+    report a fabricated 'nothing changed' -- this is the guard against
+    exactly that."""
+
+    _set_dir(monkeypatch, tmp_path)
+    older = _open(tmp_path, subject="10.255.0.12", device="RR1", flow="bgp_session")
+    current = _open(tmp_path, subject="10.255.0.12", device="RR1", flow="bgp_session")
+
+    found = ticket_read.find_previous_ticket_path(
+        "RR1", "10.255.0.12", "bgp_session", exclude_run_id=current.run_id,
+    )
+
+    assert found == Path(older.path)
+
+
+def test_find_previous_ticket_path_is_none_for_a_subject_never_seen_before(tmp_path, monkeypatch):
+    _set_dir(monkeypatch, tmp_path)
+    _open(tmp_path, subject="a different subject", device="RR1", flow="bgp_session")
+
+    found = ticket_read.find_previous_ticket_path("RR1", "10.255.0.12", "bgp_session")
+
+    assert found is None
+
+
+def test_find_previous_ticket_path_on_an_empty_directory_is_none(tmp_path, monkeypatch):
+    _set_dir(monkeypatch, tmp_path / "does-not-exist-yet")
+    assert ticket_read.find_previous_ticket_path("RR1", "10.255.0.12", "bgp_session") is None
+
+
+def test_find_previous_ticket_path_most_recently_opened_wins(tmp_path, monkeypatch):
+    _set_dir(monkeypatch, tmp_path)
+    older = _open(tmp_path, subject="10.255.0.12", device="RR1", flow="bgp_session")
+    newer = _open(tmp_path, subject="10.255.0.12", device="RR1", flow="bgp_session")
+
+    found = ticket_read.find_previous_ticket_path("RR1", "10.255.0.12", "bgp_session")
+
+    assert found == Path(newer.path)
+    assert older.path != newer.path
+
+
+def test_find_previous_ticket_path_skips_an_unreadable_ticket_file(tmp_path, monkeypatch):
+    _set_dir(monkeypatch, tmp_path)
+    good = _open(tmp_path, subject="10.255.0.12", device="RR1", flow="bgp_session")
+
+    (tmp_path / "20260101T000000.000001Z_corrupt.md").write_bytes(b"\xff\xfe not utf-8 at all")
+
+    found = ticket_read.find_previous_ticket_path("RR1", "10.255.0.12", "bgp_session")
+    assert found == Path(good.path)
+
+
+# --------------------------------------------------------------------------- #
 # code_observed vs model_claimed: the split is preserved, not flattened
 # --------------------------------------------------------------------------- #
 
@@ -248,7 +315,7 @@ def test_code_observed_and_model_claimed_are_kept_structurally_apart(tmp_path, m
     assert set(found) == {"run_id", "header", "code_observed", "model_claimed", "outcome", "closed"}
     assert set(found["code_observed"]) == {
         "question", "intent", "timeline", "device_interactions",
-        "evidence", "context_footprint", "answer",
+        "evidence", "context_footprint", "answer", "handover",
     }
     assert set(found["model_claimed"]) == {"warning", "exchanges"}
     # The model's own text lives ONLY under model_claimed -- never duplicated
@@ -291,6 +358,57 @@ def test_the_answer_is_the_deterministic_descents_own_unwrapped(tmp_path, monkey
     assert answer["trustworthy"] is True
     assert answer["cause"] == {"rung": "interface", "device": "PE2", "reason": "line protocol down"}
     assert model_egress.DEVICE_TEXT_OPEN not in str(answer)
+
+
+def test_handover_previous_reason_is_contained_current_reason_is_not(tmp_path, monkeypatch):
+    """B-446 (Lane B2): `previous_reason` is copied out of a DIFFERENT
+    ticket file (`checks.py`'s own `_last_reset_note`, B-430, is direct
+    evidence a `CheckResult.reason` can carry a verbatim, unauthenticated
+    far-end device string) and must be contained the same way
+    `response_text` already is. `current_reason` is this run's OWN cause
+    reason -- the identical field at the identical trust level
+    `answer.cause.reason` already has a few lines above in the same file --
+    so wrapping it here too would be inconsistent, not safer. This is the
+    positive control for that asymmetry: both fields present in the same
+    section, only one wrapped."""
+
+    _set_dir(monkeypatch, tmp_path)
+    tk = _open(tmp_path)
+    tk.record_answer("all_layers_healthy", trustworthy=True)
+    tk.record_handover(
+        status=ticket.HANDOVER_COMPARED,
+        previous_reason="the far end reports: administrative shutdown",
+        current_reason="line protocol up",
+        finding_changed=True,
+    )
+
+    found = ticket_read.read_ticket_by_run_id(tk.run_id)
+    handover = found["code_observed"]["handover"]
+
+    assert model_egress.DEVICE_TEXT_OPEN in handover["previous_reason"]
+    assert model_egress.DEVICE_TEXT_CLOSE in handover["previous_reason"]
+    assert "administrative shutdown" in handover["previous_reason"]
+
+    # The positive control: current_reason carries real text and is NOT
+    # wrapped -- proving the asymmetry is deliberate, not a missing case.
+    assert handover["current_reason"] == "line protocol up"
+    assert model_egress.DEVICE_TEXT_OPEN not in handover["current_reason"]
+
+
+def test_handover_is_under_code_observed_never_model_claimed(tmp_path, monkeypatch):
+    """A diff of two code-observed answers is itself code-observed --
+    computed by `cli._record_handover`, never a model's account of what
+    changed."""
+
+    _set_dir(monkeypatch, tmp_path)
+    tk = _open(tmp_path)
+    tk.record_answer("all_layers_healthy", trustworthy=True)
+    tk.record_handover(status=ticket.HANDOVER_FIRST_RUN)
+
+    found = ticket_read.read_ticket_by_run_id(tk.run_id)
+
+    assert found["code_observed"]["handover"]["status"] == ticket.HANDOVER_FIRST_RUN
+    assert "handover" not in found["model_claimed"]
 
 
 # --------------------------------------------------------------------------- #
