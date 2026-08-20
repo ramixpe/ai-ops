@@ -96,6 +96,12 @@ NOISE_PATTERNS = (
     re.compile(r"(^|/)\.facts_cache\.json$"),
     re.compile(r"(^|/)agent_nettools\.egg-info(/|$)"),
     re.compile(r"(^|/)\.venv(/|$)"),
+    # Diagram SVGs in a WORKTREE are always a stale regeneration: the .py
+    # generators and facts.py are the authored work (and classify normally);
+    # the SVG is their output for a tree state that no longer exists, and main
+    # deliberately regenerates on every merge. Holding on them told us nothing
+    # eight times in the first real run.
+    re.compile(r"^docs/diagrams/[^/]+\.svg$"),
     re.compile(r"\.log$"),
     re.compile(r"\.jsonl$"),
 )
@@ -178,15 +184,29 @@ def classify_file(
             if normalise(text) == wt_norm:
                 return FileVerdict(path, "B_RENUMBERED", f"normalised match at {commit[:9]}")
     added = nontrivial_added_lines(diff_text)
+    if not added and diff_text.strip():
+        # A tracked modification whose diff adds nothing (pure deletion or
+        # whitespace churn) has no authored content to lose -- the removal
+        # either also happened in main or main's version supersedes it, and
+        # either way there is no line here that pruning could destroy.
+        return FileVerdict(path, "C_LINES", "diff adds no nontrivial lines")
+    if not added and worktree_text is not None:
+        # Untracked file: there is no diff-vs-HEAD, so treat the WHOLE content
+        # as added lines and demand containment, exactly as Tier C does for a
+        # modification. Without this, an untracked file whose every line is in
+        # main still held (measured: test_ticket.py, whose exact blob never
+        # landed because its forgery bug was fixed before commit -- OBS-176).
+        added = nontrivial_added_lines(
+            "\n".join("+" + ln for ln in worktree_text.splitlines())
+        )
+        if not added:
+            return FileVerdict(path, "C_LINES", "untracked file with no nontrivial content")
     if added:
         union = "\n".join(normalise(t) for _, t in history_texts)
         missing = [ln for ln in added if ln not in union]
         if not missing:
             return FileVerdict(path, "C_LINES", f"all {len(added)} added lines present in target history")
         return FileVerdict(path, "HOLD", f"{len(missing)} added line(s) absent from target history; first: {missing[0][:80]!r}")
-    # Untracked file (no diff-vs-HEAD) whose content matched nothing: hold.
-    if worktree_text is not None:
-        return FileVerdict(path, "HOLD", "untracked content not found in target history")
     return FileVerdict(path, "HOLD", "unreadable content")
 
 
@@ -234,6 +254,10 @@ def classify_worktree(
 # --------------------------------------------------------------------------- #
 # Gather layer -- the only part that talks to git.
 # --------------------------------------------------------------------------- #
+
+
+def pathlib_rel(child: Path, root: Path) -> Path:
+    return child.relative_to(root)
 
 
 def _run(args: list[str], cwd: Path | None = None) -> str:
@@ -290,6 +314,16 @@ def verify_all(target: str) -> list[WorktreeVerdict]:
             f = _wt / path
             if is_noise(path):
                 return FileVerdict(path, "NOISE")
+            if f.is_dir():
+                # `git status --porcelain` collapses an untracked directory to
+                # one `dir/` entry. Expand it: every file inside must prove
+                # itself individually, or the directory holds.
+                sub = [classify_one(str(pathlib_rel(c, _wt)), _wt, _head)
+                       for c in sorted(f.rglob("*")) if c.is_file()]
+                bad = [x for x in sub if x.tier == "HOLD"]
+                if bad:
+                    return FileVerdict(path, "HOLD", f"{len(bad)} file(s) inside unproven; first: {bad[0].path}")
+                return FileVerdict(path, "C_LINES", f"all {len(sub)} contained files proven")
             try:
                 blob = _run(["git", "hash-object", "--", str(f)]).strip()
                 text = f.read_text(errors="replace")
