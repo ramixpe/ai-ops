@@ -7258,6 +7258,12 @@ Three lessons worth the price:
   detection): 4,882 events at a steady ~12/min is exactly the "60 in ninety
   seconds versus 60 across an hour" distinction B-418 is about, and nothing in
   the product can currently see it.
+- **Verified rather than asserted:** enumerating `Rung.collect` across all four
+  flows in `flows.FLOWS`, every step reads a device `show` intent — `bgp`,
+  `bgp_neighbor`, `route`, `isis`, `interfaces`, `interface`, `lldp`, `ldp`,
+  `ldp_discovery`. **No flow reads a log source at any rung.** The descent has
+  no input that could have carried this signal, which is what makes the
+  paragraph above a structural claim and not a guess about tuning.
 - **Honest limits of this finding.** I measured the finding at 23:45, after the
   events stopped; that all five rungs were healthy *during* the window is an
   inference from the absence of any adjacency change, not a reading taken at
