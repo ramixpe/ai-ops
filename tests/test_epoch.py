@@ -430,7 +430,7 @@ def test_undetermined_outranks_incoherence():
     ]
     incoherent = epoch.Coherence(skew_seconds=900.0, bound_seconds=30.0)
 
-    assert descent._finding_for(_flow(), outcomes, None, incoherent) == flows.UNDETERMINED
+    assert descent._finding_for(_flow(), outcomes, incoherent) == flows.UNDETERMINED
 
 
 # --------------------------------------------------------------------------- #

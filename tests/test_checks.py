@@ -1054,7 +1054,7 @@ def test_that_is_what_makes_cause_not_localised_reachable():
         for r, s in zip(flow.descent, statuses, strict=True)
     ]
 
-    assert _finding_for(flow, outcomes, None) == flows.CAUSE_NOT_LOCALISED
+    assert _finding_for(flow, outcomes) == flows.CAUSE_NOT_LOCALISED
 
 
 def test_no_socket_means_no_transport_regardless_of_what_the_fsm_says():

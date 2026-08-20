@@ -79,7 +79,7 @@ def _descend(statuses, devices=None):
         )
         for rung, status, device in zip(flow.descent, statuses, devices, strict=True)
     ]
-    finding = _finding_for(flow, outcomes, None)
+    finding = _finding_for(flow, outcomes)
     return DescentResult(
         flow="bgp_session", device="RR1", subject="10.255.0.12",
         finding=finding, outcomes=tuple(outcomes),

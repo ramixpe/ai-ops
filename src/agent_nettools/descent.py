@@ -467,7 +467,7 @@ def run_descent(
         # one may only be a consequence of something further down.
 
     verdict = coherence(outcomes) if coherence is not None else None
-    finding = _finding_for(flow, outcomes, stopped_reason, verdict)
+    finding = _finding_for(flow, outcomes, verdict)
 
     return DescentResult(
         flow=flow.object_type,
@@ -484,7 +484,6 @@ def run_descent(
 def _finding_for(
     flow: Flow,
     outcomes: list[RungOutcome],
-    stopped_reason: str | None,
     coherence: Coherence | None = None,
 ) -> str:
     """Turn the walk into one terminal finding."""
