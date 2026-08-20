@@ -646,6 +646,51 @@ def test_demo_unknown_device_exits_critical(capsys):
     assert "Device not found" in capsys.readouterr().out
 
 
+def test_demo_unknown_device_refusal_names_the_valid_set(monkeypatch, capsys):
+    """C4: a refusal that rejects a value must say what WOULD have been
+    accepted, not just that the given one was wrong -- the same discipline
+    argparse's own ``choices=`` already gets for free, applied here to a
+    lookup-by-name this command does by hand."""
+
+    monkeypatch.setattr(
+        cli,
+        "list_devices",
+        lambda: {"status": "success", "data": {"devices": [{"name": "RR1"}, {"name": "PE1"}]}},
+    )
+    parser = cli.build_parser()
+    args = parser.parse_args(["demo", "NOT-A-REAL-DEVICE"])
+
+    code = args.func(args)
+    out = capsys.readouterr().out
+
+    assert code == cli.EXIT_CRITICAL
+    assert "Device not found" in out
+    # Sorted, deterministic order -- not whatever order list_devices() happened
+    # to return them in.
+    assert "known devices: PE1, RR1" in out
+
+
+def test_demo_known_device_is_not_refused(monkeypatch, capsys):
+    """Positive control for the refusal above: a device that IS in the known
+    set must never hit the "Device not found" branch at all."""
+
+    monkeypatch.setattr(
+        cli,
+        "list_devices",
+        lambda: {"status": "success", "data": {"devices": [{"name": "PE1"}]}},
+    )
+    monkeypatch.setattr(cli, "collect_evidence", lambda device: {"device": device})
+    monkeypatch.setattr(cli, "analyze_evidence", lambda evidence: "All good.")
+    parser = cli.build_parser()
+    args = parser.parse_args(["demo", "PE1"])
+
+    code = args.func(args)
+    out = capsys.readouterr().out
+
+    assert code == cli.EXIT_OK
+    assert "Device not found" not in out
+
+
 def test_agent_catches_value_error_and_exits_critical(monkeypatch, capsys):
     monkeypatch.setenv("NETTOOLS_ENABLE_AGENT", "1")
     monkeypatch.setattr(

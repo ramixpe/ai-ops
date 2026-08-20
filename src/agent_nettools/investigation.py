@@ -61,6 +61,7 @@ from .descent import DescentResult, run_descent
 from .epoch import (
     DEFAULT_SKEW_BOUND_SECONDS,
     EvidenceEpoch,
+    Observation,
     check_coherence,
     collect_epoch,
     template_calls,
@@ -301,6 +302,14 @@ class InvestigationResult:
     #: docstring): no epoch was built, so there is nothing to summarize -- the
     #: same reason `descent.coherence` is `None` on that path too.
     session_summary: dict | None = None
+
+    #: Every command this investigation's evidence epoch actually read, `None`
+    #: on the `collector=` injection path (same reason `session_summary` is
+    #: `None` there -- no epoch was built). This is the source `ticket.py`'s
+    #: `record_tool_event`/`record_evidence_source` calls need per-command
+    #: device/source/timing data that `session_summary` (a pre-aggregated
+    #: dict) does not carry.
+    observations: tuple[Observation, ...] | None = None
 
     #: Non-semantic fixes applied to a model response, e.g. a stripped fence.
     repairs: tuple[str, ...] = field(default_factory=tuple)
@@ -754,6 +763,9 @@ def investigate(
     # the collecting -- `None` on the `collector=` path, same reason `epoch`
     # itself is `None` there. See `InvestigationResult.session_summary`.
     session_summary = epoch.as_dict()["sessions"] if epoch is not None else None
+    # Every command this epoch actually read -- `None` on the `collector=`
+    # path for the same reason. See `InvestigationResult.observations`.
+    observations = epoch.observations if epoch is not None else None
 
     # -- Does the subject exist? Asked before anything is walked (B-459). ----
     #
@@ -784,7 +796,7 @@ def investigate(
                 # one result whose value is that it is *not* a claim about the
                 # network.
                 report=render_report(refused), report_status=EMITTED,
-                session_summary=session_summary,
+                session_summary=session_summary, observations=observations,
             )
 
     descent = run_descent(
@@ -834,6 +846,7 @@ def investigate(
             correlation=correlation, correlation_status=correlation_status,
             coverage=coverage, origin_unresolved=origin_unresolved,
             operator_notes=operator_notes, session_summary=session_summary,
+            observations=observations,
         )
 
     # -- The paraphrase. A model, and nothing downstream may prefer it. ------
@@ -927,7 +940,7 @@ def investigate(
         correlation=correlation, correlation_status=correlation_status,
         correlation_grounding=correlation_grounding, coverage=coverage,
         origin_unresolved=origin_unresolved, operator_notes=operator_notes,
-        session_summary=session_summary,
+        session_summary=session_summary, observations=observations,
         paraphrase=paraphrase, paraphrase_status=paraphrase_status,
         paraphrase_grounding=paraphrase_grounding,
         correlation_paraphrase=correlation_paraphrase,

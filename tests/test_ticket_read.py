@@ -23,6 +23,8 @@ Three things this file has to prove that `tests/test_ticket.py` never had to:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from agent_nettools import model_egress, ticket, ticket_read
@@ -168,6 +170,63 @@ def test_an_unreadable_ticket_file_is_skipped_not_fatal(tmp_path, monkeypatch):
     found = ticket_read.read_ticket_by_run_id(good.run_id)
     assert found is not None
     assert ticket_read.list_tickets()  # did not raise, still lists the good one
+
+
+# --------------------------------------------------------------------------- #
+# find_ticket_path_by_run_id (W4e): the raw-path sibling of
+# read_ticket_by_run_id, for a caller that intends to WRITE
+# (ticket.record_ticket_outcome, W4f)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("bad", [None, "", 42, "x" * 500, object()])
+def test_find_ticket_path_a_malformed_run_id_is_simply_not_found(tmp_path, monkeypatch, bad):
+    _set_dir(monkeypatch, tmp_path)
+    assert ticket_read.find_ticket_path_by_run_id(bad) is None
+
+
+def test_find_ticket_path_a_well_formed_but_unknown_run_id_is_not_found(tmp_path, monkeypatch):
+    _set_dir(monkeypatch, tmp_path)
+    _open(tmp_path)
+    assert ticket_read.find_ticket_path_by_run_id("0" * 32) is None
+
+
+def test_find_ticket_path_resolves_to_the_real_path_not_a_quoted_payload(tmp_path, monkeypatch):
+    """The whole reason this function exists instead of reusing
+    `read_ticket_by_run_id`: a raw, writable `pathlib.Path`, never the
+    sanitised/quoted dict the read path returns."""
+
+    _set_dir(monkeypatch, tmp_path)
+    tk = _open(tmp_path, subject="PE1 bgp down")
+    tk.record_answer("interface_line_down", trustworthy=True)
+
+    found = ticket_read.find_ticket_path_by_run_id(tk.run_id)
+
+    assert found == Path(tk.path)
+    # A real, appendable ticket file -- exactly what record_ticket_outcome
+    # (W4f) needs to open in "a" mode.
+    assert found.is_file()
+    assert found.read_text(encoding="utf-8") == Path(tk.path).read_text(encoding="utf-8")
+
+
+def test_find_ticket_path_most_recently_opened_wins(tmp_path, monkeypatch):
+    _set_dir(monkeypatch, tmp_path)
+    first = _open(tmp_path, subject="older")
+    second = _open(tmp_path, subject="newer", run_id=first.run_id)
+
+    found = ticket_read.find_ticket_path_by_run_id(first.run_id)
+
+    assert found == Path(second.path)
+
+
+def test_find_ticket_path_skips_an_unreadable_ticket_file(tmp_path, monkeypatch):
+    _set_dir(monkeypatch, tmp_path)
+    good = _open(tmp_path, subject="valid")
+
+    (tmp_path / "20260101T000000.000001Z_corrupt.md").write_bytes(b"\xff\xfe not utf-8 at all")
+
+    found = ticket_read.find_ticket_path_by_run_id(good.run_id)
+    assert found == Path(good.path)
 
 
 # --------------------------------------------------------------------------- #

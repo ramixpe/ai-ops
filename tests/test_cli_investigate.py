@@ -637,6 +637,300 @@ def test_the_ledger_id_is_surfaced_so_an_operator_can_run_ledger_verdict(
 
 
 # --------------------------------------------------------------------------- #
+# W3c -- the ledger row carries this run's real run_id and the cause rung's
+# own subject (not the investigation's top-level subject), the two fields
+# `incident_correlation.from_ledger_diagnoses` needs and could not get before
+# this wiring landed (see that module's "ledger integration gap" section).
+# --------------------------------------------------------------------------- #
+
+
+def test_a_run_writes_a_ledger_row_carrying_a_real_run_id_and_cause_subject(
+    monkeypatch, capsys,
+):
+    from agent_nettools import ledger
+
+    monkeypatch.delenv("NETTOOLS_DIAGNOSIS_LEDGER_FILE", raising=False)
+    ledger.reset()
+    try:
+        _main(ARGS, monkeypatch)
+
+        recorded = ledger.diagnoses()
+        assert len(recorded) == 1
+        row = recorded[0]
+
+        # A real run_id -- present, not None, and it round-trips through
+        # ledger.diagnoses() (the same shape incident_correlation.py's
+        # from_ledger_diagnoses reads).
+        assert row["run_id"] is not None
+        assert isinstance(row["run_id"], str) and row["run_id"]
+
+        # The cause rung's own subject (the interface, "Gi0/0/0/0" on the
+        # committed "broken" fixture), NOT the investigation's own top-level
+        # subject ("10.255.0.12") -- the two are deliberately different
+        # fields, per incident_correlation.py's module docstring.
+        assert row["subject"] == "10.255.0.12"
+        assert row["cause"]["subject"] not in (None, row["subject"])
+        assert row["cause"]["rung"] == "interface"
+        assert row["cause"]["device"] == "PE2"
+    finally:
+        ledger.reset()
+
+
+def test_the_ledger_run_id_matches_the_tickets_own_run_id(monkeypatch, tmp_path):
+    """The join key actually joins: the run_id on the ledger row is the SAME
+    run_id as the ticket opened for the same investigation, not two
+    independently-minted ids that merely look alike."""
+
+    from agent_nettools import ledger
+
+    monkeypatch.delenv("NETTOOLS_DIAGNOSIS_LEDGER_FILE", raising=False)
+    monkeypatch.setenv("NETTOOLS_TICKET_DIR", str(tmp_path / "tickets"))
+    ledger.reset()
+    try:
+        _main(ARGS, monkeypatch)
+
+        recorded = ledger.diagnoses()
+        assert len(recorded) == 1
+        run_id = recorded[0]["run_id"]
+
+        from agent_nettools import ticket_read
+
+        found = ticket_read.read_ticket_by_run_id(run_id)
+        assert found is not None
+        assert found["run_id"] == run_id
+    finally:
+        ledger.reset()
+
+
+# --------------------------------------------------------------------------- #
+# W4a -- the ticket records how the raw question became the resolved intent
+# --------------------------------------------------------------------------- #
+
+
+def test_the_ticket_records_the_resolved_intent(monkeypatch, tmp_path):
+    """`record_intent` fires once per ticket, carrying the resolved flow and
+    subject and the literal resolver name the CLI path always uses (it never
+    passes `resolver=` to `investigate()`, so `investigate()`'s own
+    `resolve = resolver or inventory_resolver` always falls through to the
+    module default)."""
+
+    from agent_nettools import ticket
+
+    _main(ARGS, monkeypatch)
+
+    files = sorted((tmp_path / "tickets").glob("*.md"))
+    assert len(files) == 1
+    parsed = ticket.read_ticket(files[0])
+
+    assert parsed["intent"] is not None
+    assert parsed["intent"]["flow"] == "bgp_session"
+    assert parsed["intent"]["resolved_subject"] == "10.255.0.12"
+    assert parsed["intent"]["resolver"] == "inventory_resolver"
+
+
+# --------------------------------------------------------------------------- #
+# W4b -- the ticket records the context footprint (what actually crossed
+# into a model prompt)
+# --------------------------------------------------------------------------- #
+
+
+def test_the_context_footprint_is_zero_when_no_model_ran(tmp_path, monkeypatch):
+    """`--from-fixtures` with no `--paraphrase` makes no model call at all
+    (`result.exchanges` is empty) -- a TRUE zero, not a stand-in for one
+    never measured, since nothing really was sent."""
+
+    from agent_nettools import ticket
+
+    _main(ARGS, monkeypatch)
+
+    files = sorted((tmp_path / "tickets").glob("*.md"))
+    assert len(files) == 1
+    parsed = ticket.read_ticket(files[0])
+
+    assert parsed["context_footprint"] is not None
+    assert parsed["context_footprint"]["chars_sent"] == 0
+    # No evidence-budget mechanism runs on this path today (verified against
+    # evidence_budget.py's own callers) -- honestly 0, not fabricated.
+    assert parsed["context_footprint"]["chars_withheld"] == 0
+
+
+def test_the_context_footprint_sums_every_exchanges_user_payload(monkeypatch, capsys, tmp_path):
+    """A real, non-zero measurement: `chars_sent` is the total length of
+    every recorded exchange's own `user_payload`, not a per-exchange or
+    truncated figure."""
+
+    from agent_nettools import ticket
+
+    result = _result(
+        "broken",
+        exchanges=(
+            investigation.ModelExchange(
+                purpose="report_paraphrase", prompt_ref=None,
+                system_prompt="sys", user_payload="x" * 37,
+                response_text="ok", stop_reason=None, usage=None,
+                grounding_ok=True, grounding_summary="ok",
+            ),
+            investigation.ModelExchange(
+                purpose="correlate_paraphrase", prompt_ref=None,
+                system_prompt="sys2", user_payload="y" * 5,
+                response_text="ok2", stop_reason=None, usage=None,
+                grounding_ok=True, grounding_summary="ok",
+            ),
+        ),
+    )
+    _drive(result, monkeypatch, capsys)
+
+    files = sorted((tmp_path / "tickets").glob("*.md"))
+    assert len(files) == 1
+    parsed = ticket.read_ticket(files[0])
+
+    assert parsed["context_footprint"]["chars_sent"] == 42
+    assert parsed["context_footprint"]["chars_withheld"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# W4c/W4d -- the ticket records the tool timeline and per-evidence
+# provenance, straight off `InvestigationResult.observations`
+# --------------------------------------------------------------------------- #
+
+
+def test_the_ticket_records_the_tool_timeline(tmp_path, monkeypatch):
+    """Every real (dict-envelope) observation becomes one `tool_event`
+    section -- read back through `ticket.read_ticket`, not just "the call
+    didn't raise". The pass-through "device"/"platform"/"timestamp" entries
+    `EvidenceEpoch` also carries (plain strings, not envelopes) must never
+    appear -- `obs.envelope.get(...)` would raise on one of those if this
+    loop did not skip them first."""
+
+    from agent_nettools import ticket
+
+    _main(ARGS, monkeypatch)
+
+    files = sorted((tmp_path / "tickets").glob("*.md"))
+    assert len(files) == 1
+    parsed = ticket.read_ticket(files[0])
+
+    timeline = parsed["timeline"]
+    assert timeline, "no tool events were recorded at all"
+    for entry in timeline:
+        assert entry["tool"] in ("run_approved_commands", "run_template")
+        assert entry["status"] in ("success", "error", "unsupported")
+        assert entry["device"] in ("RR1", "PE2")
+        assert entry["duration_ms"] is not None and entry["duration_ms"] >= 0
+        assert entry["started_at"]
+
+
+def test_the_ticket_records_only_the_evidence_that_fed_the_descent(tmp_path, monkeypatch):
+    """`evidence_source` sections are recorded only for observations whose
+    reconstructed `f"{device}:{key}"` matches (exactly, or as a prefix of) a
+    real `descent.evidence_keys` entry -- one for one against the "broken"
+    fixture's own real evidence_keys, not every observation collected."""
+
+    from agent_nettools import ticket
+
+    _main(ARGS, monkeypatch)
+
+    files = sorted((tmp_path / "tickets").glob("*.md"))
+    parsed = ticket.read_ticket(files[0])
+
+    evidence = parsed["evidence"]
+    assert len(evidence) == 7, (
+        "the 'broken' fixture's bgp_session descent cites exactly 7 "
+        "evidence_keys; this must be one evidence_source per key, no more"
+    )
+    for entry in evidence:
+        assert entry["source"] == "fixture"
+        assert entry["device"] in ("RR1", "PE2")
+
+    recorded_pairs = {(e["device"], e["evidence_key"]) for e in evidence}
+    assert recorded_pairs == {
+        ("RR1", "bgp"),
+        ("RR1", "bgp_neighbor:10.255.0.12"),
+        ("RR1", "route:10.255.0.12/32"),
+        ("PE2", "isis"),
+        ("PE2", "interface:Gi0/0/0/0"),
+        ("PE2", "interface:Gi0/0/0/1"),
+        ("PE2", "interface:Gi0/0/0/2"),
+    }
+
+
+# --------------------------------------------------------------------------- #
+# W4f -- `nettools ledger verdict` mirrors the outcome onto the ticket that
+# produced the diagnosis, found via the run_id join key (W3c)
+# --------------------------------------------------------------------------- #
+
+
+def test_ledger_verdict_mirrors_the_outcome_onto_the_tickets_own_run_id(
+    monkeypatch, capsys, tmp_path,
+):
+    from agent_nettools import ledger, ticket
+
+    monkeypatch.delenv("NETTOOLS_DIAGNOSIS_LEDGER_FILE", raising=False)
+    ledger.reset()
+    try:
+        _main(ARGS, monkeypatch)
+        capsys.readouterr()
+
+        recorded = ledger.diagnoses()
+        assert len(recorded) == 1
+        diagnosis_id = recorded[0]["id"]
+
+        code = _main(
+            ["ledger", "verdict", diagnosis_id, "confirmed_correct",
+             "--by", "tester", "--note", "checked by hand"],
+            monkeypatch,
+        )
+        err = capsys.readouterr().err
+
+        assert code == 0
+        assert "not mirrored" not in err
+
+        files = sorted((tmp_path / "tickets").glob("*.md"))
+        assert len(files) == 1
+        parsed = ticket.read_ticket(files[0])
+
+        assert parsed["outcome"]["outcome"] == "confirmed_correct"
+        assert parsed["outcome"]["by"] == "tester"
+        assert parsed["outcome"]["note"] == "checked by hand"
+    finally:
+        ledger.reset()
+
+
+def test_ledger_verdict_for_a_run_id_less_diagnosis_does_not_fabricate_a_ticket(
+    monkeypatch, capsys, tmp_path,
+):
+    """An old-format ledger row (recorded before run_id was wired through)
+    has genuinely no ticket to mirror onto -- the verdict still records and
+    still exits 0, and no ticket is fabricated out of thin air."""
+
+    from agent_nettools import ledger
+
+    monkeypatch.delenv("NETTOOLS_DIAGNOSIS_LEDGER_FILE", raising=False)
+    ledger.reset()
+    try:
+        write = ledger.record_diagnosis(
+            device="RR1", subject="10.255.0.12", flow="bgp_session",
+            finding="interface_line_down", trustworthy=True,
+            source=ledger.SOURCE_FIXTURE,
+        )  # no run_id -- the pre-W3c shape
+
+        code = _main(
+            ["ledger", "verdict", write.id, "confirmed_correct", "--by", "tester"],
+            monkeypatch,
+        )
+        err = capsys.readouterr().err
+
+        assert code == 0
+        assert "not mirrored" in err
+        assert "no run_id" in err
+
+        tickets_dir = tmp_path / "tickets"
+        assert not tickets_dir.exists() or list(tickets_dir.glob("*.md")) == []
+    finally:
+        ledger.reset()
+
+
+# --------------------------------------------------------------------------- #
 # B-407 -- session memory wiring
 #
 # `session_memory.py` shipped with the exact call this wiring makes already

@@ -105,6 +105,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 from dotenv import find_dotenv, load_dotenv
 
@@ -217,6 +218,33 @@ def _note(message: str, args: argparse.Namespace) -> None:
         print(message, file=sys.stderr)
 
 
+def _error_envelope(tool: str, *, device: str | None = None, errors: list[str], **extra: Any) -> dict[str, Any]:
+    """One ``{"status": "error", ...}`` envelope shape, factored out of the
+    seven hand-built error dicts this file used to construct separately
+    (release-1.0 cleanup, C3).
+
+    Pure de-duplication -- every call site's key SET and every value are
+    unchanged from what it built by hand; only key insertion order may now
+    differ, which is not a guarantee any caller of ``_emit`` relies on
+    (JSON objects, and this project's own tests, compare by key/value, never
+    by order).
+
+    ``device`` is omitted from the envelope entirely when ``None`` rather
+    than written as a null field -- `_cmd_route_event`'s error envelope
+    never carried a ``device`` key at all, and adding one here would change
+    what is emitted, not just how it is built. ``**extra`` carries whatever
+    else one call site needs beyond ``tool``/``device``/``status``/
+    ``errors`` -- ``subject`` for most `investigate` refusals, ``data: {}``
+    for `sr_policy_detail`'s.
+    """
+
+    envelope: dict[str, Any] = {"tool": tool, "status": "error", "errors": errors}
+    if device is not None:
+        envelope["device"] = device
+    envelope.update(extra)
+    return envelope
+
+
 def _add_output_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--format",
@@ -309,10 +337,9 @@ def _cmd_sr_policy(args: argparse.Namespace) -> int:
     try:
         color, endpoint = split_sr_policy_id(args.policy_id)
     except TemplateValidationError as exc:
-        result = {
-            "tool": "sr_policy_detail", "device": args.device, "status": "error",
-            "data": {}, "errors": [str(exc)],
-        }
+        result = _error_envelope(
+            "sr_policy_detail", device=args.device, data={}, errors=[str(exc)]
+        )
         _emit(result, args)
         return EXIT_WARNING
 
@@ -566,6 +593,76 @@ def _record_in_ticket(handle, args, result, subject, flow, question=None, analys
         if question is not None:
             handle.record_question(question, device=getattr(args, "device", None),
                                    subject=subject, flow_hint=flow)
+        # W4a: how the raw question became this resolved intent. `resolver`
+        # is hardcoded to the literal "inventory_resolver" -- not a value
+        # this function invents, but the one true fact of the CLI path:
+        # `_cmd_investigate` never passes `resolver=` to `investigate()`
+        # (see that call, a few lines above this one's own caller), so
+        # `investigate()`'s own `resolve = resolver or inventory_resolver`
+        # always falls through to the module-level default here. Nothing on
+        # `InvestigationResult` names which resolver ran, so a caller-
+        # supplied `resolver=` (were the CLI ever to grow one) would need a
+        # new field to report honestly instead of this literal.
+        handle.record_intent(flow=flow, resolved_subject=subject, resolver="inventory_resolver")
+        # W4d: the tool timeline and per-evidence provenance, straight off
+        # `result.observations` (W4c) -- `None` on the `collector=` path,
+        # same reason `session_summary` is `None` there.
+        #
+        # NOT every observation's `.envelope` is a dict: `EvidenceEpoch.
+        # collect_epoch` also emits three pass-through entries per device
+        # (`key` in "device"/"platform"/"timestamp") whose `.envelope` is a
+        # plain string, mirrored into `for_device()`'s dict for `checks.py`'s
+        # benefit -- `EvidenceEpoch.commands_run`'s own property already
+        # skips exactly these (`if not isinstance(o.envelope, dict): continue`)
+        # and this loop follows the same precedent; without it,
+        # `obs.envelope.get(...)` below would raise `AttributeError` on a str.
+        #
+        # The envelope shape (verified against `network_tools._base_result`,
+        # what every real observation's envelope actually is): `tool`,
+        # `device`, `status`, `timestamp`, `source`, `data`, `errors` -- no
+        # top-level `command`/`commands` key at all (per-command detail lives
+        # nested under `data["commands"]`, keyed by the command string), so
+        # `record_tool_event`'s `command=` is left at its own default.
+        if result.observations is not None:
+            evidence_keys = set(result.descent.evidence_keys)
+            for obs in result.observations:
+                if not isinstance(obs.envelope, dict):
+                    continue
+                handle.record_tool_event(
+                    tool=obs.envelope.get("tool", obs.key),
+                    status=obs.envelope.get("status", "unknown"),
+                    device=obs.device,
+                    duration_ms=obs.duration * 1000,
+                    started_at=obs.collected_at,
+                )
+                # Only the evidence that actually fed the descent, not every
+                # observation collected. `descent.evidence_keys` entries are
+                # built by `checks.evidence_key(device, intent_or_template,
+                # subject)` -> `f"{device}:{intent_or_template}[:subject]"`
+                # (verified by reading that helper) -- a DIFFERENT string
+                # from `obs.key` (the bare intent/template name, no device
+                # prefix), so a literal `obs.key in evidence_keys` check
+                # would never match anything at all. Reconstructed here as
+                # `f"{obs.device}:{obs.key}"`, matched either exactly (a
+                # template observation already keyed by its own subject,
+                # e.g. "interface:Gi0/0/0/0") or as a prefix of a longer
+                # evidence key (a whole-intent observation, e.g. "bgp",
+                # further narrowed to one peer's own citation by the check
+                # that read it) -- confirmed against a real fixture run
+                # (`--from-fixtures --label broken`): this reconstruction
+                # picks exactly the 7 observations behind the 7 real
+                # `evidence_keys` entries, one for one, neither more nor
+                # fewer.
+                prefix = f"{obs.device}:{obs.key}"
+                fed_the_descent = any(
+                    ek == prefix or ek.startswith(prefix + ":") for ek in evidence_keys
+                )
+                if fed_the_descent:
+                    handle.record_evidence_source(
+                        obs.key, device=obs.device,
+                        source=obs.envelope.get("source", "unknown"),
+                        collected_at=obs.collected_at,
+                    )
         sessions = getattr(result, "session_summary", None)
         if sessions:
             commands_by_device = (sessions.get("commands_run") or {}).get("by_device") or {}
@@ -576,6 +673,23 @@ def _record_in_ticket(handle, args, result, subject, flow, question=None, analys
                     commands_run=commands_by_device.get(device),
                     latency_ms=latency_by_device.get(device),
                 )
+        # W4b: what actually crossed into a model prompt. `chars_sent` is a
+        # real measurement -- the total length of every exchange's own
+        # `user_payload` (0 when `result.exchanges` is empty, e.g.
+        # `--no-model`/`--from-fixtures` with no `--paraphrase`, which is a
+        # true zero, not a stand-in for one never taken).
+        # `chars_withheld` is honestly `0` here, always: no evidence-budget
+        # mechanism (`evidence_budget.budget_device_evidence`/
+        # `budget_fabric_evidence`) runs on the `investigate()` path today --
+        # verified by reading `evidence_budget.py`'s only callers
+        # (`fabric_analysis.py`/`model_egress.py`) -- so there is no real
+        # input-truncation signal to report. This is deliberately NOT
+        # `paraphrase_status == WITHHELD`: that describes the model's OUTPUT
+        # being rejected by grounding, a different fact from something
+        # withheld from its INPUT, and conflating the two would misreport a
+        # rejected answer as a truncated prompt.
+        chars_sent = sum(len(exchange.user_payload) for exchange in getattr(result, "exchanges", ()))
+        handle.record_context_footprint(chars_sent=chars_sent, chars_withheld=0)
         # Every model exchange, recorded verbatim. This is the half of the
         # flight recorder that was missing: the deterministic path was well
         # instrumented and the model path invisible, which is backwards for
@@ -629,11 +743,23 @@ def _record_diagnosis_in_ledger(result, args, subject, flow, run_id=None) -> Non
             # live diagnosis in the corpus this ledger exists to build.
             source=(_ledger.SOURCE_FIXTURE if getattr(args, "from_fixtures", False)
                     else _ledger.SOURCE_LIVE),
+            # `subject` here is the CAUSE rung's own `CheckResult.subject`
+            # (the peer, the interface) -- not this function's own `subject`
+            # parameter (the investigation's top-level subject, already
+            # passed above) -- see `incident_correlation.py`'s module
+            # docstring ("The ledger integration gap (B-486), and what W3a
+            # closed"), which names this exact addition:
+            # `"subject": cause.result.subject` beside `rung`/`device`/
+            # `reason`. `correlate_by_cause` reads it back as `cause_subject`
+            # and needs it to tell apart two diagnoses that share a device
+            # and rung name but not the same underlying object.
             cause=({"rung": cause.rung, "device": cause.device,
-                    "reason": cause.result.reason} if cause is not None else None),
+                    "reason": cause.result.reason,
+                    "subject": cause.result.subject} if cause is not None else None),
             reason=result.descent.reason,
             report_status=result.report_status,
             correlation_status=result.correlation_status,
+            run_id=run_id,
             ledger=_ledger_for_cli(),
         )
     except Exception as exc:  # noqa: BLE001 -- bookkeeping never fails a diagnosis
@@ -700,11 +826,10 @@ def _resolve_it_reference(args: argparse.Namespace) -> int | None:
     try:
         recalled = session_memory.recall(session_id)
     except ValueError as exc:
-        _emit({
-            "tool": "investigate", "status": "error",
-            "device": args.device, "subject": args.subject,
-            "errors": [f"invalid --session {session_id!r}: {exc}"],
-        }, args)
+        _emit(_error_envelope(
+            "investigate", device=args.device, subject=args.subject,
+            errors=[f"invalid --session {session_id!r}: {exc}"],
+        ), args)
         return EXIT_CRITICAL
 
     if recalled.outcome != session_memory.FOUND:
@@ -717,15 +842,14 @@ def _resolve_it_reference(args: argparse.Namespace) -> int | None:
             if recalled.outcome == session_memory.NOT_FOUND
             else recalled.reason
         )
-        _emit({
-            "tool": "investigate", "status": "error",
-            "device": args.device, "subject": args.subject,
-            "errors": [
+        _emit(_error_envelope(
+            "investigate", device=args.device, subject=args.subject,
+            errors=[
                 f"'it' does not resolve for session {session_id!r}: {reason}",
                 "give DEVICE/SUBJECT explicitly, or run an investigation "
                 "first so a later 'it' has a turn to point at",
             ],
-        }, args)
+        ), args)
         return EXIT_CRITICAL
 
     turn = recalled.turn
@@ -737,14 +861,13 @@ def _resolve_it_reference(args: argparse.Namespace) -> int | None:
         if wants and not have
     ]
     if missing:
-        _emit({
-            "tool": "investigate", "status": "error",
-            "device": args.device, "subject": args.subject,
-            "errors": [
+        _emit(_error_envelope(
+            "investigate", device=args.device, subject=args.subject,
+            errors=[
                 f"'it' does not resolve: the last recorded turn for session "
                 f"{session_id!r} has no {' or '.join(missing)}",
             ],
-        }, args)
+        ), args)
         return EXIT_CRITICAL
 
     if wants_device:
@@ -817,8 +940,9 @@ def _cmd_ledger(args) -> int:
         _emit(_ledger.summary(ledger=store), args)
         return 0
 
+    by = args.by or _default_actor()
     result = _ledger.record_verdict(
-        args.diagnosis_id, args.outcome, by=args.by or _default_actor(), note=args.note, ledger=store,
+        args.diagnosis_id, args.outcome, by=by, note=args.note, ledger=store,
     )
     _emit({"tool": "ledger verdict", "id": result.id,
            "diagnosis_id": args.diagnosis_id, "outcome": args.outcome,
@@ -828,6 +952,51 @@ def _cmd_ledger(args) -> int:
     if not result.diagnosis_found:
         _note(f"# no diagnosis {args.diagnosis_id!r} in this ledger -- recorded anyway, "
               "so a mismatch stays visible rather than being refused away", args)
+
+    # W4f: best-effort mirror of this verdict onto the ticket that produced
+    # the diagnosis, via the run_id join key W3c wires up. Never affects the
+    # ledger verdict's own success above -- same "bookkeeping never fails
+    # the primary action" posture `_open_ticket_for`/`_record_in_ticket`
+    # already take for their own writes. Wrapped broadly on purpose: a
+    # ticket mirror is commentary about where else this verdict landed, not
+    # part of the ledger write this command exists to perform.
+    try:
+        diagnosis_row = next(
+            (d for d in store.diagnoses() if d.get("id") == args.diagnosis_id), None
+        )
+        run_id = diagnosis_row.get("run_id") if diagnosis_row is not None else None
+        if run_id is None:
+            # Absence is never zero: a diagnosis recorded before W3c wired
+            # run_id through (or an unknown diagnosis_id) genuinely has no
+            # ticket to mirror onto -- skip silently-but-notably, never an
+            # error, and never a fabricated ticket.
+            _note(
+                "# ledger verdict not mirrored to a ticket: this diagnosis "
+                "carries no run_id (recorded before run_id was wired through, "
+                "or diagnosis_id not found in this ledger)",
+                args,
+            )
+        else:
+            from . import ticket_read as _ticket_read
+
+            path = _ticket_read.find_ticket_path_by_run_id(run_id)
+            if path is None:
+                _note(
+                    f"# ledger verdict not mirrored to a ticket: no ticket "
+                    f"found for run_id {run_id!r}",
+                    args,
+                )
+            else:
+                from . import ticket as _ticket
+
+                outcome_write = _ticket.record_ticket_outcome(
+                    path, args.outcome, by=by, note=args.note,
+                )
+                if not outcome_write.persisted:
+                    _note(f"# ticket outcome write failed: {outcome_write.warning}", args)
+    except Exception as exc:  # noqa: BLE001 -- a ticket mirror must never fail the ledger verdict
+        _note(f"# ledger verdict not mirrored to a ticket: {exc}", args)
+
     return 0
 
 
@@ -936,15 +1105,14 @@ def _cmd_investigate(args: argparse.Namespace) -> int:
             # Unmatched is an answer, not an exception (flow_selection.py's
             # module docstring): say what was not understood and what to say
             # instead, the same shape every other error envelope here uses.
-            _emit({
-                "tool": "investigate", "status": "error", "device": args.device,
-                "subject": args.subject,
-                "errors": [
+            _emit(_error_envelope(
+                "investigate", device=args.device, subject=args.subject,
+                errors=[
                     f"free-text flow selection did not understand the subject: "
                     f"{selection.reason}",
                     *(f"try: {candidate}" for candidate in selection.candidates),
                 ],
-            }, args)
+            ), args)
             return EXIT_CRITICAL
         flow, subject = selection.flow, selection.subject
         _note(f"# Free-text selection: {selection.reason}", args)
@@ -976,23 +1144,30 @@ def _cmd_investigate(args: argparse.Namespace) -> int:
     except (ValueError, KeyError) as exc:
         # A flow that does not exist, or a subject no device owns. The run
         # produced no answer at all, which is exit 2 by the rule above.
-        _emit({"tool": "investigate", "status": "error", "device": args.device,
-               "subject": subject, "errors": [str(exc)]}, args)
+        _emit(_error_envelope(
+            "investigate", device=args.device, subject=subject, errors=[str(exc)]
+        ), args)
         return EXIT_CRITICAL
 
     _emit(result.to_payload(), args)
+
+    # B-446: the flight recorder. One markdown file per interaction, every
+    # field code-observed. Opened here rather than at the top of the command so
+    # the resolved flow/subject are known -- the ticket records what was
+    # actually investigated, not what was typed. Opened BEFORE the ledger
+    # write below (W3c) so the ledger row can carry this ticket's own
+    # `run_id` as its join key -- `ticket.Ticket.run_id`'s own docstring
+    # names this the reason it exists.
+    ticket_handle = _open_ticket_for(args, subject, flow, entry_point="cli:investigate")
 
     # B-485: record WHAT was diagnosed. Never whether it was right -- there is
     # no parameter for that, and only a named human can add a verdict later.
     # Bookkeeping must never take down a diagnosis, so a write failure is a
     # note on stderr and nothing more.
-    _record_diagnosis_in_ledger(result, args, subject, flow)
+    _record_diagnosis_in_ledger(
+        result, args, subject, flow, run_id=getattr(ticket_handle, "run_id", None)
+    )
 
-    # B-446: the flight recorder. One markdown file per interaction, every
-    # field code-observed. Opened here rather than at the top of the command so
-    # the resolved flow/subject are known -- the ticket records what was
-    # actually investigated, not what was typed.
-    ticket_handle = _open_ticket_for(args, subject, flow, entry_point="cli:investigate")
     _record_in_ticket(
         ticket_handle, args, result, subject, flow,
         question=(raw_subject if raw_subject != subject else None),
@@ -1113,7 +1288,12 @@ def _cmd_demo(args: argparse.Namespace) -> int:
     names = [d["name"] for d in devices.get("data", {}).get("devices", [])]
     print(f"Available devices: {', '.join(names)}")
     if device not in names:
-        print(f"Device not found: {device}")
+        # C4: name the valid set in the refusal itself -- `names` is right
+        # there, already computed, and the line above prints it too, but a
+        # refusal that stops at "not found" without repeating what WOULD
+        # have worked makes a reader scroll back up to answer the very
+        # question the message exists to answer.
+        print(f"Device not found: {device!r}; known devices: {', '.join(sorted(names))}")
         return EXIT_CRITICAL
 
     print("\n## Agent Step 2: Collect approved evidence")
@@ -1413,7 +1593,7 @@ def _cmd_route_event(args: argparse.Namespace) -> int:
         else:
             raw = sys.stdin.read()
     except OSError as exc:
-        _emit({"tool": "route_event", "status": "error", "errors": [str(exc)]}, args)
+        _emit(_error_envelope("route_event", errors=[str(exc)]), args)
         return EXIT_CRITICAL
 
     decisions = route_event(raw, device=getattr(args, "device", None))
