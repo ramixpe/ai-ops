@@ -90,7 +90,7 @@ PE2 isolated (both uplinks down)
 
 Run by the operator against `PE2`. Recorded here so the state can be recreated after any future rebuild.
 
-> **Not runnable by the build agent.** Configuring a device is a state change, and `BUILD-PLAN.md` §0.11 makes that an absolute HALT. The tool's allowlist cannot express it either — there is no config mode, no `run_command`, and `VERB_ALLOWLIST` is `{show, ping, traceroute}`. This is an operator action, deliberately outside anything `nettools` can do.
+> **Not runnable by the build agent.** Configuring a device is a state change, and `PROCESS.md` §0.11 makes that an absolute HALT. The tool's allowlist cannot express it either — there is no config mode, no `run_command`, and `VERB_ALLOWLIST` is `{show, ping, traceroute}`. This is an operator action, deliberately outside anything `nettools` can do.
 
 ```bash
 # The interface: PE2 GigabitEthernet0/0/0/0, PE2's uplink to P1.

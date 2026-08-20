@@ -126,7 +126,7 @@ class GroundingResult:
     The counts are not decoration. A grounding check over a report with no
     observations and a descent with no cited rungs passes every rule in this
     module by having nothing to test, and `ok is True` would be indistinguishable
-    from a real pass. `BUILD-PLAN.md` §0.12: a guardrail that can pass by
+    from a real pass. `PROCESS.md` §0.12: a guardrail that can pass by
     measuring nothing needs the empty case to be visible. Here it is visible in
     the result itself, and :attr:`vacuous` names it.
     """
@@ -319,7 +319,7 @@ def _device_name_families(names: Iterable[str]) -> tuple[re.Pattern[str], ...]:
 
     **A fabric whose devices are named arbitrarily gets no device checking at
     all**, and that is the correct failure mode -- silence rather than a rule
-    guessed from one instance (`BUILD-PLAN.md` §0.13, the rules face).
+    guessed from one instance (`PROCESS.md` §0.13, the rules face).
     """
 
     alphas: set[str] = set()
@@ -559,7 +559,7 @@ def check_recommendation_closed(report: dict, descent: DescentResult) -> Groundi
 # docstring gives for keeping its `_IDENTIFIER_LIKE` independent of this
 # module's finer-grained `_IFACE`/`_device_name_families`. Extend both by hand
 # the day a real transcript adds a phrase to one; a table that can drift is
-# still worth more than no table (`BUILD-PLAN.md` §0.12).
+# still worth more than no table (`PROCESS.md` §0.12).
 #
 # Gated on `descent.cause is None`, exactly like `model_eval.score_invention`'s
 # own gate -- not on the finding string, because `cause_not_localised` and
@@ -657,7 +657,7 @@ def _sequence(report: object, key: str) -> tuple[list, GroundingFailure | None]:
 
 
 def check_grounding(report: dict, evidence_keys: frozenset[str]) -> GroundingResult:
-    """Citation integrity. `BUILD-PLAN.md` T-029.
+    """Citation integrity. `PROCESS.md` T-029.
 
     * Every observation's ``evidence_key`` must be in ``evidence_keys``.
     * Every interpretation's ``based_on`` must reference existing observations.
@@ -939,7 +939,7 @@ def _refuse_unmeasured(
 ) -> GroundingResult:
     """Turn "this verdict measured nothing" from a note into a failure.
 
-    `BUILD-PLAN.md` §0.12 gave :attr:`GroundingResult.vacuous` so a pass over
+    `PROCESS.md` §0.12 gave :attr:`GroundingResult.vacuous` so a pass over
     nothing would be *distinguishable* from a real pass. It worked, and that
     turned out not to be enough. At T-033 the payload printed
 

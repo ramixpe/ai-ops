@@ -1,6 +1,6 @@
 """What every check reads, against what its inputs contain (B-433).
 
-The detection method for silent-failure **shape 7** (`BUILD-PLAN.md` §0.13):
+The detection method for silent-failure **shape 7** (`PROCESS.md` §0.13):
 *evidence collected, parsed, carried in the envelope, and never read.* It is
 invisible to any check that grades output, because the output is correct — round
 3 reported `transport_blocked`, which was true, while the same parsed record

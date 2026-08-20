@@ -297,7 +297,7 @@ def test_nb2_a_malformed_router_id_produces_no_ip_address():
 
 
 def test_nb2b_a_well_formed_router_id_does_produce_one():
-    """The companion to NB2 the vacuity rule (BUILD-PLAN.md §0.12) demands:
+    """The companion to NB2 the vacuity rule (PROCESS.md §0.12) demands:
     a stub that always returns no IP addresses would also pass NB2 alone."""
 
     evidence = _fabricated(bgp_by_device={"A": {"router_id": "10.0.0.1", "active": True}})

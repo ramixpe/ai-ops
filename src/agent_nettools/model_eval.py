@@ -45,7 +45,7 @@ rather than re-argued at each function:
   overstatement this whole project is built to refuse.
 
 An honest crude detector that says what it cannot see is worth more here than
-one that looks complete and is not (`BUILD-PLAN.md` §0.12/§0.13).
+one that looks complete and is not (`PROCESS.md` §0.12/§0.13).
 
 The six dimensions, and where each is decided
 ----------------------------------------------
@@ -84,7 +84,7 @@ scenario drawn straight from §11/§12 (the `healthy` fixture, RR1 ->
 10.255.0.12) split across the three questions that fixture was actually asked;
 one contrast case (`broken_confirm`) that MCP-EXPERIMENT never ran, asserting
 a fault that *is* real, so dimension 4's scorer is proven on both sides of its
-own discrimination (`BUILD-PLAN.md` §0.12's fourth shape) rather than only
+own discrimination (`PROCESS.md` §0.12's fourth shape) rather than only
 ever tested on the reject-a-false-premise arm; and one more (`pe2_bgp_why`,
 B-514) drawn from §14 -- a *second* false-premise fixture (PE2 ->
 10.255.0.31, also `healthy`) so the refused/hedged/accepted split is proven
@@ -239,7 +239,7 @@ EVAL_QUESTIONS: tuple[EvalQuestion, ...] = (
         kind="initial",
         notes=(
             "Not in MCP-EXPERIMENT -- added so dimension 4 is exercised on "
-            "both sides of its own discrimination (BUILD-PLAN.md §0.12's "
+            "both sides of its own discrimination (PROCESS.md §0.12's "
             "fourth shape): here the asserted fault IS real "
             "(interface_line_down on PE2), so the correct move is to confirm "
             "the cause, not reject a premise that happens to be true. A "
@@ -485,7 +485,7 @@ class RungCoverage:
     missing: tuple[str, ...]
     #: Rungs the payload reports that `RUNG_MENTION_MARKERS` has no entry
     #: for. Never silently folded into `missing` -- an unmapped rung is a gap
-    #: in this table, not a finding about the prose (`BUILD-PLAN.md` §0.10's
+    #: in this table, not a finding about the prose (`PROCESS.md` §0.10's
     #: "declared, not implicit" rule, applied to this table).
     unscoreable: tuple[str, ...] = ()
 
@@ -677,7 +677,7 @@ def score_premise_handling(question: EvalQuestion, payload: dict[str, Any], pros
        through to an unlabelled "unclear". Scored `correct=None`, not
        `False`: it is worse than `refused` and better than `accepted`, and
        forcing that onto a boolean would assert an ordering this dimension
-       does not attempt to make (`BUILD-PLAN.md` §0.13's "absence, not a
+       does not attempt to make (`PROCESS.md` §0.13's "absence, not a
        sentinel", applied to a three-valued signal instead of a binary one).
 
     **The payload names a real cause** -- correct is **naming that rung**

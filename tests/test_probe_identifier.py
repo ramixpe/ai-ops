@@ -205,7 +205,7 @@ def test_an_exhausted_network_refuses_rather_than_collides(G):
 
 
 def test_the_two_checks_are_both_required_not_either_or(G):
-    """Anti-vacuity companion (BUILD-PLAN.md Sec0.12): a candidate reserved
+    """Anti-vacuity companion (PROCESS.md Sec0.12): a candidate reserved
     ONLY by the repo-grep check (not the declared inventory) must still be
     excluded -- proves the union is real, not one check silently deciding
     everything.

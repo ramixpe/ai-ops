@@ -50,7 +50,7 @@ def test_device_and_flow_language_are_case_insensitive():
 
 
 def test_two_genuinely_different_sentences_select_two_genuinely_different_flows():
-    """BUILD-PLAN.md 0.12's parameterised-test guard, applied directly: a
+    """PROCESS.md 0.12's parameterised-test guard, applied directly: a
     degenerate selector that always returns one flow would still pass every
     single-sentence test above. This is the companion that would catch it."""
 
@@ -290,7 +290,7 @@ def test_every_selectable_flow_is_actually_implemented():
 
 
 def test_the_table_is_not_vacuous():
-    """BUILD-PLAN.md 0.12: a guardrail that iterates an empty table passes by
+    """PROCESS.md 0.12: a guardrail that iterates an empty table passes by
     measuring nothing."""
 
     assert len(fsel.SENTENCE_FLOW_TABLE) > 0

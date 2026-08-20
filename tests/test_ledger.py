@@ -4,7 +4,7 @@ Structured the same way `test_metrics.py` is: persistence across separate
 instances, in-memory-only default, degrade-safely on a bad path, and one
 anti-vacuity test for `summary()` -- built from a corpus that mixes every
 outcome, every source, and both trustworthy values, so the counts could not
-pass by having only one value ever appear (BUILD-PLAN.md SS0.12's fourth
+pass by having only one value ever appear (PROCESS.md SS0.12's fourth
 shape: a parameterised check is not covered by parameters that cannot
 disagree; this one is a summary, not a parametrised test, but the same
 "assert the corpus actually varies" discipline applies).

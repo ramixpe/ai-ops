@@ -39,7 +39,7 @@ facts about the device or protocol instance; ``records`` holds table rows.
 across snapshots, and ``VOLATILE_FIELDS`` names fields that move on their own and
 must be excluded from change detection.
 
-Line accounting (B-404) -- BUILD-PLAN.md section 0.10
+Line accounting (B-404) -- PROCESS.md section 0.10
 -------------------------------------------------------
 These six parsers predate the completeness rule ``template_parsers.py`` was
 built with, and section 0.10 explicitly deferred them rather than have them

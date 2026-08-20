@@ -39,7 +39,7 @@ unrequested probes (none fired). Rung coverage does not get one here: no
 design document states a completeness bar, and MCP-EXPERIMENT.md §11.2 calls
 a 3-of-5 restatement "in two sentences ... defensible." Both arms scored
 3/5. Manufacturing a threshold neither arm was ever measured against would
-be inventing a criterion, not measuring one (`BUILD-PLAN.md` §0.13's
+be inventing a criterion, not measuring one (`PROCESS.md` §0.13's
 evidence-bounds discipline) -- so coverage is reported on every rendered
 card (informational, `passed=None`) and excluded from `passes_every_
 dimension`, and `test_rung_coverage_is_reported_not_gated` guards that
@@ -52,7 +52,7 @@ invention, premise handling and self-report accuracy (MCP-EXPERIMENT.md
 misreported its own coverage). 31B fails unrequested probes (§12.3 -- it
 fired `get_lab_ping` on its own initiative). They fail on disjoint
 dimensions, which is itself evidence the discrimination is real rather than
-a degenerate always-fail scorer (`BUILD-PLAN.md` §0.12's fourth shape). So
+a degenerate always-fail scorer (`PROCESS.md` §0.12's fourth shape). So
 B-495's question -- "what is the smallest model that passes every
 dimension" -- is not "4B" and not "31B"; it is **unanswered over the range
 this repository has ever measured**, and answering it needs at least one run
@@ -289,7 +289,7 @@ def test_neither_measured_arm_passes_every_dimension():
 
 
 def test_the_two_arms_fail_on_disjoint_dimensions():
-    """BUILD-PLAN.md §0.12's fourth shape, applied to this file's own
+    """PROCESS.md §0.12's fourth shape, applied to this file's own
     discrimination: "both arms fail somewhere" would also be true of a
     degenerate always-fail scorer. What makes this a real measurement is
     that the two failure sets are non-empty, different, and share nothing --

@@ -288,7 +288,7 @@ def test_the_classic_manifest_snapshot_history_is_append_only_in_shape(mc):
 
 
 def test_the_full_wire_manifest_counts_more_than_descriptions_alone(mc):
-    """Anti-vacuity companion (BUILD-PLAN.md Sec0.12): this measurement's
+    """Anti-vacuity companion (PROCESS.md Sec0.12): this measurement's
     entire reason to exist alongside the older, description-only test is
     that a client also pays for the JSON schema and any annotations. If
     `manifest_chars` always equalled `description_only_chars`, this script
@@ -424,7 +424,7 @@ def test_fabric_evidence_cost_at_default_budget_is_pinned(mc):
 
 
 def test_the_truncation_mechanism_is_proven_live_not_just_dormant(mc):
-    """Anti-vacuity companion (BUILD-PLAN.md Sec0.12) for the test above.
+    """Anti-vacuity companion (PROCESS.md Sec0.12) for the test above.
 
     "0 sections truncated at the defaults" is indistinguishable, from the
     outside, between "the mechanism works and there is nothing to truncate"

@@ -2,7 +2,7 @@
 
 ``template_parsers.py`` was built with section 0.10's completeness rule from
 the start; the six hand-written parsers in ``parsers.py`` predate it and were
-deliberately deferred (BUILD-PLAN.md 0.10: "It does not apply retroactively to
+deliberately deferred (PROCESS.md 0.10: "It does not apply retroactively to
 the six hand-written parsers in ``parsers.py`` -- do not rewrite working,
 tested code. Log a finding..."). This is that scheduled retrofit's test suite.
 
@@ -74,7 +74,7 @@ def _load_outputs(intent: str, device: str, label: str) -> dict[str, str]:
 
 
 # --------------------------------------------------------------------------- #
-# Anti-vacuity companion (BUILD-PLAN.md 0.12)
+# Anti-vacuity companion (PROCESS.md 0.12)
 # --------------------------------------------------------------------------- #
 #
 # The round-trip test below could pass "by measuring nothing" two different
@@ -121,14 +121,14 @@ def test_the_fixtures_actually_produce_records_not_just_meta():
 
 
 # --------------------------------------------------------------------------- #
-# The round-trip test required by BUILD-PLAN.md 0.10
+# The round-trip test required by PROCESS.md 0.10
 # --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize("case", FIXTURE_CASES, ids=lambda c: f"{c[0]}/{c[1]}/{c[2]}")
 def test_every_committed_fixture_accounts_for_every_line(case: tuple[str, str, str]):
     """Section 0.10, pinned against every real fixture on disk for all six
-    zero-argument intents -- the exact shape BUILD-PLAN.md 0.10 specifies:
+    zero-argument intents -- the exact shape PROCESS.md 0.10 specifies:
 
         parsed = parse(raw)
         assert parsed["meta"]["unaccounted_lines"] == []

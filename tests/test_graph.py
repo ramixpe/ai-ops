@@ -139,7 +139,7 @@ def test_isis_broken_pe3_p2_is_lldp_only(monkeypatch):
     lldp_edge = next(e for e in graph.edges if e.protocol == "lldp" and (e.device_a, e.device_b) == ("P2", "PE3"))
     assert lldp_edge.observed_by == ("P2", "PE3")  # both ends corroborate the cabling
 
-    # The companion the vacuity rule (BUILD-PLAN.md §0.12) demands: this is only
+    # The companion the vacuity rule (PROCESS.md §0.12) demands: this is only
     # a real assertion if the two protocols are capable of disagreeing in the
     # first place. They do, right here -- so a stub that always returned "no
     # edges" or always merged the two protocols into one would fail this test.

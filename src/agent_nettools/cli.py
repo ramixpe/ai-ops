@@ -527,7 +527,7 @@ def _probe_exit(result: dict) -> int:
     and 0 of 5 received exited success, inverting the convention at the exact
     place an operator's muscle memory is strongest. The loss percentage was
     parsed, carried in the payload, and never read by the exit computation --
-    shape 7 (`BUILD-PLAN.md` §0.13's catalogue) in the CLI's own logic.
+    shape 7 (`PROCESS.md` §0.13's catalogue) in the CLI's own logic.
 
     The rule: transport or parse failure exits 1 as before; a parsed probe
     with **zero received** exits 1; anything received exits 0. Partial loss

@@ -1330,7 +1330,7 @@ def test_a_report_naming_an_invented_interface_is_refused():
 def test_the_companion_a_report_naming_only_real_identifiers_passes():
     """Without this the check could refuse everything and look like it works.
 
-    `BUILD-PLAN.md` §0.12: a guardrail needs the case that must *not* fire.
+    `PROCESS.md` §0.12: a guardrail needs the case that must *not* fire.
     """
 
     result = grounding.check_identifier_containment(
@@ -1542,7 +1542,7 @@ def test_an_interpretation_inventing_a_cause_is_refused():
 
 def test_the_companion_a_grounded_interpretation_with_no_cause_passes():
     """Without this the check could refuse every no-cause report and look
-    like it works. `BUILD-PLAN.md` §0.12: a guardrail needs the case that
+    like it works. `PROCESS.md` §0.12: a guardrail needs the case that
     must *not* fire (OBS-181)."""
 
     descent = _all_layers_healthy_descent()

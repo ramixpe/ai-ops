@@ -66,7 +66,7 @@ is why `record_diagnosis`/`record_verdict` return a result object carrying
 `persisted` and `warning` instead of `None`, unlike `metrics._persist`'s bare
 `except OSError: pass`. A ledger that fails to persist and says nothing about
 it is exactly the "green flag over a degraded read" shape this project has
-hit three times before (`BUILD-PLAN.md` SS0.12) -- pointed at a logging path
+hit three times before (`PROCESS.md` SS0.12) -- pointed at a logging path
 instead of a check this time, but the same failure.
 
 No new environment variable
@@ -94,7 +94,7 @@ about a real device at the moment it ran -- if fixture-replay runs and live
 runs land in the ledger indistinguishably, the accuracy signal this module
 exists to build is quietly diluted by every demo and every test fixture
 replay ever run, and nothing about the summary would show it happening. That
-is `BUILD-PLAN.md` SS0.13's "identity" face -- a corpus shows width only in the
+is `PROCESS.md` SS0.13's "identity" face -- a corpus shows width only in the
 dimensions where it varies -- so `source` is required rather than defaulted:
 a default of `"live"` would be silently *wrong* for the common case
 (`--from-fixtures` is the no-lab, no-credentials path most runs of this
@@ -477,7 +477,7 @@ class DiagnosisLedger:
         ``by_outcome`` is ``{confirmed_correct: 0, incorrect: 0, unknown: 0}``,
         which reads exactly like "a spotless record" unless something says
         plainly that zero diagnoses were ever recorded. That is
-        `BUILD-PLAN.md` SS0.12/SS0.13's "absence read as health" shape, pointed
+        `PROCESS.md` SS0.12/SS0.13's "absence read as health" shape, pointed
         at this module's own output.
         """
 

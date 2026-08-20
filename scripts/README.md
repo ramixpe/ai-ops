@@ -4,7 +4,7 @@ Helpers that run **against** this repository. Read-only with respect to devices.
 
 | Script | What it does |
 |---|---|
-| `preflight.sh` | Everything §2 of `docs/build/OPERATOR-RUNBOOK.md` asks for before a lab window. Exits non-zero on anything unexpected and logs to a file. Prints the two known-benign findings by name so they do not read as alarms |
+| `preflight.sh` | Everything §2 of `docs/archive/OPERATOR-RUNBOOK.md` asks for before a lab window. Exits non-zero on anything unexpected and logs to a file. Prints the two known-benign findings by name so they do not read as alarms |
 | `archive.sh` | `archive.sh <round> <dir>` — copies a round's payload into `evidence-archive/`, warns if `.gitignore` would swallow any of it, stages, and **verifies with `git ls-files` that every file is tracked** before reporting success |
 | `mutate_guards.py` | Removes each guard, confirms its test notices, restores. Resolves a guard's test file **from the guard's own symbol**, never by name similarity, and reports `UNRESOLVED` rather than `VACUOUS` when it cannot (OBS-148). Purges `__pycache__` around every mutation. Never touches a frozen file |
 | `known_benign.py` | The (rule, device, subject) triples that fire on the `healthy` fixtures — this fabric's floor, derived rather than listed |
@@ -25,7 +25,7 @@ reach it.
 day.** The intent was that §6.1d wants the instrument archived with its payload,
 which is true. But a live second copy is not an archive: it is a **duplicate**,
 and two copies of a script agree right up until nobody is looking at both —
-`BUILD-PLAN.md` §0.13's duplication face, created while implementing the fix for
+`PROCESS.md` §0.13's duplication face, created while implementing the fix for
 the procedure face.
 
 The correct mechanism is already in `archive.sh` and in `round8b.py`: the

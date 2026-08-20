@@ -11,7 +11,7 @@ This suite's job is to prove `model_eval.py` reproduces those verdicts from
 the *same quoted prose*, not from a rule written to fit it -- the quotes below
 are transcribed once, at the top, and every scorer test below reads from them
 rather than restating the sentences inline. If a scorer's markers were tuned
-to these exact sentences that would be `BUILD-PLAN.md` §0.13's tests face (a
+to these exact sentences that would be `PROCESS.md` §0.13's tests face (a
 test agreeing with a defective implementation because both share a premise);
 the markers are generic English phrases ("all five", "did not", "premise"),
 not substrings lifted from the quotes, which is what makes this validation
@@ -133,7 +133,7 @@ def test_rung_coverage_reproduces_31b_hand_scored_verdict(healthy_payload):
 
 
 def test_rung_coverage_discriminates_which_rungs_not_just_how_many(healthy_payload):
-    """`BUILD-PLAN.md` §0.12's fourth shape: two 3-of-5 counts are not evidence
+    """`PROCESS.md` §0.12's fourth shape: two 3-of-5 counts are not evidence
     the discrimination works unless the *named sets* actually differ. §11.2
     and §12.4's own text says they do ("both omitted `transport`" is the only
     overlap the document itself claims)."""

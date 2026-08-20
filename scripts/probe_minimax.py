@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Probe the MiniMax API for the behaviours the investigation layer depends on.
 
-T-002 in ``docs/build/BUILD-PLAN.md``. A throwaway diagnostic, committed so the
+T-002 in ``docs/build/PROCESS.md``. A throwaway diagnostic, committed so the
 result is reproducible, deliberately with **no dependency on agent_nettools**
 and no dependency outside the standard library -- it must be runnable before
 the package is wired to a MiniMax provider (T-003), and it must not be able to
@@ -65,10 +65,10 @@ REQUEST_TIMEOUT_SECONDS = 60
 EVIDENCE_CHARS = 200
 
 # Documented cap on the OpenAI-compatible route. Set explicitly on every call
-# rather than relying on the endpoint default -- BUILD-PLAN.md T-003 step 4.
+# rather than relying on the endpoint default -- docs/archive/BUILD-PLAN.md T-003 step 4.
 MAX_COMPLETION_TOKENS = 2048
 
-# Verbatim from BUILD-PLAN.md T-002. Do not reword: checks 3, 4 and 5 are only
+# Verbatim from docs/archive/BUILD-PLAN.md T-002. Do not reword: checks 3, 4 and 5 are only
 # comparable to each other, and to a later re-run, if the prompt is identical.
 TYPED_DECISION_PROMPT = (
     "Return only this JSON object and nothing else. No prose, no markdown fences.\n"
@@ -450,7 +450,7 @@ def main() -> int:
 
     if failed:
         print(f"ACCEPTANCE: FAILED -- {', '.join(failed)} must pass.")
-        print("Per BUILD-PLAN.md T-002, a check-4 failure is a blocker, not something")
+        print("Per docs/archive/BUILD-PLAN.md T-002, a check-4 failure is a blocker, not something")
         print("to work around silently: a <think>-stripping step is a decision, not an")
         print("implementation detail.")
         return 1

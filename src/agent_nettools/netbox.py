@@ -24,7 +24,7 @@ first two:
 - :func:`build_records` -- **pure**. Evidence in, a :class:`NetBoxRecords`
   out. No HTTP, no import of ``pynetbox`` anywhere in its call path. Testable
   against committed fixtures with zero lab access -- this is the half worth
-  testing hard, and per BUILD-PLAN.md's instruction to this task, a complete
+  testing hard, and per docs/archive/BUILD-PLAN.md's instruction to this task, a complete
   deliverable on its own.
 - :func:`describe_writes` -- **pure**. ``NetBoxRecords`` in, the exact set of
   upsert operations :func:`write_records` would attempt out, as plain data.

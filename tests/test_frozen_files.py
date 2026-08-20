@@ -1,6 +1,6 @@
 """The frozen-file invariant, enforced by CI — not only by a manual script.
 
-`BUILD-PLAN.md` §0.5 freezes four files byte-identical against the pre-build
+`PROCESS.md` §0.5 freezes four files byte-identical against the pre-build
 commit `6629a2c`. Every session reports them "byte-identical", but the check
 lived only in `scripts/preflight.sh`, an operator script nothing in CI runs
 (2026-08-18 invariant audit, vacuous-guard flag 1). A PR relaxing a validator

@@ -31,7 +31,7 @@ The rules inherited from ``parsers`` without exception
 * ``record_key`` and ``volatile_fields`` are declared per template so
   ``diff_evidence`` and ``detect_flaps`` work on template output too.
 
-Line accounting -- BUILD-PLAN.md section 0.10
+Line accounting -- PROCESS.md section 0.10
 ----------------------------------------------
 A template that extracts three fields and ignores the rest fails silently when
 the vendor adds a fourth, and makes its own coverage invisible: nobody can tell
@@ -320,7 +320,7 @@ _AF_TEMPLATE = """
 """
 
 # Section 0.10 accounting for everything the meta/record extraction above does
-# not itself capture. Grouped by what the lines are, per BUILD-PLAN.md 0.10's
+# not itself capture. Grouped by what the lines are, per PROCESS.md 0.10's
 # instruction to keep the accounting reviewable rather than one broad
 # catch-all.
 BGP_NEIGHBOR_IGNORES: tuple[IgnoreRule, ...] = (
@@ -647,7 +647,7 @@ _ROUTE_METRIC = re.compile(r"^Route metric is (?P<route_metric>\d+)$")
 
 # Section 0.10 accounting for everything the meta/record extraction above
 # does not itself capture. A handful of rules, each explained, per
-# BUILD-PLAN.md 0.10's instruction against one broad catch-all.
+# PROCESS.md 0.10's instruction against one broad catch-all.
 ROUTE_IGNORES: tuple[IgnoreRule, ...] = (
     IgnoreRule(r"^Routing Descriptor Blocks$", "descriptor-block section header, not itself a per-path record"),
     IgnoreRule(
@@ -882,7 +882,7 @@ _COUNTER_LINES: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = (
 )
 
 # Section 0.10 accounting for everything the meta/record extraction above
-# does not itself capture. Anchored and specific per BUILD-PLAN.md 0.10's
+# does not itself capture. Anchored and specific per PROCESS.md 0.10's
 # instruction against a broad catch-all; each carries the line shape it
 # covers and why it is not part of the schema.
 INTERFACE_IGNORES: tuple[IgnoreRule, ...] = (
@@ -1295,7 +1295,7 @@ def parse_xr_logging(output: str) -> dict[str, Any]:
 # mid-response, exactly as ``parse_xr_logging``'s header-only truncation is
 # not an error either.
 #
-# ``records`` is always ``[]``. BUILD-PLAN.md's T-016 table gives no record
+# ``records`` is always ``[]``. docs/archive/PROCESS.md's T-016 table gives no record
 # shape for ping -- the whole result is one summary, not a set of named
 # per-probe objects, so there is nothing to build records from without
 # inventing structure the device never reported.
@@ -1315,7 +1315,7 @@ _SUCCESS_RATE = re.compile(
 )
 
 # Section 0.10 accounting. A single, anchored, specific rule per
-# BUILD-PLAN.md 0.10's instruction against a broad catch-all.
+# PROCESS.md 0.10's instruction against a broad catch-all.
 PING_IGNORES: tuple[IgnoreRule, ...] = (
     IgnoreRule(
         r"^Type escape sequence to abort\.$",

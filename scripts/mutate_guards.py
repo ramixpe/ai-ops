@@ -2,7 +2,7 @@
 """Remove each guard, confirm its test notices, restore. A guardrail that cannot fail is not one.
 
 A test that passes proves the code does something. **Only removing the guard proves the
-test would notice if it stopped.** `BUILD-PLAN.md` §0.12 is the rule; this is the check.
+test would notice if it stopped.** `PROCESS.md` §0.12 is the rule; this is the check.
 
 Three defects in the first version of this harness, all found by using it, and each one
 shaped how this version works:
@@ -33,7 +33,7 @@ shaped how this version works:
     byte-for-byte, and the run ends by re-checking the four frozen files against the T-001
     baseline and requiring a clean `git status`.
 
-**No frozen file is ever mutated.** `BUILD-PLAN.md` §0.5 freezes `test_safety.py`,
+**No frozen file is ever mutated.** `PROCESS.md` §0.5 freezes `test_safety.py`,
 `test_template_security.py`, `platforms.py` and `templates.py`, so the two most
 safety-critical suites cannot be mutation-tested at all while that holds. What this tool
 can do is mutate *the code they guard*, and the first two entries below do exactly that.

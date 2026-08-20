@@ -405,7 +405,7 @@ def evidence_report(
       **truncation never triggers** (the largest single section is ~1.6 kB,
       well under the 4 kB per-intent ceiling). Reporting only the default
       numbers would make ``budget_fabric_evidence``'s truncation *mechanism*
-      look untested by this script — BUILD-PLAN.md §0.12's vacuous-guardrail
+      look untested by this script — PROCESS.md §0.12's vacuous-guardrail
       shape, here applied to a measurement rather than a test: a pass that
       never says what it found wrong is a pass that may not have looked. The
       tightened run proves the mechanism engages on this exact real data,

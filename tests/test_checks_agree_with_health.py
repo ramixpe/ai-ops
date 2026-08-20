@@ -7,7 +7,7 @@ purpose — ``health.py``'s rules are pinned by a large existing suite, and
 refactoring one into the other would put that at risk for no immediate gain.
 
 **This file is the guardrail that makes coexistence safe.** The rule it
-enforces, from `BUILD-PLAN.md` T-021:
+enforces, from `PROCESS.md` T-021:
 
 * Neither may say ``healthy`` where the other says ``broken``.
 * One may be ``unevaluated`` where the other is not — that is allowed, and is
@@ -77,7 +77,7 @@ def test_isis_check_never_contradicts_the_isis_health_rule(label, device):
         assert not isolated, (
             f"{device}/{label}: checks says the IS-IS adjacencies are healthy while "
             f"health.py fires isis_isolated. This is a real disagreement, not a test "
-            f"to loosen -- see BUILD-PLAN.md §0.11."
+            f"to loosen -- see PROCESS.md §0.11."
         )
     if check.status == checks.BROKEN:
         assert isolated or health_could_not_tell, (
