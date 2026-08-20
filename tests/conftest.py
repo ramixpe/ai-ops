@@ -63,3 +63,22 @@ def _session_memory_never_lands_in_the_repo(tmp_path, monkeypatch):
     """
 
     monkeypatch.setenv("NETTOOLS_SESSION_MEMORY_DIR", str(tmp_path / "session_memory"))
+
+
+@pytest.fixture(autouse=True)
+def _retries_never_sleep(monkeypatch):
+    """Zero the retry backoff for every test.
+
+    `_netmiko_send_commands` retries transient transport failures with
+    exponential backoff (default 0.5s, doubling). Every test that exercises a
+    failing transport through the real retry path therefore slept real
+    wall-clock time proving something no assertion cared about -- measured at
+    ~3.5s across the suite (P2, release-1.0 campaign). Three tests in
+    `test_network_tools.py` already zeroed it by hand; now the suite default
+    is zero and a test that wants REAL backoff timing opts back in by setting
+    `NETTOOLS_RETRY_BACKOFF_SECONDS` itself -- same opt-out-is-not-isolation
+    reasoning as the ticket fixture above. No test pins the 0.5 default
+    through the env path (checked before this landed).
+    """
+
+    monkeypatch.setenv("NETTOOLS_RETRY_BACKOFF_SECONDS", "0")
