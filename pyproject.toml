@@ -64,6 +64,9 @@ dev = [
     # EER-012: builds the wheel/sdist that CI installs and exercises from
     # outside the checkout, instead of only ever testing an editable install.
     "build>=1.0",
+    # EER-014: coverage measurement, reported (not gated on an unmeasured
+    # number) in CI's test job.
+    "pytest-cov>=5.0",
 ]
 # The neo4j driver, needed only by graph.write_graph -- the thin half of the
 # topology collector. Never a core dependency: graph.build_graph (the pure

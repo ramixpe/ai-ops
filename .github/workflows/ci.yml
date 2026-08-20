@@ -28,8 +28,16 @@ jobs:
           pip install -c constraints.txt -e ".[dev,llm]"
       - name: Lint
         run: ruff check .
-      - name: Test
-        run: pytest -q
+      - name: Test with coverage
+        # EER-014. 90% is a measured floor, not a guess: the suite covered
+        # 93% of src/agent_nettools + mcp_server on 2026-08-20 (10,495
+        # statements, 727 missed; see constraints.txt's generation date for
+        # the same verification pass). Set a few points under that measured
+        # number, not at it, as headroom for cross-version variance between
+        # this matrix's 3.11 and 3.12 legs (only 3.11 was measured locally)
+        # -- so this ratchets against real regressions instead of failing on
+        # day one or chasing a moving target.
+        run: pytest -q --cov=agent_nettools --cov=mcp_server --cov-report=term-missing --cov-fail-under=90
 
   # B-423. The offline demo's entire value is that it needs nothing, so nothing
   # is the only environment that tests it.
@@ -225,3 +233,43 @@ jobs:
         run: |
           timeout 20 docker run --rm -i ios-xr-nettools-mcp < /dev/null
           echo "container: started and exited cleanly on stdin EOF"
+
+  # EER-014 (supply-chain half; coverage lives in the `test` job above).
+  supply-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install the project and pip-audit
+        run: |
+          python -m pip install --upgrade pip
+          pip install -c constraints.txt -e ".[dev,llm]" pip-audit
+
+      - name: pip-audit
+        # Report-only, deliberately: `continue-on-error` plus an explicit
+        # `exit 0` keep this from blocking merges on findings this lane is
+        # under instruction not to silently fix. A real finding is a
+        # reviewable dependency-bump decision for a human, same discipline as
+        # any other version bump -- see constraints.txt's own comment. Findings
+        # are still loud: printed to the job log and to the run summary, not
+        # swallowed.
+        continue-on-error: true
+        run: |
+          set +e
+          pip-audit > pip-audit-report.txt 2>&1
+          status=$?
+          cat pip-audit-report.txt
+          {
+            echo '### pip-audit'
+            echo '```'
+            cat pip-audit-report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$status" -ne 0 ]; then
+            echo "pip-audit reported findings above -- not blocking CI (report-only; see EER-014)."
+          fi
+          exit 0
