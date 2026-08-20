@@ -304,17 +304,27 @@ def test_g3_the_module_imports_with_no_neo4j_package_installed():
     assert result_modules.returncode == 0, result_modules.stderr
 
 
-def test_write_graph_without_neo4j_installed_fails_at_the_call_not_the_import():
-    """No `driver_factory` given, and no `neo4j` package installed: the
-    ImportError must happen inside `write_graph`, never at module import."""
+def test_write_graph_without_neo4j_installed_fails_at_the_call_not_the_import(monkeypatch):
+    """No `driver_factory` given and no `neo4j` package importable: the
+    ImportError must happen inside `write_graph`, never at module import.
 
+    Absence is SIMULATED rather than relied on. This test used to assert the
+    driver "is not installed in this venv", which made it a test of the
+    environment, not the code -- installing the driver so the MCP graph tool
+    works in production (B-621's .env sweep verification) turned it into a
+    failure about pip state. Same fix test_netbox.py already carries for the
+    identical defect.
+    """
+
+    import sys
+    monkeypatch.setitem(sys.modules, "neo4j", None)
     graph = Graph(nodes=(GraphNode(name="A"),), edges=())
     try:
         write_graph(graph, uri="bolt://example.invalid:7687", user="neo4j", password="x")
-    except ModuleNotFoundError as exc:
+    except (ModuleNotFoundError, ImportError) as exc:
         assert "neo4j" in str(exc)
     else:
-        raise AssertionError("expected ModuleNotFoundError: neo4j is not installed in this venv")
+        raise AssertionError("expected an ImportError naming neo4j")
 
 
 # --------------------------------------------------------------------------- #
@@ -655,17 +665,17 @@ def test_run_named_read_credentials_are_read_from_the_environment(monkeypatch):
     assert captured["auth"] == ("neo4j", "test-only-password")
 
 
-def test_run_named_read_without_neo4j_installed_fails_at_the_call_not_the_import():
-    """No `driver_factory` given, and no `neo4j` package installed: the
-    ImportError must happen inside `run_named_read`, never at module import --
-    the read half's exact counterpart to `write_graph`'s own guarantee,
-    tested the identical way just above."""
+def test_run_named_read_without_neo4j_installed_fails_at_the_call_not_the_import(monkeypatch):
+    """The read half's counterpart to the write test above -- absence simulated
+    via sys.modules, not assumed from pip state, for the reason given there."""
 
+    import sys
+    monkeypatch.setitem(sys.modules, "neo4j", None)
     try:
         run_named_read(
             "topology", uri="bolt://example.invalid:7687", user="neo4j", password="x",
         )
-    except ModuleNotFoundError as exc:
+    except (ModuleNotFoundError, ImportError) as exc:
         assert "neo4j" in str(exc)
     else:
-        raise AssertionError("expected ModuleNotFoundError: neo4j is not installed in this venv")
+        raise AssertionError("expected an ImportError naming neo4j")
