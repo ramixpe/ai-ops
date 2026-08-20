@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from agent_nettools import health as H
+from agent_nettools.inventory_model import Device
 
 NOW = datetime(2026, 8, 19, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -320,3 +321,143 @@ def test_a_duplicate_id_is_rejected():
             {"id": "dup", "reason": "b", "created_by": "rami",
              "expires_at": "2026-08-20T00:00:00+00:00"},
         ])
+
+
+# --------------------------------------------------------------------------- #
+# evaluate_device_with_silences / evaluate_fabric_with_silences -- W2-core:
+# silence wired into verdict PRODUCTION, not just annotation of a
+# hand-built verdict dict the way every test above this line exercises.
+# --------------------------------------------------------------------------- #
+
+def _device(name="PE2") -> Device:
+    return Device(name=name, mgmt_ip="10.0.0.1", role="edge", site="lab")
+
+
+def _stub_evaluate_device(monkeypatch, verdict):
+    """Stand in for the real rule engine so this section tests the WIRING
+    (evaluate_device -> apply_silences) rather than re-testing checks.py's
+    own rules, which test_health.py already covers against real fixtures."""
+
+    monkeypatch.setattr(H, "evaluate_device", lambda evidence, device: dict(verdict))
+
+
+def test_a_silenced_subjects_verdict_is_still_produced_and_carries_the_annotation(monkeypatch):
+    """The load-bearing guarantee for this wiring, restated at the
+    verdict-production entry point: a silenced subject's verdict is still
+    produced by the real rule engine, and the finding stays visible, tagged
+    -- never dropped just because a silence covers it."""
+
+    verdict = _verdict(device="PE2", findings=[_finding(severity="critical")])
+    _stub_evaluate_device(monkeypatch, verdict)
+    silence = H.Silence(id="maint", reason="planned", created_by="rami",
+                        expires_at=NOW + timedelta(hours=1), device="PE2")
+
+    result = H.evaluate_device_with_silences(
+        {}, _device("PE2"), silences=[silence], now=NOW
+    )
+
+    assert len(result["findings"]) == 1
+    assert result["findings"][0]["silenced"] is True
+    assert result["severity"] == "ok"
+    assert result["raw_severity"] == "critical"
+
+
+def test_an_unsilenced_subjects_verdict_is_unchanged_positive_control(monkeypatch):
+    """Positive control for the test above (OBS-181's discipline): a subject
+    with NO matching silence must page exactly as if this wiring did not
+    exist, proving the annotation path is not merely a mechanism that always
+    suppresses."""
+
+    verdict = _verdict(device="PE3", findings=[_finding(severity="critical")])
+    _stub_evaluate_device(monkeypatch, verdict)
+    silence = H.Silence(id="maint", reason="planned", created_by="rami",
+                        expires_at=NOW + timedelta(hours=1), device="PE2")  # A different device.
+
+    result = H.evaluate_device_with_silences(
+        {}, _device("PE3"), silences=[silence], now=NOW
+    )
+
+    assert result["findings"][0]["silenced"] is False
+    assert result["severity"] == "critical"
+    assert result["raw_severity"] == "critical"
+
+
+def test_with_no_silence_source_configured_the_verdict_is_unchanged_but_still_tagged(monkeypatch):
+    """No `silences=`, no `silence_path=`, no NETTOOLS_SILENCE_FILE set: the
+    resolution order must fall through to `load_silences(None)` -- `()`,
+    never an error -- so severity is untouched."""
+
+    monkeypatch.delenv(H.NETTOOLS_SILENCE_FILE_ENV, raising=False)
+    verdict = _verdict(device="PE2", findings=[_finding(severity="critical")])
+    _stub_evaluate_device(monkeypatch, verdict)
+
+    result = H.evaluate_device_with_silences({}, _device("PE2"), now=NOW)
+
+    assert result["severity"] == "critical"
+    assert result["findings"][0]["silenced"] is False
+
+
+def test_nettools_silence_file_env_var_is_read_when_no_explicit_path_is_given(monkeypatch, tmp_path):
+    """The actual wiring promise: an operator sets NETTOOLS_SILENCE_FILE and
+    a call with no other silence argument picks it up automatically."""
+
+    path = tmp_path / "silences.yaml"
+    path.write_text(
+        "- device: PE2\n"
+        "  rule: bgp_session_down\n"
+        "  reason: planned migration\n"
+        "  created_by: rami\n"
+        "  expires_at: '2026-08-20T00:00:00+00:00'\n"
+    )
+    monkeypatch.setenv(H.NETTOOLS_SILENCE_FILE_ENV, str(path))
+    verdict = _verdict(device="PE2", findings=[_finding(severity="critical")])
+    _stub_evaluate_device(monkeypatch, verdict)
+
+    result = H.evaluate_device_with_silences({}, _device("PE2"), now=NOW)
+
+    assert result["findings"][0]["silenced"] is True
+    assert result["findings"][0]["silence"]["reason"] == "planned migration"
+
+
+def test_explicit_silences_argument_wins_over_the_env_var(monkeypatch, tmp_path):
+    """An explicit `silences=` must never be silently overridden by an env
+    var a caller did not ask this call to consult."""
+
+    env_path = tmp_path / "env-silences.yaml"
+    env_path.write_text(
+        "- device: PE2\n  reason: x\n  created_by: rami\n"
+        "  expires_at: '2026-08-20T00:00:00+00:00'\n"
+    )
+    monkeypatch.setenv(H.NETTOOLS_SILENCE_FILE_ENV, str(env_path))
+    verdict = _verdict(device="PE2", findings=[_finding(severity="critical")])
+    _stub_evaluate_device(monkeypatch, verdict)
+
+    result = H.evaluate_device_with_silences({}, _device("PE2"), silences=[], now=NOW)
+
+    # The env-configured silence would have matched; the explicit empty list wins.
+    assert result["findings"][0]["silenced"] is False
+    assert result["severity"] == "critical"
+
+
+def test_evaluate_fabric_with_silences_produces_the_roll_up(monkeypatch):
+    """The fabric-wide counterpart: a real fabric verdict shape in, the same
+    'never removed' guarantee applied per device, then rolled back up."""
+
+    fabric = {
+        "severity": "critical",
+        "counts": {"devices": 2, "by_severity": {"critical": 1, "warning": 0, "info": 0, "ok": 1},
+                   "unevaluated_devices": []},
+        "devices": {
+            "PE2": _verdict(device="PE2", findings=[_finding(severity="critical")]),
+            "RR1": _verdict(device="RR1", findings=[]),
+        },
+    }
+    monkeypatch.setattr(H, "evaluate_fabric", lambda evidence_by_device, devices=None: fabric)
+    silence = H.Silence(id="maint", reason="x", created_by="rami",
+                        expires_at=NOW + timedelta(hours=1), device="PE2")
+
+    result = H.evaluate_fabric_with_silences({}, silences=[silence], now=NOW)
+
+    assert result["severity"] == "ok"
+    assert result["devices"]["PE2"]["findings"][0]["silenced"] is True
+    assert result["devices"]["PE2"]["raw_severity"] == "critical"

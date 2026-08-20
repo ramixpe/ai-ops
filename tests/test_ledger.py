@@ -84,6 +84,75 @@ def test_record_diagnosis_rejects_non_bool_trustworthy():
         _diagnosis(ledger.DiagnosisLedger(), trustworthy="yes")
 
 
+# --------------------------------------------------------------------------- #
+# run_id (B-486/W3a): the investigation-run identifier a diagnosis carries,
+# distinct from this ledger entry's own `id`. See the module docstring.
+# --------------------------------------------------------------------------- #
+
+
+def test_run_id_round_trips_through_append_and_read(tmp_path):
+    """The core promise of this field: what a caller passes in comes back out
+    unchanged on a fresh instance reading the same file, exactly like every
+    other recorded field."""
+
+    path = str(tmp_path / "ledger.jsonl")
+    first = ledger.DiagnosisLedger(path=path)
+    written = _diagnosis(first, run_id="run-abc123")
+
+    second = ledger.DiagnosisLedger(path=path)
+    (seen,) = second.diagnoses()
+
+    assert seen["id"] == written.id
+    assert seen["run_id"] == "run-abc123"
+
+
+def test_run_id_defaults_to_none_never_an_empty_string(tmp_path):
+    """Absence is never zero: a caller that omits run_id (every call site
+    before wave 2 wires the ticket handle through) must get `None` back, not
+    a silently-substituted empty string that a reader could mistake for a
+    recorded-but-blank value."""
+
+    led = ledger.DiagnosisLedger(path=str(tmp_path / "ledger.jsonl"))
+
+    _diagnosis(led)  # No run_id passed at all.
+
+    (raw_entry,) = led.entries()
+    assert "run_id" in raw_entry  # Present, not omitted.
+    assert raw_entry["run_id"] is None
+
+    (resolved,) = led.diagnoses()
+    assert resolved["run_id"] is None
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_a_blank_run_id_is_normalized_to_none_not_stored_verbatim(tmp_path, blank):
+    """An empty or whitespace-only run_id must never be indistinguishable
+    from a genuinely missing one to a later reader (`incident_correlation.py`
+    treats `None`, and only `None`, as unrecorded)."""
+
+    led = ledger.DiagnosisLedger(path=str(tmp_path / "ledger.jsonl"))
+
+    _diagnosis(led, run_id=blank)
+
+    (raw_entry,) = led.entries()
+    assert raw_entry["run_id"] is None
+
+
+def test_two_diagnoses_from_different_runs_carry_different_run_ids(tmp_path):
+    """Positive control: run_id is not merely present, it actually varies
+    with what the caller passes -- a corpus that only ever wrote one value
+    could not tell a bug that hardcodes it apart from one that plumbs it
+    through correctly."""
+
+    led = ledger.DiagnosisLedger(path=str(tmp_path / "ledger.jsonl"))
+
+    _diagnosis(led, run_id="run-1")
+    _diagnosis(led, run_id="run-2")
+
+    run_ids = {d["run_id"] for d in led.diagnoses()}
+    assert run_ids == {"run-1", "run-2"}
+
+
 def test_record_diagnosis_requires_source_explicitly():
     """No default -- see the module docstring on why a default would silently
     mislabel the common --from-fixtures case as a live diagnosis."""

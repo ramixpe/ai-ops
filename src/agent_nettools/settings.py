@@ -462,6 +462,22 @@ SETTINGS: tuple[Setting, ...] = (
         "exit, so the ledger accumulates nothing across invocations.",
         "ledger",
     ),
+    # -- health.py (B-483): the maintenance-window/silence layer's own table.
+    # Read once, inside health.py's own verdict-production helpers
+    # (`evaluate_device_with_silences`/`evaluate_fabric_with_silences`), not
+    # by a bare `os.getenv` scattered elsewhere -- the same "one place reads
+    # it" discipline every other opt-in path variable here follows.
+    Setting(
+        "NETTOOLS_SILENCE_FILE", "path", None,
+        "Declarative YAML table of active maintenance windows (B-483). "
+        "`evaluate_device_with_silences`/`evaluate_fabric_with_silences` load "
+        "and apply it automatically. Unset means no silences are loaded -- "
+        "every finding pages exactly as if the feature did not exist, never "
+        "an error. A silenced finding always stays in the verdict's "
+        "`findings`, tagged `silenced: true`, never removed -- see "
+        "health.py's module docstring.",
+        "health",
+    ),
     # -- ticket.py --
     Setting(
         "NETTOOLS_TICKET_DIR", "path", "tickets",
