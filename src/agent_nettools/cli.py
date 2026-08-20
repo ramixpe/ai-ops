@@ -1137,7 +1137,12 @@ def _cmd_demo(args: argparse.Namespace) -> int:
     names = [d["name"] for d in devices.get("data", {}).get("devices", [])]
     print(f"Available devices: {', '.join(names)}")
     if device not in names:
-        print(f"Device not found: {device}")
+        # C4: name the valid set in the refusal itself -- `names` is right
+        # there, already computed, and the line above prints it too, but a
+        # refusal that stops at "not found" without repeating what WOULD
+        # have worked makes a reader scroll back up to answer the very
+        # question the message exists to answer.
+        print(f"Device not found: {device!r}; known devices: {', '.join(sorted(names))}")
         return EXIT_CRITICAL
 
     print("\n## Agent Step 2: Collect approved evidence")
