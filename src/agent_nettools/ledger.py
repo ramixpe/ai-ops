@@ -631,3 +631,65 @@ def reset(*, ledger: DiagnosisLedger | None = None) -> None:
     """Reset the process-wide default ledger (or an explicit one). Test use only."""
 
     (ledger or default_ledger).reset()
+
+
+# --------------------------------------------------------------------------- #
+# B-700: the model-facing read
+# --------------------------------------------------------------------------- #
+
+#: Fields on a ledger row that hold free text something other than this code
+#: wrote. `reason` is the descent's own sentence, which embeds the far end's
+#: words verbatim (`checks.py`'s `_last_reset_note`, B-430 -- OBS-691 measured
+#: three device-authored fragments in a single run). `subject` is
+#: operator/event-derived, the same axis B-482 found reachable through an
+#: Alertmanager-forwarded alert. `note`/`outcome_note` are whatever a human
+#: typed into `nettools ledger verdict --note`.
+#:
+#: `by`/`outcome_by` are deliberately absent, matching `ticket_read`'s own
+#: table: an actor name arrives from `--by` or `NETTOOLS_ACTOR`, both of which
+#: are this operator's own input, and containing it would mark the one field
+#: whose whole purpose is to say who vouched for the row.
+_UNTRUSTED_TEXT_FIELDS = frozenset({"reason", "subject", "note", "outcome_note"})
+
+
+def contained_diagnoses(*, ledger: DiagnosisLedger | None = None) -> tuple[dict[str, Any], ...]:
+    """:func:`diagnoses`, with every untrusted field wrapped for a model.
+
+    **Why this is a second function and not a change to `diagnoses`.**
+    `incident_correlation.from_ledger_diagnoses` matches on a row's `subject`
+    (`incident_correlation.py:401,406`); wrapping it in place would feed
+    delimiters into a comparison and silently stop correlating. The same split
+    `ticket.py` already makes -- `ticket.read_ticket` returns raw for our own
+    code, `ticket_read.read_ticket_by_run_id` contains for the MCP surface --
+    for the same reason, and reached independently here rather than by
+    analogy: the internal consumer needs the literal value.
+
+    **Nothing calls this today, and that is the point.** No MCP tool exposes
+    the ledger, so its stored free text has never met a model. `CLAUDE.md`'s
+    own statement of invariant 4 is that *"an invariant that holds for every
+    internal caller is not an invariant; it is a convention that has not yet
+    met a new consumer"* -- the ticket path had this identical shape until
+    B-680 gave it one. This is the safe path existing **before** the consumer
+    arrives, so the first person to expose the ledger has something to reach
+    for other than widening an allowlist.
+    `tests/test_ledger_containment.py` fails if a ledger-exposing MCP tool is
+    added without it.
+
+    Reuses `model_egress.quote_device_text` rather than reimplementing the
+    delimiters: that helper already strips any occurrence of its own markers
+    from the input first, so a stored value cannot forge a close-tag and
+    splice past it, and a second implementation is a second place to get that
+    subtly wrong.
+    """
+
+    from .model_egress import quote_device_text
+
+    return tuple(
+        {
+            key: (quote_device_text(value)
+                  if key in _UNTRUSTED_TEXT_FIELDS and isinstance(value, str)
+                  else value)
+            for key, value in row.items()
+        }
+        for row in diagnoses(ledger=ledger)
+    )
