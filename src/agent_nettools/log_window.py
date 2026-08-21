@@ -98,6 +98,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field, replace
+from datetime import datetime
 from enum import Enum
 from typing import Any
 
@@ -107,12 +108,16 @@ __all__ = [
     "COLLECTOR_NOISE",
     "COLLECTOR_SOURCES",
     "Attribution",
+    "MnemonicAggregate",
     "NoiseRule",
     "ShapedWindow",
+    "aggregate_by_mnemonic",
     "coverage_from_logging",
     "dedupe",
     "drop_collector_noise",
     "filter_to_subject",
+    "parse_device_timestamp",
+    "seconds_between",
     "shape_window",
 ]
 
@@ -421,3 +426,296 @@ def shape_window(
         unattributed_kept=unattributed,
         coverage=coverage,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Temporal shape -- B-418
+# --------------------------------------------------------------------------- #
+#
+# `evidence-reduction.md` §3.4: "Two records with identical counts can mean
+# opposite things: 60 events evenly spread over an hour is a chronic
+# condition; 60 events in ninety seconds is an incident." A bare `count`
+# cannot tell those apart. This section adds two numbers that can, alongside
+# the count -- never in place of the records themselves, for the same reason
+# `shape_window` does not aggregate away the 28 individual records it
+# returns: B-414 measured that at this fabric's scale a replacement
+# aggregate carries no information the records do not (CLOSED-AS-MEASURED,
+# OBS-127). `aggregate_by_mnemonic` is additive summary, read alongside
+# `ShapedWindow.records`, not instead of them.
+#
+# Blocked on B-414 in the backlog, unblocked by the same measurement that
+# closed it: B-414 asked whether a *general*, cross-source normalisation
+# capability was worth building today and measured that it was not. That
+# answer is about the general capability, not about this narrower one --
+# rate and burst shape are a `Counter` plus two small scans over a sorted
+# list, not the template-normalisation machinery B-414 was scoped to.
+
+_MONTH_NUMBER: dict[str, int] = {
+    name: index
+    for index, name in enumerate(
+        ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"),
+        start=1,
+    )
+}
+
+#: `Aug 16 07:41:54.688 UTC` -- the device's own embedded timestamp, exactly
+#: as `template_parsers._LOG_ENTRY` captures it and exactly as :func:`dedupe`
+#: above already keys on it. Deliberately permissive on the trailing token
+#: (`UTC` here, but never validated) since that field is provenance, not part
+#: of what this function measures.
+_DEVICE_TIMESTAMP = re.compile(
+    r"^(?P<mon>[A-Za-z]{3})\s+(?P<day>\d{1,2})\s+"
+    r"(?P<hour>\d{2}):(?P<minute>\d{2}):(?P<second>\d{2})\.(?P<ms>\d{3})\s+\S+$"
+)
+
+#: One occurrence's parsed device timestamp, with no year -- `(month, day,
+#: hour, minute, second, millisecond)`.
+DeviceTimestamp = tuple[int, int, int, int, int, int]
+
+
+def parse_device_timestamp(text: str) -> DeviceTimestamp | None:
+    """A device timestamp string, or ``None`` when it does not parse.
+
+    Deliberately not a `datetime`: the device's own string carries no year
+    (`template_parsers.py`'s own comment explains why the field is kept
+    verbatim rather than reformatted -- IOS-XR does not print one), and this
+    module only ever needs an *interval* between two timestamps from the same
+    window, which a year never answers anyway (:func:`seconds_between`).
+
+    ``None`` covers both a malformed line and the empty string
+    `logs_loki._record_from_line` uses for a Loki line its own regex could
+    not parse. An unparseable timestamp cannot be placed in a chronology, so
+    every caller here counts it rather than silently dropping it --
+    :attr:`MnemonicAggregate.untimed` and `log_episodes.EpisodeSet.
+    records_unordered` are where that count surfaces.
+    """
+
+    match = _DEVICE_TIMESTAMP.match(text.strip())
+    if not match or match["mon"] not in _MONTH_NUMBER:
+        return None
+    return (
+        _MONTH_NUMBER[match["mon"]],
+        int(match["day"]),
+        int(match["hour"]),
+        int(match["minute"]),
+        int(match["second"]),
+        int(match["ms"]),
+    )
+
+
+def seconds_between(earlier: DeviceTimestamp, later: DeviceTimestamp) -> float:
+    """Elapsed seconds from ``earlier`` to ``later``.
+
+    Anchored on an arbitrary fixed leap year purely as a `datetime` scaffold
+    for calendar arithmetic (month lengths, leap days) -- absolute calendar
+    time is never asked for here, only the interval between two device
+    timestamps read out of one window, which is a relative question a
+    missing year never affects except at one boundary: a window spanning
+    31 December into 1 January would otherwise read as a large *negative*
+    gap, since "Jan" sorts before "Dec" in any one anchor year. When ``later``
+    would land before ``earlier`` under the shared anchor, it is re-anchored
+    one year forward instead of being returned as a negative interval -- the
+    one defence this function has against that case, sufficient for a
+    bounded device buffer whose true span is normally hours, not months.
+    """
+
+    anchor = 2000  # a leap year, so 29 Feb is always a valid anchor date too
+    lo = datetime(anchor, earlier[0], earlier[1], earlier[2], earlier[3], earlier[4], earlier[5] * 1000)
+    hi = datetime(anchor, later[0], later[1], later[2], later[3], later[4], later[5] * 1000)
+    if hi < lo:
+        hi = hi.replace(year=anchor + 1)
+    return (hi - lo).total_seconds()
+
+
+#: The fixed averaging window `max_rate_1m` names. A declared constant, not a
+#: derived protocol timer -- this is the log-volume analogue of the interface
+#: error-counter check already being a rate over a fixed window rather than a
+#: raw total (the same analogy `evidence-reduction.md` §3.4 and the B-418
+#: backlog row both draw), and is a different question from `log_episodes`'
+#: cross-protocol proximity bound, which *is* derived from protocol timers.
+#: This window asks "how many occurrences of the SAME mnemonic land within
+#: any given minute", never "is event A close enough in time to be part of
+#: event B's causal chain" -- that question belongs to `log_episodes.py` and
+#: is answered from a different, protocol-timer-derived table.
+_RATE_WINDOW_SECONDS = 60.0
+
+
+def _max_rate_1m(offsets: list[float]) -> int:
+    """Peak count of occurrences within any rolling 60-second window.
+
+    Two-pointer scan over ``offsets`` (already sorted ascending, seconds
+    relative to the group's first occurrence): O(n), no window is
+    constructed explicitly.
+    """
+
+    best = 0
+    left = 0
+    for right, value in enumerate(offsets):
+        while value - offsets[left] > _RATE_WINDOW_SECONDS:
+            left += 1
+        best = max(best, right - left + 1)
+    return best
+
+
+def _bursts(offsets: list[float]) -> int:
+    """Count of maximal runs of 2+ occurrences with each consecutive gap
+    strictly under the 60-second window.
+
+    A run of length 1 is an isolated occurrence, not a burst. A run whose
+    members are each spaced exactly at the window boundary or wider is the
+    "60 events evenly spread over an hour" chronic case the design note
+    names, and correctly scores 0 -- `gap < window`, not `<=`, is what keeps
+    steady-state repetition from reading as a burst.
+    """
+
+    if len(offsets) < 2:
+        return 0
+    runs = 0
+    in_run = False
+    for i in range(1, len(offsets)):
+        if offsets[i] - offsets[i - 1] < _RATE_WINDOW_SECONDS:
+            if not in_run:
+                runs += 1
+                in_run = True
+        else:
+            in_run = False
+    return runs
+
+
+@dataclass(frozen=True)
+class MnemonicAggregate:
+    """One mnemonic's temporal shape across a window. B-418.
+
+    Read *alongside* :attr:`ShapedWindow.records`, never instead of them --
+    see this section's header comment for why a replacement aggregate was
+    refused at this fabric's scale (B-414).
+
+    Every timing field is ``None``, never ``0``/``0.0``, when it was not
+    measured rather than measured as zero -- the same "absence is never
+    zero" discipline `coverage.Coverage` applies to a whole window, applied
+    here at the per-mnemonic grain. A mnemonic seen once has no interval to
+    compute a rate over; ``rate_per_hour: 0.0`` would assert "this never
+    happens", which one observation cannot support. :attr:`untimed` is the
+    honest account of occurrences excluded from every timing field because
+    their own device timestamp did not parse -- they still count towards
+    :attr:`count`, because they did happen, but they cannot be dated.
+    """
+
+    mnemonic: str
+    #: Every occurrence, timed or not.
+    count: int
+    #: Verbatim device timestamp of the earliest *timed* occurrence, or ``""``.
+    first_seen: str
+    #: Verbatim device timestamp of the latest *timed* occurrence, or ``""``.
+    last_seen: str
+    #: One verbatim sample -- the most recent occurrence's `text`. The
+    #: receipt an engineer checks and the grounding check can cite
+    #: (`evidence-reduction.md` §8), never a summary invented from the group.
+    sample: str
+    #: Seconds from `first_seen` to `last_seen`. ``None`` when fewer than two
+    #: occurrences were timed -- there is no interval to report, not a
+    #: zero-length one.
+    window_seconds: float | None
+    #: ``count / (window_seconds / 3600)``. ``None`` whenever `window_seconds`
+    #: is ``None`` or ``0`` -- a single instant has no rate.
+    rate_per_hour: float | None
+    #: Peak occurrences of this mnemonic within any rolling 60-second window.
+    #: ``None`` only when nothing was timed at all.
+    max_rate_1m: int | None
+    #: Count of distinct flurries (see :func:`_bursts`). ``None`` only when
+    #: nothing was timed at all; ``0`` is a real, measured "no bursts".
+    bursts: int | None
+    #: Occurrences whose own device timestamp did not parse -- excluded from
+    #: every field above, and reported rather than silently folded in or
+    #: dropped.
+    untimed: int = 0
+
+
+def aggregate_by_mnemonic(records: list[dict[str, Any]]) -> tuple[MnemonicAggregate, ...]:
+    """Per-mnemonic count, rate and burst shape over ``records``. B-418.
+
+    Takes any record list in this module's own shape -- typically
+    `ShapedWindow.records`, already denoised -- and neither filters nor
+    reorders anything; it only summarises what it is given. The returned
+    tuple is ordered by first appearance in ``records``, so it is stable and
+    reflects the window rather than an alphabetisation choice, and it holds
+    exactly one entry per distinct mnemonic present -- no minimum-count
+    threshold, matching :func:`shape_window`'s own rule that a singleton is
+    never the one thing a reduction drops.
+
+    Grouped on the mnemonic alone, not `(mnemonic, normalised body)` --
+    `evidence-reduction.md` §3.3 already establishes the mnemonic is the
+    template key on this fabric, and B-414 measured a finer key added
+    nothing at this source's scale. A source that needs body normalisation
+    too is B-414's still-open general case, not a reason to complicate this
+    narrower one.
+    """
+
+    order: list[str] = []
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for record in records:
+        mnemonic = record.get("mnemonic", "")
+        if mnemonic not in grouped:
+            grouped[mnemonic] = []
+            order.append(mnemonic)
+        grouped[mnemonic].append(record)
+
+    aggregates: list[MnemonicAggregate] = []
+    for mnemonic in order:
+        group = grouped[mnemonic]
+        timed: list[tuple[DeviceTimestamp, dict[str, Any]]] = []
+        untimed = 0
+        for record in group:
+            parsed = parse_device_timestamp(record.get("timestamp", ""))
+            if parsed is None:
+                untimed += 1
+            else:
+                timed.append((parsed, record))
+        timed.sort(key=lambda pair: pair[0])
+
+        if not timed:
+            aggregates.append(
+                MnemonicAggregate(
+                    mnemonic=mnemonic,
+                    count=len(group),
+                    first_seen="",
+                    last_seen="",
+                    sample=group[-1].get("text", ""),
+                    window_seconds=None,
+                    rate_per_hour=None,
+                    max_rate_1m=None,
+                    bursts=None,
+                    untimed=untimed,
+                )
+            )
+            continue
+
+        anchor = timed[0][0]
+        offsets = [seconds_between(anchor, parsed) for parsed, _ in timed]
+        # `None`, not `0.0`, for exactly one timed occurrence -- there is no
+        # interval to report. Two-or-more occurrences sharing one millisecond
+        # timestamp are a real, *measured* zero-length window and keep the
+        # `0.0` they compute -- the distinction is "not measured" vs.
+        # "measured, and it was zero", not "small vs. smaller".
+        window_seconds = (offsets[-1] - offsets[0]) if len(offsets) > 1 else None
+        rate_per_hour = (
+            len(timed) / (window_seconds / 3600.0)
+            if window_seconds is not None and window_seconds > 0
+            else None
+        )
+
+        aggregates.append(
+            MnemonicAggregate(
+                mnemonic=mnemonic,
+                count=len(group),
+                first_seen=timed[0][1].get("timestamp", ""),
+                last_seen=timed[-1][1].get("timestamp", ""),
+                sample=timed[-1][1].get("text", ""),
+                window_seconds=window_seconds,
+                rate_per_hour=rate_per_hour,
+                max_rate_1m=_max_rate_1m(offsets),
+                bursts=_bursts(offsets),
+                untimed=untimed,
+            )
+        )
+    return tuple(aggregates)
