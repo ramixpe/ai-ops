@@ -7282,3 +7282,65 @@ Three lessons worth the price:
   OBS-690.
 - **Needs human review:** yes — same single decision as OBS-690, now covering
   two leftover faults rather than one.
+
+## OBS-693 · Correction to OBS-692, and OBS-690 closed
+
+Appended, not edited — OBS-692 stands as written and this records what
+reading the devices showed the next morning (2026-08-21), with operator
+authorisation to change config.
+
+**OBS-690 is closed.** PE2 did still carry the leftover `remote_as 65001`
+plus `ebgp-multihop 5` toward RR1 — read directly out of
+`show running-config router bgp 65000`, exactly `fault_lab.py` option 7.
+Reverted with the injector's own documented revert lines and verified on a
+fresh session: `remote-as 65000`, no `ebgp-multihop`, `bfd` and
+`update-source` correctly retained. Both ends now Established.
+`nettools investigate RR1 10.255.0.12` returns `all_layers_healthy`, five of
+five rungs healthy — **so round 6's step-1 precondition is satisfied and
+B-440 is unblocked.**
+
+Worth noting the push itself raised on `exit_config_mode` (netmiko could not
+match the prompt back), which is precisely why `fault_lab.push`'s docstring
+says *"NEVER raises. The caller verifies by reading the device"* — the status
+was an error and the change had in fact committed (`1000000045`). A status is
+not evidence in either direction.
+
+**OBS-692's attribution was wrong; its measurement was not.** I wrote that
+PE1 "holds an MD5 BGP password toward RR1" and listed it as a second leftover
+`fault_lab` injection. Reading the config this morning: **neither PE1 nor RR1
+has any `password` or `keychain` line anywhere in `router bgp 65000`.** The
+last `BADAUTH`/`NOAUTH` event was 2026-08-20T23:22:15 and there have been
+none in the nine hours since, so the password was removed around then — which
+answers the "I do not know why the events stopped at 23:22" that OBS-692
+honestly flagged.
+
+Nor was it plausibly ours: PE1's commit history shows sustained activity by
+another party overnight — commits at 03:18 (a **Rollback**), 03:26, 03:50,
+03:51 and 03:54, the most recent an `l2vpn xconnect` change this project has
+never touched. The operator has stated another application shares these
+devices. **So the lab is not exclusively this project's, and "a leftover
+chaos-round fault" was an inference I should have marked as one.** The
+correct statement is: an MD5 mismatch existed on PE1↔RR1 for seven hours, it
+was not injected by `fault_lab.py`, and it is gone.
+
+**Everything OBS-692 actually measured is unaffected**, and it remains the
+more important finding: 4,882 authentication failures over seven hours, the
+session never dropping, every rung reading healthy, and
+`investigate RR1 10.255.0.11` returning `all_layers_healthy`,
+`trustworthy: true`. If anything the correction strengthens it — the fault
+was *real production-shaped churn from another workflow*, not something we
+planted, and the tool still could not see it.
+
+**Open question for the operator, deliberately not changed:** `health --all`
+flags `BGP peer count 2 differs from the recorded baseline 1` on **both** PE1
+and PE2. Measured: PE1 peers with PE2 and RR1, PE2 with PE1 and RR1, while
+PE3 and PE4 peer only with RR1. PE1's warning predates this morning's revert;
+PE2's appeared when the session came back. The tempting fix is to raise both
+baselines to 2 — **and it may be exactly backwards**: a direct PE1↔PE2
+session alongside a route reflector defeats the point of having one, and
+PE3/PE4 follow the clean pattern. So either the baseline is stale or the
+fabric carries a stray session, and which one is a design question for the
+operator, not a number to quietly update. Left as-is with the evidence
+recorded. Related: this is `suspicious_baseline`'s exact defect class on the
+BGP axis, which **B-465's new role floor does not cover** — it applies only
+to `isis_adjacencies`.
