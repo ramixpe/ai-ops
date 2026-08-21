@@ -7449,3 +7449,42 @@ rungs, `Gi0/0/0/2` admin up.
   the thing being gated. Filed as **B-697**; not decided here, because
   widening the matrix costs CI minutes on every push and that is the
   operator's call, not mine.
+
+## OBS-696 · The baseline was right and the fabric was wrong
+
+- **Kind:** resolution of an open question, on operator decision
+- **The question (B-699):** `health --all` flagged `BGP peer count 2 differs
+  from the recorded baseline 1` on both PE1 and PE2. Two readings fitted:
+  the baseline was stale, or the fabric carried a session it should not.
+  Raising the baseline was the tempting fix and I declined to make it —
+  PE3 and PE4 peer only with RR1, so a direct PE1↔PE2 session alongside a
+  route reflector defeats the point of having one.
+- **Operator decision, 2026-08-21:** *"PE1<->PE2 direct peering is not
+  intended, remove it."* So the warning was correct and the inventory was
+  correct; the fabric had drifted.
+- **Done and verified.** `no neighbor 10.255.0.12` on PE1, `no neighbor
+  10.255.0.11` on PE2. Read back on fresh sessions (a status is not
+  evidence — three separate device writes today have raised `ReadTimeout`
+  while committing successfully): each device now lists only
+  `10.255.0.31` and `2001:db8:ffff::31`, both toward RR1.
+- **Checked before touching anything** that neither device also carried an
+  IPv6 session toward the other — both `::31` peers are RR1, so there was
+  no v6 twin of this to miss.
+- **After:** all four PEs read exactly 1 peer, established, matching the
+  recorded baseline. Peer-count drift is gone from every device. Fabric
+  warnings 4 → 3, PE2 off the warning list entirely, and
+  `investigate RR1 10.255.0.12` still `all_layers_healthy`. The three
+  remaining warnings are all pre-existing and known: B-496's PE3↔P2 IS-IS
+  gap, the operator's own recorded "0 prefixes is normal on this lab" note,
+  and B-515's down SR-TE policy.
+- **Worth stating because the reverse was the tempting move:** an
+  inventory baseline is a *claim about intent*. When observation disagrees
+  with it, the fix is whichever of the two is wrong — and deciding that
+  requires knowing the design, which is why this one was escalated rather
+  than settled by an agent picking the reading that silenced the warning.
+  Had I raised the baseline to 2, the warning would have gone away and the
+  fabric would still have carried a session nobody wanted.
+- **Related, still open:** `B-465`'s role-floor rule covers
+  `isis_adjacencies` only. The BGP axis has no equivalent, so a
+  `bgp_peers` baseline learned from a broken fabric would not be caught
+  the way an IS-IS one now is.
