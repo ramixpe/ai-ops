@@ -1,0 +1,225 @@
+{
+  "tool": "investigate",
+  "device": "RR1",
+  "subject": "10.255.0.12",
+  "flow": "bgp_session",
+  "finding": "all_layers_healthy",
+  "reason": null,
+  "origin_unresolved": null,
+  "operator_notes": [
+    {
+      "device": "PE2",
+      "applies_to": "isis",
+      "note": "Historical (2026-08-16): the expected: isis_adjacencies value here was learned by `nettools learn-topology` while this device was isolated, so the baseline recorded 0 and matching it did not mean healthy -- health.py's suspicious_baseline meta rule existed for exactly this case.",
+      "author": "operator",
+      "recorded": "2026-08-16"
+    },
+    {
+      "device": "PE2",
+      "applies_to": "isis",
+      "note": "Resolved 2026-08-19 (B-465/B-516): the revisit condition above is met. `t0`/`t1` were fully re-captured live (B-516 found the prior t0 internally inconsistent -- its isis/lldp/bgp/version files were three weeks stale relative to the rest of the label) and the isis_adjacencies baseline re-derived against the fresh capture, cross-checked against LLDP: PE2 now shows 2 IS-IS adjacencies (P1, P3), matching PE1/PE4/RR1's pattern. suspicious_baseline no longer fires for PE2; it was never a signal that this device is unconditionally healthy, only that the recorded baseline itself is not trustworthy, and it now is.",
+      "author": "operator",
+      "recorded": "2026-08-19"
+    },
+    {
+      "device": "PE2",
+      "applies_to": "bgp",
+      "note": "Every BGP session on this lab carries 0 prefixes -- nothing is advertised into it. `bgp_no_prefixes` is the normal state here and is not a fault.",
+      "author": "operator",
+      "recorded": "2026-08-16"
+    },
+    {
+      "device": "RR1",
+      "applies_to": "bgp",
+      "note": "Every BGP session on this lab carries 0 prefixes -- nothing is advertised into it. `bgp_no_prefixes` is the normal state here and is not a fault.",
+      "author": "operator",
+      "recorded": "2026-08-16"
+    }
+  ],
+  "cause": null,
+  "causal_chain": [],
+  "rungs_examined": 5,
+  "rungs": [
+    {
+      "position": 1,
+      "of": 5,
+      "rung": "bgp_session",
+      "device": "RR1",
+      "status": "healthy",
+      "reason": "BGP session to 10.255.0.12 is Established (0 prefixes received)",
+      "evidence_keys": [
+        "RR1:bgp:10.255.0.12"
+      ]
+    },
+    {
+      "position": 2,
+      "of": 5,
+      "rung": "transport",
+      "device": "RR1",
+      "status": "healthy",
+      "reason": "TCP transport to 10.255.0.12 is up (the socket is armed for read, session state Established)",
+      "evidence_keys": [
+        "RR1:bgp_neighbor:10.255.0.12"
+      ]
+    },
+    {
+      "position": 3,
+      "of": 5,
+      "rung": "route_to_peer",
+      "device": "RR1",
+      "status": "healthy",
+      "reason": "route to 10.255.0.12/32 is present (2 path(s))",
+      "evidence_keys": [
+        "RR1:route:10.255.0.12/32"
+      ]
+    },
+    {
+      "position": 4,
+      "of": 5,
+      "rung": "igp_adjacency",
+      "device": "PE2",
+      "status": "healthy",
+      "reason": "2 IS-IS adjacency(ies), all Up",
+      "evidence_keys": [
+        "PE2:isis"
+      ]
+    },
+    {
+      "position": 5,
+      "of": 5,
+      "rung": "interface",
+      "device": "PE2",
+      "status": "healthy",
+      "reason": "2 of 2 members healthy (any suffices)",
+      "evidence_keys": [
+        "PE2:interface:Gi0/0/0/0",
+        "PE2:interface:Gi0/0/0/1"
+      ]
+    }
+  ],
+  "report": {
+    "status": "emitted",
+    "content": {
+      "authoritative": true,
+      "generated_by": "code",
+      "finding": "all_layers_healthy",
+      "rungs_examined": 5,
+      "observations": [
+        {
+          "claim": "1/5 bgp_session on RR1 is healthy: BGP session to 10.255.0.12 is Established (0 prefixes received)",
+          "position": 1,
+          "of": 5,
+          "evidence_key": "RR1:bgp:10.255.0.12"
+        },
+        {
+          "claim": "2/5 transport on RR1 is healthy: TCP transport to 10.255.0.12 is up (the socket is armed for read, session state Established)",
+          "position": 2,
+          "of": 5,
+          "evidence_key": "RR1:bgp_neighbor:10.255.0.12"
+        },
+        {
+          "claim": "3/5 route_to_peer on RR1 is healthy: route to 10.255.0.12/32 is present (2 path(s))",
+          "position": 3,
+          "of": 5,
+          "evidence_key": "RR1:route:10.255.0.12/32"
+        },
+        {
+          "claim": "4/5 igp_adjacency on PE2 is healthy: 2 IS-IS adjacency(ies), all Up",
+          "position": 4,
+          "of": 5,
+          "evidence_key": "PE2:isis"
+        },
+        {
+          "claim": "5/5 interface on PE2 is healthy: 2 of 2 members healthy (any suffices)",
+          "position": 5,
+          "of": 5,
+          "evidence_key": "PE2:interface:Gi0/0/0/0"
+        }
+      ],
+      "interpretations": [
+        {
+          "claim": "Every layer between RR1 and 10.255.0.12 is healthy. No fault was found on this dependency path.",
+          "based_on": [
+            "obs-1",
+            "obs-2",
+            "obs-3",
+            "obs-4",
+            "obs-5"
+          ]
+        }
+      ],
+      "recommendation": {
+        "next_check": "No fault on this dependency path. If a problem is being reported, it is about something this flow does not cover.",
+        "requires_human": true
+      }
+    },
+    "authoritative": true,
+    "grounding": "not graded: the authoritative report is generated from the descent's typed fields, so grounding it would check code against itself and always pass. The model paraphrase, where present, is graded normally.",
+    "paraphrase": {
+      "status": "not_attempted",
+      "content": null,
+      "authoritative": false,
+      "grounding": "vacuous pass -- nothing to verify: 0 observations, 0 citations, 0/0 rungs cited, 0 absence claims backed, 0 timeline entries cited, 0 identifiers contained, 0 recommendation(s) closed, 0 cause claim(s) checked"
+    }
+  },
+  "correlation": {
+    "status": "not_attempted",
+    "content": null,
+    "authoritative": true,
+    "grounding": "not graded: the authoritative report is generated from the descent's typed fields, so grounding it would check code against itself and always pass. The model paraphrase, where present, is graded normally.",
+    "caveat": null,
+    "paraphrase": {
+      "status": "not_attempted",
+      "content": null,
+      "authoritative": false,
+      "grounding": "vacuous pass -- nothing to verify: 0 observations, 0 citations, 0/0 rungs cited, 0 absence claims backed, 0 timeline entries cited, 0 identifiers contained, 0 recommendation(s) closed, 0 cause claim(s) checked"
+    }
+  },
+  "off_path": [],
+  "coherence": {
+    "status": "window_limited",
+    "ok": false,
+    "refuses": false,
+    "caveat": "The finding stands. It was read over 44.5s, wider than the 30.0s bound, and bgp_session were unchanged at both ends of that window. Read it as 'true at the start and at the end', not as 'true throughout' \u2014 nothing observed the middle.",
+    "skew_seconds": 44.475,
+    "bound_seconds": 30.0,
+    "within_bound": false,
+    "stable": true,
+    "detail": "skew 44.5s of 30s allowed \u2014 EXCEEDED; bgp_session agreed at both ends, so the finding stands qualified: the window brackets a stable interval, and nothing observed its middle",
+    "rereads": [
+      {
+        "rung": "bgp_session",
+        "device": "RR1",
+        "before": "healthy",
+        "after": "healthy",
+        "agrees": true,
+        "detail": "BGP session to 10.255.0.12 is Established (0 prefixes received)"
+      }
+    ]
+  },
+  "sessions": {
+    "total": 3,
+    "by_device": {
+      "RR1": 1,
+      "PE2": 2
+    },
+    "commands_run": {
+      "total": 27,
+      "by_device": {
+        "RR1": 12,
+        "PE2": 15
+      }
+    },
+    "latency_ms": {
+      "total": 44475.198,
+      "by_device": {
+        "RR1": 1896.237,
+        "PE2": 42578.961
+      }
+    }
+  },
+  "usage": null,
+  "coverage": null,
+  "repairs": [],
+  "trustworthy": true
+}

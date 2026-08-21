@@ -1,0 +1,2 @@
+# Diagnosis recorded: id=12cec2ca452949d4a0eea967842fdbfe -- to record a human verdict, run `nettools ledger verdict 12cec2ca452949d4a0eea967842fdbfe <confirmed_correct|incorrect|unknown> --by <name>`
+# The finding stands. It was read over 33.1s, wider than the 30.0s bound, and bgp_session, transport were unchanged at both ends of that window. Read it as 'true at the start and at the end', not as 'true throughout' — nothing observed the middle.

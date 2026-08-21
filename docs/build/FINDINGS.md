@@ -7344,3 +7344,73 @@ operator, not a number to quietly update. Left as-is with the evidence
 recorded. Related: this is `suspicious_baseline`'s exact defect class on the
 BGP axis, which **B-465's new role floor does not cover** — it applies only
 to `isis_adjacencies`.
+
+## OBS-694 · Round 6 · The prediction held; the restore reported success having done nothing
+
+**Round 6 ran 2026-08-21T09:22Z with operator authorisation, and its sealed
+prediction held on every clause.** Payload archived at
+`evidence-archive/round6/20260821T092220Z/` (baseline, under-fault,
+post-restore, each with stdout/stderr and parsed JSON).
+
+| sealed | observed |
+|---|---|
+| rung vector `B B H H H` | `bgp_session` broken, `transport` broken, `route_to_peer` / `igp_adjacency` / `interface` healthy |
+| finding `transport_blocked` | `transport_blocked`, `trustworthy: true`, exit 1 |
+| rung 5 healthy | healthy — "2 of 2 members healthy (any suffices)" |
+| `Gi0/0/0/2` not named as a cause | **appears zero times in the entire report** |
+| `off_path` must not list it as broken without saying so | `off_path: []` |
+
+**So the trust-loss scenario reviewer B described is prevented**, and it is
+prevented for the reason B-456 predicted: `EACH_PATH_INTERFACE` derives rung
+5's member set from the route, and the shut spare port was never a member. A
+second, off-path fault applied *in the same commit* did not leak into the
+report even as a hedge. This is a `correct` outcome on the §5.2 ordering, and
+it is a prediction that a defect is **already fixed** — the weaker kind of
+claim, as §2 of the seal says itself.
+
+### The defect the round found, which is not in the product
+
+`restore()` returned `restore_verified = True` while **both `shutdown` lines
+were still on the device.** The fabric was left faulted and the harness said
+otherwise. I only caught it because the script's own post-restore
+`investigate` disagreed with the restore's own status, and then only fixed it
+because I read the running-config rather than believing either.
+
+Root cause, `fault_lab.restore()` line 344:
+
+```python
+if _active_fault is None:
+    return True
+```
+
+Those globals are set inside `run_round()`. `round6.py` called `push()`
+directly, so they were never set, and `restore()` returned `True` **without
+attempting anything**.
+
+Two distinct problems, and they should not be collapsed:
+
+1. **The harness bug is mine.** Bypassing `run_round` bypassed the arming.
+   Fixed in `round6.py`, which now captures the baseline and sets
+   `_active_fault` before pushing, with the reasoning in-line so the next
+   person writing a `roundN.py` does not repeat it.
+2. **`restore()` fails open, and that is the more serious half.** It returns
+   the same `True` for *"reverted and verified against the baseline"* and for
+   *"there is nothing here to revert."* Those are different statements and
+   only one of them is a safety guarantee. This is **"absence is never zero"
+   landing in the one function whose entire purpose is to leave the lab
+   clean** — the same class as `chars_withheld: 0` and `retries: 0`, with a
+   much worse consequence. A caller that armed nothing gets a confident
+   success, which is exactly how OBS-690's fault sat on PE2 for two days.
+   Filed as **B-695**; not patched here, because `fault_lab.py` sits outside
+   this repo's test suite and the fix wants its own review.
+
+**Also observed, and consistent with OBS-690's original push:** every
+netmiko write to these XRd nodes raises `ReadTimeout` on prompt-matching
+(`send_config_set`, `exit_config_mode`) while the commit itself succeeds. The
+reliable pattern is per-line `send_command_timing` with `cmd_verify` off, then
+an explicit `commit`, then **read the running-config back on a fresh session**.
+`push()`'s docstring already says a status is not evidence; this is the third
+time that has been the operative fact today.
+
+**Fabric is back at golden**, verified: `all_layers_healthy`, five of five
+rungs, `Gi0/0/0/2` admin up.
