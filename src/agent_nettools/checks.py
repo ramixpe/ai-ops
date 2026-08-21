@@ -99,8 +99,8 @@ from typing import Any, Callable
 
 from . import metrics, parsers
 from .inventory_model import Device, load_inventory_file
-from .network_tools import STATUS_ERROR, STATUS_UNSUPPORTED
 from .platforms import DEFAULT_PLATFORM
+from .status import STATUS_ERROR, STATUS_UNSUPPORTED
 
 __all__ = [
     "BROKEN",

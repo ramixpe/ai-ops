@@ -34,9 +34,18 @@ def test_the_descent_predicates_never_touch_the_inventory_or_a_device():
 
     B-403 merged `health.py` in, and health's baseline rules need
     `inventory/lab.yaml`'s `expected:` blocks. So `checks.py` now imports
-    `inventory_model` and `network_tools`, and the import-graph assertion is
-    false. The operator directed the merge after that trade was stated
-    (OBS-104).
+    `inventory_model`, and the import-graph assertion is false. The operator
+    directed the merge after that trade was stated (OBS-104).
+
+    `checks.py` also imported `network_tools` itself, until EER-015: not for
+    any device-touching capability -- the only names it ever took from there
+    were `STATUS_ERROR`/`STATUS_UNSUPPORTED`, two string constants -- but the
+    import-graph assertion could not tell "imports a transport module for two
+    strings" apart from "imports a transport module for transport", which is
+    exactly the cohesion gap that pass closed by moving the vocabulary to
+    `status.py`. `inventory_model` is the one import left that genuinely adds
+    a capability this module's own docstring disclaims ("no I/O"); `status.py`
+    is a plain-string leaf like `platforms.py`'s constants, not a second one.
 
     **What replaces it is a claim about what actually happens**, which is
     strictly less: each of the five rung predicates is run against real parsed
@@ -114,6 +123,42 @@ def test_checks_reads_no_environment_and_opens_no_files():
     source = Path(inspect.getfile(checks)).read_text(encoding="utf-8")
     for forbidden in ("os.environ", "getenv", "open(", "Path(", "datetime.now", "time.time"):
         assert forbidden not in source, f"checks.py contains {forbidden!r}"
+
+
+def test_checks_no_longer_imports_the_transport_module_for_two_strings():
+    """EER-015: `checks.py` used to ``from .network_tools import STATUS_ERROR,
+    STATUS_UNSUPPORTED`` -- reaching into the SSH transport module purely for
+    two string constants that were never about a device (see
+    `test_the_descent_predicates_never_touch_the_inventory_or_a_device`'s own
+    docstring, corrected by this same change). Moved to `status.py`.
+
+    Pins that the *import* is gone, not just that the two names still
+    resolve -- they would, via `network_tools`'s own compatibility
+    re-export, even if this import had been left in place, so an equality
+    check on `checks.STATUS_ERROR` could not tell the difference. Only
+    inspecting the import statement itself can.
+
+    Checked with `ast`, not a bare substring: a substring check for
+    "network_tools" would also match this module's own prose comment
+    referencing ``network_tools.diff_evidence``, which is not an import and
+    must not fail this test.
+    """
+
+    import ast
+
+    source = Path(inspect.getfile(checks)).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    imported = {
+        node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module
+    } | {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    }
+    assert not any(m == "network_tools" or m.endswith(".network_tools") for m in imported), (
+        f"checks.py still imports network_tools: {imported}"
+    )
 
 
 # --------------------------------------------------------------------------- #
