@@ -39,12 +39,35 @@ full difference table.
 Absence is never coerced to a number: unset, blank, or unparseable all fall
 back to the caller's own `default`, exactly like a malformed string --
 `default` is the caller's explicit "I don't know" value, never silently 0.
+
+`_BOOL_TRUE`/`_BOOL_FALSE` (EER-015)
+-------------------------------------
+The recognized boolean spellings, case-insensitive: `{"1", "true", "yes",
+"on"}` and `{"0", "false", "no", "off"}`. `settings.py` declared its own copy
+of both; `mcp_server/server.py` declared the truthy half twice more, once per
+MCP-only gate (`_MCP_ACTIVE_PROBES_TRUTHY`, `_MCP_EXTERNAL_SOURCES_TRUTHY`) --
+four definitions of two literal tuples, collapsed here. Each gate keeps its
+own semantically-named constant (`_mcp_active_probes_allowed`/
+`_mcp_external_sources_allowed` both still read `_MCP_*_TRUTHY` by that exact
+name, unchanged -- one of them is a `scripts/mutate_guards.py` anchor,
+EER-008B-EXTERNAL, and rewriting that return line would silently void the
+guard); only the *value* they are assigned now comes from here instead of a
+second literal. `settings.py`'s own `_BOOL_SPELLINGS = _BOOL_FALSE |
+_BOOL_TRUE` stays exactly as it was, now built from the imported pair.
+
+This is a values-only merge -- unlike `_float_env`/`_int_env` above, there
+was no cross-copy behavioral drift to reconcile: every copy was the same
+four-string set, case for case, before this change.
 """
 
 from __future__ import annotations
 
 import math
 import os
+
+# See "`_BOOL_TRUE`/`_BOOL_FALSE` (EER-015)" above.
+_BOOL_FALSE = frozenset({"0", "false", "no", "off"})
+_BOOL_TRUE = frozenset({"1", "true", "yes", "on"})
 
 
 def _float_env(name: str, default: float) -> float:

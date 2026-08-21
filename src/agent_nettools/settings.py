@@ -59,6 +59,7 @@ import os
 from dataclasses import dataclass
 
 from . import credential_resolver, notifier
+from ._env import _BOOL_FALSE, _BOOL_TRUE
 
 # --------------------------------------------------------------------------- #
 # The declaration
@@ -119,8 +120,12 @@ class Setting:
 # unknown_bool_disables=True on their Setting(), and _problem() below
 # describes the direction that actually applies to each one rather than
 # assuming the footgun universally.
-_BOOL_FALSE = frozenset({"0", "false", "no", "off"})
-_BOOL_TRUE = frozenset({"1", "true", "yes", "on"})
+#
+# EER-015: `_BOOL_FALSE`/`_BOOL_TRUE` themselves moved to `_env.py`.
+# mcp_server/server.py declared the truthy half of this same pair twice
+# more, once per MCP-only gate (`_MCP_ACTIVE_PROBES_TRUTHY`,
+# `_MCP_EXTERNAL_SOURCES_TRUTHY`) -- four definitions of two literal tuples,
+# now one each; see `_env.py`'s docstring for the full accounting.
 _BOOL_SPELLINGS = _BOOL_FALSE | _BOOL_TRUE
 
 _LLM_PROVIDER_CHOICES = ("auto", "anthropic", "claude", "openai", "minimax", "ollama")

@@ -23,6 +23,7 @@ except ModuleNotFoundError:
     from mcp.server.fastmcp import FastMCP
 
 from agent_nettools import graph, logs_loki, metrics_prometheus, netbox
+from agent_nettools._env import _BOOL_TRUE
 from agent_nettools.health import evaluate_fabric
 from agent_nettools.inventory_model import load_inventory_file
 from agent_nettools.investigation import investigate
@@ -111,8 +112,16 @@ mcp = FastMCP("IOS-XR Read-Only Network Tools")
 # fails CLOSED on an unrecognized value -- a gate whose entire purpose is to
 # keep something off by default must not reopen on a typo (that footgun is
 # exactly what settings.py's own P2-02 finding is about).
+#
+# EER-015: the literal spelling set itself (`{"1", "true", "yes", "on"}`)
+# used to be typed out here and again below for
+# `_MCP_EXTERNAL_SOURCES_TRUTHY`, and a third time in `settings.py` -- see
+# `_env.py`'s docstring. This gate's own name for its truthy set stays
+# `_MCP_ACTIVE_PROBES_TRUTHY`, unchanged, since `_mcp_active_probes_allowed`
+# below still reads it by that exact name; only the value it is assigned now
+# comes from the shared constant instead of a second literal.
 NETTOOLS_MCP_ALLOW_ACTIVE_PROBES_ENV = "NETTOOLS_MCP_ALLOW_ACTIVE_PROBES"
-_MCP_ACTIVE_PROBES_TRUTHY = frozenset({"1", "true", "yes", "on"})
+_MCP_ACTIVE_PROBES_TRUTHY = _BOOL_TRUE
 
 
 def _mcp_active_probes_allowed() -> bool:
@@ -258,8 +267,17 @@ def _active_probes_refused(tool_name: str, call_args: tuple, call_kwargs: dict) 
 # orchestrator-owned `settings.Setting` for this name should gain
 # `unknown_bool_disables=True` to match (proposed AS DATA in this task's
 # final report; this module does not own `settings.py`).
+#
+# EER-015: this gate's own truthy set used to be its own literal
+# `frozenset({"1", "true", "yes", "on"})`, the third copy of the same tuple
+# in this pair of files -- see `_env.py`'s docstring and
+# `_MCP_ACTIVE_PROBES_TRUTHY`'s comment above. `_MCP_EXTERNAL_SOURCES_TRUTHY`
+# stays exactly this name deliberately: `scripts/mutate_guards.py`'s
+# EER-008B-EXTERNAL anchor is the line below,
+# `return value in _MCP_EXTERNAL_SOURCES_TRUTHY`, unchanged -- only the value
+# this name is bound to changed, not the name or the line that reads it.
 NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES_ENV = "NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES"
-_MCP_EXTERNAL_SOURCES_TRUTHY = frozenset({"1", "true", "yes", "on"})
+_MCP_EXTERNAL_SOURCES_TRUTHY = _BOOL_TRUE
 
 
 def _mcp_external_sources_allowed() -> bool:
