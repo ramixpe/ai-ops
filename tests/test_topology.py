@@ -11,14 +11,19 @@ control the truth of.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
+import pytest
 from helpers import set_device_environment
 
 from agent_nettools import parsers, topology
 from agent_nettools.fixtures import load_fixture_evidence
 from agent_nettools.lab import all_devices
 from agent_nettools.topology import (
+    NeighborhoodStatus,
     build_anomaly_report,
     derive_expected,
+    evidence_neighborhood,
     find_lldp_disagreements,
     find_neighbors_not_in_inventory,
     find_zero_adjacency_devices,
@@ -426,3 +431,245 @@ def test_a_genuinely_foreign_neighbour_is_still_reported():
     )
 
     assert find_neighbors_not_in_inventory(evidence) != {}
+
+
+# --------------------------------------------------------------------------- #
+# B-417 -- evidence_neighborhood: relationship-aware projection over a
+# bounded topology neighbourhood.
+#
+# The real measured case (evidence-reduction.md §5): an investigation of
+# RR1's BGP session with 10.255.0.12 (PE2's router_id). Deliberately built
+# from the `t0` fixture, not `broken` -- `test_a_broken_incidents_own_
+# window_finds_nothing_useful` below is the direct, measured proof of why:
+# PE2 reports zero adjacencies *in the window it is trying to explain*,
+# because the isolation is the fault. `t0` is this fabric's committed
+# stand-in for "topology evidence collected independent of the incident",
+# exactly the caller obligation this resolver's own module comment states.
+# --------------------------------------------------------------------------- #
+
+
+def _neighborhood(monkeypatch, device, subject, depth, label="t0"):
+    evidence = _evidence_by_device(monkeypatch, label=label)
+    return evidence_neighborhood(evidence, device, subject, depth)
+
+
+def test_depth_0_is_only_the_subjects_own_device(monkeypatch):
+    n = _neighborhood(monkeypatch, "RR1", "10.255.0.12", depth=0)
+
+    assert n.status is NeighborhoodStatus.RESOLVED
+    assert n.anchor_device == "RR1"
+    assert n.subject_device == "PE2"
+    assert n.devices == frozenset({"PE2"})
+    assert n.interfaces == ()
+    assert n.depth == 0
+
+
+def test_depth_1_adds_no_new_device_but_finds_the_real_session_interfaces(monkeypatch):
+    """The 'genuinely empty, not accidentally' half of the report.
+
+    Depth 1 never adds a device by construction -- it only reads the depth-0
+    device's own IS-IS adjacencies. That the *device set* is unchanged from
+    depth 0 is not a bug to explain away; `interfaces` being real and
+    non-empty in the same result is the proof this is a designed boundary,
+    not a resolver that stopped working.
+    """
+
+    n = _neighborhood(monkeypatch, "RR1", "10.255.0.12", depth=1)
+
+    assert n.status is NeighborhoodStatus.RESOLVED
+    assert n.devices == frozenset({"PE2"})  # unchanged from depth 0 -- see above
+    assert set(n.interfaces) == {"Gi0/0/0/0", "Gi0/0/0/1"}
+    assert {r["system_id"] for r in n.adjacency_records} == {"P1", "P3"}
+
+
+def test_the_measured_case_lands_at_depth_2(monkeypatch):
+    """BACKLOG.md's B-417 row and evidence-reduction.md §5, made executable.
+
+    'The events are on PE2 and name P1/P3' -- P1 and P3 only enter the
+    neighbourhood at depth 2, resolved from PE2's own IS-IS adjacency
+    records through the inventory's hostname map, never invented.
+    """
+
+    n = _neighborhood(monkeypatch, "RR1", "10.255.0.12", depth=2)
+
+    assert n.status is NeighborhoodStatus.RESOLVED
+    assert n.devices == frozenset({"PE2", "P1", "P3"})
+    assert n.widened is False  # this fabric's t0 capture has no real disagreement (B-590)
+
+
+def test_a_broken_incidents_own_window_finds_nothing_useful(monkeypatch):
+    """Direct, measured proof of this module's own caution.
+
+    Pointed at the `broken` window instead of a topology reference: PE2
+    reports zero IS-IS adjacencies *in that window*, because the isolation
+    under investigation is exactly what broke them. Depth 2 over the
+    incident's own evidence finds nobody -- not P1, not P3 -- which is why
+    the resolver's contract requires topology evidence independent of the
+    window it is explaining, not a subtler bug in the resolver itself.
+    """
+
+    n = _neighborhood(monkeypatch, "RR1", "10.255.0.12", depth=2, label="broken")
+
+    assert n.status is NeighborhoodStatus.RESOLVED  # isis parsed cleanly -- genuinely isolated, not unread
+    assert n.devices == frozenset({"PE2"})
+
+
+def test_subject_matching_no_router_id_is_unresolved_not_misattributed(monkeypatch):
+    """A peer-address-shaped subject that owns no device must not fall back to
+    the local device -- that would be exactly the wrong-device reading Q-013
+    exists to prevent, dressed up as a neighbourhood instead of a rung."""
+
+    n = _neighborhood(monkeypatch, "RR1", "10.255.0.99", depth=2)
+
+    assert n.status is NeighborhoodStatus.SUBJECT_UNRESOLVED
+    assert n.subject_device is None
+    assert n.devices == frozenset()
+
+
+def test_local_shaped_subject_defaults_to_the_anchor_device(monkeypatch):
+    """A subject that is not IPv4-shaped is already local to `device` --
+    `isis_adjacency`/`ldp_session`'s own vocabulary -- so depth 0 is the
+    anchor device itself, no inventory lookup involved."""
+
+    n = _neighborhood(monkeypatch, "PE2", "Gi0/0/0/0", depth=0)
+
+    assert n.status is NeighborhoodStatus.RESOLVED
+    assert n.subject_device == "PE2"
+    assert n.devices == frozenset({"PE2"})
+
+
+def test_local_shape_depth_1_is_genuinely_empty_for_a_real_isis_gap(monkeypatch):
+    """B-496 on the real `isis-broken` fixture: PE3's Gi0/0/0/0 is IS-IS
+    enabled but has no IPv4 address, so no adjacency can form. Depth 1 must
+    report that as a real, resolved fact -- interfaces=() -- not as
+    `TOPOLOGY_UNAVAILABLE`, which would wrongly suggest the evidence itself
+    could not be read."""
+
+    n = _neighborhood(monkeypatch, "PE3", "Gi0/0/0/0", depth=1, label="isis-broken")
+
+    assert n.status is NeighborhoodStatus.RESOLVED
+    assert n.devices == frozenset({"PE3"})
+    assert n.interfaces == ()
+
+
+def test_an_lldp_only_neighbor_widens_rather_than_being_dropped(monkeypatch):
+    """The companion to the test above, same real fixture, one depth further.
+
+    IS-IS names nobody on PE3's Gi0/0/0/0 (the gap above); LLDP names P2.
+    Scoping the depth-2 check to IS-IS's own interface list would never look
+    at this port and P2 would be silently dropped -- exactly what 'derive
+    from declared topology, but widen rather than pick a side' forbids.
+    """
+
+    n = _neighborhood(monkeypatch, "PE3", "Gi0/0/0/0", depth=2, label="isis-broken")
+
+    assert n.status is NeighborhoodStatus.RESOLVED
+    assert n.devices == frozenset({"PE3", "P2"})
+    assert n.widened is True
+    assert len(n.disagreements) == 1
+    disagreement = n.disagreements[0]
+    assert disagreement["kind"] == "isis_lldp_mismatch"
+    assert disagreement["isis_neighbor"] is None
+    assert disagreement["lldp_neighbor"] == "P2"
+
+
+def test_unknown_anchor_device_refuses_rather_than_guessing(monkeypatch):
+    evidence = _evidence_by_device(monkeypatch)
+
+    with pytest.raises(ValueError, match="no evidence"):
+        evidence_neighborhood(evidence, "NOT-A-DEVICE", "10.255.0.12", 1)
+
+
+def test_negative_depth_is_refused(monkeypatch):
+    evidence = _evidence_by_device(monkeypatch)
+
+    with pytest.raises(ValueError, match="non-negative"):
+        evidence_neighborhood(evidence, "RR1", "10.255.0.12", -1)
+
+
+def test_isis_parse_failure_is_topology_unavailable_not_empty():
+    """The third absence state (OBS-181's house rule, restated for this
+    resolver): a section that failed to parse must not read the same as one
+    that parsed cleanly and found nothing. Companion to
+    `test_local_shape_depth_1_is_genuinely_empty_for_a_real_isis_gap`, which
+    pins the other half of the same distinction."""
+
+    evidence = _fabricated({"A": [], "B": []})
+    evidence["A"]["isis"]["data"]["parse_status"] = parsers.PARSE_FAILED
+
+    n = evidence_neighborhood(evidence, "A", "Gi0/0/0/0", depth=1)
+
+    assert n.status is NeighborhoodStatus.TOPOLOGY_UNAVAILABLE
+    assert n.devices == frozenset({"A"})  # the device itself still resolved -- only its topology did not
+    assert n.interfaces == ()
+
+
+def test_a_resolver_that_always_returns_empty_fails_this_suite(monkeypatch):
+    """The explicit positive control (OBS-181): a stub that always reports
+    an empty neighbourhood must disagree with, and so fail, the assertions
+    the real measured-case tests above make -- proving those tests would
+    actually notice a resolver that stopped finding anything."""
+
+    def always_empty(evidence_by_device, device, subject, depth):
+        # Same shape a broken resolver could plausibly produce: it runs, it
+        # returns a `Neighborhood`, and it has silently forgotten every
+        # device beyond the subject's own.
+        real = evidence_neighborhood(evidence_by_device, device, subject, depth)
+        return replace(real, devices=frozenset({real.subject_device} if real.subject_device else ()))
+
+    evidence = _evidence_by_device(monkeypatch)
+
+    real = evidence_neighborhood(evidence, "RR1", "10.255.0.12", depth=2)
+    stub = always_empty(evidence, "RR1", "10.255.0.12", depth=2)
+
+    assert real.devices == frozenset({"PE2", "P1", "P3"})  # what the tests above pin
+    assert stub.devices != real.devices  # the stub would fail that same assertion
+    with pytest.raises(AssertionError):
+        assert stub.devices == frozenset({"PE2", "P1", "P3"})
+
+
+def _isis_lldp_mismatch_evidence():
+    """Two devices, device-wide (peer-address) shape: IS-IS says A's
+    Gi0/0/0/0 faces B; LLDP on the same port says it faces C instead. Neither
+    is invented -- both are real records in this fabricated evidence, and the
+    resolver must keep both rather than choosing one silently."""
+
+    evidence = _fabricated(
+        {
+            "A": [{"local_interface": "Gi0/0/0/0", "neighbor": "C", "neighbor_interface": "Gi0/0/0/0"}],
+            "B": [],
+            "C": [],
+        }
+    )
+    evidence["A"]["isis"]["data"]["parsed"]["records"] = [
+        {"system_id": "B", "interface": "Gi0/0/0/0"}
+    ]
+    return evidence
+
+
+def test_device_wide_isis_lldp_mismatch_unions_both_candidates(monkeypatch):
+    """The device-wide (peer-address) counterpart to the real isis-broken
+    proof above, where both sources name *something*, and disagree."""
+
+    from agent_nettools import inventory_model
+
+    evidence = _isis_lldp_mismatch_evidence()
+
+    class _FakeDevice:
+        name = "A"
+        router_id = "10.9.9.9"
+
+    class _FakeInventory:
+        devices = [_FakeDevice()]
+
+    monkeypatch.setattr(inventory_model, "load_inventory_file", lambda *a, **k: _FakeInventory())
+
+    n = evidence_neighborhood(evidence, "A", "10.9.9.9", depth=2)
+
+    assert n.status is NeighborhoodStatus.RESOLVED
+    assert n.devices == frozenset({"A", "B", "C"})  # both IS-IS's and LLDP's candidate, neither dropped
+    assert n.widened is True
+    mismatches = [d for d in n.disagreements if d["kind"] == "isis_lldp_mismatch"]
+    assert len(mismatches) == 1
+    assert mismatches[0]["isis_neighbor"] == "B"
+    assert mismatches[0]["lldp_neighbor"] == "C"
