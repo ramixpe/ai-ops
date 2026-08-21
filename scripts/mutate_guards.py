@@ -853,6 +853,25 @@ MUTATIONS = [
      "        trustworthy=trustworthy, cause=cause, ticket_id=ticket_id,\n",
      "        report, device=device, subject=subject, finding=finding, notifier=target,\n",
      "test_the_rca_fields_reach_an_owner_routed_message_too"),
+
+    # ---- B-419 (expand_evidence, the tier-3 drill-down). Counted before
+    # adding this entry (OBS-191): the anchor string below occurs exactly
+    # once in evidence_expand.py (`grep -cF`, checked by hand) --
+    # `_quote_raw_fields` is the only call site that tests `_RAW_TEXT_FIELDS`
+    # membership at all. Mutated to `if False`, which disables quoting for
+    # EVERY raw-text field this module returns (today, just `line`) rather
+    # than one specific record -- the same "any one of them going bare is a
+    # containment failure" shape TICKET-READ-CONTAINMENT above already
+    # established for ticket_read.py's own field table.
+
+    ("EXPAND-EVIDENCE-CONTAINMENT", "every raw log line expand_evidence "
+     "returns (first/last occurrence and every neighbour) is wrapped in "
+     "untrusted-content delimiters before the call returns, never left bare "
+     "-- the operator's explicit tier-3 decision: build it, but contain it",
+     "src/agent_nettools/evidence_expand.py",
+     "                if key in _RAW_TEXT_FIELDS and isinstance(value, str)\n",
+     "                if False\n",
+     "test_a_forged_close_delimiter_inside_a_raw_line_cannot_splice_past_it"),
 ]
 
 
