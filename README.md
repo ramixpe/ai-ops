@@ -226,16 +226,41 @@ link claim has to take a side on. It is not right for the reason originally
 given, and the anomaly report still classifies those three as unknown
 neighbours until B-435 lands.
 
+## Moving this repo to a new host
+
+**[`docs/build/MIGRATION.md`](docs/build/MIGRATION.md) — read it before you
+start, not when something breaks.** Written to be executed step by step, by a
+person or an agent; every step carries a check that proves it worked.
+
+The repository itself is portable — the suite runs fully offline against
+committed fixtures. What does not travel is `.env`, the virtualenv, and **the
+SSH host keys**. That last one is the one that costs an afternoon: XRd
+containers regenerate their host keys on redeploy, this tool pins them and
+treats a mismatch as terminal, and `faultlab/fault_lab.py` keeps working
+regardless because it uses `AutoAddPolicy` — so the injector succeeds while the
+tool fails, and the tool looks broken when it is the only one of the two that
+is checking.
+
 ## Diagrams
 
-Six SVGs in [`docs/diagrams/`](docs/diagrams/) describe the whole system as it
+**Two layers, and they are not equivalent.**
+
+Nine SVGs in [`docs/diagrams/`](docs/diagrams/) describe the system as it
 stands: the [layer stack](docs/diagrams/01-repo-anatomy.svg), [one call traced
 end to end](docs/diagrams/02-call-path.svg), [how device text reaches a
 model](docs/diagrams/03-trust-boundary.svg), [every
 capability](docs/diagrams/04-capabilities.svg), [where the build
-is](docs/diagrams/05-current-state.svg), and [how a diagnosis is
-reached](docs/diagrams/06-descent.svg). They are generated from the tree by the
-scripts beside them, so they are regenerated rather than edited.
+is](docs/diagrams/05-current-state.svg), [how a diagnosis is
+reached](docs/diagrams/06-descent.svg), Stage 2, the event-driven loop, and the
+model boundary. They are generated from the tree by the scripts beside them and
+**byte-pinned by `tests/test_diagrams.py`**, so they cannot drift from the code
+without failing CI. Regenerate them; never edit them.
+
+Ten hand-authored diagrams in
+[`docs/diagrams/design/`](docs/diagrams/design/index.html) cover the whole stack
+— this tool, the lab platform beside it, and the fabric it reads. Nicer to
+read, and *able* to go stale in a way the generated set cannot. **When the two
+disagree, the generated ones are right.**
 
 ## Quick Start
 
