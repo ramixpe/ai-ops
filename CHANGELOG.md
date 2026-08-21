@@ -5,6 +5,89 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); this
 project does not yet promise semantic-versioning stability outside the CLI
 and MCP surfaces (see README's "product surface for 1.0" note).
 
+## [1.2.0] — 2026-08-21
+
+An overnight wave run as five parallel lanes with one orchestrator. Every
+headline claim below was re-verified by an independent probe before merge;
+three of those probes changed the conclusion, and those are called out.
+
+### Added
+
+- **Event episodes** (B-416, `log_episodes.py`) — a time-bounded, ordered
+  sequence of log events, joined under a bound **derived per adjacent pair
+  from the protocol timers** (BGP 180s, IS-IS 30s), with the bound recorded
+  on each join. Verified against the real `PE2/broken` capture: the
+  interface → IS-IS → config-commit → BGP chain survives as one episode
+  across the measured **153.349s** gap — the link a few-second threshold
+  would have severed. An episode is the log-side mirror of the dependency
+  descent, and evidence *for* one, never a substitute: two of the descent's
+  five rungs have no log event at all.
+- **Temporal shape** (B-418) — `max_rate_1m` and burst counts beside the
+  totals, so 60 events in ninety seconds stops reading like 60 across an
+  hour.
+- **Relay hardening** (B-209, `relay_policy.py`) — silences, ownership
+  grouping and de-duplication on the outbound path. Every failure mode
+  falls back to **sending**: for a notifier the dangerous direction is a
+  page that never arrives, the opposite of a capability gate. A failed send
+  never records the signature, so a provider outage cannot mark a page
+  delivered and swallow it on recovery.
+- **Ticket handover view** (B-446) — what changed since the previous run on
+  the same subject, and which rungs recovered.
+- **The evaluation corpus** (B-427, `docs/build/EVALUATION-CORPUS.md`) — a
+  confusion matrix over the archived rounds, obeying the rule that a past
+  score is never rewritten.
+
+### Changed
+
+- **EER-015 closed as four extractions, zero splits** — the review's own
+  instruction. 17 duplicated persistence definitions collapsed to 5
+  (`_persist.py`); the snapshot-root resolver de-duplicated; the status
+  vocabulary given its own module so `checks.py` no longer imports the
+  transport layer; the truthy/falsy literals consolidated without touching
+  either gate function body. All 66 pre-existing mutation guards re-run and
+  diffed guard-by-guard against a pre-wave baseline: zero differences.
+- **`suspicious_baseline` is now a role invariant, not a value test**
+  (B-465) — it flagged a recorded baseline of `0` and missed an equally
+  wrong `1`.
+
+### Fixed
+
+- **OBS-691 — device text reaching a reader unwrapped.** A test asserted the
+  descent's `reason` needed no containment "because it is code-typed, not
+  free text", and passed for months because its fixture reason was a
+  hand-written string with no device text in it. Measured instead: a single
+  broken-fixture run puts the far end's own words into `reason` at three
+  rungs. `reason` and `current_reason` are now contained, and both tests
+  were rewritten with fixtures that carry real quoted device text so neither
+  can pass again by not exercising its own subject.
+- `chars_withheld` was a hardcoded `0` claiming a measurement that was never
+  taken; it is `None`.
+- `fault_lab.py`'s `restore()` wrapped a pure dict comparison inside the
+  device-read `try`, so a code defect there would have been reported as
+  "could not read device".
+
+### Found, not fixed — two live faults and a false clean
+
+Recorded here because they are the wave's most important output and they
+are **not** repository changes:
+
+- **OBS-690 / OBS-692 — two leftover injected faults on the lab**, from
+  earlier chaos rounds whose restores were never verified. One aborted
+  round 6 at its own preflight (the fabric already read the finding the
+  sealed prediction was about, which would have made the round vacuous).
+  Both need a one-line operator revert; neither was touched unsupervised.
+- **OBS-692 — a seven-hour false clean.** PE1 held an MD5 BGP password
+  toward RR1: 4,882 authentication failures between 16:34 and 23:22, while
+  the session itself never dropped once. Every rung therefore read healthy
+  and `investigate` returned `all_layers_healthy`, `trustworthy: true` —
+  correct at every layer it examines, wrong about the network. The descent
+  structurally cannot catch this: enumerating every rung's evidence input
+  across all four flows, none reads a log source, and the fault exists only
+  as a *rate of rejected connection attempts*, never as state. This is the
+  false-clean class `ROADMAP.md` singles out as unmeasured, arriving on real
+  hardware, and it is the strongest justification yet for the log axis
+  shipped in this same release.
+
 ## [1.1.0] — 2026-08-20
 
 Boundary repair. Closes the remaining findings from the independent
