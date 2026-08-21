@@ -80,6 +80,17 @@ sources. The one property that must survive that work is pinned here now:
 :func:`shape_window` never removes a singleton, because a lone occurrence of a
 critical event among thousands of routine ones is frequently the answer.
 
+**Cross-device clock-skew detection lives in `clock_skew.py`, not here
+(B-415).** This module orders and shapes one device's own window; whether two
+*devices'* windows can be safely compared by timestamp at all is a different
+question, over records this module has no reason to hold onto once shaped.
+`clock_skew.assess_clock_skew` answers it from `logs_loki.py`-shaped records
+(each device's own timestamp plus Loki's ingest time as a shared reference)
+and is deliberately a sibling module rather than a new responsibility bolted
+onto `shape_window` — see its own module docstring for how it relates to (and
+does not duplicate) `epoch.py`'s `Coherence` (B-436), a differently-scoped
+skew over a different clock.
+
 A measured correction to OBS-014
 ---------------------------------
 OBS-014 found one event stored **1,346 times** and concluded any count over
