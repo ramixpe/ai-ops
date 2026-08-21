@@ -776,6 +776,20 @@ SETTINGS: tuple[Setting, ...] = (
     # because for a notifier the dangerous direction is a page that never
     # arrives, not one that arrives twice.
     Setting(
+        "NETTOOLS_CLOCK_SKEW_BOUND_SECONDS", "float", 15.0,
+        "How far two devices' own clocks may disagree before clock_skew "
+        "reports it as a finding (B-415). **A stated policy default, not a "
+        "measured one** -- the 2026-08-21 measurement found this fabric's "
+        "per-device medians spanning 1.0s, which describes a healthy lab and "
+        "is not a failure threshold. Deliberately NOT epoch's 30s bound: that "
+        "one is derived from the IS-IS hold timer and answers how long OUR "
+        "collection window may run on our own monotonic clock, which is a "
+        "different question from whether two devices' timestamps can be "
+        "ordered against each other at all.",
+        "clock_skew",
+        minimum=0.0,
+    ),
+    Setting(
         "NETTOOLS_RELAY_STATE_FILE", "path", None,
         "De-duplication state for the outbound relay (B-209). Unset disables "
         "de-duplication entirely -- every notification sends, which is exactly "
