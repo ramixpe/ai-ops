@@ -1,4 +1,9 @@
-PYTHON ?= python3
+# Default to a version CI actually gates on. The matrix is 3.11 and 3.12;
+# a bare `python3` is whatever the host happens to ship, which on this box
+# was 3.13 -- so `make setup` silently produced a venv no CI leg exercises
+# and every local `make test` was evidence about the wrong interpreter
+# (OBS-695). Override for a different one: `make setup PYTHON=python3.11`.
+PYTHON ?= python3.12
 
 # Resolve dev tools through the local venv when it exists, so every target
 # below works whether or not the venv is activated (EER-020). Before this,

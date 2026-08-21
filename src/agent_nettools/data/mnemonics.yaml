@@ -38,9 +38,12 @@
 #       "derive the candidate list from what this fabric actually logs"
 #       instruction on the most basic ground: no evidence it reaches this
 #       source at all. B-206a (this file's SECURITY-SSHD_SYSLOG_PRX-6 note,
-#       logs_loki.MEASURED_SEVERITY_AVAILABLE) establishes only severities 3
-#       ("err") and 4 ("warning") are known to cross the pipeline, so a
-#       severity-5+ mnemonic's absence is expected, not surprising — but
+#       logs_loki.MEASURED_SEVERITY_AVAILABLE) established only severities 3
+#       ("err") and 4 ("warning") crossed the pipeline. RE-MEASURED 2026-08-21
+#       (B-696): severities 2, 3, 4 and 5 all cross it now — the routers' own
+#       destination line moved from `severity warning` to `severity
+#       notifications`. A severity-5 mnemonic's absence is therefore no longer
+#       expected, and a severity-6 one's still is — but
 #       absence is not proof of exclusion either (Coverage's own discipline,
 #       coverage.py), so these stay a documented "not yet observed", not a
 #       claim the mnemonic can never reach Loki.
@@ -513,6 +516,15 @@
     Severity 2 in the mnemonic's own digit ("critical" by IOS-XR's message
     catalog) — the single most severe mnemonic measured in this whole sweep.
     MEASURED ANOMALY, reported rather than silently reconciled:
+    RESOLVED 2026-08-21 (B-696): this record was right and the constant was
+    stale. It reads "crit" — severity 2 — which the then-declared ceiling of
+    (3, 4) said should not exist; a 7-day re-measurement found 21 crit, 5000+
+    err, 122 warning and 345 notice records, and MEASURED_SEVERITY_AVAILABLE
+    is now (2, 3, 4, 5). **Worth keeping as written**: an observation that
+    contradicted a declared constant sat here for days, correctly flagged and
+    correctly not silently "fixed" in either direction. The constant was the
+    thing that was wrong. Original note follows.
+
     logs_loki.MEASURED_SEVERITY_AVAILABLE declares only severities 3 ("err")
     and 4 ("warning") cross this pipeline (B-206a), but this record's own
     Loki `severity` label reads "crit" — a severity-2-equivalent event that

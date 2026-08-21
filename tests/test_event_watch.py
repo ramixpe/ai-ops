@@ -27,6 +27,7 @@ import pytest
 
 from agent_nettools import event_routing, logs_loki
 from agent_nettools import event_watch as W
+from agent_nettools import logs_loki as loki
 from agent_nettools.event_routing import RoutingDecision
 from agent_nettools.knowledge import load_mnemonic_table
 
@@ -377,7 +378,12 @@ def test_coverage_travels_with_every_successful_report_and_states_the_severity_g
 
     assert report.coverage is not None
     assert report.coverage["source"] == "loki"
-    assert report.coverage["severity_available"] == [3, 4]
+    # B-696: re-measured 2026-08-21 and widened. The property under test is
+    # that coverage TRAVELS with every report and states its gap, not what
+    # the gap happens to be today -- so this tracks the constant rather
+    # than restating a literal that will go stale the next time the
+    # pipeline changes.
+    assert report.coverage["severity_available"] == list(loki.MEASURED_SEVERITY_AVAILABLE)
     assert any("severities" in gap for gap in report.coverage["gaps"])
 
 

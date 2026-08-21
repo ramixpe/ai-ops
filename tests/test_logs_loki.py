@@ -488,10 +488,18 @@ def test_empty_window_absence_claim_is_still_refused_on_severity_grounds():
 
     assert coverage.query_complete is True
     assert coverage.records_returned == 0
-    assert not coverage.complete  # severities 0,1,2,5,6,7 are not carried
-    gaps = " ".join(coverage.gaps())
-    for severity in ("0", "1", "2", "5", "6", "7"):
-        assert severity in gaps
+    # B-696: 2 and 5 now ARE carried, so the gap set narrowed to 0,1,6,7.
+    # The property under test is unchanged and is the point -- an empty
+    # window still cannot support an absence claim, because the source
+    # never carried every severity. A narrower gap set makes the refusal
+    # *more* precise, not weaker.
+    assert not coverage.complete  # severities 0,1,6,7 are not carried
+    # Asserted against the exact rendered gap rather than substring-hunting
+    # for digits: "2" appears in "severities 0,1,6,7" only by accident of
+    # formatting, and a test that can be satisfied by coincidence is the
+    # OBS-691 shape. This pins the whole sentence, so the carried severities
+    # are excluded by construction rather than by a second loop.
+    assert coverage.gaps() == ("severities 0,1,6,7 are not carried by this source",)
 
     refusal = {"correlation": {"found": False, "summary": "no correlating events in window"}}
     ground = grounding.ground_correlation(refusal, coverage)
@@ -697,9 +705,22 @@ def test_to_ns_is_exact_at_todays_magnitude():
 
 def test_measured_severity_available_matches_the_grounding_pin():
     """Keeps this module's declared constant in step with the fixed
-    expectation `test_grounding.py`'s own Loki case already pins."""
+    expectation `test_grounding.py`'s own Loki case already pins.
 
-    assert loki.MEASURED_SEVERITY_AVAILABLE == (3, 4)
+    Widened to `(2, 3, 4, 5)` on 2026-08-21 (B-696) after a fresh
+    measurement, which is the only way the constant's own docstring permits
+    it to move. **This test failing is the mechanism working, not a nuisance
+    to silence**: the constant is a declared claim about a pipeline nothing
+    can interrogate live, so the pin exists precisely to make a human notice
+    when reality and the claim diverge. It did.
+
+    Still deliberately not 6: `show running-config logging` on PE2 reads
+    `severity notifications` (5), so severity 6 is not sent at all and
+    claiming it would be claiming coverage the fabric is not configured to
+    produce.
+    """
+
+    assert loki.MEASURED_SEVERITY_AVAILABLE == (2, 3, 4, 5)
 
 
 def test_a_corrupted_inventory_address_is_refused_not_forwarded(monkeypatch):

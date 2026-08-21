@@ -321,3 +321,75 @@ def test_the_accounting_primitives_carry_no_dependency_on_parsers():
         "the accounting primitives must be defined before template_parsers "
         "reaches into parsers, or the cycle breaks"
     )
+
+
+def test_a_bgp_neighbour_record_names_its_own_address_family():
+    """B-443: BGP object identity is `(device, ..., peer, afi-safi)`.
+
+    The same neighbour appears in BOTH `bgp` and `bgp_vpnv4` output with
+    genuinely different data -- on the committed RR1/t0 capture, 10.255.0.11
+    reads `prefixes_received` 0 under the default AF and 3 under VPNv4. Before
+    this, nothing in either record said which AF it came from: the two were
+    told apart only because they arrive under different *intent* keys, so the
+    intent name was doing the AFI's job implicitly.
+
+    Nothing misread them -- `diff_evidence` compares per intent -- but that is
+    a property of today's only consumer, not of the data. The first consumer to
+    key on `(device, neighbour)` alone would have silently collapsed two
+    different objects with different prefix counts.
+    """
+
+    from agent_nettools.fixtures import load_fixture_evidence
+    from agent_nettools.parsers import AFI_SAFI_IPV4_UNICAST, AFI_SAFI_VPNV4_UNICAST
+
+    evidence = load_fixture_evidence("RR1", label="t0")
+    peer = "10.255.0.11"
+
+    def record_for(intent):
+        parsed = evidence[intent]["data"]["parsed"]
+        return next(r for r in parsed["records"] if r["neighbor"] == peer)
+
+    ipv4 = record_for("bgp")
+    vpnv4 = record_for("bgp_vpnv4")
+
+    assert ipv4["afi_safi"] == AFI_SAFI_IPV4_UNICAST
+    assert vpnv4["afi_safi"] == AFI_SAFI_VPNV4_UNICAST
+
+    # The measurement that motivated the row, pinned so it cannot quietly
+    # stop being true: these are the same peer with different data.
+    assert ipv4["prefixes_received"] != vpnv4["prefixes_received"]
+
+    # The property itself: the old key still collides, the new one does not.
+    assert ("RR1", ipv4["neighbor"]) == ("RR1", vpnv4["neighbor"])
+    assert ("RR1", ipv4["neighbor"], ipv4["afi_safi"]) != (
+        "RR1", vpnv4["neighbor"], vpnv4["afi_safi"]
+    )
+
+
+def test_the_address_family_is_declared_not_scraped_from_device_text():
+    """Positive control for the test above, and a real constraint.
+
+    Neither `show bgp summary` nor `show bgp vpnv4 unicast summary` names its
+    own address family anywhere in the output -- the AF is in the *command*.
+    So `afi_safi` must be a declared constant, and a future change that tries
+    to parse it out of the text would be inventing a field the device never
+    printed. This asserts the value is one of the two declared constants and
+    appears nowhere in the raw capture it was attached to.
+    """
+
+    from agent_nettools.fixtures import load_fixture_evidence
+    from agent_nettools.parsers import AFI_SAFI_IPV4_UNICAST, AFI_SAFI_VPNV4_UNICAST
+
+    evidence = load_fixture_evidence("RR1", label="t0")
+    for intent, expected in (
+        ("bgp", AFI_SAFI_IPV4_UNICAST),
+        ("bgp_vpnv4", AFI_SAFI_VPNV4_UNICAST),
+    ):
+        section = evidence[intent]["data"]
+        parsed = section["parsed"]
+        assert parsed["meta"]["afi_safi"] == expected
+        raw = "\n".join(section["commands"].values())
+        assert expected not in raw, (
+            f"{intent}'s raw output contains {expected!r}; if the device does "
+            "print its AF, parse it instead of declaring it"
+        )

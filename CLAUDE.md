@@ -67,6 +67,9 @@ CI (`.github/workflows/ci.yml`) runs `ruff check .` then `pytest -q` on a
 `.venv` happens to be**. A local `pytest -q` is evidence about your
 interpreter, not a prediction about CI; OBS-695 records a session that
 reported green all night from a 3.13 venv while CI gated on 3.11/3.12.
+**Resolved 2026-08-21 (B-697):** `make setup` now defaults to
+`PYTHON ?= python3.12`, so the default venv is a version CI tests. A bare
+`python3` was what produced the mismatch — it is whatever the host ships.
 `tests/test_live_lab.py` (marker `live_lab`, registered in `pyproject.toml`) is
 excluded from that by default -- every test in it self-skips unless
 `NETTOOLS_LIVE_LAB=1` is set, so CI/`make test` never needs a reachable lab.

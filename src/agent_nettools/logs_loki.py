@@ -173,8 +173,29 @@ DEFAULT_LOKI_URL = "http://172.20.250.103:3100"
 LOKI_TIMEOUT_ENV = "NETTOOLS_LOKI_TIMEOUT_SECONDS"
 DEFAULT_TIMEOUT_SECONDS = 10.0
 
-#: Measured 2026-08-15 (discovery-loki.md §6.1) and reconfirmed 2026-08-18
-#: (B-206a): only IOS-XR severities 3 (`err`) and 4 (`warning`) reach Loki.
+#: **Re-measured 2026-08-21 (B-696), and widened from `(3, 4)` to `(2, 3, 4, 5)`
+#: by a human, which is what the closing paragraph of this comment requires.**
+#: Severities 2 (`crit`), 3 (`err`), 4 (`warning`) and 5 (`notice`) all reach
+#: Loki now. Counts over a 7-day window: crit 21, err 5000 (the query cap, so
+#: a floor not a total), warning 122, notice 345; emerg, alert, info and debug
+#: all zero. The `notice` records carry genuine IOS-XR severity-5 mnemonics --
+#: `%ROUTING-BGP-5-ADJCHANGE`, `%MGBL-SYS-5-CONFIG_I`,
+#: `%PKT_INFRA-LINK-5-CHANGED` -- so the syslog name maps to the IOS-XR digit
+#: as expected rather than by coincidence.
+#:
+#: **Why 5 and not 6, which is the part worth knowing:** the ceiling is the
+#: routers' own destination config, not a pipeline mystery. `show running-config
+#: logging` on PE2 reads `logging 172.20.250.101 vrf default severity
+#: notifications` (severity 5). B-206a changed that line from `severity
+#: warning`; the old line is still present alongside the new one and the
+#: comment above them still says *"warning and higher only"*, which is now
+#: false. Severity 6 (`informational`) is therefore *correctly* absent, and
+#: widening this tuple to 6 would be claiming coverage the fabric is not
+#: configured to send.
+#:
+#: Historical, kept because it is why the constant exists: measured 2026-08-15
+#: (discovery-loki.md §6.1) and reconfirmed 2026-08-18 (B-206a) as only
+#: severities 3 (`err`) and 4 (`warning`).
 #: Confirmed NOT to be the devices' own trap level (OBS-041) -- every device
 #: reports `Trap logging: level informational` (severities 0-6), so the drop
 #: happens further down the syslog-ng pipeline, which this repository does
@@ -187,7 +208,7 @@ DEFAULT_TIMEOUT_SECONDS = 10.0
 #: either. If B-206a/B-206b are ever fixed upstream, this constant must be
 #: updated by a human after a fresh measurement -- never widened
 #: automatically, and never narrowed without one either.
-MEASURED_SEVERITY_AVAILABLE: tuple[int, ...] = (3, 4)
+MEASURED_SEVERITY_AVAILABLE: tuple[int, ...] = (2, 3, 4, 5)
 
 
 def _loki_url() -> str:

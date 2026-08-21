@@ -134,6 +134,16 @@ VOLATILE_FIELDS: dict[tuple[str, str], frozenset[str]] = {
     ("cisco_xr", "ldp_discovery"): frozenset({"established_ago"}),
 }
 
+#: B-443. The address family each BGP summary parser reads, stamped onto every
+#: record and its meta so a neighbour's identity is complete without knowing
+#: which intent fetched it. **Declared, not parsed**: `show bgp summary` and
+#: `show bgp vpnv4 unicast summary` do not name their own AF anywhere in the
+#: output -- the AF is in the *command*. Reading it back out of the text would
+#: be inventing a field the device never printed.
+AFI_SAFI_IPV4_UNICAST = "ipv4 unicast"
+AFI_SAFI_VPNV4_UNICAST = "vpnv4 unicast"
+
+
 # The field identifying a record within an intent, so two snapshots' rows can be
 # matched up. None means the intent has no table, only meta.
 RECORD_KEYS: dict[tuple[str, str], str | None] = {
@@ -465,6 +475,10 @@ def parse_xr_bgp(outputs: dict[str, str]) -> dict[str, Any]:
                 "in_q": fields[6],
                 "out_q": fields[7],
                 "up_down": fields[8],
+                # B-443 -- see `parse_xr_bgp_vpnv4` for the measurement and the
+                # reasoning. Both AFs of one session are self-describing now,
+                # rather than distinguished only by which intent fetched them.
+                "afi_safi": AFI_SAFI_IPV4_UNICAST,
                 # `St/PfxRcd` holds **either** a prefix count **or** a session
                 # state, and which one depends on the state (B-460). A field
                 # whose *type* depends on its value cannot be checked, diffed or
@@ -486,6 +500,7 @@ def parse_xr_bgp(outputs: dict[str, str]) -> dict[str, Any]:
         raise ParseError("no BGP router identifier and no neighbour rows found")
 
     meta["neighbor_count"] = len(records)
+    meta["afi_safi"] = AFI_SAFI_IPV4_UNICAST  # B-443
 
     return finalize(
         raw=text,
@@ -618,6 +633,19 @@ def parse_xr_bgp_vpnv4(outputs: dict[str, str]) -> dict[str, Any]:
                 "in_q": fields[6],
                 "out_q": fields[7],
                 "up_down": fields[8],
+                # B-443. The same neighbour appears in BOTH this parser's
+                # output and `parse_xr_bgp`'s, with genuinely different data --
+                # measured on RR1/t0, 10.255.0.11 reads prefixes_received 0
+                # under the default AF and 3 under VPNv4. Until now nothing in
+                # the record said which AF it came from: the two were told
+                # apart only because they arrive under different *intent*
+                # keys, so the intent name was doing the AFI's job implicitly.
+                # Nothing misread them (`diff_evidence` compares per intent),
+                # but the first consumer to key on (device, neighbour) alone
+                # would have collapsed two different objects silently. Stated
+                # in the record now, so the identity does not depend on the
+                # caller's indexing choice.
+                "afi_safi": AFI_SAFI_VPNV4_UNICAST,
                 **_split_state_pfx_rcd(fields[9]),
             }
         )
@@ -627,6 +655,7 @@ def parse_xr_bgp_vpnv4(outputs: dict[str, str]) -> dict[str, Any]:
         raise ParseError("no BGP router identifier and no neighbour rows found")
 
     meta["neighbor_count"] = len(records)
+    meta["afi_safi"] = AFI_SAFI_VPNV4_UNICAST
 
     return finalize(
         raw=text,
