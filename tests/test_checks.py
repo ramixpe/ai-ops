@@ -219,6 +219,64 @@ def test_evidence_key_matches_the_operational_memory_convention():
 
 
 # --------------------------------------------------------------------------- #
+# CheckResult.device_text (B-692) -- absence is never zero
+# --------------------------------------------------------------------------- #
+
+
+def test_device_text_defaults_to_none_not_an_empty_tuple():
+    """A check that never quotes the device must say so structurally -- not
+    with a `()` a reader has to know means the same thing as `None`."""
+
+    result = checks.healthy(subject="x", evidence_keys=("RR1:bgp",))
+    assert result.device_text is None
+
+
+def test_device_text_empty_tuple_is_rejected_at_construction():
+    """`()` is refused outright -- the module rule (absence is never zero)
+    restated for this field: a value that IS present must carry something."""
+
+    with pytest.raises(ValueError, match="non-empty tuple"):
+        checks.CheckResult(checks.HEALTHY, evidence_keys=("k",), device_text=())
+
+
+def test_device_text_a_list_is_rejected_not_silently_accepted():
+    """Only a tuple is a real `device_text` -- a list is mutable, which is
+    exactly what `CheckResult` being frozen exists to rule out."""
+
+    with pytest.raises(ValueError, match="non-empty tuple"):
+        checks.CheckResult(
+            checks.HEALTHY, evidence_keys=("k",), device_text=["quoted"]  # type: ignore[arg-type]
+        )
+
+
+def test_device_text_an_empty_string_fragment_is_rejected():
+    """A quote that came back genuinely empty must never be smuggled in as a
+    `("",)` -- that would make 'asked, got nothing' indistinguishable from a
+    real fragment by anything that only checks truthiness."""
+
+    with pytest.raises(ValueError, match="non-empty strings"):
+        checks.CheckResult(checks.HEALTHY, evidence_keys=("k",), device_text=("",))
+
+
+def test_device_text_a_real_fragment_round_trips():
+    result = checks.broken(
+        reason="the device said 'no route'", subject="x", evidence_keys=("k",),
+        device_text=("no route",),
+    )
+    assert result.device_text == ("no route",)
+
+
+def test_device_text_positive_control_two_otherwise_identical_calls_differ_only_by_it():
+    """OBS-181: the field must actually distinguish "quoted" from "did not",
+    not just always be `None` or always be populated regardless of input."""
+
+    quoted = checks.broken(reason="r", subject="x", evidence_keys=("k",), device_text=("word",))
+    unquoted = checks.broken(reason="r", subject="x", evidence_keys=("k",))
+    assert quoted.device_text is not None
+    assert unquoted.device_text is None
+
+
+# --------------------------------------------------------------------------- #
 # The rule: absence is unevaluated
 # --------------------------------------------------------------------------- #
 
@@ -985,6 +1043,141 @@ def test_a_session_with_no_recorded_reset_reads_normally():
     # No socket line in this synthetic meta, so the FSM fallback runs -- and
     # says so, rather than implying a socket was observed.
     assert "no socket state reported" in result.reason
+
+
+# --------------------------------------------------------------------------- #
+# B-692 -- the device fragment carried structurally, not just in prose
+#
+# OBS-691's own lesson, applied: every fixture below is REAL, captured device
+# output (the same `broken`-label BGP neighbour capture the B-430 tests above
+# already use), never a hand-written string that happens to contain no device
+# text -- a test using one of those could not fail no matter what this field
+# did, which is exactly how OBS-691 slipped past the original containment
+# test.
+# --------------------------------------------------------------------------- #
+
+
+def test_a_broken_transport_s_device_text_is_the_same_words_as_its_reason():
+    """The real ``broken`` fixture carries BOTH notes at once -- the device's
+    *current* state reason and its *last reset* reason -- so this is also the
+    one place that proves the two-fragment case: `device_text` is a 2-tuple,
+    not the two notes flattened into one string."""
+
+    evidence = _neighbor_evidence("RR1", "show-bgp-neighbor-10-255-0-12.txt")
+    result = checks.bgp_transport(evidence, "10.255.0.12")
+
+    assert result.status == checks.BROKEN
+    assert result.device_text == (
+        "No route to multi-hop neighbor",
+        "BGP Notification sent: hold time expired",
+    )
+    # Structurally separable, not regex-recovered: every fragment is a
+    # verbatim substring of `reason`, but `device_text` was never produced by
+    # parsing `reason` -- `_state_note`/`_last_reset_note` hand both back from
+    # the same read of `meta` that built the sentence.
+    for fragment in result.device_text:
+        assert fragment in result.reason
+
+
+def test_a_healthy_transport_still_carries_its_state_reason_as_device_text():
+    """`_state_note` is read on the HEALTHY branch too (an Established session
+    can still carry a `state_reason`) -- `device_text` must not be tied to
+    ``broken``/``unevaluated`` alone, or a device quote on a healthy verdict
+    would stay bare when read back through `ticket_read`."""
+
+    result = checks.bgp_transport(
+        _neighbor_meta(
+            connection_state="OpenSent", socket_armed_read=True,
+            state_reason="Peer preferred",
+        ),
+        "10.255.0.12",
+    )
+
+    assert result.status == checks.HEALTHY
+    assert result.device_text == ("Peer preferred",)
+
+
+def test_a_transport_with_no_device_words_at_all_has_no_device_text():
+    """The companion to every case above: absence is `None`, not a `()`
+    nobody populated. Without this, `device_text` could be unconditionally
+    `("",)`-shaped and every assertion above would still pass."""
+
+    evidence = {
+        "device": "RR1",
+        "bgp_neighbor:10.255.0.99": {
+            "status": "success",
+            "data": {
+                "parse_status": "ok",
+                "parsed": {"meta": {"found": True, "connection_state": "Active"}},
+            },
+        },
+    }
+    result = checks.bgp_transport(evidence, "10.255.0.99")
+
+    assert result.status == checks.BROKEN
+    assert result.device_text is None
+
+
+def test_an_unarmed_socket_with_only_a_reset_reason_has_a_single_fragment():
+    """The "not armed" branch, with only `last_reset_reason` set (no
+    `state_reason`) -- `device_text` must be the 1-tuple, not padded with a
+    `None`/empty placeholder for the note that was not there."""
+
+    result = checks.bgp_transport(
+        _neighbor_meta(
+            connection_state="Idle", socket_armed_read=False,
+            last_reset_reason="administrative shutdown", last_reset_ago="1h",
+        ),
+        "10.255.0.12",
+    )
+
+    assert result.status == checks.BROKEN
+    assert result.device_text == ("administrative shutdown",)
+
+
+def test_the_fsm_fallback_broken_branch_carries_its_reset_reason_too():
+    """The no-socket-line fallback's own `broken` return also folds in
+    `_last_reset_note` -- device_text must follow it there as well, not only
+    in the socket-present branches above."""
+
+    result = checks.bgp_transport(
+        _neighbor_meta(
+            connection_state="Active",
+            last_reset_reason="BGP Notification sent: hold time expired",
+            last_reset_ago="00:05:03",
+        ),
+        "10.255.0.12",
+    )
+    # No `socket_armed_read` key at all -- `_neighbor_meta` only sets it when
+    # given, so this exercises the "no socket line" fallback deliberately.
+    assert result.status == checks.BROKEN
+    assert "no socket state reported" in result.reason
+    assert result.device_text == ("BGP Notification sent: hold time expired",)
+
+
+def test_route_present_broken_device_text_is_the_devices_fixed_reply(monkeypatch):
+    """Unlike `bgp_transport`'s notes, this one line is a fixed literal in
+    `checks.py` rather than a captured parser field (`_NOT_IN_TABLE` matches
+    the whole line with no capture group) -- still carried as `device_text`,
+    from the SAME module constant `reason`'s prose is built from, so the two
+    can never drift apart."""
+
+    evidence = _fixture_evidence(monkeypatch, "PE2", label="broken")
+    evidence = _with_template(evidence, "PE2", "route", label="broken", prefix="10.255.0.31/32")
+    result = checks.route_present(evidence, "10.255.0.31/32")
+
+    assert result.status == checks.BROKEN
+    assert result.device_text == ("% Network not in table",)
+    assert result.device_text[0] in result.reason
+
+
+def test_route_present_healthy_has_no_device_text(monkeypatch):
+    evidence = _fixture_evidence(monkeypatch, "RR1", label="healthy")
+    evidence = _with_template(evidence, "RR1", "route", label="healthy", prefix="10.255.0.11/32")
+    result = checks.route_present(evidence, "10.255.0.11/32")
+
+    assert result.status == checks.HEALTHY
+    assert result.device_text is None
 
 
 # --------------------------------------------------------------------------- #

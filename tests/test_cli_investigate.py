@@ -703,6 +703,81 @@ def test_the_ledger_run_id_matches_the_tickets_own_run_id(monkeypatch, tmp_path)
 
 
 # --------------------------------------------------------------------------- #
+# B-692 -- the device-authored fragments the ticket carries are wrapped, and
+# `reason`'s own copy of the same words stays wrapped alongside them
+# --------------------------------------------------------------------------- #
+
+
+def test_every_device_authored_fragment_in_the_ticket_is_wrapped_never_bare(
+    monkeypatch, tmp_path
+):
+    """The exact scenario B-692 is verified against: a real `investigate`
+    run over the `broken` fixture, read back through `ticket_read`, checking
+    that every device-authored fragment OBS-691 measured --
+    `'BGP Notification sent: hold time expired'`, `'No route to multi-hop
+    neighbor'`, `'% Network not in table'` -- appears inside
+    `model_egress.DEVICE_TEXT_OPEN`/`CLOSE` delimiters and never bare, in
+    EVERY occurrence anywhere in the returned payload (both in `device_text`
+    and in the copy still embedded in `reason`'s own prose -- see
+    `ticket_read.py`'s comment on why `reason` stays wrapped too).
+    """
+
+    import json
+
+    from agent_nettools import model_egress, ticket_read
+
+    monkeypatch.setenv("NETTOOLS_TICKET_DIR", str(tmp_path / "tickets"))
+    code = _main([*ARGS, "--label", "broken", "--no-model"], monkeypatch)
+    assert code == 1  # a real fault -- interface_line_down, per the parametrised test above
+
+    files = sorted((tmp_path / "tickets").glob("*.md"))
+    assert len(files) == 1
+    from agent_nettools import ticket as _ticket
+
+    run_id = _ticket.read_ticket(files[0])["run_id"]
+
+    found = ticket_read.read_ticket_by_run_id(run_id)
+    assert found is not None
+    payload_str = json.dumps(found)
+
+    fragments = (
+        "BGP Notification sent: hold time expired",
+        "No route to multi-hop neighbor",
+        "% Network not in table",
+    )
+    for fragment in fragments:
+        start = 0
+        occurrences = 0
+        while (idx := payload_str.find(fragment, start)) != -1:
+            occurrences += 1
+            open_before = payload_str.rfind(model_egress.DEVICE_TEXT_OPEN, 0, idx)
+            close_before = payload_str.rfind(model_egress.DEVICE_TEXT_CLOSE, 0, idx)
+            assert open_before != -1 and open_before > close_before, (
+                f"{fragment!r} appears bare (occurrence at index {idx}, not "
+                "preceded by an un-closed DEVICE_TEXT_OPEN)"
+            )
+            start = idx + 1
+        assert occurrences >= 1, f"{fragment!r} did not survive into the ticket at all"
+
+    # And structurally, not just by string search: the transport and route
+    # rungs each carry their own fragment(s) in `device_text`, separate from
+    # `reason`.
+    rungs_by_name = {r["rung"]: r for r in found["code_observed"]["answer"]["rungs"]}
+    transport_text = "".join(rungs_by_name["transport"]["device_text"])
+    assert "No route to multi-hop neighbor" in transport_text
+    assert "BGP Notification sent: hold time expired" in transport_text
+    route_text = "".join(rungs_by_name["route_to_peer"]["device_text"])
+    assert "% Network not in table" in route_text
+
+    # Positive control (OBS-181): the rung/device/status identifiers beside
+    # them are code-chosen and must stay bare -- a walker that wrapped
+    # everything in the payload would satisfy every assertion above.
+    assert rungs_by_name["transport"]["rung"] == "transport"
+    assert model_egress.DEVICE_TEXT_OPEN not in rungs_by_name["transport"]["rung"]
+    assert model_egress.DEVICE_TEXT_OPEN not in rungs_by_name["transport"]["status"]
+
+
+# --------------------------------------------------------------------------- #
 # W4a -- the ticket records how the raw question became the resolved intent
 # --------------------------------------------------------------------------- #
 

@@ -230,11 +230,43 @@ _UNTRUSTED_TEXT_FIELDS = frozenset(
         # the quoted fragment. That is the deliberate direction of the error:
         # the delimiters mean "treat as untrusted", which is true of a string
         # that *contains* untrusted content, and over-marking costs a reader
-        # nothing while under-marking is the B-481 gap. The precise fix is to
-        # stop mixing the two in one field at the `checks.py` end (filed, not
-        # done here).
+        # nothing while under-marking is the B-481 gap.
         "reason",
         "current_reason",
+        # B-692, the OBS-691 residual. `checks.CheckResult` now carries the
+        # device-authored fragment(s) `_last_reset_note`/`_state_note`/
+        # `route_present` quote inside `reason` in a SEPARATE field,
+        # `device_text` -- a tuple, so it serialises here as a JSON array,
+        # not a bare string; `_quote_untrusted_fields` below has its own
+        # branch for a list value under one of these keys. cli.py copies it
+        # into the ticket alongside `reason` under this same name wherever a
+        # rung's own reason appears (`answer.cause.device_text`, each entry
+        # of `answer.rungs[].device_text`, each entry of a handover's
+        # `recovered`/`newly_broken[].{previous,current}_device_text`), and
+        # under `previous_device_text`/`current_device_text` for the
+        # handover's own single-value fields -- the same flat-name-per-
+        # trust-level pattern `previous_reason`/`current_reason` already use,
+        # for the identical reason (a nested `device_text` key inside both
+        # `previous_cause`/`current_cause` would make the two impossible to
+        # tell apart by key name alone at containment time).
+        #
+        # `reason`/`current_reason`/`previous_reason` stay in this set --
+        # this is `device_text` ADDED, not `reason` NARROWED. B-692 asked
+        # whether `reason` could stop needing blanket wrapping now that the
+        # fragment has its own field, and the answer, measured against
+        # requirement 1 of that item, is no: `reason` must keep reading as a
+        # human sentence, quote and all -- turning it into a template with a
+        # `device_text` placeholder was explicitly ruled out as a
+        # degradation. So the SAME device words are always present in BOTH
+        # `reason`'s prose and `device_text`'s fragment, and un-wrapping
+        # `reason` while `device_text` stays wrapped would leave that same
+        # substring bare one field over -- exactly the under-marking B-481
+        # exists to prevent. `device_text` exists so a reader who wants only
+        # the untrusted substring, structurally, never has to regex it out of
+        # `reason` themselves; it is not a replacement for wrapping `reason`.
+        "device_text",
+        "current_device_text",
+        "previous_device_text",
     }
 )
 
@@ -293,6 +325,17 @@ def _quote_untrusted_fields(payload: Any) -> Any:
     the payload is being assembled -- so no call site can forget a subfield;
     see `read_ticket_by_run_id`.
 
+    A value under an untrusted key is a bare string for every field this
+    table predates, and, since B-692, may also be a LIST of strings --
+    `checks.CheckResult.device_text` is a tuple of device-authored fragments
+    and serialises to a JSON array under `device_text`/`current_device_text`/
+    `previous_device_text`. That case is handed to `_quote_fragment_list`
+    rather than falling through to the recursive walk below: a list reached
+    via the walk's own `isinstance(payload, list)` branch has already lost
+    the key it came from by the time it gets there, so a bare string element
+    would hit this function's final `return payload` unquoted -- exactly the
+    B-481 shape this module exists to close, one field over.
+
     Mutation-tested by `scripts/mutate_guards.py`'s `TICKET-READ-CONTAINMENT`
     entry, which disables exactly the `key in _UNTRUSTED_TEXT_FIELDS` check
     below and expects `tests/test_ticket_read.py::test_a_forged_verdict_
@@ -304,6 +347,8 @@ def _quote_untrusted_fields(payload: Any) -> Any:
             key: (
                 _quote(value)
                 if key in _UNTRUSTED_TEXT_FIELDS and isinstance(value, str)
+                else _quote_fragment_list(value)
+                if key in _UNTRUSTED_TEXT_FIELDS and isinstance(value, list)
                 else _quote_untrusted_fields(value)
             )
             for key, value in payload.items()
@@ -311,6 +356,26 @@ def _quote_untrusted_fields(payload: Any) -> Any:
     if isinstance(payload, list):
         return [_quote_untrusted_fields(item) for item in payload]
     return payload
+
+
+def _quote_fragment_list(value: list[Any]) -> list[Any]:
+    """Quote every string element of a list reached directly under an
+    untrusted key (`device_text` and friends, B-692).
+
+    Each element is wrapped individually -- a reader sees exactly which
+    fragment is untrusted, rather than one delimiter pair around a
+    JSON-looking blob of all of them. A non-string element (there should
+    never be one; `CheckResult.device_text` is a tuple of non-empty strings,
+    enforced in `checks.py`) falls back to the ordinary recursive walk rather
+    than being dropped or left unquoted by assumption, the same
+    fail-toward-more-containment posture `_quote` already takes for a
+    non-string scalar.
+    """
+
+    return [
+        _quote(item) if isinstance(item, str) else _quote_untrusted_fields(item)
+        for item in value
+    ]
 
 
 def _resolve_dir() -> Path:

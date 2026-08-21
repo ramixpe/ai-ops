@@ -145,6 +145,22 @@ class CheckResult:
     reason: str | None = None
     subject: str | None = None
     evidence_keys: tuple[str, ...] = field(default_factory=tuple)
+    #: The far end's own words, quoted verbatim and kept structurally apart
+    #: from ``reason``'s code-authored prose (B-692, the OBS-691 residual).
+    #: ``reason`` still SAYS what a fragment here also holds -- the two
+    #: checks that ever quote a device (``bgp_transport`` via
+    #: ``_state_note``/``_last_reset_note``, ``route_present``'s fixed
+    #: "% Network not in table" reply) build both from the SAME read at the
+    #: same call site, never one by regexing the other, so a consumer that
+    #: wants the untrusted substring alone (``ticket_read``'s containment)
+    #: can wrap exactly it without parsing this project's own sentence.
+    #:
+    #: ``None`` means this check never quoted the device at all. A non-``None``
+    #: value is always a non-empty tuple of non-empty strings -- enforced
+    #: below -- so "never asked" and "asked, quote came back empty" cannot
+    #: collapse onto the same ``()``/``""`` the module rule above already
+    #: refuses to let stand in for absence.
+    device_text: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
         if self.status not in STATUSES:
@@ -159,6 +175,20 @@ class CheckResult:
                 f"a {self.status!r} CheckResult must cite at least one evidence key; "
                 "only 'unevaluated' may cite none"
             )
+        # B-692's own rule, restated as code: absence is `None`, never a zero
+        # shaped like `()`. A quote that came back genuinely empty and a check
+        # that never asked must never be able to look identical -- so a
+        # `device_text` that is present at all must carry at least one real,
+        # non-empty fragment.
+        if self.device_text is not None:
+            if not isinstance(self.device_text, tuple) or not self.device_text:
+                raise ValueError(
+                    "CheckResult.device_text must be a non-empty tuple of "
+                    "device-authored fragments, or None if the check never "
+                    "quoted the device -- never () (absence is never zero)"
+                )
+            if any(not isinstance(f, str) or not f for f in self.device_text):
+                raise ValueError("CheckResult.device_text entries must be non-empty strings")
 
     @property
     def is_conclusive(self) -> bool:
@@ -179,15 +209,39 @@ def evidence_key(device: str, intent_or_template: str, subject: str | None = Non
     return f"{device}:{intent_or_template}" + (f":{subject}" if subject else "")
 
 
-def healthy(*, subject: str | None, evidence_keys: tuple[str, ...], reason: str | None = None):
-    return CheckResult(HEALTHY, reason=reason, subject=subject, evidence_keys=evidence_keys)
+def healthy(
+    *,
+    subject: str | None,
+    evidence_keys: tuple[str, ...],
+    reason: str | None = None,
+    device_text: tuple[str, ...] | None = None,
+):
+    return CheckResult(
+        HEALTHY, reason=reason, subject=subject, evidence_keys=evidence_keys,
+        device_text=device_text,
+    )
 
 
-def broken(*, reason: str, subject: str | None, evidence_keys: tuple[str, ...]):
-    return CheckResult(BROKEN, reason=reason, subject=subject, evidence_keys=evidence_keys)
+def broken(
+    *,
+    reason: str,
+    subject: str | None,
+    evidence_keys: tuple[str, ...],
+    device_text: tuple[str, ...] | None = None,
+):
+    return CheckResult(
+        BROKEN, reason=reason, subject=subject, evidence_keys=evidence_keys,
+        device_text=device_text,
+    )
 
 
-def unevaluated(*, reason: str, subject: str | None = None, evidence_keys: tuple[str, ...] = ()):
+def unevaluated(
+    *,
+    reason: str,
+    subject: str | None = None,
+    evidence_keys: tuple[str, ...] = (),
+    device_text: tuple[str, ...] | None = None,
+):
     """The honest answer when the evidence needed to decide was not there.
 
     Always carries a reason. "Unevaluated" with no explanation is only
@@ -195,7 +249,10 @@ def unevaluated(*, reason: str, subject: str | None = None, evidence_keys: tuple
     tell whether to re-collect, fix a parser, or look elsewhere.
     """
 
-    return CheckResult(UNEVALUATED, reason=reason, subject=subject, evidence_keys=evidence_keys)
+    return CheckResult(
+        UNEVALUATED, reason=reason, subject=subject, evidence_keys=evidence_keys,
+        device_text=device_text,
+    )
 
 
 def parsed_records(section: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -391,6 +448,10 @@ def bgp_transport(evidence: dict[str, Any], peer: str) -> CheckResult:
     armed = meta.get("socket_armed_read")
     fsm = meta.get("connection_state") or meta.get("state")
     if armed is not None:
+        # Read once, used two ways below: `*_suffix` is folded into `reason`
+        # exactly as before B-692, `*_fragment` is the same device string
+        # handed to `device_text` unparsed -- see `_state_note`'s docstring.
+        state_suffix, state_fragment = _state_note(meta)
         if armed and fsm in _TCP_UP_STATES:
             return healthy(
                 subject=peer,
@@ -398,8 +459,9 @@ def bgp_transport(evidence: dict[str, Any], peer: str) -> CheckResult:
                 reason=(
                     f"TCP transport to {peer} is up (the socket is armed for read"
                     f", session state {fsm})"
-                    + _state_note(meta)
+                    + state_suffix
                 ),
+                device_text=(state_fragment,) if state_fragment else None,
             )
         if armed:
             # Armed, but the FSM is not in a state that implies an established
@@ -407,23 +469,27 @@ def bgp_transport(evidence: dict[str, Any], peer: str) -> CheckResult:
             # trying. The evidence is genuinely ambiguous: it cannot tell a
             # transport fault from a BGP-layer fault, so it says so and the
             # walk stops rather than clearing a layer it did not verify.
+            reset_suffix, reset_fragment = _last_reset_note(meta)
             return unevaluated(
                 reason=(
                     f"cannot judge TCP transport to {peer}: the socket is armed for "
                     f"read but the session is in {fsm or 'an unreported state'}, "
                     "which does not imply an established TCP connection (B-497)"
-                    + _state_note(meta) + _last_reset_note(meta)
+                    + state_suffix + reset_suffix
                 ),
                 subject=peer,
                 evidence_keys=(key,),
+                device_text=tuple(f for f in (state_fragment, reset_fragment) if f) or None,
             )
+        reset_suffix, reset_fragment = _last_reset_note(meta)
         return broken(
             reason=(
                 f"no TCP transport to {peer} (the socket is not armed for read)"
-                + _state_note(meta) + _last_reset_note(meta)
+                + state_suffix + reset_suffix
             ),
             subject=peer,
             evidence_keys=(key,),
+            device_text=tuple(f for f in (state_fragment, reset_fragment) if f) or None,
         )
 
     # No socket line: an older XR release, or output shaped differently. Fall
@@ -440,19 +506,29 @@ def bgp_transport(evidence: dict[str, Any], peer: str) -> CheckResult:
                 f"(no socket state reported; read from the session state)"
             ),
         )
+    reset_suffix, reset_fragment = _last_reset_note(meta)
     return broken(
         reason=(
             f"BGP transport session to {peer} is not Established "
             f"(connection_state: {connection_state}; no socket state reported)"
-            + _last_reset_note(meta)
+            + reset_suffix
         ),
         subject=peer,
         evidence_keys=(key,),
+        device_text=(reset_fragment,) if reset_fragment else None,
     )
 
 
-def _state_note(meta: dict[str, Any]) -> str:
-    """The device's parenthesised reason for the current BGP state, if any.
+def _state_note(meta: dict[str, Any]) -> tuple[str, str | None]:
+    """The device's parenthesised reason for the current BGP state, if any --
+    returned as a ``(reason-suffix, fragment)`` pair, B-692.
+
+    The suffix is the exact text `bgp_transport` has always appended to its
+    `reason` sentence; the fragment is the SAME read of
+    ``meta["state_reason"]``, handed back separately rather than recovered by
+    parsing the suffix, so a caller can populate `CheckResult.device_text`
+    from the identical source the sentence itself came from -- one read, two
+    outputs, never one derived from the other.
 
     `BGP state = Idle (No route to multi-hop neighbor)` -- the device naming the
     layer beneath it. Distinct from `_last_reset_note`, which is history: this
@@ -461,12 +537,14 @@ def _state_note(meta: dict[str, Any]) -> str:
 
     reason = meta.get("state_reason")
     if not reason:
-        return ""
-    return f"; the device reports the session state as {reason!r}"
+        return "", None
+    return f"; the device reports the session state as {reason!r}", reason
 
 
-def _last_reset_note(meta: dict[str, Any]) -> str:
-    """The device's own account of why the session last went down (B-430).
+def _last_reset_note(meta: dict[str, Any]) -> tuple[str, str | None]:
+    """The device's own account of why the session last went down (B-430) --
+    returned as a ``(reason-suffix, fragment)`` pair; see `_state_note` for
+    why the pair shape exists (B-692).
 
     Round 3 is why this exists. The fault was a BGP neighbour administratively
     shut on the far end; the check read ``connection_state`` and reported
@@ -493,18 +571,29 @@ def _last_reset_note(meta: dict[str, Any]) -> str:
 
     reason = meta.get("last_reset_reason")
     if not reason:
-        return ""
+        return "", None
     ago = meta.get("last_reset_ago")
     when = f" {ago} ago" if ago else ""
     return (
         f"; the device last recorded a reset{when} with reason {reason!r} "
-        f"(history, not current state)"
+        f"(history, not current state)",
+        reason,
     )
 
 
 # --------------------------------------------------------------------------- #
 # route_present -- does this device have a route to a prefix at all (T-020)
 # --------------------------------------------------------------------------- #
+
+
+#: The device's own reply when a prefix has no installed route --
+#: `template_parsers._NOT_IN_TABLE`'s exact matched line, re-declared here
+#: (not imported) for the same reason `_is_numeric` is re-declared rather
+#: than shared: this module reads parsed evidence only, and importing a
+#: parser-internal pattern would blur that line. One constant, used both in
+#: `reason`'s prose below and in `device_text`, so the two can never drift
+#: apart -- B-692.
+_ROUTE_NOT_IN_TABLE = "% Network not in table"
 
 
 def route_present(evidence: dict[str, Any], prefix: str) -> CheckResult:
@@ -533,9 +622,10 @@ def route_present(evidence: dict[str, Any], prefix: str) -> CheckResult:
             reason=f"route to {prefix} is present ({meta.get('path_count', '0')} path(s))",
         )
     return broken(
-        reason=f"no route to {prefix} (device reports '% Network not in table')",
+        reason=f"no route to {prefix} (device reports {_ROUTE_NOT_IN_TABLE!r})",
         subject=prefix,
         evidence_keys=(key,),
+        device_text=(_ROUTE_NOT_IN_TABLE,),
     )
 
 
