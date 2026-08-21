@@ -146,6 +146,41 @@ def _git(*args: str) -> str:
     ).stdout.strip()
 
 
+#: Names in this module that must never be called from a `d*.py` generator.
+#: Two distinct reasons, both fatal to a byte pin:
+#:   - history-dependent: committing the diagram changes the value it shows
+#:     (`commit_count`, `last_commit_date`, `current_branch`)
+#:   - run-dependent: the value reflects one execution rather than the tree,
+#:     or one machine's speed (`investigate_walkthrough_duration_bucket_s`)
+#:
+#: `tests_passed` is named in the block below and **no longer exists** -- it
+#: was replaced by `tests_collected` (how many tests EXIST, stable under
+#: pass/fail) and the prose outlived the function. Left out of the tuple
+#: rather than listed, because a guard that names a symbol nothing defines
+#: fails for the wrong reason and teaches the next reader to trust the list
+#: less.
+#:
+#: **OBS-697: the block below was prose with nothing enforcing it, which is
+#: exactly how it got broken.** The duration fact was volatile in a second way
+#: nobody had named -- machine-dependent rather than history-dependent -- so it
+#: was never listed, and `d2.py` baked a wall-clock measurement into a pinned
+#: SVG. It passed on the author's box, whose samples all landed in one
+#: half-second bucket, and failed intermittently on CI runners slow enough to
+#: reach the next one: two red pushes, and a finding filed as "unexplained"
+#: because regenerating at the same commit on the same machine could never
+#: reproduce it.
+#:
+#: `tests/test_diagrams.py::test_no_generator_bakes_a_volatile_fact` reads this
+#: tuple and scans every generator, so the rule is now checked rather than
+#: remembered.
+VOLATILE_FACTS: tuple[str, ...] = (
+    "commit_count",
+    "last_commit_date",
+    "current_branch",
+    "investigate_walkthrough_duration_bucket_s",
+)
+
+
 @functools.lru_cache(maxsize=1)
 #: ---------------------------------------------------------------------------
 #: VOLATILE facts: true of this *history* or of one test RUN, not of the tree's

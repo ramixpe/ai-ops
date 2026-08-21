@@ -7488,3 +7488,55 @@ rungs, `Gi0/0/0/2` admin up.
   `isis_adjacencies` only. The BGP axis has no equivalent, so a
   `bgp_peers` baseline learned from a broken fabric would not be caught
   the way an IS-IS one now is.
+
+## OBS-697 · The unexplained CI failure, explained: a clock baked into a byte pin
+
+Resolves the failure OBS-695 recorded as unexplained, and supersedes its
+reading of the cause.
+
+**What it actually was.** `d2.py` rendered
+`facts.investigate_walkthrough_duration_bucket_s()` — a **wall-clock
+measurement** of the walkthrough subprocess, bucketed to half a second — into
+`02-call-path.svg`. The bucket is `max(0.5, round(duration / 0.5) * 0.5)`, and
+the function's own docstring records the evidence it was accepted on: *"eight
+measurements across several regenerations (0.25s-0.41s) all landed in the same
+half-second bucket."* Every one of those eight was taken **on this machine**.
+A CI runner slow enough to cross 0.75s produces `1.0`, the committed SVG says
+`0.5`, and the byte pin fails.
+
+**Why it looked like a Python-version problem and was not.** It failed on the
+3.12 leg once and the 3.11 leg twice, always on whichever leg happened to be
+slow, and never locally — so the pattern I read as "fails on the version I have
+not tested" was really "fails on the runner that was slow that day". I chased
+the version hypothesis to the point of building a 3.12 environment and
+regenerating at the exact failing commit, which produced byte-identical output
+and looked like exculpation. **It was measuring the wrong variable.** The
+machine was held constant in every experiment I ran.
+
+**Two pushes went red and I reported both as done without checking CI.** The
+first is OBS-695's; the second and third are B-699 and B-700. The finding there
+— that a local pass is not a CI prediction — was right, and I then repeated the
+underlying mistake by not looking afterwards.
+
+**Fixed:** `d2` now shows `rungs_examined`, derived from the same walkthrough
+payload but a property of the flow rather than of the hardware.
+
+**The durable half, which is the actual defect.** `facts.py` had a careful
+prose block naming the volatile facts and forbidding their use in a pinned
+SVG — and nothing enforced it. The duration was volatile in a second way the
+block never named (machine-dependent, not history-dependent), so it was never
+added, and no mechanism noticed. That block is now
+`facts.VOLATILE_FACTS`, read by
+`tests/test_diagrams.py::test_no_generator_bakes_a_volatile_fact`, which
+`ast`-scans every generator. Mutation-checked by reintroducing the call.
+
+A second test asserts every name in the tuple actually exists — not
+hypothetical: the prose it replaced named `tests_passed`, which was deleted
+when `tests_collected` superseded it, and the comment outlived the function.
+A guard naming a symbol nothing defines matches nothing and passes.
+
+**The generalisable point.** This is the third time in two days that a rule
+written as prose was broken by a case its author had not imagined
+(§0.5's frozen files held because they are checked; this did not because it was
+not). The block was not wrong — it was unenforced, and it was broken by the one
+kind of volatility it had not thought to list.

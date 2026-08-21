@@ -51,8 +51,19 @@ s.rect(48, 120, W - 96, 52, fill="#1b1b1f", stroke="none", rx=10)
 s.text(68, 152, f"$ nettools investigate {facts.WALKTHROUGH_DEVICE} {facts.WALKTHROUGH_SUBJECT} --from-fixtures --format table",
        size=15, family=MONO, fill="#e9e9e6")
 s.text(W - 68, 152,
+       # OBS-697: the wall-clock bucket that used to sit here is GONE. A
+       # byte-pinned artifact may carry only CONTENT facts (OBS-189), and a
+       # measured duration is the definition of a volatile one -- it made this
+       # SVG a function of the machine that generated it. It passed on the
+       # author's box, whose eight sampled runs (0.25-0.41s) all landed in the
+       # same half-second bucket, and failed intermittently on CI runners slow
+       # enough to cross into the next one. Two CI reds and one finding
+       # recorded as "unexplained" were this.
+       #
+       # `rungs_examined` replaces it: derived from the same walkthrough
+       # payload, but a property of the flow rather than of the hardware.
        f"exit {exit_code} ({_EXIT_MEANING.get(exit_code, 'unrecognised exit code')})  ·  "
-       f"~{facts.investigate_walkthrough_duration_bucket_s():.1f} s  ·  no network, no credentials, no API key",
+       f"{rungs_examined} rungs  ·  no network, no credentials, no API key",
        size=12, family=MONO, fill="#8f8f88", anchor="end")
 
 LX, LW = 48, 862

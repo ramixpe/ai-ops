@@ -155,3 +155,69 @@ def test_key_facts_appear_in_the_committed_svgs():
     for wid, _item in write_path:
         assert wid in svg_text("08-event-loop.svg")
         assert "DEFERRED" in svg_text("08-event-loop.svg")
+
+
+def test_no_generator_bakes_a_volatile_fact():
+    """OBS-697. `facts.VOLATILE_FACTS` names every value that is true of this
+    history, this run, or this machine rather than of the tree's content. A
+    byte-pinned SVG may not show one: committing the regenerated diagram
+    changes the number the diagram shows, so the pin can never be satisfied.
+
+    This existed only as a comment until it was broken. `d2.py` rendered
+    `investigate_walkthrough_duration_bucket_s()` -- a wall-clock measurement
+    bucketed to half a second -- which passed on the machine that wrote it,
+    whose samples all landed in one bucket, and failed intermittently on CI
+    runners slow enough to reach the next one. Two red pushes, and a finding
+    filed as "unexplained" because regenerating at the same commit on the same
+    machine could never reproduce it.
+
+    Scanned with `ast` rather than `grep` so a name inside a docstring or a
+    comment (this file's own prose names all four) is not a false positive.
+    """
+
+    import ast
+
+    sys.path.insert(0, str(DIAGRAMS_DIR))
+    import facts  # noqa: E402
+
+    offenders = []
+    for generator in sorted(DIAGRAMS_DIR.glob("d*.py")):
+        tree = ast.parse(generator.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = None
+            if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+                if func.value.id == "facts":
+                    name = func.attr
+            elif isinstance(func, ast.Name):
+                name = func.id
+            if name in facts.VOLATILE_FACTS:
+                offenders.append(f"{generator.name}:{node.lineno} calls {name}()")
+
+    assert offenders == [], (
+        "a byte-pinned diagram generator calls a volatile fact: "
+        f"{offenders}. Its value depends on this history, this run, or this "
+        "machine, so the committed SVG cannot stay in step with it. Show a "
+        "content fact instead -- something derived from the tree or from a "
+        "replayed payload, not from a clock or from git."
+    )
+
+
+def test_the_volatile_fact_list_names_only_real_functions():
+    """Positive control for the guard above.
+
+    A tuple naming a symbol that no longer exists would make the scan quietly
+    match nothing and pass over an empty set. That is not hypothetical here:
+    the prose this list replaced named `tests_passed`, which was removed when
+    `tests_collected` superseded it, and the comment outlived the function by
+    long enough for nobody to notice.
+    """
+
+    sys.path.insert(0, str(DIAGRAMS_DIR))
+    import facts  # noqa: E402
+
+    assert facts.VOLATILE_FACTS, "the list is empty, so the guard checks nothing"
+    missing = [n for n in facts.VOLATILE_FACTS if not hasattr(facts, n)]
+    assert missing == [], f"VOLATILE_FACTS names symbols facts.py does not define: {missing}"
