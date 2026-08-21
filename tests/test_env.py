@@ -120,3 +120,36 @@ def test_the_refused_float_strings_really_do_parse_to_non_finite_values():
     assert math.isinf(float("inf"))
     assert math.isinf(float("-inf"))
     assert math.isnan(float("nan"))
+
+
+# --------------------------------------------------------------------------- #
+# EER-015: _BOOL_TRUE/_BOOL_FALSE -- one literal each, not four
+# --------------------------------------------------------------------------- #
+
+
+def test_bool_true_and_false_are_the_recognized_spellings():
+    assert E._BOOL_TRUE == {"1", "true", "yes", "on"}
+    assert E._BOOL_FALSE == {"0", "false", "no", "off"}
+    assert E._BOOL_TRUE.isdisjoint(E._BOOL_FALSE)
+
+
+def test_settings_and_mcp_server_share_one_bool_true_not_four_copies():
+    """`settings.py` declared its own `_BOOL_TRUE`/`_BOOL_FALSE`, and
+    `mcp_server/server.py` declared the truthy half twice more, once per
+    MCP-only gate (`_MCP_ACTIVE_PROBES_TRUTHY`, `_MCP_EXTERNAL_SOURCES_
+    TRUTHY`) -- four definitions of two literal tuples, collapsed here.
+
+    Identity, not just equality: value equality would also pass if a future
+    edit reintroduced a separate literal that still happened to spell the
+    same four strings today, which is exactly the silent-drift shape this
+    collapse exists to close off -- the same reasoning
+    `tests/test_persist.py` uses for the EER-015 persistence helpers.
+    """
+
+    from agent_nettools import settings
+    from mcp_server import server as mcp_server_module
+
+    assert settings._BOOL_TRUE is E._BOOL_TRUE
+    assert settings._BOOL_FALSE is E._BOOL_FALSE
+    assert mcp_server_module._MCP_ACTIVE_PROBES_TRUTHY is E._BOOL_TRUE
+    assert mcp_server_module._MCP_EXTERNAL_SOURCES_TRUTHY is E._BOOL_TRUE

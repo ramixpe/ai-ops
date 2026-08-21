@@ -1142,8 +1142,8 @@ def test_blockquoted_model_response_cannot_start_a_line_at_column_zero(tmp_path)
 # `mkdir`/`open` mode argument -- `os.chmod` sets exactly the bits requested
 # regardless of the process umask, so these assertions are exact rather than
 # "no group/other bits" and need no umask fixture. See
-# `evidence_store._secure_mkdir`'s docstring for the same reasoning applied
-# to the sibling module.
+# `_persist._secure_mkdir`'s docstring (EER-015: the shared implementation
+# every module in this family imports) for the same reasoning applied here.
 # --------------------------------------------------------------------------- #
 
 

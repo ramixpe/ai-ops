@@ -35,32 +35,21 @@ from .platforms import (
     supports_template,
     template_for,
 )
+from .status import SOURCE_FIXTURE, SOURCE_LIVE, STATUS_ERROR, STATUS_SUCCESS, STATUS_UNSUPPORTED
 
-# Statuses a result envelope may carry. "unsupported" means the device's platform
-# has no command for the requested intent -- a Junos box has no SR-TE policy
-# output. That is a property of the fabric, not a failure, so it is neither an
-# error nor a success and must not make a fabric check go red.
-STATUS_SUCCESS = "success"
-STATUS_ERROR = "error"
-STATUS_UNSUPPORTED = "unsupported"
-
-# Where an envelope's data actually came from -- real SSH against the device,
-# or replayed/injected output over the `sender=` seam (a committed fixture via
-# `fixtures.fixture_sender`, or any other test double; from this layer's own
-# point of view both are simply "not a live read of the device at the moment
-# this ran", which is exactly `ledger.py`'s own definition of `SOURCE_FIXTURE`
-# -- see its module docstring's "What 'source' is for" section). Everything
-# in this file was implicitly SSH before Stage 2's Loki/Prometheus/NetBox
-# sources made that stop being true; this is the minimum discriminator the
-# build report asks for.
-#
-# Deliberately **not** imported from `ledger.py`, even though the spellings
-# are the same on purpose: `ticket.py`'s own docstring ("Ledger sibling, not
-# ledger duplicate") explains why two modules built in the same session avoid
-# a hard import between them, and the same reasoning applies here -- a
-# documented convention, not a runtime coupling.
-SOURCE_LIVE = "live"
-SOURCE_FIXTURE = "fixture"
+# EER-015: the status/source vocabulary above used to be defined here
+# directly. `checks.py` -- a module whose own docstring promises "no I/O, no
+# device access ... no clock, no environment" -- imported `STATUS_ERROR`/
+# `STATUS_UNSUPPORTED` from this transport module purely for two string
+# constants that were never actually about a device. Moved to `status.py`;
+# see its module docstring for the full reasoning, including why
+# `SOURCE_LIVE`/`SOURCE_FIXTURE` still deliberately do not import
+# `ledger.py`'s same-spelled pair. Re-imported here (not re-assigned; the
+# names are used directly throughout this file below) so every existing
+# `network_tools.STATUS_ERROR` / `from .network_tools import SOURCE_LIVE`
+# call site keeps working -- same compatibility goal `DEFAULT_SNAPSHOT_DIR`
+# serves a little further down this file, different mechanism because these
+# five names are read locally here, not just re-exported.
 
 
 def _source_for(sender: Callable[[dict[str, Any], str], str] | None) -> str:

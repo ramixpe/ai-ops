@@ -149,9 +149,15 @@ import sys
 import threading
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from ._persist import (
+    _SECURE_FILE_MODE,
+    _require_nonempty_str,
+    _secure_mkdir,
+    _timestamp_now,
+)
 
 #: A human verdict on one diagnosis. `UNKNOWN` is both the resting state
 #: before any verdict exists *and* a value a human may set explicitly
@@ -172,32 +178,18 @@ SOURCE_FIXTURE = "fixture"
 _DIAGNOSIS = "diagnosis"
 _VERDICT = "verdict"
 
-
-def _timestamp_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+# EER-015: `_timestamp_now`, `_SECURE_DIR_MODE`/`_SECURE_FILE_MODE`/
+# `_secure_mkdir` and `_require_nonempty_str` used to be defined here,
+# byte-identically, in up to three of `evidence_store.py`/`session_memory.py`/
+# `ticket.py` too. Collapsed into `_persist.py` -- see its module docstring
+# for the exact duplication count and why importing that leaf module does not
+# reopen the "don't hard-import a sibling that's plausibly mid-edit" risk this
+# module's own docstring names for `ledger.py`/`ticket.py` themselves.
+# `_new_id` stays local: nothing else in the family needs a bare uuid hex.
 
 
 def _new_id() -> str:
     return uuid.uuid4().hex
-
-
-# EER-019: a diagnosis entry can carry `cause`/`reason` detail lifted from
-# device evidence. Owner-only, the same fixed default `evidence_store.py`
-# and `ticket.py` use -- see `evidence_store._secure_mkdir`'s docstring for
-# why this is a chmod-on-every-call, not chmod-once-at-creation.
-_SECURE_DIR_MODE = 0o700
-_SECURE_FILE_MODE = 0o600
-
-
-def _secure_mkdir(directory: Path) -> None:
-    directory.mkdir(parents=True, exist_ok=True)
-    os.chmod(directory, _SECURE_DIR_MODE)
-
-
-def _require_nonempty_str(name: str, value: Any) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{name} must be a non-empty string, got {value!r}")
-    return value
 
 
 @dataclass(frozen=True)

@@ -160,9 +160,13 @@ docstring gives the reason this module also follows -- these files are
 plausibly being changed by separate tracks in the same session, and a hard
 import dependency between two modules that are each somebody else's is a
 self-inflicted breakage risk this module's job does not require taking on.
-Small helpers (`_atomic_write_text`, id/timestamp helpers) are therefore
-re-declared locally rather than imported, the same trade `ticket.py` names
-explicitly for the same reason.
+`_atomic_write_text` is therefore re-declared locally rather than imported,
+the same trade `ticket.py` names explicitly for the same reason. EER-015
+narrowed that list: `_timestamp_now` and `_secure_mkdir`/`_SECURE_DIR_MODE`
+carried no module-specific logic in any of their four copies, so they moved
+into `_persist.py`, a leaf module with nothing of its own to drift underfoot
+-- a different trade than depending on a sibling's still-evolving file, and
+one that does not reopen the risk this paragraph is otherwise arguing for.
 
 Only one backend exists today: `FileSessionMemoryStore`, one small JSON file
 per session (default directory `DEFAULT_SESSION_MEMORY_DIR`,
@@ -206,9 +210,10 @@ import tempfile
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from ._persist import _secure_mkdir, _timestamp_now
 
 __all__ = [
     "CANNOT_RECALL",
@@ -271,8 +276,11 @@ def _validate_session_id(session_id: Any) -> str:
     return session_id
 
 
-def _timestamp_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+# EER-015: `_timestamp_now` and `_secure_mkdir`/`_SECURE_DIR_MODE` used to be
+# defined here too -- see `_persist.py`'s module docstring and the "Storage"
+# section above for the duplication count and why importing that leaf module
+# is a different trade than the sibling-import risk this file otherwise
+# avoids.
 
 
 def _session_dir(base_dir: str | None) -> Path:
@@ -287,28 +295,6 @@ def _session_dir(base_dir: str | None) -> Path:
         return Path(base_dir)
     env_dir = os.getenv(NETTOOLS_SESSION_MEMORY_DIR_ENV, "").strip()
     return Path(env_dir or DEFAULT_SESSION_MEMORY_DIR)
-
-
-# EER-019: a session-memory record names a device/subject/flow/ticket path
-# for one operator's recent turn -- private the same way ticket/evidence data
-# is. Re-declared locally rather than imported from `evidence_store.py` for
-# the same "each is plausibly somebody else's" reason the module docstring's
-# "Storage" section already gives for re-declaring `_atomic_write_text`
-# itself.
-_SECURE_DIR_MODE = 0o700
-
-
-def _secure_mkdir(directory: Path) -> None:
-    """Create ``directory`` (and parents) then force ``_SECURE_DIR_MODE`` on it.
-
-    Same reasoning as `evidence_store._secure_mkdir`: `Path.mkdir(mode=...)`
-    is a no-op on an already-existing directory (the common case here --
-    every turn after a session's first), so the chmod must happen explicitly,
-    on every call, for a pre-existing permissive directory to self-heal.
-    """
-
-    directory.mkdir(parents=True, exist_ok=True)
-    os.chmod(directory, _SECURE_DIR_MODE)
 
 
 def _atomic_write_text(path: Path, text: str) -> None:

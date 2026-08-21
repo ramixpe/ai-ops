@@ -219,8 +219,9 @@ def test_ledger_file_is_literally_append_only_jsonl(tmp_path):
 # Both modes below come from an explicit `os.chmod` in `ledger._append`/
 # `ledger._secure_mkdir`, which sets exactly the bits requested regardless of
 # the process umask -- so these are exact assertions, not "no group/other
-# bits", and need no umask fixture. See `evidence_store._secure_mkdir`'s
-# docstring for the same reasoning applied to the sibling module.
+# bits", and need no umask fixture. See `_persist._secure_mkdir`'s docstring
+# (EER-015: the shared implementation every module in this family imports)
+# for the same reasoning applied here.
 # --------------------------------------------------------------------------- #
 
 

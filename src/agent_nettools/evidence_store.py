@@ -57,6 +57,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from ._persist import _SECURE_FILE_MODE, _secure_mkdir, _timestamp_now
+
 # Snapshots (files) or the database (sqlite) land here, relative to the
 # working directory unless overridden -- same resolution order as every other
 # env-then-default path in this project (``inventory_model.resolve_inventory_path``,
@@ -76,41 +78,20 @@ DEFAULT_EVIDENCE_BACKEND = "files"
 
 _SQLITE_FILENAME = "evidence.db"
 
-# EER-019: this store holds device evidence (and, via metrics.py sharing
-# `_atomic_write_text`, operational counters) that should not be readable by
-# other accounts on a shared host. 0600/0700 -- owner-only -- is the
-# defensible fixed default; an operator who deliberately wants to share a
-# directory can already do so with a `chmod` after the fact, or a group-ID
-# sticky bit on the parent directory, without this project adding a new env
-# var (`settings.py` is owned elsewhere this wave; see the EER-019 report for
-# why a setting was considered and not added).
-_SECURE_DIR_MODE = 0o700
-_SECURE_FILE_MODE = 0o600
-
-
-def _secure_mkdir(directory: Path) -> None:
-    """Create ``directory`` (and parents) then force ``_SECURE_DIR_MODE`` on it.
-
-    ``Path.mkdir(mode=...)`` alone is not sufficient: with ``exist_ok=True``
-    the ``mode`` argument is silently ignored once the directory already
-    exists (the common case -- every snapshot after the first), so a
-    directory created under a permissive umask before this fix, or nudged
-    open by hand, would stay world-readable forever. The explicit
-    ``os.chmod`` below runs on *every* call, not just the directory's first
-    creation, so it self-heals on the next write instead of only protecting
-    directories created after this change shipped.
-    """
-
-    directory.mkdir(parents=True, exist_ok=True)
-    os.chmod(directory, _SECURE_DIR_MODE)
+# EER-015: `_SECURE_DIR_MODE`/`_SECURE_FILE_MODE`/`_secure_mkdir`/
+# `_timestamp_now` used to be defined here, byte-identically, in `ledger.py`,
+# `session_memory.py` and `ticket.py` too -- four copies of five names.
+# Collapsed into `_persist.py`, a leaf module with no logic of its own to
+# drift underfoot; see its module docstring for the exact duplication count
+# and why this does not reopen the "don't hard-import a sibling that's
+# plausibly mid-edit" risk `session_memory.py`/`ticket.py` name for the
+# modules themselves. `_atomic_write_text` below stays local -- it is EER-019
+# security-relevant policy (0600/0700), still shared verbatim across the same
+# four files, but not part of this pass.
 
 
 def _snapshot_dir(base_dir: str | None) -> Path:
     return Path(base_dir or os.getenv(NETTOOLS_EVIDENCE_DIR_ENV) or DEFAULT_SNAPSHOT_DIR)
-
-
-def _timestamp_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def _atomic_write_text(path: Path, text: str) -> None:
