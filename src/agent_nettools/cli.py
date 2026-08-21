@@ -903,15 +903,29 @@ def _record_in_ticket(handle, args, result, subject, flow, question=None, analys
         # descent's own field (`result.descent.outcomes`), still passed
         # through unchanged, so `record_answer`'s own "never re-derived"
         # contract is unaffected.
+        # B-692: `o.result.device_text` is the same device-authored fragment(s)
+        # already folded into `o.result.reason`'s prose, carried alongside it
+        # rather than left for a reader to regex back out -- `None` passes
+        # through as `None` (a rung that never quoted the device), a tuple as
+        # a JSON array (`ticket_read`'s own list-of-strings branch quotes each
+        # element). Copied from the SAME `CheckResult` `reason` came from,
+        # never re-derived from the rendered sentence.
         rungs = [
-            {"rung": o.rung, "device": o.device, "status": o.status, "reason": o.result.reason}
+            {
+                "rung": o.rung, "device": o.device, "status": o.status,
+                "reason": o.result.reason,
+                "device_text": list(o.result.device_text) if o.result.device_text else None,
+            }
             for o in result.descent.outcomes
         ]
         handle.record_answer(
             finding=result.descent.finding,
             trustworthy=result.trustworthy,
             cause=({"rung": cause.rung, "device": cause.device,
-                    "reason": cause.result.reason} if cause is not None else None),
+                    "reason": cause.result.reason,
+                    "device_text": (
+                        list(cause.result.device_text) if cause.result.device_text else None
+                    )} if cause is not None else None),
             coherence=(coherence.as_dict() if coherence is not None else None),
             report_status=result.report_status,
             correlation_status=result.correlation_status,
@@ -984,6 +998,14 @@ def _record_handover(handle, args, result, subject, flow) -> None:
             {"rung": cause.rung, "device": cause.device} if cause is not None else None
         )
         current_reason = cause.result.reason if cause is not None else None
+        # B-692: the SAME device-authored fragment(s) already inside
+        # `current_reason`'s prose, carried alongside it -- see the matching
+        # comment on `rungs` in `_record_in_ticket` above.
+        current_device_text = (
+            list(cause.result.device_text)
+            if cause is not None and cause.result.device_text
+            else None
+        )
         current_finding = result.descent.finding
         current_trustworthy = result.trustworthy
 
@@ -995,6 +1017,13 @@ def _record_handover(handle, args, result, subject, flow) -> None:
             if prev_answer.get("cause") is not None else None
         )
         prev_reason = prev_cause_raw.get("reason") if prev_answer.get("cause") is not None else None
+        # A ticket written before B-692 has no `device_text` key at all --
+        # `.get` degrades that to `None`, the same "never quoted" shape a
+        # rung that genuinely never touched the device already produces, not
+        # a fabricated distinction between the two.
+        prev_device_text = (
+            prev_cause_raw.get("device_text") if prev_answer.get("cause") is not None else None
+        )
         prev_rungs = prev_answer.get("rungs")
 
         finding_changed = current_finding != prev_finding
@@ -1023,6 +1052,14 @@ def _record_handover(handle, args, result, subject, flow) -> None:
                     "rung": outcome.rung, "device": outcome.device,
                     "previous_reason": prev_entry.get("reason"),
                     "current_reason": outcome.result.reason,
+                    # B-692. `prev_entry` is read straight from the previous
+                    # ticket's own JSON, so a pre-B-692 ticket's rung entries
+                    # simply have no `device_text` key -- `.get` degrades that
+                    # to `None`, not a fabricated `[]`.
+                    "previous_device_text": prev_entry.get("device_text"),
+                    "current_device_text": (
+                        list(outcome.result.device_text) if outcome.result.device_text else None
+                    ),
                 }
                 if prev_status == BROKEN and outcome.status == HEALTHY:
                     recovered.append(entry)
@@ -1062,6 +1099,18 @@ def _record_handover(handle, args, result, subject, flow) -> None:
             recovered=recovered,
             newly_broken=newly_broken,
             notes=notes,
+            # B-692: `record_handover` has no dedicated parameter for these --
+            # `previous_reason`/`current_reason` predate `device_text` and
+            # adding two more named parameters is not needed when `extra=`
+            # already exists for exactly this (free-form fields `ticket.py`
+            # itself never interprets). Read back as
+            # `handover["current_device_text"]`/`handover["previous_device_text"]`,
+            # same flat-name-per-trust-level shape as the reason pair beside
+            # them.
+            extra={
+                "current_device_text": current_device_text,
+                "previous_device_text": prev_device_text,
+            },
         )
     except Exception as exc:  # noqa: BLE001 -- bookkeeping never fails a run
         _note(f"# handover not recorded: {exc}", args)

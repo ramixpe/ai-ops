@@ -443,6 +443,112 @@ def test_both_handover_reasons_are_contained_not_just_the_previous_one(
     assert handover["finding_changed"] is True
 
 
+def test_the_cause_device_text_is_contained_fragment_by_fragment(tmp_path, monkeypatch):
+    """B-692. `checks.CheckResult.device_text` -- the far end's own words,
+    now carried in their own field alongside `reason` rather than only
+    inside its prose -- serialises into the ticket as a JSON array under
+    `device_text`. This proves each element is wrapped on its own (a reader
+    sees which fragment is untrusted, not one delimiter pair around the
+    whole list), using the SAME real, quoted device text B-430/OBS-691 use
+    elsewhere in this file -- not a hand-written string with nothing to
+    contain, which is exactly how the field this replaces (the old
+    `reason`-only containment) first slipped past its own test.
+    """
+
+    _set_dir(monkeypatch, tmp_path)
+    tk = _open(tmp_path)
+    device_words = "BGP Notification sent: hold time expired"
+    state_words = "No route to multi-hop neighbor"
+    tk.record_answer(
+        "transport_blocked", trustworthy=True,
+        cause={
+            "rung": "transport", "device": "PE2",
+            "reason": (
+                f"no TCP transport (the socket is not armed for read); the "
+                f"device reports the session state as '{state_words}'; the "
+                f"device last recorded a reset with reason '{device_words}' "
+                f"(history, not current state)"
+            ),
+            "device_text": [state_words, device_words],
+        },
+    )
+
+    found = ticket_read.read_ticket_by_run_id(tk.run_id)
+    cause = found["code_observed"]["answer"]["cause"]
+
+    assert len(cause["device_text"]) == 2
+    for fragment in (state_words, device_words):
+        matches = [v for v in cause["device_text"] if fragment in v]
+        assert matches, f"{fragment!r} is missing from device_text entirely"
+        value = matches[0]
+        assert model_egress.DEVICE_TEXT_OPEN in value
+        assert model_egress.DEVICE_TEXT_CLOSE in value
+
+    # Positive control (OBS-181): code-chosen identifiers beside it stay
+    # bare -- a walker that wrapped every string in the payload (including
+    # `rung`/`device`) would satisfy the assertions above and tell a reader
+    # nothing.
+    assert cause["rung"] == "transport"
+    assert cause["device"] == "PE2"
+    assert model_egress.DEVICE_TEXT_OPEN not in cause["rung"]
+    assert model_egress.DEVICE_TEXT_OPEN not in cause["device"]
+
+
+def test_a_rung_that_never_quoted_the_device_has_device_text_none_not_empty(tmp_path, monkeypatch):
+    """Absence is never zero, carried through the read path: a rung whose
+    `CheckResult.device_text` was `None` must come back `None`, never `[]` --
+    `[]` would read as "asked, and the device said nothing", which is a
+    different, false claim."""
+
+    _set_dir(monkeypatch, tmp_path)
+    tk = _open(tmp_path)
+    tk.record_answer(
+        "interface_line_down", trustworthy=True,
+        cause={"rung": "interface", "device": "PE2", "reason": "interface is down",
+               "device_text": None},
+    )
+
+    found = ticket_read.read_ticket_by_run_id(tk.run_id)
+    assert found["code_observed"]["answer"]["cause"]["device_text"] is None
+
+
+def test_handover_device_text_is_contained_for_both_previous_and_current(tmp_path, monkeypatch):
+    """The handover-section sibling of `test_both_handover_reasons_are_
+    contained_not_just_the_previous_one` -- B-692's `current_device_text`/
+    `previous_device_text` must be contained at the SAME trust level as
+    `current_reason`/`previous_reason` beside them, real device words and
+    all."""
+
+    _set_dir(monkeypatch, tmp_path)
+    tk = _open(tmp_path)
+    tk.record_answer("all_layers_healthy", trustworthy=True)
+    previous_words = "administrative shutdown"
+    current_words = "% Network not in table"
+    tk.record_handover(
+        status=ticket.HANDOVER_COMPARED,
+        previous_reason=f"the far end reports: {previous_words}",
+        current_reason=f"no route (device reports '{current_words}')",
+        finding_changed=True,
+        extra={
+            "previous_device_text": [previous_words],
+            "current_device_text": [current_words],
+        },
+    )
+
+    found = ticket_read.read_ticket_by_run_id(tk.run_id)
+    handover = found["code_observed"]["handover"]
+
+    for field, words in (
+        ("previous_device_text", previous_words),
+        ("current_device_text", current_words),
+    ):
+        values = handover[field]
+        assert len(values) == 1
+        assert model_egress.DEVICE_TEXT_OPEN in values[0]
+        assert model_egress.DEVICE_TEXT_CLOSE in values[0]
+        assert words in values[0]
+
+
 def test_handover_is_under_code_observed_never_model_claimed(tmp_path, monkeypatch):
     """A diff of two code-observed answers is itself code-observed --
     computed by `cli._record_handover`, never a model's account of what
