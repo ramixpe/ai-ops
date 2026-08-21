@@ -1,0 +1,26 @@
+{
+  "prompt": "troubleshooting.v1.txt",
+  "note": "Golden cases for the single-device analysis prompt. This prompt lived as a string literal in `llm_analysis.py` until 2026-08-21, when the operator asked that every prompt sent to a model be reviewable as a file. Moving it here subjected it to this directory's governance for the first time -- the refusal-path and golden-case rules were never applied to it while it was Python. The text itself is byte-for-byte unchanged by that move; nothing here re-reviews it, and any wording change is a v2.",
+  "refusal_marker": "If a claim cannot be traced to a specific command's output, do not make it.",
+  "refusal_note": "This prompt's refusal is per-claim rather than per-answer: it does not have an `undetermined` verdict the way `report` does, because it advises a next check rather than returning a finding. The refusal it does name is the one that matters for grounding -- an untraceable claim is dropped, not hedged.",
+  "cases": [
+    {
+      "name": "single_device_broken_evidence",
+      "source": "the `broken` label on PE2 -- the committed capture where IS-IS is down and the route to the peer is absent",
+      "structural_properties": [
+        "the rendered prompt carries parsed evidence only, never raw device text",
+        "every command whose output is summarised is named, so a claim can be traced back to one"
+      ],
+      "asserted_by_shape_only": true
+    },
+    {
+      "name": "healthy_device",
+      "source": "the `healthy` label on PE1",
+      "structural_properties": [
+        "a healthy device still yields a next check rather than an empty answer",
+        "no claim is made that is not traceable to a named command"
+      ],
+      "asserted_by_shape_only": true
+    }
+  ]
+}

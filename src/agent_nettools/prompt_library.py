@@ -116,7 +116,19 @@ PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "prompts"
 #: paragraph naming the quote delimiters `window_json` entries are now
 #: wrapped in -- see `prompts/README.md`'s version history. Superseded
 #: versions stay in the tree as the record of what was reviewed when.
-CURRENT_VERSION: dict[str, int] = {"report": 2, "correlate": 4}
+CURRENT_VERSION: dict[str, int] = {
+    "report": 2,
+    "correlate": 4,
+    # Migrated out of Python 2026-08-21 at the operator's request -- every
+    # prompt sent to a model is now reviewable as a file. All three landed
+    # at v1 because they are byte-for-byte the strings that were already
+    # in `llm_analysis.py`/`fabric_analysis.py`/`agent_loop.py`: a move,
+    # not an edit, and versioning them higher would have implied a review
+    # that never happened.
+    "troubleshooting": 1,
+    "fabric_analysis": 1,
+    "agent_system": 1,
+}
 
 
 class PromptNotFoundError(FileNotFoundError):

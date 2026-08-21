@@ -93,9 +93,13 @@ nettools-mcp = "mcp_server.server:main"
 
 [tool.setuptools.package-data]
 # data/*.yaml: inventory/lab.yaml's packaged fallback copy (R2).
-# data/prompts/*.txt: the six runtime-required prompt versions (EER-003) --
-# report.v1/v2, correlate.v1..v4. `.txt` needs its own entry; the yaml glob
-# above does not cover it.
+# data/prompts/*.txt: the nine runtime-required prompt versions (EER-003) --
+# report.v1/v2, correlate.v1..v4, and troubleshooting/fabric_analysis/
+# agent_system at v1 (moved out of Python 2026-08-21). `.txt` needs its own
+# entry; the yaml glob above does not cover it. The glob already covered the
+# three new files, so nothing here changed but the count -- which is exactly
+# why the count is written down: a stale number is the only thing that would
+# have made this drift visible.
 # data/fixtures/**/*.txt: the packaged demo fixture subset (EER-004) -- the
 # files the README-documented `--from-fixtures` commands actually read, not
 # the full tests/fixtures/ corpus. See fixtures.py's `_packaged_fixture_root`.

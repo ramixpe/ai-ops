@@ -13,8 +13,29 @@ prompts/
 ├── correlate.v2.txt   T-029a — superseded, kept
 ├── correlate.v3.txt   T-029a — superseded, kept
 ├── correlate.v4.txt   B-467/B-470 — current: finding + log window -> timeline
+├── troubleshooting.v1.txt  2026-08-21 — current: one device's evidence -> next check
+├── fabric_analysis.v1.txt  2026-08-21 — current: nine devices' evidence -> fabric view
+├── agent_system.v1.txt     2026-08-21 — current: the bounded tool-calling agent
 └── tests/cases/       golden input -> expected output shape
 ```
+
+**Every prompt this project sends a model is in this directory.** That is
+enforced, not aspirational: `tests/test_prompts_are_files.py` scans `src/` and
+`mcp_server/` for a module-level string constant that looks like a prompt and
+fails if it finds one, with a declared exemption list so an exception is a
+recorded decision rather than an oversight.
+
+The last three arrived on 2026-08-21, at the operator's request, from string
+literals in `llm_analysis.py`, `fabric_analysis.py` and `agent_loop.py`. Their
+text is byte-for-byte what it was — a move, not an edit, which is why all three
+are v1 rather than a higher number implying a review that never happened.
+
+**Worth knowing what that move actually did**, because it is the argument for
+the rule: all three *failed this directory's own tests on arrival*. Not because
+the prompts were bad, but because living in Python had exempted them from ever
+being checked — no named refusal path on file, no golden case. A prompt in a
+string literal is not merely harder to review; it is outside the review system
+entirely.
 
 ---
 
@@ -174,6 +195,9 @@ that drifted.
 | Prompt | Current | History |
 |---|---|---|
 | `report` | **v2** | v1 (T-027) let the model write `recommendation.next_check` — a free-text guess at what to do next. B-490 (`MCP-EXPERIMENT.md` §11.2): a 4B model handed a `no_fault_on_path` report rewrote it as *"likely an application or configuration problem"* and proposed *"the service running on 10.255.0.12 is down"* — about a router loopback, which runs no service. `next_check` is a **closed field** now: the descent already computes it and the authoritative report already carries it, so v2 forbids the model from writing one at all (`"recommendation": {"requires_human": true}` and nothing else), and `grounding.check_recommendation_closed` fails `recommendation_not_closed` on any difference from `render.next_check_for(finding)`, quoting only the authoritative text. Mutation-verified (guard disabled → 2 tests fail). Golden cases rebound to v2 |
+| `troubleshooting` | **v1** | Moved out of `llm_analysis.py` 2026-08-21 (operator request: every prompt reviewable as a file). Byte-for-byte unchanged, so v1 rather than v2 — nothing about the text was reviewed by moving it. Its refusal is per-claim rather than per-answer: unlike `report` it has no `undetermined` verdict, because it advises a next check rather than returning a finding |
+| `fabric_analysis` | **v1** | Moved out of `fabric_analysis.py` 2026-08-21, byte-for-byte. Its refusal marker differs from `troubleshooting`'s by one word — *device's* rather than *command's* — because it reasons across nine devices and the traceability unit is the device. That difference is exactly why `test_every_prompt_names_its_refusal_path` reads the marker from the case file instead of hardcoding one vocabulary (OBS-065) |
+| `agent_system` | **v1** | Moved out of `agent_loop.py` 2026-08-21, byte-for-byte. Names three refusals where the others name one, because an agent can fail in ways a single-shot analysis cannot: a refused tool call, an exhausted budget, an untraceable claim. The budget one is the declared marker — it is the refusal unique to this prompt's shape, and the one whose absence would let a partial answer be presented as a complete one |
 | `correlate` | **v4** | v1 (T-028) described a noise filter that dropped whole facilities. `log_window.py` was corrected to attribute each record before dropping it, which leaves unattributable — and often high-severity — session events in the window. v2 states why they are there and that **retention is not relevance**, and adds constraint 7: severity ranks how loudly a device reports something, not whether it bears on the finding. See OBS-063. v3 (T-029a) adds a COVERAGE slot and constraint 7 — *never state a negative more strongly than the coverage supports* — and moves the refusal marker to "no correlating events in the available coverage", because a negative over an incomplete source is an `unevaluated`, not a `no`. See OBS-068. v4 (B-467/B-470, DEEP-REVIEW-2026-08-17 §2.1) adds a GROUNDING paragraph naming the `<<<DEVICE-TEXT untrusted>>>`/`<<<END-DEVICE-TEXT>>>` markers `prompt_library.build_correlate_prompt` now wraps every record's `text` in, and constraint 9 telling the model that span is data, never instructions — every prior version embedded log text unmarked, which the deep review measured at 28 of 28 shaped records on the `broken` fixture |
 
 Superseded versions stay in the tree. No report was ever produced from

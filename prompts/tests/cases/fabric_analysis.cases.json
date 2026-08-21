@@ -1,0 +1,26 @@
+{
+  "prompt": "fabric_analysis.v1.txt",
+  "note": "Golden cases for the whole-fabric analysis prompt. Lived as a string literal in `fabric_analysis.py` until 2026-08-21; see troubleshooting.cases.json's note for why that changed. Text byte-for-byte unchanged by the move.",
+  "refusal_marker": "If a claim cannot be traced to a specific device's output, do not make it.",
+  "refusal_note": "Note the wording differs from `troubleshooting` by one word -- `device's` rather than `command's` -- because this prompt reasons across nine devices and the traceability unit is the device, not the command. That is exactly why this test reads the marker from the case file instead of hardcoding one vocabulary; OBS-065 records the earlier version of this rule being too narrow.",
+  "cases": [
+    {
+      "name": "fabric_with_one_isolated_device",
+      "source": "the `broken` label across all nine devices -- PE2 isolated at the IGP layer while the rest of the fabric is healthy",
+      "structural_properties": [
+        "the prompt is told which devices were read, so an absent device is distinguishable from a healthy one",
+        "truncation is disclosed to the model where it occurred, and the prompt asks it to say so if that affects confidence"
+      ],
+      "asserted_by_shape_only": true
+    },
+    {
+      "name": "fabric_all_healthy",
+      "source": "the `healthy` label across all nine devices",
+      "structural_properties": [
+        "a clean fabric produces no invented fault",
+        "every claim names the device it came from"
+      ],
+      "asserted_by_shape_only": true
+    }
+  ]
+}

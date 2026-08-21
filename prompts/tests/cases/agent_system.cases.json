@@ -1,0 +1,26 @@
+{
+  "prompt": "agent_system.v1.txt",
+  "note": "Golden cases for the bounded tool-calling agent's system prompt (`nettools agent`, opt-in behind NETTOOLS_ENABLE_AGENT since B-488). Lived as a string literal in `agent_loop.py` until 2026-08-21. Text byte-for-byte unchanged by the move.",
+  "refusal_marker": "If you cannot fully answer within your remaining tool calls, say what you found and what you were not able to check.",
+  "refusal_note": "This prompt names three distinct refusals where the other two name one, because an agent can fail in ways a single-shot analysis cannot: a refused tool call, a budget it ran out of, and an untraceable claim. The budget one is declared the marker here -- it is the refusal unique to this prompt's shape, and the one whose absence would let the agent quietly present a partial answer as a complete one.",
+  "cases": [
+    {
+      "name": "answerable_within_budget",
+      "source": "a question resolvable from two tool calls against committed fixtures",
+      "structural_properties": [
+        "evidence is gathered before answering rather than guessed",
+        "every claim traces to a tool result actually received"
+      ],
+      "asserted_by_shape_only": true
+    },
+    {
+      "name": "budget_exhausted_before_completion",
+      "source": "a question requiring more tool calls than the configured --max-iterations allows",
+      "structural_properties": [
+        "the answer states what was found AND what was not checked",
+        "the shortfall is disclosed rather than the partial answer being presented as complete"
+      ],
+      "asserted_by_shape_only": true
+    }
+  ]
+}
