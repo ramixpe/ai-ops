@@ -14,11 +14,15 @@ from __future__ import annotations
 import json
 import sys
 import urllib.error
+from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 
+from agent_nettools import health as H
 from agent_nettools import notifier as N
 from agent_nettools import ownership as O
+from agent_nettools import relay_policy as R
 
 # --------------------------------------------------------------------------- #
 # helpers
@@ -734,3 +738,266 @@ def test_resolve_ownership_then_notify_owner_end_to_end(monkeypatch):
     assert len(records) == 1
     assert records[0]["ok"] is True
     assert json.loads(capture.requests[0].data)["chat_id"] == "555"
+
+
+# --------------------------------------------------------------------------- #
+# B-209b: `relay_policy.relay()` wired into the CLI's `--notify` handling.
+#
+# `relay()` shipped in B-209 fully tested against itself (`test_relay_policy.
+# py`); the risk this section actually guards against is the WIRING -- did
+# `cli.py`'s `_cmd_investigate` call it with the right arguments, and did it
+# turn `relay()`'s (differently-shaped) record into the same notes `--notify`
+# always printed. `relay_policy.relay`'s own discrimination (a silence for
+# the wrong device does not match, a changed signature is never suppressed,
+# ...) is already pinned in `test_relay_policy.py` and is not re-proven here.
+# --------------------------------------------------------------------------- #
+
+
+class _Recording(N.Notifier):
+    """A notifier that records every keyword `notify()`/`notify_owner()` pass
+    it, and never talks to a network. Registered under `_NOTIFIERS` per test
+    (`monkeypatch.setitem`) rather than module scope, matching `test_the_cli_
+    hands_the_notifier_the_report_and_nothing_else` above."""
+
+    name = "recording"
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def send(self, report, *, subject, device, finding,
+              trustworthy=None, cause=None, ticket_id=None) -> None:
+        self.calls.append({
+            "report": report, "subject": subject, "device": device,
+            "finding": finding, "trustworthy": trustworthy, "cause": cause,
+            "ticket_id": ticket_id,
+        })
+
+
+def _no_relay_hardening_configured(monkeypatch) -> None:
+    """The `.env`-default state every B-209b default-behaviour test starts
+    from: no de-dup state file, no ownership table, no silence file."""
+
+    monkeypatch.delenv(R.NETTOOLS_RELAY_STATE_FILE_ENV, raising=False)
+    monkeypatch.delenv(R.NETTOOLS_OWNERSHIP_FILE_ENV, raising=False)
+    monkeypatch.delenv(H.NETTOOLS_SILENCE_FILE_ENV, raising=False)
+
+
+def test_note_relay_outcome_matches_pre_b209b_notify_wording_for_all_three_branches(capsys):
+    """`relay_policy.relay()`'s top-level record (`"decision"`/`"deliveries"`)
+    has a different shape from `notifier.notify()`'s own
+    (`"attempted"`/`"provider"`/`"ok"`/`"error"`) -- this pins that
+    `cli._note_relay_outcome`, the function that bridges the two, still
+    prints the exact three literal notes the pre-B-209b direct `notify()`
+    call produced, for the single-delivery case every default configuration
+    produces. Isolated from the full CLI/investigation machinery so the
+    three branches are each exercised directly rather than depending on a
+    fixture producing the right finding to hit all three."""
+
+    from agent_nettools import cli
+
+    args = SimpleNamespace(quiet=False)
+
+    cli._note_relay_outcome(
+        {"decision": "failed", "deliveries": [
+            {"attempted": True, "provider": "telegram", "ok": False,
+             "error": "boom", "owner": "default"},
+        ]},
+        args,
+    )
+    assert capsys.readouterr().err == "# Notification failed (telegram): boom\n"
+
+    cli._note_relay_outcome(
+        {"decision": "sent", "deliveries": [
+            {"attempted": True, "provider": "telegram", "ok": True,
+             "error": None, "owner": "default"},
+        ]},
+        args,
+    )
+    assert capsys.readouterr().err == "# Notification sent via telegram.\n"
+
+    cli._note_relay_outcome(
+        {"decision": "no_provider", "deliveries": [
+            {"attempted": False, "provider": "none", "ok": True,
+             "error": None, "owner": "default"},
+        ]},
+        args,
+    )
+    assert capsys.readouterr().err == "# NETTOOLS_NOTIFIER is 'none'; --notify did nothing.\n"
+
+
+def test_notify_default_behaviour_is_byte_identical_via_relay(monkeypatch, capsys):
+    """The house rule this wiring is bound by: with `NETTOOLS_RELAY_STATE_FILE`
+    unset (its actual state in `.env`), delivery through `relay_policy.relay()`
+    must be byte-identical to the pre-B-209b direct `notifier.notify()` call --
+    not merely similar. `relay()` resolves to the single default-channel owner
+    with no ownership table configured, and `notify_owner` on that channel
+    defers to `notify()` unchanged (see its own docstring) -- this is the
+    end-to-end proof that fallback chain actually lands on the exact same
+    note the CLI printed before this file existed."""
+
+    from agent_nettools import cli
+
+    _no_relay_hardening_configured(monkeypatch)
+    monkeypatch.setitem(N._NOTIFIERS, _Recording.name, _Recording)
+    monkeypatch.setenv(N.NOTIFIER_ENV, _Recording.name)
+
+    _argv(monkeypatch, cli, "--notify")
+    code = cli.main()
+
+    assert code == 1  # `broken`: a real fault on the path, unaffected by --notify
+    assert capsys.readouterr().err.splitlines()[-1] == "# Notification sent via recording."
+
+
+def test_the_cli_now_threads_trustworthy_cause_and_ticket_id_through_relay(monkeypatch):
+    """Before this wiring, `_cmd_investigate`'s `--notify` handling called
+    `notify()` with only `report`/`device`/`subject`/`finding` -- `notify()`
+    had accepted `trustworthy`/`cause`/`ticket_id` since B-681, but nothing
+    in the shipped CLI path ever supplied them (`notifier.py`'s own docstring,
+    "Wiring a caller to pass them is explicitly out of scope for this
+    change", names this exact gap). This is the test that closes it: all
+    three now reach the notifier's `send()`, taken from the same descent
+    result and ticket the JSON payload/ticket file already record."""
+
+    from agent_nettools import cli
+
+    _no_relay_hardening_configured(monkeypatch)
+    recorder = _Recording()
+    monkeypatch.setitem(N._NOTIFIERS, _Recording.name, lambda: recorder)
+    monkeypatch.setenv(N.NOTIFIER_ENV, _Recording.name)
+
+    _argv(monkeypatch, cli, "--notify", "--quiet")
+    cli.main()
+
+    assert len(recorder.calls) == 1
+    call = recorder.calls[0]
+    # The `broken` fixture's own known answer (also `_report()`'s shape at the
+    # top of this file): a real, trustworthy finding with a resolved cause.
+    assert call["trustworthy"] is True
+    assert call["cause"] == {
+        "rung": "interface", "device": "PE2",
+        "reason": "1 of 3 members healthy (all required)",
+    }
+    assert isinstance(call["ticket_id"], str) and call["ticket_id"]
+
+
+def test_a_silenced_finding_is_noted_and_never_reaches_the_notifier(monkeypatch, tmp_path, capsys):
+    """B-209b surfaces two decisions `notify()` alone never produced --
+    `relay()` can decide not to attempt delivery at all. This is the first:
+    an operator-declared silence, read from `NETTOOLS_SILENCE_FILE` exactly
+    as `nettools health --silence-file` already does (`relay_policy.py`'s own
+    `_resolve_silences`)."""
+
+    from agent_nettools import cli
+
+    silence_path = tmp_path / "silences.yaml"
+    silence_path.write_text(
+        "- device: RR1\n"
+        "  rule: interface_line_down\n"
+        "  reason: planned migration\n"
+        "  created_by: rami\n"
+        "  expires_at: '2030-01-01T00:00:00+00:00'\n"
+    )
+
+    _no_relay_hardening_configured(monkeypatch)
+    monkeypatch.setenv(H.NETTOOLS_SILENCE_FILE_ENV, str(silence_path))
+    recorder = _Recording()
+    monkeypatch.setitem(N._NOTIFIERS, _Recording.name, lambda: recorder)
+    monkeypatch.setenv(N.NOTIFIER_ENV, _Recording.name)
+
+    _argv(monkeypatch, cli, "--notify")
+    cli.main()
+
+    assert recorder.calls == []
+    err = capsys.readouterr().err
+    assert "# Notification silenced (planned migration, by rami)" in err
+
+
+def test_positive_control_a_silence_for_a_different_device_still_sends(monkeypatch, tmp_path, capsys):
+    """OBS-181: the silenced-note test above must not pass because `relay()`
+    silences everything once a silence file is merely configured -- this is
+    the identical file with a device that does not match, and delivery must
+    proceed."""
+
+    from agent_nettools import cli
+
+    silence_path = tmp_path / "silences.yaml"
+    silence_path.write_text(
+        "- device: PE9\n"  # not RR1
+        "  rule: interface_line_down\n"
+        "  reason: planned migration\n"
+        "  created_by: rami\n"
+        "  expires_at: '2030-01-01T00:00:00+00:00'\n"
+    )
+
+    _no_relay_hardening_configured(monkeypatch)
+    monkeypatch.setenv(H.NETTOOLS_SILENCE_FILE_ENV, str(silence_path))
+    recorder = _Recording()
+    monkeypatch.setitem(N._NOTIFIERS, _Recording.name, lambda: recorder)
+    monkeypatch.setenv(N.NOTIFIER_ENV, _Recording.name)
+
+    _argv(monkeypatch, cli, "--notify")
+    cli.main()
+
+    assert len(recorder.calls) == 1
+    assert capsys.readouterr().err.splitlines()[-1] == "# Notification sent via recording."
+
+
+def test_a_suppressed_finding_is_noted_and_never_reaches_the_notifier(monkeypatch, tmp_path, capsys):
+    """The second decision unique to `relay()`: an unchanged (device, subject,
+    finding, cause.rung) signature notified again inside the de-dup window --
+    pre-seeded here so the very first `--notify` call in the test already
+    lands inside it."""
+
+    from agent_nettools import cli
+
+    state_path = tmp_path / "relay-state.json"
+    state_path.write_text(json.dumps({
+        "RR1\x1f10.255.0.12": {
+            "signature": ["interface_line_down", "interface"],
+            "last_notified_at": datetime.now(timezone.utc).isoformat(),
+            "notify_count": 1, "device": "RR1", "subject": "10.255.0.12",
+        },
+    }), encoding="utf-8")
+
+    monkeypatch.delenv(R.NETTOOLS_OWNERSHIP_FILE_ENV, raising=False)
+    monkeypatch.setenv(R.NETTOOLS_RELAY_STATE_FILE_ENV, str(state_path))
+    recorder = _Recording()
+    monkeypatch.setitem(N._NOTIFIERS, _Recording.name, lambda: recorder)
+    monkeypatch.setenv(N.NOTIFIER_ENV, _Recording.name)
+
+    _argv(monkeypatch, cli, "--notify")
+    cli.main()
+
+    assert recorder.calls == []
+    assert "# Notification suppressed (de-dup):" in capsys.readouterr().err
+
+
+def test_positive_control_a_changed_cause_is_never_suppressed_at_the_cli(monkeypatch, tmp_path, capsys):
+    """OBS-181: the suppressed-note test above must not pass because `relay()`
+    suppresses on the mere presence of a state file -- a DIFFERENT prior
+    signature for the same (device, subject) must still send, exactly as
+    `relay_policy.py`'s own de-dup rule states (an update is never
+    suppressed, regardless of the window)."""
+
+    from agent_nettools import cli
+
+    state_path = tmp_path / "relay-state.json"
+    state_path.write_text(json.dumps({
+        "RR1\x1f10.255.0.12": {
+            "signature": ["bgp_session_down", "bgp_session"],  # not this run's signature
+            "last_notified_at": datetime.now(timezone.utc).isoformat(),
+            "notify_count": 1, "device": "RR1", "subject": "10.255.0.12",
+        },
+    }), encoding="utf-8")
+
+    monkeypatch.delenv(R.NETTOOLS_OWNERSHIP_FILE_ENV, raising=False)
+    monkeypatch.setenv(R.NETTOOLS_RELAY_STATE_FILE_ENV, str(state_path))
+    recorder = _Recording()
+    monkeypatch.setitem(N._NOTIFIERS, _Recording.name, lambda: recorder)
+    monkeypatch.setenv(N.NOTIFIER_ENV, _Recording.name)
+
+    _argv(monkeypatch, cli, "--notify")
+    cli.main()
+
+    assert len(recorder.calls) == 1
+    assert capsys.readouterr().err.splitlines()[-1] == "# Notification sent via recording."

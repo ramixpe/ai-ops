@@ -113,23 +113,31 @@ def test_a_silence_subcommand_is_still_not_registered_but_the_flag_is():
 # --------------------------------------------------------------------------- #
 
 
-def test_notify_call_site_does_not_yet_pass_the_rca_fields():
-    """§2 says today's `--notify` message is `{finding} — {device} →
-    {subject}` and nothing else, because `cli.py`'s call into
-    `notifier.notify()` does not pass `cause`/`trustworthy`/`ticket_id` even
-    though `notify()` accepts all three. If a future change wires them
-    through, this fails and §2 needs rewriting to describe the fuller page."""
+def test_notify_call_site_now_passes_the_rca_fields_through_relay():
+    """§2, updated for B-209b: `cli.py`'s `--notify` handling now calls
+    `relay_policy.relay()` -- the hardened drop-in `notifier.notify()`
+    (B-209) -- with `cause`/`trustworthy`/`ticket_id`, closing the gap this
+    test used to pin the absence of (see git blame for the pre-B-209b
+    version, which asserted the opposite). If a future change drops one of
+    them again, this fails and §2 needs rewriting back to describe the
+    narrower page. `tests/test_notifier.py::
+    test_the_cli_now_threads_trustworthy_cause_and_ticket_id_through_relay`
+    is the companion proof that these are not just syntactically present but
+    actually reach a notifier's `send()`."""
 
     source = inspect.getsource(cli._cmd_investigate)
-    # Isolate just the `_notify(...)` call, not the whole (long) function.
-    start = source.index("record = _notify(")
-    end = source.index(")", source.index("finding=result.descent.finding", start))
+    # Isolate just the `relay_policy.relay(...)` call, not the whole (long)
+    # function. Anchored on `ticket_id=` (the last of the three) rather than
+    # `finding=`, which now precedes all three and would truncate the slice
+    # at the first `)` it meets -- inside `cause=payload.get("cause")`.
+    start = source.index("record = relay_policy.relay(")
+    end = source.index(")", source.index("ticket_id=", start))
     call_text = source[start:end]
-    for missing_kwarg in ("cause=", "trustworthy=", "ticket_id="):
-        assert missing_kwarg not in call_text, (
-            f"{missing_kwarg} now appears in --notify's call to notify() -- "
-            "ON-CALL-RUNBOOK.md section 2 describes the OLD, narrower page "
-            "and must be updated"
+    for required_kwarg in ("cause=", "trustworthy=", "ticket_id="):
+        assert required_kwarg in call_text, (
+            f"{required_kwarg} no longer appears in --notify's call to "
+            "relay_policy.relay() -- ON-CALL-RUNBOOK.md section 2 describes "
+            "the FULLER page and must be updated back to the narrower one"
         )
 
 

@@ -54,6 +54,8 @@ deployment at all today, a human is reading its output, not a page.
 
 ```
 {finding} — {device} → {subject}
+Cause: <rung> on <device>
+Trustworthy: yes  /  Trustworthy: NO — verify before acting on this
 
 • <observation 1>
 • <observation 2>
@@ -61,22 +63,30 @@ deployment at all today, a human is reading its output, not a page.
 <interpretation lines, if a paraphrase ran>
 
 Next: <recommendation, if one was rendered>
+
+Ticket: <run_id>
 ```
 
-Three more lines — `Cause: <rung> on <device>`, `Trustworthy: yes` /
-`Trustworthy: NO — verify before acting on this`, and `Ticket: <run_id>` —
-are **built into `notifier.py` and not yet reaching you**. The function that
-renders them (`render_report_text`) takes `cause`/`trustworthy`/`ticket_id`
-as optional arguments; `cli.py`'s `--notify` handling — the one thing that
-actually calls it today — does not pass them. So the page you have names
-*what* was found and *where*, and nothing about whether it was found with
-confidence, or which rung caused it, or which ticket it belongs to. That is
-a real, current gap, not a formatting choice — if the page you're looking at
-already has `Cause:`/`Trustworthy:`/`Ticket:` lines, someone has since wired
-`cli.py` to pass them and this paragraph is stale; check the git blame on
-`_cmd_investigate`'s `--notify` block before trusting either version.
+The `Cause:`/`Trustworthy:`/`Ticket:` lines were, until B-209b, **built into
+`notifier.py` and not reaching you**: `render_report_text` always accepted
+`cause`/`trustworthy`/`ticket_id` as optional arguments, but `cli.py`'s
+`--notify` handling — the one thing that actually calls it — did not pass
+them. That gap is closed: `_cmd_investigate` now threads all three through
+`relay_policy.relay()` (the same call that also applies silences, ownership
+routing, and de-dup — §5 and §8 below), which forwards them to
+`notify_owner()`/`notify()` unchanged, so a page now names not just *what*
+was found and *where*, but whether the answer is trustworthy, which rung
+caused it, and the exact ticket to open for the rest.
 
-**Until that's wired, get the rest by hand, on the host that ran it:**
+`Cause:` is still omitted (not blank) when the descent found no cause to
+name (`cause_not_localised`, `all_layers_healthy`, ...) — absence is never
+zero, the same rule the rest of this codebase applies everywhere else. If a
+page you're reading is missing all three lines, it predates this wiring;
+check the git blame on `_cmd_investigate`'s `--notify` block if the date
+matters.
+
+**What §2's page still does not give you directly — the diagnosis id, and
+the ticket's own content (only its `run_id` is on the page now):**
 
 1. `nettools ledger summary` shows recent diagnoses, most-recent first,
    including the id you'll need in §6.
@@ -178,8 +188,11 @@ as "checked and clean" rather than "nothing we checked found a problem."
 
 **[Corrected 2026-08-20] The mechanism is wired for `nettools health` now.**
 This section originally said it was not reachable from the command line at
-all; that stopped being true when `--silence-file` shipped. Read both halves
-below — what changed and what is still genuinely missing.
+all; that stopped being true when `--silence-file` shipped. **[B-209b]
+`nettools investigate --notify` reaches the same silence file now too, and
+so does `ownership.py` (who gets told).** Read every part below — what
+changed for `health`, what changed for `investigate --notify`, and what is
+still genuinely missing.
 
 **What it does.** `health.py` implements a maintenance
 window (`Silence`): `device`/`rule`/`subject` (each optional, each an AND), a
@@ -206,22 +219,46 @@ flag existed — no silences applied. So filing a silence and having it
 actually suppress `nettools health`'s verdict severity **is** something you
 can do from the command line today, for `health`.
 
-**The gap that's still real.** `nettools investigate` has **no**
-`--silence-file` flag — the mechanism only reaches the fabric health check,
-not a single investigation. There is still no dedicated `nettools silence`
-subcommand for authoring a silence file (you write the JSON/YAML by hand
-against `health.Silence`'s fields). And `ownership.py` (who gets told) and
-`incident_correlation.py` (grouping related pages) remain unwired: tested,
-but neither has a CLI or MCP surface — grepping both for either module name
-turns up nothing but one code comment.
+**[B-209b] `nettools investigate --notify` now reads the same
+`NETTOOLS_SILENCE_FILE` environment variable too**, with no flag of its own
+to set — `relay_policy.relay()` (the hardened relay `--notify` calls, §2)
+checks it on every run before attempting delivery. One file covers both
+surfaces: a silence filed for `health` also stops the identical finding from
+paging through `investigate`, and vice versa. Delivery is the only thing a
+match changes here, same as the narrower `--notify` rule the "What it does"
+paragraph above already states — the investigation's own JSON payload and
+exit code are untouched; only the page is withheld. `ownership.py` (who
+gets told) is resolved in the same call, via `NETTOOLS_OWNERSHIP_FILE` — a
+declarative table routing a finding to an owner's own Telegram destination,
+falling back to today's single default channel when unset. A third,
+genuinely new capability rides along with no `health` equivalent at all:
+`NETTOOLS_RELAY_STATE_FILE` de-duplicates, so the same (device, subject)
+signature does not re-page on every run inside a window
+(`NETTOOLS_RELAY_DEDUP_SECONDS`, default 1800s). All three variables are
+declared in `settings.py` (`nettools config show` lists them) and unset by
+default — unset, `--notify`'s delivery is exactly what it was before B-209b.
+
+**The gap that's still real.** There is still no dedicated `nettools
+silence` or `nettools ownership` subcommand for authoring either file (you
+write the YAML by hand against `health.Silence`'s / `ownership.
+OwnershipTable`'s fields), and `investigate` still has no `--silence-file`/
+`--ownership-file` *flag* the way `health` has one — only the environment
+variables reach it, so a per-run override (as opposed to a per-deployment
+default) is not possible from `investigate` today. `incident_correlation.py`
+(grouping related pages into one incident) remains genuinely unwired:
+tested, but it has no CLI or MCP surface — and `relay_policy.py`'s own
+docstring explains why it was not simply called from here either: it answers
+a retrospective, batch-shaped question over the ledger, not this module's
+"one call, right now" shape.
 
 **What to actually do about an `investigate`-triggered page during a planned
-change, until that has a silence flag too:** tell your
-team out of band (the channel this system does not have), and if you need to
-stop pages mechanically, disable or pause whatever *external* scheduler is
-calling `nettools investigate --notify` for the device in question (the
-Alertmanager rule, the n8n flow, the cron entry) — the suppression has to
-happen one layer up, in the orchestrator, not inside `nettools` today.
+change:** add (or reuse) a row in whatever file `NETTOOLS_SILENCE_FILE`
+names — it reaches `investigate --notify` directly now, no external
+workaround required (see above). If that variable is not set for your
+deployment at all, fall back to the old answer: tell your team out of band
+(the channel this system does not have), and disable or pause whatever
+*external* scheduler is calling `nettools investigate --notify` for the
+device in question (the Alertmanager rule, the n8n flow, the cron entry).
 
 ## 6. Closing a ticket, and what closure means
 
@@ -285,7 +322,8 @@ nettools ledger verdict DIAGNOSIS_ID confirmed_correct|incorrect|unknown \
 | Is this "couldn't check" or "network's fine" | §3's table — `trustworthy: false` only for `undetermined`/`temporally_incoherent`/`subject_not_found` |
 | Same integer, `investigate` vs `health` | §3's exit-code table — they are not the same scale |
 | Can it fix this itself | No. Never. §4 |
-| Stop paging during a maintenance window | §5 — pause the *external* trigger; there is no `nettools` switch yet |
+| Stop paging during a maintenance window | §5 — file a row in `$NETTOOLS_SILENCE_FILE`; it now reaches `investigate --notify` directly (B-209b), no external workaround needed |
+| Route a page to a specific owner, or stop the same fault re-paging every run | §5 — `NETTOOLS_OWNERSHIP_FILE` / `NETTOOLS_RELAY_STATE_FILE` (both unset by default; unset changes nothing) |
 | "Close" this ticket | Nothing to do — already closed itself. §6 |
 | Record that the diagnosis was wrong (or right) | `nettools ledger verdict ID OUTCOME --by NAME` — §7 |
 | Find the diagnosis id after the fact | `nettools ledger summary`, or stderr from the original run — §2 |

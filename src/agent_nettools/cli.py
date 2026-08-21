@@ -176,6 +176,7 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     "flows": (".flows", None),
     "metrics": (".metrics", None),
     "output": (".output", None),
+    "relay_policy": (".relay_policy", None),
     "settings": (".settings", None),
     # agent_loop
     "run_agent_loop": (".agent_loop", "run_agent_loop"),
@@ -247,7 +248,7 @@ _LAZY: dict[str, tuple[str, str | None]] = {
 # save-the-old-value step) now finds this placeholder directly rather than
 # going through `__getattr__` at all, which is fine -- the placeholder is
 # about to be overwritten with `fake` either way.
-flows = metrics = output = settings = None
+flows = metrics = output = relay_policy = settings = None
 run_agent_loop = None
 analyze_fabric = None
 capture_device = load_fixture_evidence = None
@@ -1450,6 +1451,53 @@ def _config_reconciliation_for(args, result, sender) -> dict | None:
     }
 
 
+def _note_relay_outcome(record: dict, args: argparse.Namespace) -> None:
+    """Turn a `relay_policy.relay()` record (B-209b) into `--notify`'s notes.
+
+    **Byte-identical to the pre-B-209b `notifier.notify()` notes whenever
+    there is exactly one delivery and it was neither silenced nor
+    suppressed** -- which is every default configuration
+    (`NETTOOLS_RELAY_STATE_FILE` unset, no ownership table configured):
+    `relay()` then resolves to the single default-channel owner, and
+    `notify_owner` on that channel defers to `notify()` unchanged (see that
+    function's own docstring), so `record["deliveries"][0]` IS `notify()`'s
+    own record, plus `"owner"`. `test_notify_default_behaviour_is_byte_
+    identical_via_relay` in `tests/test_notifier.py` pins exactly this.
+
+    Two new outcomes have no pre-B-209b equivalent -- `relay()` can decide
+    not to attempt delivery at all, either because an operator declared a
+    silence (`decision == "silenced"`) or because the de-dup window matched
+    an unchanged signature (`decision == "suppressed"`) -- and get their own
+    note rather than being forced through the three branches above.
+    """
+
+    decision = record["decision"]
+    if decision == "silenced":
+        silence = record.get("silence") or {}
+        _note(
+            f"# Notification silenced ({silence.get('reason', 'no reason given')}"
+            f", by {silence.get('created_by', 'unknown')}); --notify did not "
+            "attempt delivery.",
+            args,
+        )
+        return
+    if decision == "suppressed":
+        reason = (record.get("dedup") or {}).get("reason", "duplicate within the de-dup window")
+        _note(f"# Notification suppressed (de-dup): {reason}", args)
+        return
+
+    deliveries = record["deliveries"]
+    multi = len(deliveries) > 1
+    for delivery in deliveries:
+        suffix = f" (owner {delivery['owner']})" if multi and delivery.get("owner") else ""
+        if delivery["error"]:
+            _note(f"# Notification failed ({delivery['provider']}){suffix}: {delivery['error']}", args)
+        elif delivery["attempted"]:
+            _note(f"# Notification sent via {delivery['provider']}{suffix}.", args)
+        else:
+            _note(f"# NETTOOLS_NOTIFIER is 'none'; --notify did nothing{suffix}.", args)
+
+
 def _cmd_investigate(args: argparse.Namespace) -> int:
     """Run one deterministic investigation and report what it found.
 
@@ -1652,16 +1700,25 @@ def _cmd_investigate(args: argparse.Namespace) -> int:
         _note(f"# {coherence.caveat}", args)
 
     # T-035. Delivery is best-effort and structurally cannot carry evidence:
-    # `notify` takes the report object and has no parameter a bundle could
+    # `relay` takes the report object and has no parameter a bundle could
     # arrive in. It never raises, so nothing below this line can change because
     # a channel was down -- a run that found the fault and failed to post about
     # it has still found the fault.
+    #
+    # B-209b: `relay_policy.relay()` is the hardened drop-in for
+    # `notifier.notify()` -- same required arguments (`report`, `device=`,
+    # `subject=`, `finding=`), with silence/ownership/de-dup layered in front
+    # of delivery. `trustworthy`/`cause`/`ticket_id` are passed through so an
+    # owner-routed message carries the RCA, not just the alarm (B-681/B-209 --
+    # `notifier.notify_owner`'s own docstring names what was silently dropped
+    # on a routed channel before that fix). `cause`/`ticket_id` are already in
+    # hand here: `payload["cause"]` from the `to_payload()` above, and
+    # `ticket_handle.run_id` from the ticket this function already opened.
     if getattr(args, "notify", False):
-        from .notifier import notify as _notify
+        _require("relay_policy")
 
-        payload = result.to_payload()
         report = (payload.get("report") or {}).get("content") or {}
-        record = _notify(
+        record = relay_policy.relay(
             report,
             device=args.device,
             # The resolved subject, not the raw sentence (B-112): a
@@ -1669,13 +1726,11 @@ def _cmd_investigate(args: argparse.Namespace) -> int:
             # name "10.255.0.12", same as it would for a normal invocation.
             subject=subject,
             finding=result.descent.finding,
+            trustworthy=result.trustworthy,
+            cause=payload.get("cause"),
+            ticket_id=getattr(ticket_handle, "run_id", None),
         )
-        if record["error"]:
-            _note(f"# Notification failed ({record['provider']}): {record['error']}", args)
-        elif record["attempted"]:
-            _note(f"# Notification sent via {record['provider']}.", args)
-        else:
-            _note("# NETTOOLS_NOTIFIER is 'none'; --notify did nothing.", args)
+        _note_relay_outcome(record, args)
 
     if not result.trustworthy:
         return EXIT_CRITICAL
