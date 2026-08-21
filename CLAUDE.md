@@ -62,7 +62,11 @@ per-device collection/latency/retry metrics and health verdict counts;
 now accept `--format json|table|summary` (default `json`) and `--quiet`; see
 "Output formats and exit codes (Phase 8)" below.
 
-CI (`.github/workflows/ci.yml`) runs `ruff check .` then `pytest -q` on Python 3.11.
+CI (`.github/workflows/ci.yml`) runs `ruff check .` then `pytest -q` on a
+**matrix of Python 3.11 and 3.12** — not one version, and **not whatever
+`.venv` happens to be**. A local `pytest -q` is evidence about your
+interpreter, not a prediction about CI; OBS-695 records a session that
+reported green all night from a 3.13 venv while CI gated on 3.11/3.12.
 `tests/test_live_lab.py` (marker `live_lab`, registered in `pyproject.toml`) is
 excluded from that by default -- every test in it self-skips unless
 `NETTOOLS_LIVE_LAB=1` is set, so CI/`make test` never needs a reachable lab.

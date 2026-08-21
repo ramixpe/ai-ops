@@ -7414,3 +7414,38 @@ time that has been the operative fact today.
 
 **Fabric is back at golden**, verified: `all_layers_healthy`, five of five
 rungs, `Gi0/0/0/2` admin up.
+
+## OBS-695 · "Green locally" has never meant "green in CI"
+
+- **Kind:** process defect (mine), plus one unexplained CI failure
+- **What happened:** the 08:37 push (OBS-693) failed CI on
+  `test_diagrams.py::test_diagram_matches_its_generator[02-call-path.svg]`
+  — "stale: regenerating it from d2.py produces different bytes" — on the
+  **Python 3.12** leg. The 3.11 leg was cancelled by fail-fast. I had run
+  `pytest -q` locally before that push and seen it green, and I did not look
+  at CI afterwards.
+- **The failure itself is unreproducible and is no longer occurring.** Checked
+  out that exact commit in a detached worktree, regenerated `d2.py` under a
+  real 3.12 interpreter: byte-identical to what was committed. Same at HEAD,
+  and 3.12 vs 3.13 output for `d2` is byte-identical too. The subsequent push
+  is green on both legs. Recorded as **unexplained**, not as fixed — `d2.py`
+  is the one generator that *runs an actual investigate* rather than reading
+  the tree, so it has more surface for environment to leak in than the other
+  eight, and that is the place to look if it recurs.
+- **The finding that matters is the one I went looking for the failure and
+  found instead: I have been testing on a Python version CI does not use.**
+  The venv is **3.13.11**. CI's matrix is **3.11 and 3.12**. So every "suite
+  green, ruff clean" in this session — including the v1.2.0 release gate —
+  was evidence about an interpreter no CI leg exercises, reported as though
+  it were evidence about the ones that gate the merge. Nothing was wrong in
+  the end (3585 pass on 3.12, verified now for the first time), but that is
+  luck rather than method.
+- **`CLAUDE.md` states this wrongly and helped me believe it**: *"CI runs
+  `ruff check .` then `pytest -q` on Python 3.11."* The matrix has had two
+  legs for some time, and neither is what a local run uses. Corrected.
+- **What to do differently:** the cheap fix is to stop treating a local pass
+  as a CI prediction. The right fix is either to develop on a version CI
+  tests, or to add 3.13 to the matrix so the thing being developed on is also
+  the thing being gated. Filed as **B-697**; not decided here, because
+  widening the matrix costs CI minutes on every push and that is the
+  operator's call, not mine.
