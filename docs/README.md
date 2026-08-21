@@ -105,7 +105,14 @@ ios-xr-nettools/
 │   │   │                               the descent, Stage 2, the event-driven loop, and the model
 │   │   │                               boundary. Generated from the tree by d1.py…d9.py;
 │   │   │                               byte-pinned, regenerate, never hand-edit
-│   │   └── README.md                   What each diagram answers, and how to regenerate it
+│   │   ├── README.md                   What each diagram answers, and how to regenerate it
+│   │   └── design/                     **A second, hand-authored layer** (2026-08-21) — ten
+│   │                                   presentation diagrams of the whole stack, tool plus lab
+│   │                                   platform, drawn with the diagram-design skill. Better to
+│   │                                   read, and CAPABLE OF GOING STALE: the SVGs above are
+│   │                                   generated and byte-pinned, so they cannot drift from the
+│   │                                   code without failing CI. When the two disagree, the
+│   │                                   generated ones are right. Start at design/index.html
 │   └── architecture.drawio             Pre-M0 diagram source, superseded by docs/diagrams/ —
 │                                       not regenerated since 6629a2c; treat as historical
 ├── examples/                           Orchestrator wiring (n8n, systemd) — plumbing only,

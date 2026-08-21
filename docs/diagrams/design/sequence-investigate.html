@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ios-xr-nettools — one investigation</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f5f5f5;
+      --color-ink:     #2d3142;
+      --color-muted:   #4f5d75;
+      --color-accent:  #eb6c36;
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+      padding: 3rem 2rem;
+    }
+    .frame { max-width: 1200px; width: 100%; }
+    .eyebrow {
+      font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500;
+      letter-spacing: 0.18em; text-transform: uppercase;
+      color: var(--color-muted); margin-bottom: 0.5rem;
+    }
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400; letter-spacing: -0.02em; line-height: 1.15;
+      color: var(--color-ink); margin-bottom: 0.5rem;
+    }
+    .standfirst {
+      font-size: 0.9rem; color: var(--color-muted);
+      max-width: 66ch; margin-bottom: 1.5rem; line-height: 1.5;
+    }
+    svg { width: 100%; min-width: 900px; display: block; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Sequence · ios-xr-nettools</p>
+    <h1>One observation window, then a five-rung walk</h1>
+    <p class="standfirst"><code>nettools investigate RR1 10.255.0.12</code> runs the <code>bgp_session</code> flow. Every rung's evidence is pulled into a single epoch before the descent takes a single step — a rung may not depend on what an earlier rung concluded. After the walk, a re-read checks the fabric hasn't moved; a disagreement is refused, never reported.</p>
+
+    <svg viewBox="0 0 1120 864" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="sequence-investigate-title sequence-investigate-desc">
+      <title id="sequence-investigate-title">One investigation, command to verdict</title>
+      <desc id="sequence-investigate-desc">Sequence diagram of a bgp_session investigation across Operator, CLI, Epoch/collector, Descent and Device lifelines: the epoch collects evidence for all five rungs once in a loop before the descent walks them, then re-reads the device to confirm coherence before CLI returns a headline verdict to the operator.</desc>
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+      </defs>
+
+      <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+      <!-- ============ lifelines ============ -->
+      <line x1="120" y1="104" x2="120" y2="752" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+      <line x1="340" y1="104" x2="340" y2="752" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+      <line x1="560" y1="104" x2="560" y2="752" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+      <line x1="780" y1="104" x2="780" y2="752" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+      <line x1="1000" y1="104" x2="1000" y2="752" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+
+      <!-- ============ activation bars ============ -->
+      <rect x="336" y="156" width="8" height="560" fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+      <rect x="556" y="204" width="8" height="200" fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+      <rect x="556" y="580" width="8" height="40" fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+      <rect x="776" y="452" width="8" height="216" fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+      <rect x="996" y="300" width="8" height="32" fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+
+      <!-- ============ M1: Operator -> CLI ============ -->
+      <line x1="120" y1="152" x2="340" y2="152" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="176" y="132" width="88" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="220" y="141" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">INVESTIGATE</text>
+
+      <!-- ============ M2: CLI -> Epoch ============ -->
+      <line x1="340" y1="200" x2="560" y2="200" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="406" y="180" width="88" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="450" y="189" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">OPEN EPOCH</text>
+
+      <!-- ============ LOOP fragment: Epoch <-> Device, all 5 rungs' collect steps ============ -->
+      <rect x="540" y="232" width="480" height="128" rx="4" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.22)" stroke-width="1"/>
+      <rect x="540" y="232" width="44" height="16" rx="2" fill="#f5f5f5" stroke="rgba(45,49,66,0.22)" stroke-width="1"/>
+      <text x="562" y="244" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.12em">LOOP</text>
+      <text x="552" y="268" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.02em">[for each rung's collect step — 5 total]</text>
+
+      <!-- M3: Epoch -> Device (call) -->
+      <line x1="560" y1="296" x2="1000" y2="296" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="726" y="276" width="108" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="780" y="285" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">SHOW · PER INTENT</text>
+
+      <!-- M4: Device --> Epoch (return) -->
+      <line x1="1000" y1="336" x2="560" y2="336" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+      <rect x="722" y="316" width="116" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="780" y="325" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">PARSED EVIDENCE</text>
+
+      <!-- ============ M5: Epoch --> CLI (return) ============ -->
+      <line x1="560" y1="400" x2="340" y2="400" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+      <rect x="380" y="380" width="140" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="450" y="389" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.04em">EPOCH READY · 1 WINDOW</text>
+
+      <!-- ============ M6: CLI -> Descent (call) ============ -->
+      <line x1="340" y1="448" x2="780" y2="448" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="490" y="428" width="140" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="560" y="437" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.04em">WALK BGP_SESSION</text>
+
+      <!-- ============ M7: Descent self-message ============ -->
+      <path d="M 784 496 L 824 496 L 824 536 L 784 536" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="832" y="510" width="88" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="876" y="519" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.04em">WALK RUNGS 1–5</text>
+
+      <!-- ============ M8: Descent -> Epoch (call, re-read) ============ -->
+      <line x1="780" y1="576" x2="560" y2="576" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="615" y="556" width="110" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="670" y="565" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.04em">VERIFY COHERENCE</text>
+
+      <!-- ============ M9: Epoch --> Descent (return, coherence) ============ -->
+      <line x1="560" y1="616" x2="780" y2="616" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+      <rect x="570" y="582" width="200" height="10" rx="2" fill="#f5f5f5"/>
+      <text x="670" y="590" fill="#7a8399" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.02em">else: temporally_incoherent, refused</text>
+      <rect x="620" y="596" width="100" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="670" y="605" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.04em">COHERENCE: STABLE</text>
+
+      <!-- ============ M10: Descent --> CLI (return, verdict) ============ -->
+      <line x1="780" y1="664" x2="340" y2="664" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+      <rect x="505" y="644" width="110" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="560" y="653" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.04em">VERDICT + CHAIN</text>
+
+      <!-- ============ M11: CLI --> Operator (headline return) ============ -->
+      <line x1="340" y1="712" x2="120" y2="712" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+      <rect x="165" y="692" width="130" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="230" y="701" fill="#eb6c36" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.04em">REPORT + EXIT CODE</text>
+
+      <!-- ============ actor boxes (drawn after arrows/labels) ============ -->
+
+      <!-- Operator (input) -->
+      <rect x="40" y="40" width="160" height="64" rx="6" fill="#f5f5f5"/>
+      <rect x="40" y="40" width="160" height="64" rx="6" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/>
+      <rect x="48" y="48" width="30" height="12" rx="2" fill="transparent" stroke="rgba(122,131,153,0.40)" stroke-width="0.8"/>
+      <text x="63" y="57" fill="#7a8399" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">OPR</text>
+      <text x="120" y="72" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Operator</text>
+      <text x="120" y="87" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">RR1 → 10.255.0.12</text>
+
+      <!-- CLI (backend) -->
+      <rect x="260" y="40" width="160" height="64" rx="6" fill="#f5f5f5"/>
+      <rect x="260" y="40" width="160" height="64" rx="6" fill="#ffffff" stroke="rgba(45,49,66,0.25)" stroke-width="1"/>
+      <rect x="268" y="48" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="282" y="57" fill="rgba(45,49,66,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CLI</text>
+      <text x="340" y="72" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">nettools CLI</text>
+      <text x="340" y="87" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">_cmd_investigate</text>
+
+      <!-- Epoch / collector (store) -->
+      <rect x="480" y="40" width="160" height="64" rx="6" fill="#f5f5f5"/>
+      <rect x="480" y="40" width="160" height="64" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+      <rect x="488" y="48" width="30" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="503" y="57" fill="rgba(45,49,66,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">EPO</text>
+      <text x="560" y="72" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Epoch / collector</text>
+      <text x="560" y="87" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">epoch.py · one window</text>
+
+      <!-- Descent (FOCAL) -->
+      <rect x="700" y="40" width="160" height="64" rx="6" fill="#f5f5f5"/>
+      <rect x="700" y="40" width="160" height="64" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1.2"/>
+      <rect x="708" y="48" width="36" height="12" rx="2" fill="transparent" stroke="rgba(235,108,54,0.50)" stroke-width="0.8"/>
+      <text x="726" y="57" fill="#eb6c36" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">DESC</text>
+      <text x="780" y="72" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Descent</text>
+      <text x="780" y="87" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">4 flows · lowest broken rung</text>
+
+      <!-- Device (external) -->
+      <rect x="920" y="40" width="160" height="64" rx="6" fill="#f5f5f5"/>
+      <rect x="920" y="40" width="160" height="64" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+      <rect x="928" y="48" width="30" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="943" y="57" fill="rgba(45,49,66,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">DEV</text>
+      <text x="1000" y="72" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Device</text>
+      <text x="1000" y="87" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">RR1 · SSH show only</text>
+
+      <!-- ============ legend ============ -->
+      <line x1="40" y1="792" x2="1080" y2="792" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+      <text x="40" y="808" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">LEGEND</text>
+
+      <rect x="112" y="800" width="14" height="10" rx="2" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+      <text x="134" y="808" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Focal actor</text>
+
+      <rect x="240" y="797" width="4" height="18" fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+      <text x="252" y="808" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Activation</text>
+
+      <line x1="356" y1="805" x2="384" y2="805" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <text x="392" y="808" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Call</text>
+
+      <line x1="452" y1="805" x2="480" y2="805" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+      <text x="488" y="808" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Return</text>
+
+      <line x1="560" y1="805" x2="588" y2="805" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+      <text x="596" y="808" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Headline</text>
+
+      <rect x="684" y="797" width="40" height="16" rx="2" fill="#f5f5f5" stroke="rgba(45,49,66,0.22)" stroke-width="1"/>
+      <text x="704" y="808" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.10em">LOOP</text>
+      <text x="736" y="808" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Fragment — all 5 rungs collected once</text>
+    </svg>
+  </div>
+</body>
+</html>

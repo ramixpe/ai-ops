@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ios-xr-nettools — diagram set</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:  #f5f5f5;
+      --color-ink:    #2d3142;
+      --color-muted:  #4f5d75;
+      --color-accent: #eb6c36;
+      --font-sans:  'Geist', system-ui, sans-serif;
+      --font-serif: 'Instrument Serif', serif;
+      --font-mono:  'Geist Mono', ui-monospace, monospace;
+    }
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      padding: 3rem 2rem 4rem;
+      line-height: 1.5;
+    }
+    .frame { max-width: 1000px; margin: 0 auto; }
+    .eyebrow {
+      font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500;
+      letter-spacing: 0.18em; text-transform: uppercase;
+      color: var(--color-muted); margin-bottom: 0.5rem;
+    }
+    h1 {
+      font-family: var(--font-serif); font-size: 2rem; font-weight: 400;
+      letter-spacing: -0.02em; line-height: 1.15; margin-bottom: 0.75rem;
+    }
+    .standfirst { color: var(--color-muted); max-width: 68ch; margin-bottom: 2rem; }
+    h2 {
+      font-family: var(--font-serif); font-size: 1.25rem; font-weight: 400;
+      margin: 2.5rem 0 0.25rem;
+    }
+    h2 + p { color: var(--color-muted); font-size: 0.88rem; max-width: 68ch; margin-bottom: 1rem; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; }
+    a.card {
+      display: block; text-decoration: none; color: inherit;
+      background: #ffffff; border: 1px solid rgba(45,49,66,0.12);
+      border-radius: 6px; padding: 1.1rem 1.25rem;
+      transition: border-color 0.15s ease;
+    }
+    a.card:hover { border-color: var(--color-accent); }
+    .card-head { display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.35rem; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-muted); flex: none; }
+    .dot.coral { background: var(--color-accent); }
+    .card h3 { font-size: 0.95rem; font-weight: 600; }
+    .card .type {
+      font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.12em;
+      text-transform: uppercase; color: var(--color-muted);
+    }
+    .card p { font-size: 0.82rem; color: var(--color-muted); }
+    .note {
+      border-left: 2px solid var(--color-accent);
+      padding: 0.75rem 0 0.75rem 1rem; margin: 2rem 0;
+      max-width: 68ch;
+    }
+    .note em { font-family: var(--font-serif); font-style: italic; font-size: 1rem; }
+    footer {
+      margin-top: 3rem; padding-top: 1rem;
+      border-top: 1px solid rgba(45,49,66,0.12);
+      font-family: var(--font-mono); font-size: 0.7rem; color: var(--color-muted);
+    }
+    code { font-family: var(--font-mono); font-size: 0.82em; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Diagram set · ios-xr-nettools v1.2.0</p>
+    <h1>Ten views of a read-only network inspection tool</h1>
+    <p class="standfirst">Hand-authored presentation diagrams covering the whole stack — the tool, the lab platform it runs beside, and the fabric it reads. Every figure in them was derived from the tree or measured against the running system, not recalled.</p>
+
+    <div class="note">
+      <em>These are a presentation layer, not the record.</em>
+      <p style="margin-top:0.5rem; font-size:0.85rem; color:var(--color-muted);">
+        The nine SVGs in <code>docs/diagrams/</code> are generated from the source tree and byte-pinned by
+        <code>tests/test_diagrams.py</code> — they cannot drift from the code without failing CI, which is what makes them
+        trustworthy and also what keeps them plain. These ten are drawn by hand: better to read, and capable of going stale.
+        When the two disagree, <strong>the generated ones are right</strong>.
+      </p>
+    </div>
+
+    <h2>Start here</h2>
+    <p>If you read one, read the first. If you read two, add the call paths — they are the three ways anything enters this system.</p>
+    <div class="grid">
+      <a class="card" href="high-level.html">
+        <div class="card-head"><span class="dot coral"></span><h3>High-Level</h3></div>
+        <p class="type">High-Level · whole stack</p>
+        <p>Device plane → collection → evidence → diagnosis → surfaces, with the safety and observability layers cutting across.</p>
+      </a>
+      <a class="card" href="call-paths.html">
+        <div class="card-head"><span class="dot coral"></span><h3>The three call paths</h3></div>
+        <p class="type">Flowchart</p>
+        <p>CLI, LM Studio over MCP, and syslog-driven events — and what stays dry-run on purpose.</p>
+      </a>
+    </div>
+
+    <h2>Structure</h2>
+    <p>What the thing is made of, what depends on what, and where it runs.</p>
+    <div class="grid">
+      <a class="card" href="architecture.html">
+        <div class="card-head"><span class="dot"></span><h3>Architecture</h3></div>
+        <p class="type">Architecture</p>
+        <p>The layer stack, with the safety boundary and the model boundary drawn as what they are — trust boundaries.</p>
+      </a>
+      <a class="card" href="dependency-graph.html">
+        <div class="card-head"><span class="dot"></span><h3>Dependency graph</h3></div>
+        <p class="type">Dependency graph</p>
+        <p>What actually imports what. Fan-in is the story: <code>inventory_model</code> is pulled in by 18 modules.</p>
+      </a>
+      <a class="card" href="deployment.html">
+        <div class="card-head"><span class="dot"></span><h3>Deployment</h3></div>
+        <p class="type">Deployment</p>
+        <p>One host, two container layers, and a GPU held by a systemd service rather than a container.</p>
+      </a>
+    </div>
+
+    <h2>Behaviour</h2>
+    <p>What happens when it runs.</p>
+    <div class="grid">
+      <a class="card" href="sequence-investigate.html">
+        <div class="card-head"><span class="dot"></span><h3>One investigation</h3></div>
+        <p class="type">Sequence</p>
+        <p>Command to verdict across five rungs — all evidence collected before the walk begins, then re-read for coherence.</p>
+      </a>
+      <a class="card" href="data-flow.html">
+        <div class="card-head"><span class="dot"></span><h3>Evidence pipeline</h3></div>
+        <p class="type">Data flow</p>
+        <p>Device text in, grounded answer out, with what each stage is permitted to withhold.</p>
+      </a>
+    </div>
+
+    <h2>State and narrative</h2>
+    <p>What it writes down, what it runs beside, and how it got here.</p>
+    <div class="grid">
+      <a class="card" href="data-model.html">
+        <div class="card-head"><span class="dot"></span><h3>Durable records</h3></div>
+        <p class="type">ER / data model</p>
+        <p>Ticket, ledger, evidence, metrics — and the deliberate gap between what the tool diagnosed and whether a human confirmed it.</p>
+      </a>
+      <a class="card" href="it-current-state.html">
+        <div class="card-head"><span class="dot"></span><h3>Lab platform today</h3></div>
+        <p class="type">IT current-state</p>
+        <p>23 services, 13 fabric nodes, and the known faults left visible rather than tidied away.</p>
+      </a>
+      <a class="card" href="story-map.html">
+        <div class="card-head"><span class="dot"></span><h3>How it got here</h3></div>
+        <p class="type">Story map</p>
+        <p>Four releases that made the tool narrower and better-evidenced, and what sits below the cut line.</p>
+      </a>
+    </div>
+
+    <footer>
+      Drawn with the diagram-design skill · default skin · doc-wide · engineer audience<br>
+      Generated-and-pinned counterparts: <code>docs/diagrams/01-repo-anatomy.svg</code> … <code>09-model-boundary.svg</code>
+    </footer>
+  </div>
+</body>
+</html>
