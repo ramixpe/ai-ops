@@ -764,6 +764,39 @@ SETTINGS: tuple[Setting, ...] = (
         "Optional SSH private key path, used instead of a password.",
         "credential_resolver (via inventory YAML)",
     ),
+    # B-209. All three default to today's behaviour, deliberately: the relay
+    # hardening ships inert and an operator opts into each piece. Note the
+    # asymmetry with the gates above -- those fail CLOSED because an unset
+    # value must not grant a capability, while these fail toward SENDING,
+    # because for a notifier the dangerous direction is a page that never
+    # arrives, not one that arrives twice.
+    Setting(
+        "NETTOOLS_RELAY_STATE_FILE", "path", None,
+        "De-duplication state for the outbound relay (B-209). Unset disables "
+        "de-duplication entirely -- every notification sends, which is exactly "
+        "the behaviour before B-209 and is why leaving it unset is safe. The "
+        "state records a signature only after a send actually succeeded, so a "
+        "provider outage cannot mark a page delivered and swallow it.",
+        "relay_policy",
+    ),
+    Setting(
+        "NETTOOLS_RELAY_DEDUP_SECONDS", "float", 1800.0,
+        "De-duplication window in seconds (B-209), consulted only when "
+        "NETTOOLS_RELAY_STATE_FILE is set. A repeat of the same "
+        "(device, subject) with the same (finding, cause rung) inside the "
+        "window is suppressed; a changed signature always sends. **A stated "
+        "policy default, not a measured one** -- nothing has yet measured how "
+        "long an operator wants between reminders for the same condition.",
+        "relay_policy",
+    ),
+    Setting(
+        "NETTOOLS_OWNERSHIP_FILE", "path", None,
+        "Declarative ownership and escalation table (B-484). Unset resolves to "
+        "ownership.default_table(), today's single-channel behaviour -- never "
+        "to nobody. A malformed file falls back the same way rather than "
+        "raising, for the fail-toward-sending reason above.",
+        "relay_policy",
+    ),
 )
 
 # Names that can never be found by scanning src/ or mcp_server/ for a string

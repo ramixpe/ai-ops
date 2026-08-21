@@ -137,7 +137,7 @@
 <text x="400.6" y="779.6" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10" font-weight="400" fill="#6f6f6a" text-anchor="start">Telegram, egress-bounded</text>
 <rect x="550.4" y="764.0" width="276.9" height="24.0" rx="12.0" fill="#e8f5ec" stroke="#15803d" stroke-width="1"/>
 <text x="561.4" y="780.3" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="12" font-weight="500" fill="#15803d" text-anchor="start">config show | check</text>
-<text x="707.4" y="779.6" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10" font-weight="400" fill="#6f6f6a" text-anchor="start">69 declared settings</text>
+<text x="707.4" y="779.6" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10" font-weight="400" fill="#6f6f6a" text-anchor="start">72 declared settings</text>
 <rect x="64.0" y="796.0" width="222.5" height="24.0" rx="12.0" fill="#e8f5ec" stroke="#15803d" stroke-width="1"/>
 <text x="75.0" y="812.3" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-size="12" font-weight="500" fill="#15803d" text-anchor="start">inspect</text>
 <text x="133.8" y="811.6" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10" font-weight="400" fill="#6f6f6a" text-anchor="start">smoke-test the MCP surface</text>
