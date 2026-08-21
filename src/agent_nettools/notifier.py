@@ -624,6 +624,9 @@ def notify_owner(
     subject: str,
     finding: str,
     silence: SilenceNotice | None = None,
+    trustworthy: bool | None = None,
+    cause: dict | None = None,
+    ticket_id: str | None = None,
 ) -> dict[str, Any]:
     """:func:`notify`, routed to one :class:`ownership.Owner`. **Never raises.**
 
@@ -638,6 +641,18 @@ def notify_owner(
     The returned record adds ``"owner": owner.name`` to :func:`notify`'s own
     shape, so a caller fanning this out over several owners (a primary plus
     an escalation target) can tell the records apart.
+
+    ``trustworthy``/``cause``/``ticket_id`` (B-681, B-209) are forwarded to
+    :func:`notify` on every routed path -- **this closes a gap left when
+    B-681 added the three fields to** :func:`notify` **but not to this
+    function**: before B-209, an owner-routed message (any channel other
+    than the default) silently rendered without the RCA `notify()`'s own
+    unrouted callers already got, and nothing surfaced the difference --
+    the exact "reads correct evidence, reports it worse" shape this
+    codebase repeatedly refuses elsewhere. All three still default to
+    ``None`` and are omitted when absent, so a caller that does not pass
+    them (today's only caller, until B-209's wiring report is acted on)
+    sees no change in output.
     """
 
     if silence is not None:
@@ -652,7 +667,10 @@ def notify_owner(
         }
 
     if owner.channel == DEFAULT_CHANNEL:
-        record = notify(report, device=device, subject=subject, finding=finding)
+        record = notify(
+            report, device=device, subject=subject, finding=finding,
+            trustworthy=trustworthy, cause=cause, ticket_id=ticket_id,
+        )
         record["owner"] = owner.name
         return record
 
@@ -670,6 +688,9 @@ def notify_owner(
         }
 
     target = TelegramNotifier(chat_ids=chat_ids)
-    record = notify(report, device=device, subject=subject, finding=finding, notifier=target)
+    record = notify(
+        report, device=device, subject=subject, finding=finding, notifier=target,
+        trustworthy=trustworthy, cause=cause, ticket_id=ticket_id,
+    )
     record["owner"] = owner.name
     return record

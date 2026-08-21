@@ -816,6 +816,43 @@ MUTATIONS = [
      "                )\n",
      "                fed_the_descent = True\n",
      "test_the_ticket_records_only_the_evidence_that_fed_the_descent"),
+
+    # ---- B-209 report relay hardening (de-dup + the notify_owner RCA gap). ----
+    # Counted before adding these entries (OBS-191): each anchor string below
+    # occurs exactly once in its file (`grep -c`, checked by hand).
+
+    ("B-209-DEDUP-ONLY-ON-SENT", "de-dup state is recorded only after a real "
+     "send -- never after a failed or no-op delivery, or a real outage would "
+     "silently suppress the real page once the channel recovers",
+     "src/agent_nettools/relay_policy.py",
+     '    if decision == "sent" and state_path is not None:\n',
+     "    if state_path is not None:\n",
+     "test_dedup_state_is_not_recorded_when_delivery_fails"),
+
+    ("B-209-DEDUP-SIGNATURE-CHANGE", "a changed finding/cause signature is "
+     "always sent, never suppressed by the de-dup window",
+     "src/agent_nettools/relay_policy.py",
+     '    if prior.get("signature") != signature:\n',
+     '    if prior.get("signature") != signature and False:\n',
+     "test_positive_control_a_changed_finding_is_never_suppressed"),
+
+    ("B-209-DEDUP-CORRUPT-STATE", "a de-dup state file that fails to parse "
+     "must never raise out of relay() -- it degrades to \"no prior record\", "
+     "the same fail-toward-sending direction a corrupt silence/ownership "
+     "file already takes",
+     "src/agent_nettools/relay_policy.py",
+     "    except json.JSONDecodeError:\n        return {}, False\n",
+     "    except json.JSONDecodeError:\n        raise\n",
+     "test_a_corrupt_dedup_state_file_never_suppresses"),
+
+    ("B-209-NOTIFY-OWNER-RCA", "notify_owner forwards trustworthy/cause/"
+     "ticket_id on a routed (non-default-channel) delivery too -- before "
+     "B-209 these were silently dropped on every channel but the default one",
+     "src/agent_nettools/notifier.py",
+     "        report, device=device, subject=subject, finding=finding, notifier=target,\n"
+     "        trustworthy=trustworthy, cause=cause, ticket_id=ticket_id,\n",
+     "        report, device=device, subject=subject, finding=finding, notifier=target,\n",
+     "test_the_rca_fields_reach_an_owner_routed_message_too"),
 ]
 
 
