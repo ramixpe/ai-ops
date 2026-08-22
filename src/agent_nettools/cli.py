@@ -2257,71 +2257,51 @@ def _cmd_version(args: argparse.Namespace) -> int:
 
 
 def _cmd_inspect(args: argparse.Namespace) -> int:
-    # Imported lazily so the rest of the CLI works without the MCP SDK installed.
-    import asyncio
-
-    from mcp import ClientSession, StdioServerParameters
-    from mcp.client.stdio import stdio_client
+    # `McpToolset` is `mcp_client.py`'s reusable stdio session (extracted from
+    # this function, which used to build ClientSession/stdio_client inline --
+    # see that module's docstring for the environment-forwarding fix this
+    # extraction makes structural). No `env_overrides` here, deliberately:
+    # this command gets exactly the operator-environment forwarding it always
+    # had (NETTOOLS_*/device credentials passed through unmodified, including
+    # NETTOOLS_MCP_SURFACE if the operator set it) -- `child_server_env`'s
+    # forced-safe posture is for an unattended caller, not a human typing a
+    # diagnostic command, and forcing it here would silently switch this
+    # command to the staged surface even when unasked, breaking every call
+    # below (they name classic-surface tools).
+    from .mcp_client import McpToolset
 
     device = _resolve_device(args.device)
 
-    async def run() -> None:
-        # The MCP SDK's stdio_client forwards only get_default_environment()
-        # plus an explicit env= -- NOT the caller's os.environ. Without this,
-        # `NETTOOLS_MCP_SURFACE=staged nettools inspect` silently listed the
-        # classic surface: the one smoke test that existed could never test
-        # the surface it was asked for (operator walkthrough, stumble 7).
-        import os as _os
+    with McpToolset() as toolset:
+        print("=== TOOLS EXPOSED BY THE SERVER ===")
+        for tool in toolset.list_tools():
+            summary = tool.description.splitlines()
+            print(f"  - {tool.name}: {summary[0] if summary else ''}")
 
-        forwarded = {
-            name: value for name, value in _os.environ.items()
-            if name.startswith("NETTOOLS_") or name in (
-                "DEVICE_USERNAME", "DEVICE_PASSWORD", "DEVICE_SSH_KEYFILE",
-            )
-        }
-        params = StdioServerParameters(
-            command=sys.executable, args=["-m", "mcp_server.server"], env=forwarded
+        print("\n=== RESOURCES EXPOSED BY THE SERVER ===")
+        for resource in toolset.list_resources():
+            print(f"  - {resource.uri}: {resource.description or ''}")
+
+        print("\n=== PROMPTS EXPOSED BY THE SERVER ===")
+        for prompt in toolset.list_prompts():
+            print(f"  - {prompt.name}: {prompt.description or ''}")
+
+        print("\n=== CALL: list_lab_devices ===")
+        result = toolset.call_tool("list_lab_devices", {}, timeout_s=30.0)
+        print(result.text)
+
+        print(f"\n=== CALL: check_lab_bgp_neighbors (device_name={device}) ===")
+        result = toolset.call_tool(
+            "check_lab_bgp_neighbors", {"device_name": device}, timeout_s=30.0
         )
-        async with stdio_client(params) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
+        print(result.text)
 
-                tools = await session.list_tools()
-                print("=== TOOLS EXPOSED BY THE SERVER ===")
-                for tool in tools.tools:
-                    summary = (tool.description or "").splitlines()
-                    print(f"  - {tool.name}: {summary[0] if summary else ''}")
+        print(f"\n=== CALL: assess_lab_device_health (device_name={device}) ===")
+        result = toolset.call_tool(
+            "assess_lab_device_health", {"device_name": device}, timeout_s=30.0
+        )
+        print(result.text)
 
-                resources = await session.list_resources()
-                print("\n=== RESOURCES EXPOSED BY THE SERVER ===")
-                for resource in resources.resources:
-                    print(f"  - {resource.uri}: {resource.description or ''}")
-
-                prompts = await session.list_prompts()
-                print("\n=== PROMPTS EXPOSED BY THE SERVER ===")
-                for prompt in prompts.prompts:
-                    print(f"  - {prompt.name}: {prompt.description or ''}")
-
-                print("\n=== CALL: list_lab_devices ===")
-                result = await session.call_tool("list_lab_devices", {})
-                for block in result.content:
-                    print(getattr(block, "text", block))
-
-                print(f"\n=== CALL: check_lab_bgp_neighbors (device_name={device}) ===")
-                result = await session.call_tool(
-                    "check_lab_bgp_neighbors", {"device_name": device}
-                )
-                for block in result.content:
-                    print(getattr(block, "text", block))
-
-                print(f"\n=== CALL: assess_lab_device_health (device_name={device}) ===")
-                result = await session.call_tool(
-                    "assess_lab_device_health", {"device_name": device}
-                )
-                for block in result.content:
-                    print(getattr(block, "text", block))
-
-    asyncio.run(run())
     return EXIT_OK
 
 
