@@ -7633,3 +7633,70 @@ call. This is exactly why the invariant is the disjunction — *no text AND no
 tool calls* — and not a check on text alone. It is now enforced in
 `ModelTurn.__post_init__`, so the invalid state is unconstructable rather than
 rejected at one call site.
+
+---
+
+## OBS-700 · A refusal that never reached the flight recorder
+
+Found reviewing the `event_agent` lane before merge, and worth recording
+because the module it appeared in is the module built to make this exact
+measurement.
+
+`event_agent.run_event` refuses a tool call in five situations: the model
+supplied a pinned identifier (the B-459 attack), the shared `max_tool_calls`
+budget is exhausted, a per-tool cap is exhausted, the wall clock is spent, or
+the model named a tool it was never offered. Each refusal was recorded in two
+places — an `is_error` tool result the model sees, so it can adapt rather than
+retry blindly, and the returned `EventRun`. It was **not** recorded on the
+ticket. Only a call that actually dispatched got a `record_tool_event`.
+
+The reading behind that was defensible: the plan says each tool event carries
+*"the arguments as dispatched"*, and a refused call has none. The problem is
+what the two surviving records are worth to different readers.
+
+**`EventRun` is a return value. The ticket is what survives.** In the intended
+deployment nothing human reads the return value at all — a receiver wakes the
+loop on a syslog line and the object is discarded when the call returns. So a
+production ticket for a run in which the model attempted five calls and had
+four refused would show one tool event, and read as a model that behaved
+impeccably. That is absence-is-never-zero, in the one module written to count
+how often a model misbehaves.
+
+It also loses the measurement outright. B-459 could only say *"the model asked
+rather than inventing — one model on one occasion, not a property."* Making it
+a property is the stated purpose of `model_ingress`'s argument pinning. A
+count that exists only in memory, in a process nobody is watching, is not a
+measurement.
+
+**Fixed** by routing all five branches through one `refuse()` closure that
+records to the model, the `EventRun`, and the ticket.
+
+Two details in the fix are the parts worth keeping:
+
+- **`status="refused"` and `dispatched: false`.** An entry that is present but
+  indistinguishable from a dispatched call is *worse* than an absent one — a
+  reader counting tool events would count work that never happened. The
+  mutation guard added for this mutates `refused` to `success` rather than
+  deleting the call, because that is the regression with teeth.
+- **The model's values go in as `model_supplied`, never `arguments`.** On a
+  dispatched event `arguments` means "as dispatched, pinned values included".
+  One key carrying two meanings on one timeline is precisely how a refusal
+  comes to be read as a call.
+
+Verified after the fix, on a ticket, against the reproduced B-459 attack:
+
+```
+## Tool event -- investigate_lab @ PE1
+  "status": "refused",
+  "dispatched": false,
+  "fabrication": true,
+  "model_supplied": { "device_name": "PE2", "subject": "10.255.0.99" }
+```
+
+The fabricated values are preserved verbatim. What the model reached for is
+the finding, so normalising it away would discard the thing being measured.
+
+**The general shape**, which is not new here but keeps recurring: a fact
+recorded in a rich in-memory object and a durable one is recorded once, not
+twice, and the durable copy is the only one that exists tomorrow. Every
+`record_*` call in this project earns its place that way.

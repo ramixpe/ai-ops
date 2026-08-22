@@ -83,6 +83,19 @@ by reference rather than re-argued each time:
 
 - **A generic autonomous troubleshooting agent.** The gated `nettools agent`
   is useful research; free-form autonomy is not the product.
+  **Amended 2026-08-22, because a reader could otherwise take this bullet to
+  refuse something that now exists.** `event_agent.py` is autonomous — no human
+  types anything — and is deliberately *not* generic. What separates the two is
+  worth stating, since "bounded" is the word every unbounded agent uses about
+  itself: the device, the subject and the flow are supplied by code and
+  **removed from the schema the model is handed**, so it has no field in which
+  to name a different one; five read-only tools, not thirty-seven; active
+  probes forced off in the spawned server's own environment regardless of the
+  operator's `.env`; four iterations, 90 seconds, six tool calls;
+  `investigate_lab` once; and the answer recorded on the ticket is
+  `investigate_lab`'s own `finding` field, never the model's prose about it.
+  A model with a free-text field for a target is a generic agent with a short
+  timeout. This one does not have the field.
 - **Autonomous configuration or remediation.** Read-only diagnosis and change
   execution have different safety architectures. If it is ever built it is a
   separate surface with human authorisation, pre/post checks, rollback and a
