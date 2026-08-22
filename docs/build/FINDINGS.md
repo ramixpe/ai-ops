@@ -7540,3 +7540,47 @@ written as prose was broken by a case its author had not imagined
 (§0.5's frozen files held because they are checked; this did not because it was
 not). The block was not wrong — it was unenforced, and it was broken by the one
 kind of volatility it had not thought to list.
+
+## OBS-698 · MiniMax honours `tools=` on the Responses API — OBS-010's route survives
+
+- **Kind:** measurement, unblocking
+- **Why it was asked:** the event-driven agent (the operator's "AI mimics the
+  LM Studio user, woken by a syslog") needs MiniMax to call tools. OBS-012
+  recorded that it can — but that was measured by `scripts/probe_minimax.py`,
+  which posts to **`/v1/chat/completions`**. The package's own path,
+  `llm_analysis._openai_call`, uses **`client.responses.create(...)`** and has
+  never passed a tool. OBS-010 chose Responses *specifically* to close OBS-006
+  (empty `content` on `finish_reason: "length"`, no error, no non-zero status)
+  and its revisit condition reads: *"If a future task moves the gate to Chat
+  Completions, OBS-006 and step 4 both come back into force."* Building on the
+  proven route would have been that task.
+- **Measured against the live endpoint** (`MiniMax-M3`,
+  `https://api.minimax.io/v1`), 2026-08-22:
+
+  **1. Responses honours tools.** `responses.create(input=..., tools=[...])`
+  returned one `function_call` output item — `name: "check_lab"`,
+  `arguments: {"protocol": "bgp"}`. Correct tool, correct enum member, no
+  prompting toward a schema it was not given.
+
+  **2. Truncation is signalled, not silent.** At `max_output_tokens=16`, with
+  and without tools offered: `status: "incomplete"`,
+  `incomplete_details.reason: "max_output_tokens"`, **and partial text
+  returned**. OBS-006's shape — empty content, no error, no status — does not
+  occur on this route.
+
+- **So the design keeps OBS-010's structural win and does not reopen OBS-006.**
+  No move to Chat Completions; `_openai_call` gains a `tools=` parameter rather
+  than a second client.
+- **One shape worth naming, because it is the trap.** In the successful
+  tool-calling turn, `output_text` was **`''`** while a `function_call` item was
+  present. A turn that calls a tool legitimately has empty text. So the
+  guard this design needs is *not* "empty text is an error" — it is:
+
+  > **A turn with no text AND no tool calls is a structured error, never an
+  > answer.**
+
+  Written that way in the plan before this was measured, and the measurement is
+  why the distinction is load-bearing rather than pedantic: the naive form of
+  the check would reject every successful tool call.
+- **Needs human review:** no. `probe_minimax.py` should gain this as a
+  permanent check 7 so the claim stays measured rather than remembered.
