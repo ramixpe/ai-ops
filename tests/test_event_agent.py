@@ -23,6 +23,7 @@ import pytest
 from agent_nettools import event_agent as ea
 from agent_nettools import event_routing as er
 from agent_nettools import event_watch as ew
+from agent_nettools import model_ingress
 from agent_nettools import ticket as ticket_module
 from agent_nettools.mcp_client import ToolCallResult, ToolDescriptor
 
@@ -376,7 +377,16 @@ def test_plan_event_previews_the_offered_manifest_when_the_gate_would_pass(monke
     assert run.mode == "plan"
     assert "explore_lab" in run.tools_offered
     assert "investigate_lab" in run.tools_offered
-    assert "probe_lab" in run.tools_offered  # offered, even though never dispatchable live
+    # This line read `assert "probe_lab" in run.tools_offered  # offered, even
+    # though never dispatchable live` until 2026-08-22. The behaviour was
+    # noticed and pinned as correct rather than questioned -- the reasoning
+    # being that `child_server_env()` disables active probes in the child, so
+    # offering it was harmless. It was not correct: it made the prompt's own
+    # sentence to the model false, and it left a mechanism standing on a
+    # second one (OBS-701). A test can freeze a defect exactly as firmly as it
+    # freezes a property, and the comment explaining why it is fine is the
+    # tell.
+    assert "probe_lab" not in run.tools_offered
 
 
 # --------------------------------------------------------------------------- #
@@ -621,6 +631,98 @@ def test_a_budget_refusal_also_reaches_the_ticket(monkeypatch, tmp_path):
 # --------------------------------------------------------------------------- #
 # Both ToolCallResult error shapes -- OBS-698, this task's own measured fact.
 # --------------------------------------------------------------------------- #
+
+
+def test_probe_lab_is_never_offered_even_where_it_pins_cleanly(monkeypatch):
+    """The active-probe tool must not be offered to an unattended loop.
+
+    `probe_lab` IS pinnable: on a `bgp_session` flow the subject is
+    IPv4-shaped, so `device_name` and `address` pin cleanly and only `kind`
+    (ping/traceroute) is left for the model. Offering the whole PIN_TABLE
+    therefore handed it to the model on every BGP event -- measured, not
+    reasoned about (OBS-701), and it made the prompt's own sentence *"The
+    active-probe kind (ping/traceroute) is not offered to this loop"* false.
+
+    Nothing could have been probed -- `child_server_env()` disables active
+    probes in the spawned server's own environment -- but a loop should not be
+    shown a tool whose only possible outcome is a refusal.
+
+    The `bgp_session` case is the one that regressed; `interface` never
+    offered it (an interface name is not an address), which is exactly why a
+    test written against only the interface flow would have passed throughout.
+    """
+
+    for subject, flow in (("10.255.0.12", "bgp_session"), ("GigabitEthernet0/0/0/0", "interface")):
+        context = model_ingress.PinnedContext(device="RR1", subject=subject, flow=flow)
+        offered = [o.name for o in ea._offer_tools(ea._PLANNING_TOOL_SCHEMAS, context)]
+        assert "probe_lab" not in offered, f"probe_lab offered on the {flow} flow"
+        assert "lookup_lab" not in offered
+        assert "investigate_lab" in offered  # positive control: not an empty manifest
+
+
+def test_the_offered_set_is_a_real_subset_of_what_could_be_pinned():
+    """Guards the vacuous-exclusion trap: a set that excludes a name which was
+    never in the source is not an exclusion, it is a typo that looks like one."""
+
+    assert ea.OFFERED_TOOLS <= set(model_ingress.PIN_TABLE), (
+        "OFFERED_TOOLS names a tool model_ingress cannot pin -- it would be "
+        "dropped silently by build_offers, offering fewer tools than declared"
+    )
+    assert "probe_lab" in model_ingress.PIN_TABLE, (
+        "probe_lab is not in PIN_TABLE, so excluding it from OFFERED_TOOLS "
+        "excludes nothing and the test above proves nothing"
+    )
+    assert "probe_lab" not in ea.OFFERED_TOOLS
+
+
+def test_a_clean_finish_is_complete_whatever_the_provider_calls_its_stop_reason(
+    monkeypatch, tmp_path
+):
+    """`complete` is a fact about this loop's control flow, not about a string.
+
+    MiniMax on the Responses API ends a clean turn with `stop_reason:
+    "completed"`; Anthropic says `"end_turn"`. Comparing against one
+    vocabulary reported `complete=False` on 12 of 12 clean MiniMax runs, every
+    one of which finished perfectly (OBS-701). `stopped_because` still carries
+    the provider's own word verbatim -- that part was right and is kept.
+    """
+
+    responses = {
+        "explore_lab": [_tool_result("explore_lab", _EXPLORE_LAB_OK)],
+        "investigate_lab": [_tool_result("investigate_lab", _INVESTIGATE_LAB_OK)],
+    }
+    for provider_word in ("completed", "end_turn", "stop", "finished_wibble"):
+        turns = [
+            {"text": "", "tool_calls": [{"id": "1", "name": "investigate_lab", "arguments": {}}],
+             "stop_reason": "tool_calls"},
+            {"text": "the descent found a hold-timer expiry", "tool_calls": [],
+             "stop_reason": provider_word},
+        ]
+        run, _toolset, _caller, _decision = _open_ticket_run(
+            monkeypatch, tmp_path / provider_word, turns=turns, toolset_responses=responses,
+        )
+        assert run.complete is True, f"a clean finish reported as incomplete for {provider_word!r}"
+        assert run.stopped_because == provider_word, "the provider's own word, unfolded"
+
+    # Negative controls: a bound, and a genuinely empty turn, are NOT complete.
+    bounded = [
+        {"text": "", "tool_calls": [{"id": "1", "name": "explore_lab", "arguments": {}}],
+         "stop_reason": "tool_calls"},
+    ] * 4
+    run, _t, _c, _d = _open_ticket_run(
+        monkeypatch, tmp_path / "bounded", turns=bounded,
+        toolset_responses={"explore_lab": [_tool_result("explore_lab", _EXPLORE_LAB_OK)] * 4},
+        bounds=ea.AgentBounds(max_iterations=2),
+    )
+    assert run.complete is False
+    assert run.stopped_because == "max_iterations"
+
+    run, _t, _c, _d = _open_ticket_run(
+        monkeypatch, tmp_path / "empty", toolset_responses={},
+        turns=[{"text": "", "tool_calls": [], "stop_reason": "completed"}],
+    )
+    assert run.complete is False, "an empty turn must never read as a completed run"
+    assert run.stopped_because == "empty_turn"
 
 
 def test_protocol_level_is_error_is_classified_as_an_error():

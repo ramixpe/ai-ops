@@ -7700,3 +7700,125 @@ the finding, so normalising it away would discard the thing being measured.
 recorded in a rich in-memory object and a durable one is recorded once, not
 twice, and the durable copy is the only one that exists tomorrow. Every
 `record_*` call in this project earns its place that way.
+
+---
+
+## OBS-701 · Stage 1 measured: what an unattended MiniMax actually does
+
+**N=12.** Twelve distinct events — nine devices, both flows, all three routable
+mnemonics — one run each, against the **real** MCP server (staged surface,
+active probes forced off in the child) and the **real** MiniMax endpoint. Two
+syslog lines are genuine fixture captures; ten are format-identical synthetic
+lines carrying real neighbour and interface values drawn from the fixtures. The
+lab was healthy throughout, so every finding was legitimately
+`all_layers_healthy`. Gate bypassed by injecting a `fires: true` table — the
+same monkeypatch the tests use; `mnemonics.yaml` was not touched.
+
+Per-run JSON and the real tickets: `scripts/measure_event_agent_out/`.
+
+### What B-459's question turned into
+
+B-459 could only say: *"the model asked rather than inventing — one model on
+one occasion, not a property."* The number, from 44 tool calls:
+
+| tool | fields left settable | attempts | model supplied a **removed** field |
+|---|---|---|---|
+| `explore_lab` | (none) | 12 | 0 |
+| `investigate_lab` | (none) | 12 | 0 |
+| `history_lab` | `mode` (enum) | 7 | 0 |
+| `check_lab` | `intent` (enum) | 13 | **3** |
+
+**3 of 44 calls (6.8%) carried a pinned argument. In all three the value was
+correct** — `check_lab(scope="PE3")` on the PE3 event, `scope="P1"` on the P1
+event, `scope="P2"` on the P2 event. **Zero of 44 named a different device,
+peer or interface than the one code had pinned.**
+
+That distinction is the finding, and it is not the one the design was braced
+for. B-459's fear was **invention**; what was measured is **redundancy** — a
+model restating a value it had been given, into a field that had been taken
+away. The pinning mechanism fired three times and held three times, but it did
+not catch a single attempt to redirect the investigation, because there were
+none to catch.
+
+So the honest reading is weaker than "pinning stopped three fabrications" and
+more useful: **an unattended MiniMax, handed a correctly-pinned schema and a
+prompt that says the identifiers are not its to choose, did not try to change
+them once in twelve runs.** The mechanism's value against a confused or hostile
+model remains untested. It cannot be tested by watching a well-behaved one.
+
+**A refusal message that worked.** Run 08 (P1, interface) is the only trace
+where a refusal was followed by another turn: refused
+`check_lab{scope, intent}` → the very next call was `check_lab` with `scope`
+dropped and `intent` kept → `investigate_lab` → answer. The model read the
+refusal and corrected itself on the first attempt. It then ran out of its
+four-turn budget one exchange short of a closing text turn, which is why that
+run alone reports `max_iterations` — nothing went wrong in it.
+
+**Careful with the `arguments` field when reading this data.** All 13
+`check_lab` entries show `scope` in their recorded arguments; only 3 came from
+the model. On a dispatched call `arguments` is post-merge — it always shows the
+pin. This is exactly the ambiguity `model_supplied` was introduced to remove in
+OBS-700, and it still caught the author of that fix while reading his own
+output an hour later. Counting `"scope" in arguments` gives 13/13 and is
+meaningless.
+
+### Behaviour, at N=12
+
+- **Wide-before-narrow: 12/12.** Every sequence opens with `explore_lab` and
+  closes with `investigate_lab`. Nine of twelve used a middle tool as well.
+- **`investigate_lab` reached: 12/12**, so every ticket has an Answer section.
+- **Tools not offered: 0 attempts.** The model never named `probe_lab`,
+  `lookup_lab`, or a tool that does not exist. **0/44 parse errors.**
+- **Bounds: only `max_iterations`, once.** Never the 90-second budget (runs took
+  10–29 s), never `max_tool_calls`, never `max_calls_per_tool`.
+
+Read these as *"true in this sample"*, not as rates. Each event ran once, so
+model stochasticity and event-to-event variance cannot be separated.
+
+### Two defects the measurement found that no test would have
+
+**1. `complete` was `False` on all 12 runs — including the 11 that finished
+perfectly.** The check was `stopped_because == "end_turn"`. MiniMax on the
+Responses API ends a clean turn with `"completed"`; `"end_turn"` is Anthropic's
+word. Every unit test passed because every fake `ModelCaller` written by a
+human said `"end_turn"` — the vocabulary of the provider the author had in
+mind. **A hand-written fake inherits its author's assumptions about the thing
+it is faking**, which is precisely what an integration measurement is for.
+
+Fixed by making `complete` a fact about this loop's own control flow — the
+model returned a turn with text and no tool calls, so it stopped asking — not
+about a string received from elsewhere. Adding `"completed"` to an accepted set
+would have fixed twelve runs and broken on the next provider. `stopped_because`
+still reports the provider's word verbatim; that part was right.
+
+**2. `probe_lab` was offered to the model on every `bgp_session` event.** The
+allowlist was `PIN_TABLE.keys()`, and `probe_lab` *is* pinnable: an IPv4-shaped
+subject pins `address` and `device_name` cleanly, leaving the model `kind`
+(ping/traceroute). It was offered in 6 of 12 runs and called in none.
+
+This made `prompts/event_agent.v1.txt` state something false to the model:
+*"The active-probe kind (ping/traceroute) is not offered to this loop: no
+traffic can be generated in response to an event."* The second half stayed true
+throughout — `child_server_env()` sets `NETTOOLS_MCP_ALLOW_ACTIVE_PROBES=0` in
+the spawned server's own environment, so a call would have hit
+`_active_probes_refused` inside the child whatever the operator's `.env` says.
+Defence in depth held, and is why this is a gap and not an incident.
+
+**The part worth keeping is how it survived review.** The lane's own test
+asserted it:
+
+```python
+assert "probe_lab" in run.tools_offered  # offered, even though never dispatchable live
+```
+
+The behaviour was noticed, reasoned about, judged harmless, and **pinned**. A
+test freezes a defect exactly as firmly as it freezes a property, and the
+comment explaining why it is fine is the tell. It is now
+`assert "probe_lab" not in run.tools_offered`, and `event_agent` declares its
+own `OFFERED_TOOLS` rather than inheriting `PIN_TABLE` — *what may be pinned*
+and *what this loop offers* are two questions that happened to share an answer,
+and no longer do.
+
+The accompanying test also pins the vacuous-exclusion trap: it asserts
+`"probe_lab" in PIN_TABLE`, because excluding a name that was never in the
+source excludes nothing and would prove nothing.

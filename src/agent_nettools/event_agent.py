@@ -120,7 +120,6 @@ from .event_routing import MNEMONIC_FLOW_TABLE, RoutingDecision
 from .knowledge import load_mnemonic_table
 from .mcp_client import McpToolset, ToolCallResult, child_server_env
 from .model_ingress import (
-    PIN_TABLE,
     ArgumentRefusal,
     PinnedContext,
     ToolOffer,
@@ -489,16 +488,37 @@ def _resolve_context(decision: RoutingDecision) -> tuple[bool, str, PinnedContex
     return True, f"{mnemonic} is cleared to fire by mnemonics.yaml (trigger.fires: true)", context
 
 
+#: The tools this loop offers -- `model_ingress.PIN_TABLE`'s pinnable set
+#: MINUS `probe_lab`, and the subtraction is the point.
+#:
+#: `probe_lab` is pinnable, so passing `PIN_TABLE.keys()` offered it: on any
+#: `bgp_session` flow the subject is IPv4-shaped, `address` and `device_name`
+#: pin cleanly, and the model was handed ping/traceroute with `kind` free to
+#: choose. Measured, not reasoned about (OBS-701) -- and it made
+#: `prompts/event_agent.v1.txt` state something false to the model: *"The
+#: active-probe kind (ping/traceroute) is not offered to this loop."*
+#:
+#: Nothing could have been probed: `child_server_env()` sets
+#: `NETTOOLS_MCP_ALLOW_ACTIVE_PROBES=0` in the SPAWNED server's own
+#: environment, so `_active_probes_refused` fires inside the child before the
+#: tool body runs, whatever the operator's `.env` says. That layer held and is
+#: why this was a gap rather than an incident. But an unattended loop should
+#: not be shown a tool whose only possible outcome is a refusal, and a
+#: mechanism that works only because a second one catches it is one env
+#: default away from working not at all.
+#:
+#: Declared here rather than reused from `PIN_TABLE` because "what may be
+#: pinned" and "what this loop offers" are two different questions that
+#: happened to have the same answer. They no longer do.
+OFFERED_TOOLS = frozenset({"explore_lab", "check_lab", "investigate_lab", "history_lab"})
+
+
 def _offer_tools(tools: Iterable[Mapping[str, Any]], context: PinnedContext) -> tuple[ToolOffer, ...]:
-    #: The staged surface's own tool set, per `model_ingress.PIN_TABLE`'s own
-    #: keys -- never `mcp_server.staged_surface.STAGED_TOOL_NAMES` (that
-    #: would import `mcp_server`, the forbidden direction). The two name sets
-    #: agree today by construction: `PIN_TABLE` was declared FROM that
-    #: module's five pinnable tools (`lookup_lab` structurally excluded on
-    #: both sides), so using `PIN_TABLE`'s keys here is not a second,
-    #: independent allowlist that could drift -- it is the same one
-    #: `model_ingress.py` itself already treats as authoritative.
-    return build_offers(tools, context, allowlist=PIN_TABLE.keys())
+    #: `OFFERED_TOOLS`, never `mcp_server.staged_surface.STAGED_TOOL_NAMES`
+    #: (that would import `mcp_server`, the forbidden direction) and no longer
+    #: `PIN_TABLE.keys()` -- see `OFFERED_TOOLS`' own comment for what that
+    #: silently included.
+    return build_offers(tools, context, allowlist=OFFERED_TOOLS)
 
 
 def _question_text(decision: RoutingDecision) -> str:
@@ -784,7 +804,7 @@ def _dispatch(
             #: staged surface's own six functions, not the classic surface's
             #: 21-37 tools, so there is no other value this could honestly be.
             "surface": "staged",
-            "tool_allowlist": sorted(PIN_TABLE.keys()),
+            "tool_allowlist": sorted(OFFERED_TOOLS),
             "tools_offered": list(tools_offered),
         },
     )
@@ -799,6 +819,24 @@ def _dispatch(
     total_calls = 0
     iteration = 0
     stopped_because = "end_turn"
+    #: Set on exactly one branch below: the model returned a turn with text and
+    #: no tool calls -- it stopped asking, of its own accord. That, and nothing
+    #: else, is what `complete` means.
+    #:
+    #: It is deliberately NOT `stopped_because == "end_turn"`, which is what
+    #: this was until it was measured. `stopped_because` reports the PROVIDER's
+    #: own stop word verbatim (a rule this module keeps on purpose -- see
+    #: `ModelCaller`'s docstring on not folding an unrecognised value into a
+    #: bucket that could be mistaken for success), and providers disagree about
+    #: that word: MiniMax on the Responses API says `"completed"`, Anthropic
+    #: says `"end_turn"`. Comparing against one vocabulary made `complete`
+    #: False on 12 of 12 clean MiniMax runs -- every one of which finished
+    #: perfectly (OBS-701).
+    #:
+    #: Adding `"completed"` to an accepted set would fix those 12 runs and
+    #: break again on the next provider. Completion is a fact about this loop's
+    #: control flow, which this module owns, not about a string it receives.
+    model_finished = False
     investigate_lab_recorded = False
 
     def record_limit(key: str, value: Any, observed: Any) -> None:
@@ -910,7 +948,10 @@ def _dispatch(
                 # dispatch branch) is normal and not this.
                 stopped_because = "empty_turn"
             else:
+                # The model stopped asking for tools and said something. This
+                # is completion, whatever the provider calls it.
                 stopped_because = turn_stop_reason
+                model_finished = True
             break
 
         messages.append({"role": "assistant", "text": text, "tool_calls": requested_calls})
@@ -1023,7 +1064,7 @@ def _dispatch(
         tool_calls=tuple(tool_calls),
         exchanges=tuple(exchanges),
         stopped_because=stopped_because,
-        complete=(stopped_because == "end_turn"),
+        complete=model_finished,
         limits_hit=tuple(limits_hit),
         fabrication_attempts=tuple(fabrication_attempts),
         ticket_run_id=ticket.run_id,
