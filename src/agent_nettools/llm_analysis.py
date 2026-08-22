@@ -81,6 +81,28 @@ is already structurally separated from the answer on the Responses API route
 (there is no ``<think>`` block mixed into ``output_text`` the way a raw
 chat-completions call to a reasoning model might produce), so no extra
 stripping step is needed here.
+
+**Tool calling (OBS-698).** ``ModelCaller``/``ModelTurn``/``ToolCall`` add a
+second, tool-calling-capable entry point to this same Responses API route --
+``_openai_model_call`` and its bound forms ``minimax_model_caller``/
+``openai_model_caller`` -- alongside, not instead of, the single-string
+``_openai_call`` path every existing caller (``analyze_with_openai``,
+``analyze_with_minimax``, ``fabric_analysis.py``) keeps using unchanged.
+OBS-698 measured, live against MiniMax-M3, the one shape that makes this
+route safe to build tool calling on: a successful tool call returns
+``output_text == ''`` alongside a populated ``function_call`` item, so the
+empty-turn guard this module enforces (``_model_turn_from_response``) is
+*"no text AND no tool calls is an error"*, never *"no text is an error"* --
+the latter would reject every successful call. Multi-turn continuation
+(sending a tool's result back for the next turn) uses an explicit ``input``
+list carrying the echoed ``function_call`` plus a ``function_call_output``
+item, **not** ``previous_response_id`` -- that OpenAI-platform shortcut was
+tried first and fails against MiniMax with ``400 invalid_prompt`` (see
+``ModelCaller``'s docstring for the exact error and the reasoning). Truncated
+tool-call ``arguments`` are parsed defensively but never repaired or guessed
+at (see ``ToolCall``); measurement showed a tight token budget does not
+reliably produce invalid JSON in the first place -- MiniMax was observed
+closing the JSON early but validly more often than not.
 """
 
 from __future__ import annotations
@@ -88,7 +110,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, Mapping, Protocol, Sequence
 
 from . import model_egress
 from .prompt_library import RenderedPrompt, load_prompt
@@ -458,6 +480,46 @@ def analyze_with_anthropic(evidence: dict[str, Any], *, timeout: float | None = 
     return analysis
 
 
+def _call_openai_or_raise(
+    client: Any,
+    *,
+    api_key_env: str,
+    model_env: str,
+    resolved_model: str,
+    provider_label: str,
+    **create_kwargs: Any,
+) -> Any:
+    """``client.responses.create(**create_kwargs)`` with the SDK's exceptions
+    mapped to ``LLMAnalysisError`` -- the Responses-API sibling of
+    ``_call_anthropic_or_raise`` above, split out for the same reason OBS-011
+    is recorded for: the one time this exact six-``except``-clause
+    translation existed in two places at once, the provider label drifted
+    out of step in four of the six messages and no test caught it, because
+    none pinned the wording. Shared by ``_openai_call`` (the legacy
+    single-string path) and ``_openai_model_call`` (the tool-calling path
+    added for MiniMax -- OBS-698) so it can only drift once.
+    """
+
+    import openai
+
+    try:
+        return client.responses.create(**create_kwargs)
+    except openai.AuthenticationError as exc:
+        raise LLMAnalysisError(f"{api_key_env} was rejected. Check the key in .env.") from exc
+    except openai.NotFoundError as exc:
+        raise LLMAnalysisError(
+            f"Unknown {provider_label} model: {resolved_model}. Check {model_env}."
+        ) from exc
+    except openai.RateLimitError as exc:
+        raise LLMAnalysisError(f"Rate limited by the {provider_label} API. Retry shortly.") from exc
+    except openai.APIStatusError as exc:
+        raise LLMAnalysisError(
+            f"{provider_label} API error {exc.status_code}: {exc.message}"
+        ) from exc
+    except openai.APIConnectionError as exc:
+        raise LLMAnalysisError(f"Could not reach the {provider_label} API: {exc}") from exc
+
+
 def _openai_call(
     prompt: str,
     *,
@@ -509,26 +571,16 @@ def _openai_call(
     client = openai.OpenAI(**client_kwargs)
     resolved_model = model if model is not None else os.getenv(model_env, model_default)
 
-    try:
-        response = client.responses.create(
-            model=resolved_model,
-            input=prompt,
-            max_output_tokens=MAX_OUTPUT_TOKENS,
-        )
-    except openai.AuthenticationError as exc:
-        raise LLMAnalysisError(f"{api_key_env} was rejected. Check the key in .env.") from exc
-    except openai.NotFoundError as exc:
-        raise LLMAnalysisError(
-            f"Unknown {provider_label} model: {resolved_model}. Check {model_env}."
-        ) from exc
-    except openai.RateLimitError as exc:
-        raise LLMAnalysisError(f"Rate limited by the {provider_label} API. Retry shortly.") from exc
-    except openai.APIStatusError as exc:
-        raise LLMAnalysisError(
-            f"{provider_label} API error {exc.status_code}: {exc.message}"
-        ) from exc
-    except openai.APIConnectionError as exc:
-        raise LLMAnalysisError(f"Could not reach the {provider_label} API: {exc}") from exc
+    response = _call_openai_or_raise(
+        client,
+        api_key_env=api_key_env,
+        model_env=model_env,
+        resolved_model=resolved_model,
+        provider_label=provider_label,
+        model=resolved_model,
+        input=prompt,
+        max_output_tokens=MAX_OUTPUT_TOKENS,
+    )
 
     analysis = response.output_text
     incomplete = getattr(response, "incomplete_details", None)
@@ -549,6 +601,334 @@ def _openai_call_with_usage(prompt: str, **kwargs: Any) -> Completion:
     """
 
     return _openai_call(prompt, _return_usage=True, **kwargs)
+
+
+# --------------------------------------------------------------------------- #
+# Tool calling on the Responses API (OBS-698).
+#
+# `_openai_call` above is the single-shot, single-string path: one prompt in,
+# one answer out, no tools. This block is its tool-calling sibling, not a
+# replacement -- `analyze_with_openai`/`analyze_with_minimax`/
+# `fabric_analysis.py` are all unaffected and keep using `_openai_call`
+# exactly as before.
+#
+# OBS-698 measured three things live against MiniMax-M3 that this design
+# depends on and does not re-derive:
+#
+# 1. `responses.create(tools=[...])` returns a `function_call` output item --
+#    correct tool, correct enum member -- so no move to Chat Completions is
+#    needed (that would reopen OBS-006's silent-empty-content failure; see
+#    the module docstring's "MiniMax" paragraph and OBS-010's revisit
+#    condition).
+# 2. Truncation is signalled (`status: "incomplete"`,
+#    `incomplete_details.reason: "max_output_tokens"`), not silent.
+# 3. **The trap**: a successful tool-calling turn had `output_text == ''`.
+#    A legitimate tool call has empty text. So the invariant this module
+#    enforces is exactly OBS-698's own wording -- see
+#    `_model_turn_from_response` -- and deliberately not "empty text is an
+#    error", which would reject every one of these.
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class ToolCall:
+    """One function call the model asked for, on the tool-calling path.
+
+    ``raw_arguments`` is the exact ``arguments`` string the provider
+    returned, kept regardless of whether it parsed -- nothing here ever
+    repairs, trims, or guesses at a value the model did not actually send
+    (this task's constraint). ``arguments`` is the parsed JSON object when
+    ``raw_arguments`` parses as one; ``None`` otherwise, with
+    ``parse_error`` carrying why.
+
+    A truncated turn does not reliably make ``raw_arguments`` invalid JSON.
+    Measured live against MiniMax-M3 at a tight ``max_output_tokens`` for
+    this task: one budget produced a syntactically valid but semantically
+    empty argument (``'{"protocol":""}'``, ``status: "completed"``, no
+    incomplete signal at all), another closed a long string field off early
+    but still validly (``'...because Border"}'``). So ``parse_error is None``
+    is not proof the call is what the caller actually wanted -- only that it
+    is parseable -- and a caller that cares about semantic completeness
+    still has to look at the turn's ``stop_reason`` too.
+    """
+
+    id: str
+    name: str
+    raw_arguments: str
+    arguments: Mapping[str, Any] | None
+    parse_error: str | None = None
+
+
+@dataclass(frozen=True)
+class ModelTurn:
+    """One model turn on the tool-calling path: text, tool calls, or both.
+
+    Never both empty, per OBS-698's invariant, stated exactly: *"a turn
+    with no text AND no tool calls is a structured error, never an
+    answer."* That is not "empty text is an error": OBS-698 measured
+    ``output_text == ''`` on a turn that correctly returned one
+    ``function_call`` item, so ``text == ""`` with one or more
+    ``tool_calls`` is a completely ordinary, successful instance of this
+    type -- see the accept/reject pair in ``test_llm_analysis_tools.py``.
+
+    **Enforced in ``__post_init__``, not only by the one call site that
+    currently builds one (``_model_turn_from_response``).** D2's organising
+    principle, already named for this exact route by OBS-010 ("make the
+    unsafe state unrepresentable rather than instructing against it"):
+    raising here means no future provider integration, and no hand-rolled
+    ``ModelCaller`` fake written for the wrong purpose, can construct an
+    empty-and-tool-call-free ``ModelTurn`` and have it silently pass as an
+    answer -- the exact failure shape this whole task exists to close off
+    route-independently. ``_model_turn_from_response`` still checks first
+    and raises its own, more specific, provider-named message before
+    constructing one; this is the structural backstop behind it, not a
+    duplicate of the same check for its own sake.
+
+    ``stop_reason`` is drawn from the provider's own vocabulary, never
+    invented: ``incomplete_details.reason`` (e.g. ``"max_output_tokens"``)
+    when the API marked the turn incomplete, else ``"tool_calls"`` when one
+    or more tool calls came back, else the API's own ``status`` (normally
+    ``"completed"``).
+    """
+
+    text: str
+    tool_calls: tuple[ToolCall, ...]
+    stop_reason: str
+    usage: TokenUsage
+
+    def __post_init__(self) -> None:
+        if not self.text and not self.tool_calls:
+            raise LLMAnalysisError("A model turn had no text and no tool calls.")
+
+
+class ModelCaller(Protocol):
+    """One model turn, provider-agnostic: what a tool-calling loop depends on.
+
+    ``minimax_model_caller``/``openai_model_caller`` below are the concrete
+    implementations bound to a provider's client/model/base_url; a loop's
+    own tests only need to fake this call shape, never construct a real
+    ``openai.OpenAI`` client.
+
+    ``messages`` entries are OpenAI Responses-API input items, passed
+    through to ``input=`` essentially verbatim -- not a provider-neutral
+    shape this module invents and then translates, because translating
+    would risk losing exactly the fidelity multi-turn tool calling depends
+    on. A plain turn is ``{"role": "user"|"assistant", "content": <str>}``;
+    continuing after a tool call needs two more items appended to that same
+    list: the model's own prior call echoed back,
+    ``{"type": "function_call", "call_id": ..., "name": ..., "arguments":
+    ...}`` (use the ``ToolCall.raw_arguments`` the turn returned, not a
+    re-serialization of ``.arguments`` -- the former is always present, even
+    when parsing failed), and the loop's result for it,
+    ``{"type": "function_call_output", "call_id": ..., "output": <str>}``.
+
+    This exact shape was verified live against MiniMax-M3 for this task: a
+    three-item ``input`` list (original user message + echoed
+    ``function_call`` + ``function_call_output``) produced a coherent
+    follow-up answer that correctly referenced the tool's result.
+    ``previous_response_id`` -- the OpenAI-platform-native shortcut that
+    lets the server hold the prior turn's state so only the new item needs
+    sending -- was tried first and **does not work against MiniMax**: it
+    answered ``400 invalid_prompt: tool result's tool id ... not found``,
+    meaning the endpoint does not retain response state the way
+    api.openai.com does. Building on it would have been silently
+    un-portable to any other Responses-API-compatible endpoint, not just
+    presently broken -- the explicit-input-list shape above is what this
+    module uses instead.
+    """
+
+    def __call__(
+        self,
+        *,
+        system: str,
+        messages: Sequence[Mapping[str, Any]],
+        tools: Sequence[Mapping[str, Any]],
+        timeout: float | None,
+    ) -> ModelTurn: ...
+
+
+def _parse_tool_arguments(raw: str) -> tuple[dict[str, Any] | None, str | None]:
+    """Parse one tool call's ``arguments`` JSON string. Returns ``(parsed, error)``.
+
+    Never repairs or guesses: a parse failure returns ``(None, <message>)``
+    and the caller (``_tool_call_from_item``) keeps ``raw`` on the
+    ``ToolCall`` unchanged -- see ``ToolCall``'s docstring for why a
+    truncated turn does not reliably land here rather than parsing to
+    something merely wrong.
+    """
+
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return None, str(exc)
+    if not isinstance(parsed, dict):
+        return None, f"tool arguments were not a JSON object (got {type(parsed).__name__})"
+    return parsed, None
+
+
+def _tool_call_from_item(item: Any) -> ToolCall:
+    """Build one ``ToolCall`` from a Responses-API ``function_call`` output item."""
+
+    raw_arguments = getattr(item, "arguments", None) or ""
+    arguments, parse_error = _parse_tool_arguments(raw_arguments)
+    return ToolCall(
+        id=getattr(item, "call_id", None) or getattr(item, "id", "") or "",
+        name=getattr(item, "name", "") or "",
+        raw_arguments=raw_arguments,
+        arguments=arguments,
+        parse_error=parse_error,
+    )
+
+
+def _model_turn_from_response(response: Any, *, provider_label: str) -> ModelTurn:
+    """Normalize one Responses-API ``response`` into a route-independent ``ModelTurn``.
+
+    ``response.output_text`` is the SDK's own aggregate of every text
+    content block in ``response.output`` -- used here rather than walking
+    ``output`` by hand for text, and it is exactly what OBS-698 measured to
+    be ``''`` on a successful tool-calling turn, which is why an empty
+    string here is not, by itself, anything to act on. Tool calls are read
+    separately, from the ``function_call`` items in ``response.output``.
+
+    Checked in this order: an explicit ``response.error`` (a 200 the
+    provider still used to signal "the model failed to generate a
+    response" -- the Responses-API analogue of Anthropic's
+    ``stop_reason == "refusal"``) is the most specific diagnosis and is
+    raised immediately; only then is OBS-698's empty-turn invariant checked,
+    so it can never mask a more specific provider-reported reason.
+    """
+
+    error = getattr(response, "error", None)
+    if error is not None:
+        message = getattr(error, "message", None) or str(error)
+        raise LLMAnalysisError(f"{provider_label} returned an error: {message}")
+
+    text = response.output_text or ""
+    tool_calls = tuple(
+        _tool_call_from_item(item)
+        for item in getattr(response, "output", None) or []
+        if getattr(item, "type", None) == "function_call"
+    )
+
+    # OBS-698's invariant, stated exactly: a turn with no text AND no tool
+    # calls is a structured error, never an answer. Not "empty text is an
+    # error" -- that naive form would reject every successful tool call (see
+    # ModelTurn's docstring and the accept/reject pair in
+    # test_llm_analysis_tools.py).
+    if not text and not tool_calls:
+        raise LLMAnalysisError(f"{provider_label} returned no text and no tool calls.")
+
+    incomplete = getattr(response, "incomplete_details", None)
+    incomplete_reason = getattr(incomplete, "reason", None) if incomplete is not None else None
+    if incomplete_reason:
+        stop_reason = incomplete_reason
+    elif tool_calls:
+        stop_reason = "tool_calls"
+    else:
+        stop_reason = getattr(response, "status", None) or "completed"
+
+    return ModelTurn(
+        text=text,
+        tool_calls=tool_calls,
+        stop_reason=stop_reason,
+        usage=_usage_from(getattr(response, "usage", None)),
+    )
+
+
+def _openai_model_call(
+    *,
+    system: str,
+    messages: Sequence[Mapping[str, Any]],
+    tools: Sequence[Mapping[str, Any]] = (),
+    timeout: float | None = None,
+    api_key_env: str = "OPENAI_API_KEY",
+    base_url: str | None = None,
+    model: str | None = None,
+    model_env: str = "OPENAI_MODEL",
+    model_default: str = "gpt-5.5",
+    provider_label: str = "OpenAI",
+) -> ModelTurn:
+    """One tool-calling-capable turn on the OpenAI Responses API. Implements ``ModelCaller``.
+
+    Parameterised exactly like ``_openai_call`` (``api_key_env``/
+    ``base_url``/``model``/``model_env``/``model_default``/
+    ``provider_label``) so ``minimax_model_caller``/``openai_model_caller``
+    below can bind it the same way ``analyze_with_minimax``/
+    ``analyze_with_openai`` bind ``_openai_call``. This is the tool-calling
+    sibling of that function, not a replacement for it.
+
+    ``system`` becomes ``instructions=`` (verified live: MiniMax honours
+    it), omitted entirely when empty rather than sent as ``instructions=""``
+    -- the same "omit an absent optional rather than pass a falsy
+    placeholder" convention ``_openai_call`` already uses for ``base_url``.
+    ``tools`` is omitted the same way when empty. See ``ModelCaller`` for
+    what ``messages`` entries look like and how multi-turn tool-result
+    continuation works.
+    """
+
+    import openai
+
+    client_kwargs: dict[str, Any] = {
+        "api_key": os.getenv(api_key_env),
+        "timeout": _resolve_llm_timeout(timeout),
+    }
+    if base_url is not None:
+        client_kwargs["base_url"] = base_url
+    client = openai.OpenAI(**client_kwargs)
+    resolved_model = model if model is not None else os.getenv(model_env, model_default)
+
+    create_kwargs: dict[str, Any] = {
+        "model": resolved_model,
+        "input": list(messages),
+        "max_output_tokens": MAX_OUTPUT_TOKENS,
+    }
+    if system:
+        create_kwargs["instructions"] = system
+    if tools:
+        create_kwargs["tools"] = list(tools)
+
+    response = _call_openai_or_raise(
+        client,
+        api_key_env=api_key_env,
+        model_env=model_env,
+        resolved_model=resolved_model,
+        provider_label=provider_label,
+        **create_kwargs,
+    )
+    return _model_turn_from_response(response, provider_label=provider_label)
+
+
+def minimax_model_caller(
+    *,
+    system: str,
+    messages: Sequence[Mapping[str, Any]],
+    tools: Sequence[Mapping[str, Any]],
+    timeout: float | None,
+) -> ModelTurn:
+    """A ``ModelCaller`` bound to the MiniMax endpoint -- OBS-698's route.
+
+    What a tool-calling agent loop can depend on and fake in tests (see
+    ``ModelCaller``). Reuses ``_minimax_call_kwargs()``, the same argument
+    set ``analyze_with_minimax`` and ``fabric_analysis.py`` already bind
+    ``_openai_call`` with, so the MiniMax endpoint/model/env-var names stay
+    defined in exactly one place.
+    """
+
+    return _openai_model_call(
+        system=system, messages=messages, tools=tools, timeout=timeout, **_minimax_call_kwargs()
+    )
+
+
+def openai_model_caller(
+    *,
+    system: str,
+    messages: Sequence[Mapping[str, Any]],
+    tools: Sequence[Mapping[str, Any]],
+    timeout: float | None,
+) -> ModelTurn:
+    """A ``ModelCaller`` bound to the plain OpenAI endpoint -- ``minimax_model_caller``'s sibling."""
+
+    return _openai_model_call(system=system, messages=messages, tools=tools, timeout=timeout)
 
 
 def analyze_with_openai(evidence: dict[str, Any], *, timeout: float | None = None) -> str:

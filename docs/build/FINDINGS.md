@@ -7584,3 +7584,52 @@ kind of volatility it had not thought to list.
   the check would reject every successful tool call.
 - **Needs human review:** no. `probe_minimax.py` should gain this as a
   permanent check 7 so the claim stays measured rather than remembered.
+
+## OBS-699 · Extending OBS-698 to tool-calling turns — and one shape it does not cover
+
+Amends OBS-698 rather than correcting it. Two lanes probed the same endpoint
+and appeared to disagree; they were measuring different phenomena, and the
+combination is the useful result.
+
+**1. Truncation of a tool-calling turn IS signalled, and no partial call is
+emitted.** Measured with a two-field schema whose second field was prompted to
+be long: at `max_output_tokens` of 16 and 64, `status: "incomplete"`,
+`incomplete_details.reason: "max_output_tokens"`, and **zero** `function_call`
+items. At 2048 the same request completed with one well-formed call. So there
+is no "half a tool call" shape to defend against — the call either arrives
+whole or does not arrive.
+
+**2. A tool call that FITS can still carry a semantically empty argument.**
+The other lane, with a single-field schema, measured `status: "completed"` at
+`max_output_tokens=16` with `arguments: '{"protocol": ""}'` — syntactically
+valid, semantically useless, and **not** flagged as incomplete. That is not a
+truncation-signalling gap; it is a model emitting an empty value under a tight
+budget, which the provider has no reason to call an error.
+
+**Why the two readings looked contradictory and were not:** whether the call
+fits inside the budget decides which shape you see. A schema that cannot fit
+truncates and emits nothing; a schema that fits emits something possibly
+worthless. Neither contradicts OBS-698, and stating only one of them would
+have left the other unguarded.
+
+**Shape 2 is already caught, one layer down.** `model_ingress.resolve_arguments`
+validates enumerated parameters against their declared vocabulary, so
+`intent: ""` is refused exactly as `intent: "nonsense"` is, while
+`intent: "bgp"` passes. Verified directly. The argument policy built for
+B-459's *fabrication* problem turns out to cover this *degeneracy* problem too
+— worth recording, because it was not designed for it.
+
+**3. `previous_response_id` does not work against MiniMax.** The lane tried the
+OpenAI-platform shortcut first and got `400 invalid_prompt: tool result's tool
+id ... not found` — MiniMax retains no server-side response state. Multi-turn
+therefore requires the explicit input list (`function_call` echoed back plus
+`function_call_output`), verified live end to end. Recorded because the
+shortcut is the obvious thing to reach for and it fails in a way that reads
+like a bug in the caller.
+
+**4. Both text shapes occur on a successful tool call.** OBS-698 measured empty
+text; a different prompt phrasing produced commentary text *alongside* the same
+call. This is exactly why the invariant is the disjunction — *no text AND no
+tool calls* — and not a check on text alone. It is now enforced in
+`ModelTurn.__post_init__`, so the invalid state is unconstructable rather than
+rejected at one call site.
