@@ -260,6 +260,109 @@ def test_an_unknown_device_is_a_stated_refusal():
 
 
 # --------------------------------------------------------------------------- #
+# Loki transport framing -- syslog-ng's leading host token (OBS-702/B-711
+# follow-up). Every line above is `show logging` shape (no host); these use
+# the *other* real shape, the one the overnight campaign actually measured
+# in Loki and that `route_syslog_line` used to reject outright.
+# --------------------------------------------------------------------------- #
+
+
+def test_the_real_loki_bgp_line_measured_live_routes_correctly():
+    """Verbatim from the overnight campaign's live measurement: this exact
+    line, host prefix and all, used to come back `routable=False` with
+    reason "not an IOS-XR log line this fabric's parser recognises". It must
+    now route exactly as the equivalent `show logging`-shape line does."""
+
+    line = (
+        "PE2.sota-xrd RP/0/RP0/CPU0:Aug 22 21:31:55.194 UTC: bgp[1084]: "
+        "%ROUTING-BGP-5-ADJCHANGE : neighbor 10.255.0.31 Down - Admin. "
+        "shutdown (CEASE notification...)"
+    )
+    d = er.route_syslog_line(line, device="PE2")
+
+    assert d.routable is True
+    assert d.flow == "bgp_session"
+    assert d.subject == "10.255.0.31"
+    assert d.transition == "down"
+    assert d.device == "PE2"
+
+
+def test_a_loki_format_link_updown_line_routes_to_the_interface_flow():
+    """Same Loki shape, the interface mnemonic: a real fixture body (never
+    hand-typed) with a syslog-ng host token prepended, same as syslog-ng
+    actually does before syslog-ng-forwarded lines land in Loki."""
+
+    body = _real_line(
+        "PKT_INFRA-LINK-3-UPDOWN : Interface GigabitEthernet0/0/0/0, "
+        "changed state to Down", device="PE2",
+    )
+    line = f"PE2.sota-xrd {body}"
+    d = er.route_syslog_line(line, device="PE2")
+
+    assert d.routable is True
+    assert d.flow == "interface"
+    assert d.subject == "GigabitEthernet0/0/0/0"
+    assert d.transition == "down"
+
+
+def test_a_loki_format_link_updown_up_recovery_is_still_refused():
+    """The B-711 recovery-vs-fault rule must keep holding for the Loki
+    shape, not just the `show logging` shape it was proven against."""
+
+    body = _real_line(
+        "PKT_INFRA-LINK-3-UPDOWN : Interface GigabitEthernet0/0/0/0, "
+        "changed state to Up", device="PE2",
+    )
+    line = f"PE2.sota-xrd {body}"
+    d = er.route_syslog_line(line, device="PE2")
+
+    assert d.routable is False
+    assert d.transition == "up"
+    assert "recovery" in d.reason
+
+
+def test_the_host_prefix_and_bare_forms_of_one_line_decide_identically():
+    """Positive control, Loki edition: stripping the transport framing must
+    change nothing about the decision except that it now succeeds at all --
+    same full payload either way, since both supply `device` from the
+    caller, never from text."""
+
+    body = _real_line("ROUTING-BGP-5-ADJCHANGE : neighbor 10.255.0.12")
+    bare = er.route_syslog_line(body, device="RR1")
+    prefixed = er.route_syslog_line(f"RR1.sota-xrd {body}", device="RR1")
+
+    assert bare.as_dict() == prefixed.as_dict()
+
+
+def test_a_parsed_host_never_overrides_the_caller_supplied_device():
+    """B-467's rule, re-affirmed for the new host token: even when the
+    parsed host names a *different* device than the caller supplied,
+    `device` on the decision is the caller's -- the parsed host is transport
+    framing this fix strips and discards, never a second vote."""
+
+    body = _real_line("ROUTING-BGP-5-ADJCHANGE : neighbor 10.255.0.12")
+    d = er.route_syslog_line(f"PE2.sota-xrd {body}", device="RR1")
+
+    assert d.routable is True
+    assert d.device == "RR1"
+
+
+def test_junk_between_a_host_token_and_the_rp_marker_still_refuses():
+    """Conservative-stripping guard: `_SYSLOG_HOST_PREFIX` only ever
+    consumes a single leading token immediately followed by whitespace then
+    `RP/0/RP0/CPU0:`. It must NOT scan forward for that marker anywhere in
+    the string -- a line with stray tokens in between is genuinely
+    malformed and must keep refusing, not be "rescued"."""
+
+    body = _real_line("ROUTING-BGP-5-ADJCHANGE : neighbor 10.255.0.12")
+    line = f"PE2 stray extra {body}"
+    d = er.route_syslog_line(line, device="PE2")
+
+    assert d.routable is False
+    assert d.reason == "not an IOS-XR log line this fabric's parser recognises"
+
+
+# --------------------------------------------------------------------------- #
 # Alertmanager -- the payload shape T-005 recorded
 # --------------------------------------------------------------------------- #
 

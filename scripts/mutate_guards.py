@@ -944,6 +944,36 @@ MUTATIONS = [
      '            str(name) if name else "(unnamed tool)", status="refused", device=decision.device,\n',
      '            str(name) if name else "(unnamed tool)", status="success", device=decision.device,\n',
      "test_a_refused_call_reaches_the_TICKET_not_only_the_returned_EventRun"),
+
+    # ---- Overnight fix, 2026-08-22: `route_syslog_line` couldn't parse a
+    # real Loki line (syslog-ng prepends the sending host before
+    # `RP/0/RP0/CPU0:`, a shape `template_parsers._LOG_ENTRY` -- built for
+    # `show logging` output, which has no host field -- never matches).
+    # `_SYSLOG_HOST_PREFIX` strips that single leading host token
+    # deliberately conservatively: anchored at the start of the (`.strip()`-
+    # ed) line, and `\s+` cannot itself cross the whitespace that separates
+    # the host from the marker, so it can only ever consume ONE leading
+    # token immediately followed by whitespace then `RP/0/RP0/CPU0:` -- never
+    # scan forward to the first such marker anywhere in the string. That is
+    # the exact property this guard pins: mutated so a run of ANY characters
+    # (`.*`) may sit between the host token and the marker, a line with junk
+    # in between (`"PE2 stray extra RP/0/RP0/CPU0:..."`) would be wrongly
+    # "rescued" into a routable decision instead of being refused as
+    # malformed. No backlog row number was assigned before this fix shipped
+    # (urgent lab-blocking fix, filed same night as B-711/B-713 in the same
+    # module) -- the operator can rename this id once one is filed. Counted
+    # before adding this entry: the anchor string below occurs exactly once
+    # in event_routing.py (`grep -c`, 2026-08-22).
+    ("EVENTROUTING-HOSTPREFIX-NO-SCAN-FORWARD",
+     "route_syslog_line's leading syslog-host stripper only ever consumes a "
+     "single token immediately followed by whitespace then `RP/0/RP0/CPU0:` "
+     "-- it must never scan forward to a marker buried later in the string, "
+     "which would let a genuinely malformed line (junk between a host-shaped "
+     "token and the marker) through as if it were well-formed",
+     "src/agent_nettools/event_routing.py",
+     'r"^(?P<host>\\S+)\\s+(?=RP/0/RP0/CPU0:)"',
+     'r"^(?P<host>\\S+).*(?=RP/0/RP0/CPU0:)"',
+     "test_junk_between_a_host_token_and_the_rp_marker_still_refuses"),
 ]
 
 

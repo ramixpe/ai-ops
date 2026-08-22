@@ -1,0 +1,55 @@
+{
+  "round": 3,
+  "fault_choice": 5,
+  "started": "2026-08-22T21:31:44Z",
+  "fault_confirmed_live": true,
+  "subject": {
+    "device": "RR1",
+    "subject": "10.255.0.12"
+  },
+  "loki_events": [
+    {
+      "host": "RR1",
+      "device_time": "Aug 22 21:31:55",
+      "mnemonic": "ROUTING-BGP-5-ADJCHANGE",
+      "ingest_ns": 1787434315000000000,
+      "line": "RR1.sota-xrd RP/0/RP0/CPU0:Aug 22 21:31:55.196 UTC: bgp[1084]: %ROUTING-BGP-5-ADJCHANGE : neighbor 10.255.0.12 Down - BGP Notification received, administrative shutdown (VRF: default) (AS: 65000)",
+      "retransmits": 1
+    },
+    {
+      "host": "PE2",
+      "device_time": "Aug 22 21:31:55",
+      "mnemonic": "ROUTING-BGP-5-ADJCHANGE",
+      "ingest_ns": 1787434315000000000,
+      "line": "PE2.sota-xrd RP/0/RP0/CPU0:Aug 22 21:31:55.194 UTC: bgp[1084]: %ROUTING-BGP-5-ADJCHANGE : neighbor 10.255.0.31 Down - Admin. shutdown (CEASE notification sent - administrative shutdown) (VRF: default) (AS: 65000)",
+      "retransmits": 1
+    }
+  ],
+  "detected_after_s": 40.5,
+  "observations": [
+    {
+      "at_s": 40.5,
+      "events": 2
+    }
+  ],
+  "agent": {
+    "device": "PE2",
+    "line": "PE2.sota-xrd RP/0/RP0/CPU0:Aug 22 21:31:55.194 UTC: bgp[1084]: %ROUTING-BGP-5-ADJCHANGE : neighbor 10.255.0.31 Down - Admin. shutdown (CEASE notification sent - administrative shutdown) (VRF: default) (AS: 65000)",
+    "routable": false,
+    "transition": null,
+    "flow": null,
+    "subject": null,
+    "matched": null,
+    "route_reason": "not an IOS-XR log line this fabric's parser recognises",
+    "skipped": "not routable (recovery, or no flow) -- correct behaviour, not a failure"
+  },
+  "fault_lab_rc": 0,
+  "restore_verified": true,
+  "session_dir": "runs/20260822-213144/truth.jsonl",
+  "fabric_after": {
+    "finding": "transport_blocked",
+    "trustworthy": true,
+    "exit": 1
+  },
+  "ended": "2026-08-22T21:32:58Z"
+}

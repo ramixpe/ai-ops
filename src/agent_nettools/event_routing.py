@@ -27,7 +27,11 @@ label, or the explicit ``--device`` a syslog receiver supplies from its
 transport source. Message text is device-authored and, transitively,
 attacker-influenceable (B-467: a failed login embeds the attacker's chosen
 username in the log). An event that names no device through metadata is
-**unroutable**, never guessed.
+**unroutable**, never guessed. (A syslog-ng-forwarded line carries a leading
+host token ahead of the ``show logging``-shaped body -- see
+``route_syslog_line``'s own docstring -- but that token is transport framing
+this fabric's own relay adds, not device-authored message text, and it is
+stripped and discarded, never promoted to ``device``; this rule still holds.)
 
 Unroutable is a success, not an error
 ---------------------------------------
@@ -287,20 +291,65 @@ def _validated_device(name: str | None, *, source_kind: str) -> tuple[str | None
 # Routers.
 # --------------------------------------------------------------------------- #
 
+#: syslog-ng prepends the sending host before the ``RP/0/RP0/CPU0:`` node
+#: token that `template_parsers._LOG_ENTRY` (built for ``show logging``
+#: output, which has no such prefix) starts at. This is transport framing,
+#: not part of the log line format itself, so it is stripped *here* rather
+#: than by widening the shared parser -- `logs_loki.py`'s `_LOKI_LOG_LINE`
+#: already carries the equivalent ``^(?P<host>\S+)\s+RP/0/RP0/CPU0:`` shape;
+#: this constant deliberately mirrors it rather than defining a third,
+#: possibly-drifting version of the same fact.
+#:
+#: Deliberately conservative: anchored at the *start* of the (already
+#: ``.strip()``-ed) line, and ``\S+`` cannot itself match the whitespace that
+#: separates it from ``RP/0/RP0/CPU0:`` -- so this can only ever consume a
+#: single leading whitespace-delimited token immediately followed by that
+#: literal marker. It does not scan forward for ``RP/0/RP0/CPU0:`` anywhere
+#: in the string: a line with junk between a host-shaped token and the
+#: marker (``"PE2 stray RP/0/RP0/CPU0:..."``) does not match here, is passed
+#: through unstripped, and then correctly fails `_LOG_ENTRY` below --
+#: genuinely malformed input still refuses rather than being "rescued" by
+#: skipping ahead to the first recognisable marker.
+_SYSLOG_HOST_PREFIX = re.compile(r"^(?P<host>\S+)\s+(?=RP/0/RP0/CPU0:)")
+
 
 def route_syslog_line(line: str, *, device: str | None = None) -> RoutingDecision:
-    """Route one raw IOS-XR syslog line.
+    """Route one raw IOS-XR syslog line -- either shape Loki actually stores.
 
     ``device`` is the origin the *receiver* knows from transport metadata
-    (source address, syslog hostname field) — required, because the line's own
-    text never supplies it.
+    (source address, syslog hostname field) — required, because the line's
+    own **message text** never supplies it (B-467: message text is
+    device-authored and, transitively, attacker-influenceable).
+
+    A syslog-ng-forwarded line (as Loki stores it) carries an additional
+    leading host token before the ``show logging``-shaped body -- see
+    `_SYSLOG_HOST_PREFIX`. That token *is* parsed and, if present, is a
+    genuine origin hostname; it is nonetheless never promoted to `device`.
+    It is transport framing added by this fabric's own syslog-ng, not
+    attacker-reachable message text, so the B-467 threat model does not
+    strictly forbid using it -- but this function has exactly one caller
+    contract today (every caller already supplies ``device`` from its own
+    transport metadata; see `event_watch.py`, `scripts/overnight_campaign.py`),
+    and honouring two independent origin claims that could disagree (a
+    caller-supplied ``device`` and a parsed host) is a new failure mode this
+    fix has no reason to introduce under time pressure. So: caller-supplied
+    ``device`` keeps sole authority, unchanged from before this fix, and the
+    parsed host is discarded once stripped. If a future caller needs the
+    parsed host (e.g. a receiver that wants to cross-check it against its own
+    transport metadata rather than trust either blindly), surface it as a new
+    field then, deliberately, rather than silently here.
 
     The line format is `template_parsers._LOG_ENTRY` — the one place the
-    format is defined; a second regex here would drift from the parser the
-    descent itself trusts.
+    ``show logging``/syslog-ng body format is defined; a second regex here
+    would drift from the parser the descent itself trusts. Only the leading
+    host token, if any, is handled outside it.
     """
 
-    match = _LOG_ENTRY.match(line.strip())
+    stripped = line.strip()
+    host_match = _SYSLOG_HOST_PREFIX.match(stripped)
+    body = stripped[host_match.end():] if host_match else stripped
+
+    match = _LOG_ENTRY.match(body)
     if not match:
         return RoutingDecision(
             routable=False, source_kind="syslog",

@@ -199,10 +199,40 @@ def run_agent(line: str, device: str, ticket_dir: Path) -> dict:
     return out
 
 
-def fabric_ok() -> dict:
+def fabric_ok(*, settle_s: float = 0.0, poll_s: float = 20.0) -> dict:
     """Read-only: is the fabric back? Never used to decide a revert -- fault_lab
-    owns that -- only to record whether the revert actually took."""
+    owns that -- only to record whether the revert actually took.
 
+    `settle_s` exists because the first version of this had no settle window and
+    killed a nine-hour campaign after three rounds. Round 3 reverted an
+    admin-shut BGP neighbour; the revert was verified, the fabric read
+    `transport_blocked` seconds later, and the check called it unrestored. The
+    session simply had not finished re-establishing -- confirmed golden by hand
+    a minute afterwards.
+
+    Reading a transient as a steady state is the failure this whole project
+    keeps rediscovering, and here it was in the checker written to guard
+    against it. So: poll until healthy or until the window closes, and report
+    the LAST reading plus how long it took to settle. A fault that really did
+    not revert stays broken for the whole window and is still caught.
+    """
+
+    deadline = time.monotonic() + settle_s
+    attempt = 0
+    while True:
+        attempt += 1
+        result = _fabric_once()
+        result["attempts"] = attempt
+        if result.get("finding") == "all_layers_healthy":
+            result["settled_after_s"] = round(settle_s - max(0.0, deadline - time.monotonic()), 1)
+            return result
+        if time.monotonic() >= deadline:
+            result["settled_after_s"] = None
+            return result
+        time.sleep(min(poll_s, max(0.0, deadline - time.monotonic())))
+
+
+def _fabric_once() -> dict:
     r = subprocess.run(
         [str(REPO / ".venv/bin/nettools"), "investigate", "RR1", "10.255.0.12",
          "--no-model", "--format", "json"],
@@ -307,7 +337,9 @@ def one_round(n: int, fault: int, hold_s: float, outdir: Path, mnemonics: list[s
     record["restore_verified"] = "RESTORE verified" in text
     record["session_dir"] = (re.search(r"Sealed log: (\S+)", text) or [None, None])[1] \
         if "Sealed log" in text else None
-    record["fabric_after"] = fabric_ok()
+    # 180s: a BGP session admin-shut and un-shut re-establishes well inside
+    # this on the lab fabric, and an IS-IS adjacency inside it too.
+    record["fabric_after"] = fabric_ok(settle_s=180.0)
     record["ended"] = _stamp()
     log(f"  restore_verified={record['restore_verified']} fabric={record['fabric_after'].get('finding')}")
     return record
@@ -349,9 +381,24 @@ def main() -> int:
         (outdir / f"round_{n:02d}.json").write_text(json.dumps(rec, indent=2, default=str))
         (outdir / "campaign.json").write_text(json.dumps(results, indent=2, default=str))
 
-        if not rec["restore_verified"] and not args.rehearse:
-            log("  !! RESTORE NOT VERIFIED -- aborting rather than stacking faults")
+        if args.rehearse:
+            pass
+        elif rec.get("fault_confirmed_live") and not rec["restore_verified"]:
+            # Applied and not verifiably reverted: stop. Stacking a second
+            # fault on an unrestored fabric makes every later round unreadable
+            # and the morning's scoring worthless.
+            log("  !! FAULT WAS LIVE AND RESTORE NOT VERIFIED -- aborting")
             break
+        elif rec["fabric_after"].get("finding") not in ("all_layers_healthy", None):
+            # Independent of fault_lab's own verdict: the fabric itself says
+            # it is still broken. Belt and braces, because a restore that
+            # reports success is exactly the thing B-412 says not to trust.
+            log(f"  !! FABRIC NOT GOLDEN after round ({rec['fabric_after'].get('finding')}) -- aborting")
+            break
+        elif not rec.get("fault_confirmed_live"):
+            # Never applied -- almost always a fault whose CLI syntax the
+            # device rejected. One lost round, not a broken fabric.
+            log("  round produced no live fault (likely rejected config); continuing")
         if n < rounds:
             nxt = start + n * args.interval_min * 60
             sleep_for = nxt - time.monotonic()

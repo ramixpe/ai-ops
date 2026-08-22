@@ -1,0 +1,32 @@
+{
+  "round": 1,
+  "fault_choice": 2,
+  "started": "2026-08-22T20:28:05Z",
+  "fault_confirmed_live": true,
+  "subject": {
+    "device": "RR1",
+    "subject": "10.255.0.12"
+  },
+  "observations": [
+    {
+      "at_s": 11.3,
+      "events": 0
+    },
+    {
+      "at_s": 23.8,
+      "events": 0
+    }
+  ],
+  "agent": {
+    "skipped": "no matching syslog reached Loki during the hold"
+  },
+  "fault_lab_rc": 0,
+  "restore_verified": true,
+  "session_dir": "runs/20260822-202805/truth.jsonl",
+  "fabric_after": {
+    "finding": "all_layers_healthy",
+    "trustworthy": true,
+    "exit": 0
+  },
+  "ended": "2026-08-22T20:28:43Z"
+}

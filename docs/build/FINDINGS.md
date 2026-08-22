@@ -7929,3 +7929,73 @@ someone goes looking with the unsanctioned query. Filed as B-712.
   left uncorrected in the table pending an occurrence to check it against.
 - **`mnemonics.yaml` is unchanged.** Nothing was promoted. All 20 entries remain
   `fires: false`, so the event path still ships doing nothing.
+
+---
+
+## OBS-703 · The event path could not read a single real log line
+
+Found by the overnight fault campaign at round 3, forty minutes into a nine-hour
+run, on the first fault that produced a syslog we were watching for. Nothing a
+unit test could have caught, because the fixtures are the wrong format.
+
+`route_syslog_line` refused the line Loki actually stores:
+
+```
+'PE2.sota-xrd RP/0/RP0/CPU0:Aug 22 21:31:55.194 UTC: bgp[1084]:
+ %ROUTING-BGP-5-ADJCHANGE : neighbor 10.255.0.31 Down - Admin. shutdown'
+  -> routable=False   "not an IOS-XR log line this fabric's parser recognises"
+```
+
+Remove the leading `PE2.sota-xrd ` and it routes perfectly: `bgp_session`,
+`10.255.0.31`, `down`.
+
+**syslog-ng prepends the sending host. `show logging` output has no such
+field.** `event_routing` parses with `template_parsers._LOG_ENTRY`, built for the
+device buffer. `logs_loki` carries its own separate `_LOKI_LOG_LINE` for the
+wire shape. Two parsers, two real formats, **neither able to read the other's
+input** — and the event path only ever met one of them, because every line it
+was ever tested against came from a `show logging` fixture or was typed by hand.
+
+So the entire syslog→model path, built and tested over two days, could not have
+processed one production event. The gate being shut is the only reason this was
+not already true in the field.
+
+**The pattern, which is now three for three today.** OBS-701 found `complete`
+permanently `False` because every hand-written fake `ModelCaller` said
+`"end_turn"` — the vocabulary its author had in mind, not the one MiniMax
+returns. This is the same defect one layer out: **a fixture inherits its
+author's assumptions about the thing it stands in for**, and a test suite built
+entirely from fixtures cannot discover that the real input has a different
+shape. Both were found by running against the real thing for the first time.
+
+**Fixed** by normalising the transport framing in `route_syslog_line`, not by
+widening the shared parser. `template_parsers._LOG_ENTRY` still parses real
+`show logging` output and must keep rejecting malformed input; a hostname is
+framing, and stripping it is the receiver's job.
+
+The stripper is deliberately narrow:
+
+```python
+_SYSLOG_HOST_PREFIX = re.compile(r"^(?P<host>\S+)\s+(?=RP/0/RP0/CPU0:)")
+```
+
+`\S+` cannot cross whitespace and the pattern is `^`-anchored with `.match()`,
+so it can never scan forward to a marker buried later in the string.
+`"PE2 stray extra RP/0/RP0/CPU0:…"` is passed through unstripped and still
+refused. That property has its own mutation guard
+(`EVENTROUTING-HOSTPREFIX-NO-SCAN-FORWARD`, mutating `\s+` to `.*`), because it
+is the exact way a fix like this goes wrong.
+
+**The parsed host is discarded, not promoted to `device`.** Every real caller
+already supplies `device` from its own transport metadata, and two origin claims
+that can silently disagree is a new failure mode, not a fix. Verified: a line
+whose host says `RR1` still routes as the caller's `PE2`.
+
+**What remains, and it is the real lesson.** Two regexes still encode the same
+fact about one wire format and can drift apart again exactly as they did here.
+`logs_loki._record_from_line` already produces a structured record with `host`,
+`mnemonic` and `text` parsed out; routing from that record rather than from a
+raw line would leave one parser instead of two. That is an interface change
+rather than a bugfix — `route_syslog_line`'s contract is "a raw line in", which
+`route_event`'s JSON sniffing also relies on — so it is filed (B-714) rather
+than done under a stopped campaign.
