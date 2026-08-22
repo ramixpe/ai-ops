@@ -89,7 +89,7 @@ by reference rather than re-argued each time:
   worth stating, since "bounded" is the word every unbounded agent uses about
   itself: the device, the subject and the flow are supplied by code and
   **removed from the schema the model is handed**, so it has no field in which
-  to name a different one; five read-only tools, not thirty-seven; active
+  to name a different one; four read-only tools, not thirty-seven; active
   probes forced off in the spawned server's own environment regardless of the
   operator's `.env`; four iterations, 90 seconds, six tool calls;
   `investigate_lab` once; and the answer recorded on the ticket is

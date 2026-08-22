@@ -73,7 +73,7 @@
 <body>
   <div class="frame">
     <p class="eyebrow">Diagram set · ios-xr-nettools v1.2.0</p>
-    <h1>Ten views of a read-only network inspection tool</h1>
+    <h1>Eleven views of a read-only network inspection tool</h1>
     <p class="standfirst">Hand-authored presentation diagrams covering the whole stack — the tool, the lab platform it runs beside, and the fabric it reads. Every figure in them was derived from the tree or measured against the running system, not recalled.</p>
 
     <div class="note">
@@ -81,13 +81,13 @@
       <p style="margin-top:0.5rem; font-size:0.85rem; color:var(--color-muted);">
         The nine SVGs in <code>docs/diagrams/</code> are generated from the source tree and byte-pinned by
         <code>tests/test_diagrams.py</code> — they cannot drift from the code without failing CI, which is what makes them
-        trustworthy and also what keeps them plain. These ten are drawn by hand: better to read, and capable of going stale.
+        trustworthy and also what keeps them plain. These eleven are drawn by hand: better to read, and capable of going stale.
         When the two disagree, <strong>the generated ones are right</strong>.
       </p>
     </div>
 
     <h2>Start here</h2>
-    <p>If you read one, read the first. If you read two, add the call paths — they are the three ways anything enters this system.</p>
+    <p>If you read one, read the first. If you read two, add the call paths — they are the three ways anything enters this system, and the third now reaches the descent too, through a gate that happens to be shut.</p>
     <div class="grid">
       <a class="card" href="high-level.html">
         <div class="card-head"><span class="dot coral"></span><h3>High-Level</h3></div>
@@ -97,7 +97,7 @@
       <a class="card" href="call-paths.html">
         <div class="card-head"><span class="dot coral"></span><h3>The three call paths</h3></div>
         <p class="type">Flowchart</p>
-        <p>CLI, LM Studio over MCP, and syslog-driven events — and what stays dry-run on purpose.</p>
+        <p>CLI, LM Studio over MCP, and syslog-driven events — and the two refusals (routing, then <code>mnemonics.yaml</code>) that keep the third silent today.</p>
       </a>
     </div>
 
@@ -133,6 +133,11 @@
         <div class="card-head"><span class="dot"></span><h3>Evidence pipeline</h3></div>
         <p class="type">Data flow</p>
         <p>Device text in, grounded answer out, with what each stage is permitted to withhold.</p>
+      </a>
+      <a class="card" href="event-path.html">
+        <div class="card-head"><span class="dot coral"></span><h3>The event path, end to end</h3></div>
+        <p class="type">Sequence</p>
+        <p>A syslog line reaching MiniMax over a schema with every identifier deleted, and the two refusals — a shut gate, a rejected pinned key — that make it safe.</p>
       </a>
     </div>
 
