@@ -7822,3 +7822,110 @@ and no longer do.
 The accompanying test also pins the vacuous-exclusion trap: it asserts
 `"probe_lab" in PIN_TABLE`, because excluding a name that was never in the
 source excludes nothing and would prove nothing.
+
+---
+
+## OBS-702 · Stage 2 measured, and the answer is "promote neither, yet"
+
+B-706 asked for one mnemonic to be promoted from the reviewed trigger table,
+with a measurement behind it. The measurement was made and it says **not yet** —
+which is the result, not a failure to produce one. It also **corrects the
+reasoning B-706 itself was filed on**, which matters more than the verdict.
+
+### The blocker: the routing cannot tell a fault from a recovery
+
+`route_syslog_line` extracts a BGP peer with
+
+```python
+_NEIGHBOR = re.compile(r"neighbor\s+(\S+)\s+(?:Down|Up)", re.IGNORECASE)
+```
+
+The direction is matched and then **discarded** — `_ipv4_subject` returns only
+the address. So a session coming back **Up** produces the same
+`RoutingDecision` as one going Down: `routable=True`, `flow="bgp_session"`,
+same reason string. Verified on real lines taken from Loki:
+
+```
+RECOVERY (Up)   routable=True flow=bgp_session subject=10.255.0.31
+FAULT   (Down)  routable=True flow=bgp_session subject=10.255.0.11
+```
+
+Nothing downstream can separate them, because by the time the decision exists
+the distinguishing token is gone.
+
+**How often that would matter, measured rather than supposed:** the 59 raw
+`ROUTING-BGP-5-ADJCHANGE` lines in the last 48h dedupe to **10 distinct device
+events**, of which **6 are `Up`**. Promoting this mnemonic today fires an
+unattended investigation on a recovery the majority of the time. In Stage 2
+(notify off) the cost is a wasted descent and a ticket recording that nothing
+was wrong; in Stage 3 it is a page for a fault that had already healed.
+
+That is a code defect, not a data one, and no amount of further measurement
+changes it. Filed as B-711; once fixed, this mnemonic is the clear candidate.
+
+### The correction: B-206a explains only one of the two candidates
+
+B-706 said the candidates' recorded absence was *"measured against a pipeline
+that was dropping severity-5 events"*. That is true for exactly one of them.
+
+| Mnemonic | Severity | Old `logging … severity warning` filter | Absence explained by B-206a? |
+|---|---|---|---|
+| `ROUTING-BGP-5-ADJCHANGE` | 5 (`notice`) | **blocked** | **yes** |
+| `PKT_INFRA-LINK-3-UPDOWN` | 3 (`err`) | passed | **no** |
+
+"Warning and higher" passes 3 and 4 and blocks 5. `PKT_INFRA-LINK-3-UPDOWN`
+always reached Loki — its lines arrive labelled `err` today and would have then.
+Its recorded absence was **never** a pipeline artifact, so re-measuring against
+the fixed pipeline cannot rehabilitate it. It was rare, and it still is: **one
+distinct event in 48h**, on PE2 `Gi0/0/0/2`, attributable to this project's own
+chaos round.
+
+The stale-absence hypothesis was right about the mnemonic it was right about,
+and I generalised it to both candidates without checking the severity of
+either. The check takes one line of the table.
+
+### Nothing spontaneous happened
+
+All 10 distinct BGP events attribute to operator action: the `10.255.0.11` ↔
+`10.255.0.12` pairs are the PE1↔PE2 session B-699 removed on 2026-08-21, and
+the PE2↔RR1 transitions sit beside the LINK-3 event from a chaos round. **Zero
+spontaneous fabric events in the window.**
+
+This is the honest limit of measuring precision on a stable lab: there is no
+natural event rate. It is also the argument for the injection half of Stage 2
+rather than for waiting — a controlled fault is the only way to observe the
+loop waking on something real.
+
+### A measured cost for a decision that was defensible when it was made
+
+`logs_loki.LOKI_QUERIES` deliberately holds **one** query, `logs_for_device`,
+and its comment defends the absence of a mnemonic-filtered variant: *"a
+caller-supplied LogQL line filter is a much larger validation surface —
+arbitrary regex from a caller is its own denial-of-service vector — and
+mnemonic filtering is already possible client-side."*
+
+Client-side filtering only works on what the query returns. Measured on this
+fabric: four of nine devices hit the 1000-line ceiling, and on PE1, PE2 and RR1
+the reachable window no longer extends back before 2026-08-20 **at all** — post-
+fix noise (SSHD errors, TCP auth bursts) has crowded the history out. PE2's
+reachable window begins four hours *after* a `PKT_INFRA-LINK-3-UPDOWN` event
+that a line-filtered query finds without difficulty.
+
+So the sanctioned path cannot see an event that the raw API can, and the gap
+grows precisely because B-206a succeeded in letting more through. The original
+reasoning was sound; it now has a cost, and the cost is invisible unless
+someone goes looking with the unsanctioned query. Filed as B-712.
+
+### What Stage 2 actually established
+
+- The pipeline carries `ROUTING-BGP-5-ADJCHANGE` post-B-206a. Its recorded
+  `trigger.reason` is **falsified by observation** — dated, unambiguously
+  post-fix occurrences exist on three devices.
+- `PKT_INFRA-LINK-3-UPDOWN`'s reason stands, for a reason unrelated to B-206a.
+- `PKT_INFRA-LINEPROTO-5-UPDOWN`'s recorded reason — *"paired with LINK-3 in the
+  same second in every fixture occurrence"* — does **not** hold live: 1 distinct
+  LINK-3 event, 0 LINEPROTO. Not a severity floor (severity 5 arrives now). The
+  conclusion "do not promote it" survives; the stated reason does not, and is
+  left uncorrected in the table pending an occurrence to check it against.
+- **`mnemonics.yaml` is unchanged.** Nothing was promoted. All 20 entries remain
+  `fires: false`, so the event path still ships doing nothing.
