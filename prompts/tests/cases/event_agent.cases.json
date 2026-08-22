@@ -1,0 +1,46 @@
+{
+  "prompt": "event_agent.v1.txt",
+  "note": "Golden cases for the bounded, event-woken MCP tool-calling loop (event_agent.py) -- driven by an event (a routed syslog line or Alertmanager alert), never by a human question, and talking to the staged MCP surface through mcp_client.McpToolset rather than calling network_tools directly (see event_agent.py's module docstring for why it does not reuse agent_loop.py).",
+  "refusal_marker": "\"no fault found\" is a complete, acceptable answer",
+  "refusal_note": "B-490 (MCP-EXPERIMENT.md S11.2, also the report prompt's own v1->v2 history) measured the failure mode this marker exists to name: a small model facing a clean result invents a plausible-sounding cause rather than report one. This prompt's declared refusal path is therefore not 'return undetermined' (report.v2's shape) or 'say what you could not check' (agent_system's shape) but an explicit permission to answer with nothing wrong found -- the vacuum a small model is measured to fill with fabrication otherwise.",
+  "cases": [
+    {
+      "name": "wide_then_narrow_completes",
+      "source": "a routable RoutingDecision (bgp_session flow) against a fake ModelCaller that calls explore_lab, then investigate_lab, then stops -- tests/test_event_agent.py's positive control",
+      "structural_properties": [
+        "a wide tool (explore_lab) is called before the narrow one (investigate_lab)",
+        "investigate_lab's own finding/trustworthy fields become the ticket's record_answer, never the model's own prose",
+        "the run completes (stopped_because == \"end_turn\", complete is True)"
+      ],
+      "asserted_by_shape_only": true
+    },
+    {
+      "name": "no_fault_found_is_not_overridden",
+      "source": "investigate_lab's own JSON payload reporting finding=\"no_fault_on_path\" against a fake ModelCaller whose final turn writes prose speculating about a cause anyway",
+      "structural_properties": [
+        "record_answer carries investigate_lab's own finding string, not the model's speculative prose",
+        "the model's speculative text is recorded only as a model_exchange, never as the ticket's answer"
+      ],
+      "asserted_by_shape_only": true
+    },
+    {
+      "name": "trigger_fires_false_never_dispatches",
+      "source": "a routable RoutingDecision whose matched mnemonic has trigger.fires: false in the (injected) mnemonics table",
+      "structural_properties": [
+        "ran is False",
+        "no tool is called, no ticket is opened",
+        "reason names the mnemonic and states it is not cleared to fire"
+      ],
+      "asserted_by_shape_only": true
+    },
+    {
+      "name": "investigate_lab_never_ran_no_answer",
+      "source": "a run that exhausts max_iterations before ever calling investigate_lab",
+      "structural_properties": [
+        "the ticket carries no Answer section at all -- not an empty one, an absent one",
+        "stopped_because names the exhausted bound (\"max_iterations\") and complete is False"
+      ],
+      "asserted_by_shape_only": true
+    }
+  ]
+}

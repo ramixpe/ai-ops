@@ -872,6 +872,64 @@ MUTATIONS = [
      "                if key in _RAW_TEXT_FIELDS and isinstance(value, str)\n",
      "                if False\n",
      "test_a_forged_close_delimiter_inside_a_raw_line_cannot_splice_past_it"),
+    # ---- event_agent.py: the bounded, event-woken MCP tool-calling loop.
+    # Two guards, not one -- the HARD GATE (does a `trigger.fires: false`
+    # mnemonic actually get refused before any tool or model call) and the
+    # ABSENCE-IS-NEVER-ZERO rule on the ticket's own answer (does
+    # `investigate_lab`'s own finding/trustworthy payload actually reach
+    # `record_answer`, rather than the model's prose silently standing in
+    # for it, or the section going missing even when a real finding came
+    # back). Counted before adding these entries (OBS-191): `if not
+    # entry.get("fires"):` occurs exactly once in event_agent.py, and
+    # `if isinstance(payload, Mapping) and "finding" in payload and
+    # "trustworthy" in payload:` occurs exactly once too (`grep -c`,
+    # 2026-08-22) -- confirmed against the literal line, not a paraphrase in
+    # this module's own prose (its docstring discusses both properties in
+    # English, but neither exact code line repeats there). ----
+
+    ("EVENT-AGENT-HARD-GATE", "run_event/plan_event refuse any mnemonic "
+     "whose mnemonics.yaml trigger.fires is not true, before a toolset is "
+     "ever opened or a model is ever called -- the gate the operator's own "
+     "brief calls out as 'not an env var': every one of the 20 reviewed "
+     "mnemonics is fires:false today, so this is what makes the module ship "
+     "doing nothing even with every other gate wired open",
+     "src/agent_nettools/event_agent.py",
+     '    if not entry.get("fires"):\n',
+     "    if False:\n",
+     "test_trigger_fires_false_names_the_mnemonic_and_never_dispatches"),
+
+    ("EVENT-AGENT-ANSWER-IS-INVESTIGATE-LABS-OWN", "the ticket's Answer "
+     "section is written from investigate_lab's own finding/trustworthy "
+     "payload and from nothing else -- never a model's closing prose "
+     "standing in for it. Mutated to `if False`, which stops record_answer "
+     "from EVER being called, even on a real, successful investigate_lab "
+     "result -- caught because the positive-control run asserts the "
+     "ticket's answer.finding equals investigate_lab's own finding string, "
+     "which a run with no Answer section at all cannot produce",
+     "src/agent_nettools/event_agent.py",
+     '                if isinstance(payload, Mapping) and "finding" in payload and "trustworthy" in payload:\n',
+     "                if False:\n",
+     "test_a_well_behaved_fake_model_completes_a_wide_then_narrow_run"),
+
+    # Counted before adding (OBS-191): the anchor line below occurs exactly
+    # once in event_agent.py (`grep -c`, 2026-08-22). `status="refused"`
+    # alone occurs twice -- the second is this module's own prose about the
+    # field -- which is why the anchor is the whole call line, not the
+    # fragment.
+    ("EVENT-AGENT-REFUSAL-IS-NOT-A-CALL", "a call this loop REFUSED -- a "
+     "fabricated identifier, an exhausted budget, an unoffered tool -- reaches "
+     "the ticket marked as a refusal, never as a call that ran. Mutated to "
+     "status=\"success\", which leaves the timeline entry in place but makes a "
+     "refused call indistinguishable from a dispatched one: strictly worse "
+     "than omitting it, because a reader counting tool events would now count "
+     "work that never happened. The EventRun return value carries the same "
+     "facts, but an unattended event-woken caller discards it -- the ticket is "
+     "what survives, and it is where the B-459 fabrication measurement has to "
+     "land to be a measurement at all",
+     "src/agent_nettools/event_agent.py",
+     '            str(name) if name else "(unnamed tool)", status="refused", device=decision.device,\n',
+     '            str(name) if name else "(unnamed tool)", status="success", device=decision.device,\n',
+     "test_a_refused_call_reaches_the_TICKET_not_only_the_returned_EventRun"),
 ]
 
 
