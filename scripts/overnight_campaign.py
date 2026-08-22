@@ -297,22 +297,35 @@ def one_round(n: int, fault: int, hold_s: float, outdir: Path, mnemonics: list[s
             log("  fault never reported live; reverting this round")
         else:
             record["subject"] = dict(subject)
-            log(f"  live; holding {hold_s}s and watching Loki")
-            # Two paced looks: one mid-hold, one at the end. Enough to bound
-            # detection latency without reopening the rate limiter.
+            log(f"  live; watching Loki, up to {hold_s}s")
+            # ADAPTIVE, and the reason matters. A fixed 90s hold can only ever
+            # see faults that change state immediately -- an admin shutdown was
+            # detected at 40.5s. Anything that manifests through TIMER EXPIRY
+            # (a one-sided MD5 password, a wrong remote-AS, a BFD or IS-IS auth
+            # mismatch) needs the BGP hold timer to run out, ~180s, and a 90s
+            # hold reverts before the fault has visibly happened at all.
+            # Measured: round 1 of the second campaign, fault 6, zero events.
+            #
+            # So poll until something arrives, then stop. Fast faults get a
+            # short hold and the fabric is broken for less time; slow ones get
+            # the room they need. A fixed hold had to be wrong in one direction
+            # or the other.
             observations = []
-            for frac in (0.45, 0.95):
-                target = t_live + hold_s * frac
-                sleep_for = target - time.monotonic()
-                if sleep_for > 0:
-                    time.sleep(sleep_for)
-                evs = loki_events(mnemonics, since_s=int(hold_s) + 120)
-                observations.append({"at_s": round(time.monotonic() - t_live, 1), "events": len(evs)})
+            baseline_keys = {(e["host"], e["device_time"], e["mnemonic"])
+                             for e in loki_events(mnemonics, since_s=900)}
+            while time.monotonic() - t_live < hold_s:
+                time.sleep(min(25.0, max(0.0, hold_s - (time.monotonic() - t_live))))
+                evs = [e for e in loki_events(mnemonics, since_s=int(hold_s) + 180)
+                       if (e["host"], e["device_time"], e["mnemonic"]) not in baseline_keys]
+                at = round(time.monotonic() - t_live, 1)
+                observations.append({"at_s": at, "new_events": len(evs)})
                 if evs:
                     record["loki_events"] = evs
-                    record["detected_after_s"] = round(time.monotonic() - t_live, 1)
+                    record["detected_after_s"] = at
+                    log(f"  detected after {at}s")
                     break
             record["observations"] = observations
+            record["held_for_s"] = round(time.monotonic() - t_live, 1)
 
             fresh = record.get("loki_events") or []
             if fresh:
@@ -349,7 +362,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--hours", type=float, default=9.0)
     ap.add_argument("--interval-min", type=float, default=20.0)
-    ap.add_argument("--hold", type=float, default=90.0)
+    ap.add_argument("--hold", type=float, default=90.0, help="MAXIMUM hold; polling stops early on detection")
     ap.add_argument("--faults", default="", help="comma-separated menu numbers to draw from")
     ap.add_argument("--seed", type=int, default=20260822)
     ap.add_argument("--out", default=str(REPO / "scripts" / "overnight_out"))
