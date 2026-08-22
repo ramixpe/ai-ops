@@ -26,24 +26,184 @@ def _real_line(fragment: str, device: str = "RR1") -> str:
 
 
 def test_a_real_bgp_adjchange_line_routes_to_the_bgp_flow():
+    """Positive control (B-711): a Down line must still produce a fully
+    routable decision with the right flow and subject -- a test suite that
+    only checks refusals would pass just as well if routing were broken
+    outright."""
+
     line = _real_line("ROUTING-BGP-5-ADJCHANGE : neighbor 10.255.0.12")
     d = er.route_syslog_line(line, device="RR1")
 
     assert d.routable is True
     assert d.flow == "bgp_session"
     assert d.subject == "10.255.0.12"
+    assert d.transition == "down"
     assert d.suggested_command() == [
         "nettools", "investigate", "RR1", "10.255.0.12", "--flow", "bgp_session"
     ]
 
 
 def test_a_real_link_updown_line_routes_to_the_interface_flow():
+    """Positive control (B-711), interface side: a Down line still routes
+    fully, with the direction now recorded alongside it."""
+
     line = _real_line("PKT_INFRA-LINK-3-UPDOWN", device="PE2")
     d = er.route_syslog_line(line, device="PE2")
 
     assert d.routable is True
     assert d.flow == "interface"
     assert d.subject and d.subject.startswith("GigabitEthernet")
+    assert d.transition == "down"
+
+
+def test_a_bgp_down_decision_is_byte_for_byte_unchanged_apart_from_transition():
+    """B-711 requirement 4: a Down decision must be identical to what it was
+    before the fix, apart from the new field. Compares the full `as_dict()`
+    payload rather than a handful of fields, so a regression anywhere in the
+    decision (not just in `transition`) would be caught here."""
+
+    line = _real_line("ROUTING-BGP-5-ADJCHANGE : neighbor 10.255.0.12")
+    d = er.route_syslog_line(line, device="RR1")
+    payload = d.as_dict()
+
+    assert payload.pop("transition") == "down"
+    assert payload == {
+        "routable": True,
+        "flow": "bgp_session",
+        "device": "RR1",
+        "subject": "10.255.0.12",
+        "reason": "ROUTING-BGP-5-ADJCHANGE routes to the bgp_session flow",
+        "source_kind": "syslog",
+        "matched": "ROUTING-BGP-5-ADJCHANGE",
+        "suggested_command": [
+            "nettools", "investigate", "RR1", "10.255.0.12", "--flow", "bgp_session"
+        ],
+    }
+
+
+def test_a_bgp_recovery_is_refused_not_investigated():
+    """B-711's core defect: `neighbor X Up` used to produce the identical
+    `RoutingDecision` as `neighbor X Down` because the direction was matched
+    and discarded. No fixture captures a real BGP Up line (only Down ones
+    were captured), so this is built from the real Down line at
+    `tests/fixtures/cisco_xr/PE2/broken/show-logging-last-200.txt` -- same
+    device, process, timestamp and peer (10.255.0.31), the direction and
+    trailing explanation swapped for the "Up" shape verified against real
+    Loki output in OBS-702/FINDINGS.md and BACKLOG.md's B-711 entry."""
+
+    line = (
+        "RP/0/RP0/CPU0:Aug 16 07:44:28.097 UTC: bgp[1084]: "
+        "%ROUTING-BGP-5-ADJCHANGE : neighbor 10.255.0.31 Up"
+    )
+    d = er.route_syslog_line(line, device="PE2")
+
+    assert d.routable is False
+    assert d.transition == "up"
+    assert d.flow == "bgp_session"
+    assert d.subject == "10.255.0.31"
+    assert "recovery" in d.reason
+    assert d.suggested_command() is None
+
+
+def test_a_link_updown_recovery_is_refused_not_investigated():
+    """The interface analogue of B-711 -- verified against the module
+    docstring's warning that this "almost certainly" had the same bug: it
+    did. Real fixture line, `PKT_INFRA-LINK-3-UPDOWN ... changed state to Up`."""
+
+    line = _real_line("PKT_INFRA-LINK-3-UPDOWN : Interface GigabitEthernet0/0/0/0, "
+                       "changed state to Up", device="PE2")
+    d = er.route_syslog_line(line, device="PE2")
+
+    assert d.routable is False
+    assert d.transition == "up"
+    assert d.flow == "interface"
+    assert d.subject == "GigabitEthernet0/0/0/0"
+    assert "recovery" in d.reason
+    assert d.suggested_command() is None
+
+
+def test_a_lineproto_updown_recovery_is_refused_not_investigated():
+    """`PKT_INFRA-LINEPROTO-5-UPDOWN` is a separate mnemonic from
+    `PKT_INFRA-LINK-3-UPDOWN` sharing the same `_interface_subject`/
+    `_interface_transition` extractors -- checked independently since the
+    task explicitly warns against fixing one interface mnemonic and leaving
+    the other broken."""
+
+    line = _real_line("PKT_INFRA-LINEPROTO-5-UPDOWN : Line protocol on Interface "
+                       "GigabitEthernet0/0/0/0, changed state to Up", device="PE2")
+    d = er.route_syslog_line(line, device="PE2")
+
+    assert d.routable is False
+    assert d.transition == "up"
+    assert d.flow == "interface"
+    assert d.subject == "GigabitEthernet0/0/0/0"
+    assert "recovery" in d.reason
+
+
+def test_a_link_updown_down_is_unaffected_by_the_fix():
+    """The interface-mnemonic analogue of the byte-for-byte test above."""
+
+    line = _real_line("PKT_INFRA-LINK-3-UPDOWN : Interface GigabitEthernet0/0/0/0, "
+                       "changed state to Down", device="PE2")
+    d = er.route_syslog_line(line, device="PE2")
+    payload = d.as_dict()
+
+    assert payload.pop("transition") == "down"
+    assert payload == {
+        "routable": True,
+        "flow": "interface",
+        "device": "PE2",
+        "subject": "GigabitEthernet0/0/0/0",
+        "reason": "PKT_INFRA-LINK-3-UPDOWN routes to the interface flow",
+        "source_kind": "syslog",
+        "matched": "PKT_INFRA-LINK-3-UPDOWN",
+        "suggested_command": [
+            "nettools", "investigate", "PE2", "GigabitEthernet0/0/0/0",
+            "--flow", "interface",
+        ],
+    }
+
+
+def test_a_direction_that_does_not_parse_is_unknown_not_none():
+    """B-711 requirement 1: a mnemonic with a direction concept whose
+    direction text does not parse must not collapse into `None` -- `None` is
+    reserved for a mnemonic with no direction concept at all. Chosen shape:
+    the literal string ``"unknown"``, and the decision refuses to route
+    rather than guess fault-vs-recovery. Constructed text: a real device
+    process/timestamp/mnemonic prefix (matches the fixture format) with a
+    trailing word that is neither "Down" nor "Up" -- plausible (a line get
+    truncated, or a future IOS-XR variant), and it is exactly the case the
+    stricter `_INTERFACE_TRANSITION` regex (vs. the looser subject regex)
+    exists to catch: the interface name still parses, the direction does not."""
+
+    line = (
+        "RP/0/RP0/CPU0:Aug 16 07:44:06.366 UTC: ifmgr[236]: "
+        "%PKT_INFRA-LINK-3-UPDOWN : Interface GigabitEthernet0/0/0/0, "
+        "changed state to Reset"
+    )
+    d = er.route_syslog_line(line, device="PE2")
+
+    assert d.routable is False
+    assert d.transition == "unknown"
+    assert d.transition is not None
+    assert d.subject == "GigabitEthernet0/0/0/0"  # subject parsing is unaffected
+    assert "could not be determined" in d.reason
+    assert d.suggested_command() is None
+
+
+def test_a_mnemonic_not_in_the_flow_table_has_no_transition_concept():
+    """`transition=None` means "this mnemonic has no direction concept" --
+    distinct from "unknown". A mnemonic absent from `MNEMONIC_FLOW_TABLE`
+    entirely is the clearest case: routing never even reaches a transition
+    extractor for it."""
+
+    d = er.route_syslog_line(
+        "RP/0/RP0/CPU0:Aug 16 07:00:00.000 UTC: sshd[123]: "
+        "%SECURITY-SSHD_SYSLOG_PRX-6-INFO_GENERAL : Accepted authentication for clab",
+        device="PE2",
+    )
+    assert d.routable is False
+    assert d.transition is None
 
 
 def test_an_ipv6_peer_is_not_a_subject():

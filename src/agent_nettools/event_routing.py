@@ -34,6 +34,19 @@ Unroutable is a success, not an error
 The table refusing to route is the deterministic behaviour B-202 wanted in
 place of a model judgement. Every decision carries ``reason`` either way, so
 an orchestrator can log *why* nothing fired without parsing prose.
+
+A recovery is not a fault (B-711)
+------------------------------------
+Some mnemonics carry a direction — ``neighbor X Down`` vs. ``neighbor X Up``,
+``Interface X, changed state to Down`` vs. ``... to Up``. Investigating an
+``Up`` spends the window on a condition that is already fine, so
+``RoutingDecision.transition`` records what the text said (``"down"``,
+``"up"``, or ``"unknown"`` if the mnemonic has a direction concept but this
+line's text did not parse one out) and a recovery is routed as
+``routable=False`` with a ``reason`` that says so plainly — never dropped
+silently, and never treated as equivalent to a fault. ``transition`` is
+``None`` only for a mnemonic with no direction concept at all; that is a
+different fact from ``"unknown"`` and the two are never conflated.
 """
 
 from __future__ import annotations
@@ -70,6 +83,16 @@ class RoutingDecision:
     source_kind: str = "unknown"
     #: The mnemonic or alertname that decided this, for the orchestrator's log.
     matched: str | None = None
+    #: "up" | "down" | "unknown" | None (B-711). ``None`` means this mnemonic
+    #: has no direction concept at all -- it is not in `_TRANSITION_EXTRACTORS`
+    #: because nothing in its message text ever encodes a direction. That is
+    #: a *different* fact from "unknown", which means a mnemonic that DOES
+    #: have a direction concept had text this run could not parse a
+    #: direction out of. Collapsing the two into one falsy value would let a
+    #: genuine parse failure masquerade as "no concept to worry about" --
+    #: exactly the silent-absence shape this project's `unevaluated`/
+    #: `Coverage.gaps()` discipline exists to rule out elsewhere.
+    transition: str | None = None
 
     def suggested_command(self) -> list[str] | None:
         """The exact ``nettools`` argv this decision suggests, or ``None``.
@@ -91,6 +114,7 @@ class RoutingDecision:
             "routable": self.routable, "flow": self.flow, "device": self.device,
             "subject": self.subject, "reason": self.reason,
             "source_kind": self.source_kind, "matched": self.matched,
+            "transition": self.transition,
             "suggested_command": self.suggested_command(),
         }
 
@@ -99,9 +123,29 @@ class RoutingDecision:
 # Subject extractors: message text -> a validated subject, or None.
 # --------------------------------------------------------------------------- #
 
-_NEIGHBOR = re.compile(r"neighbor\s+(\S+)\s+(?:Down|Up)", re.IGNORECASE)
+#: The direction word is captured (group 2), not just matched, so a
+#: transition extractor can read it -- B-711: it used to be matched and
+#: thrown away, which is exactly why a recovery and a fault produced the
+#: same `RoutingDecision`. Subject extraction below only ever reads group 1;
+#: capturing group 2 changes nothing about which text this regex matches or
+#: what `_ipv4_subject` returns.
+_NEIGHBOR = re.compile(r"neighbor\s+(\S+)\s+(Down|Up)", re.IGNORECASE)
 _INTERFACE = re.compile(r"Interface\s+([A-Za-z][A-Za-z0-9_./-]{0,62}),")
 _INTERFACE_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_./-]{0,62}")
+
+#: A *separate* regex for the interface direction, not a second capture
+#: group bolted onto `_INTERFACE` above -- `_INTERFACE` only promises to
+#: match up to the interface name (verified against both
+#: `PKT_INFRA-LINK-3-UPDOWN`'s "Interface X, changed state to Down" and
+#: `PKT_INFRA-LINEPROTO-5-UPDOWN`'s "Line protocol on Interface X, changed
+#: state to Down" -- both real fixture lines, `tests/fixtures/cisco_xr/PE2/
+#: broken/show-logging-last-200.txt`). Keeping subject extraction unchanged
+#: is what makes requirement 4 (a Down decision is byte-for-byte what it was)
+#: provable instead of merely plausible.
+_INTERFACE_TRANSITION = re.compile(
+    r"Interface\s+[A-Za-z][A-Za-z0-9_./-]{0,62},\s*changed state to\s+(Down|Up)",
+    re.IGNORECASE,
+)
 
 
 def _ipv4_subject(text: str) -> str | None:
@@ -128,6 +172,48 @@ def _interface_subject(text: str) -> str | None:
 
     match = _INTERFACE.search(text)
     return match.group(1) if match else None
+
+
+# --------------------------------------------------------------------------- #
+# Transition extractors (B-711): message text -> "up" | "down" | "unknown".
+#
+# Never ``None`` -- these are only ever consulted for a mnemonic already
+# known (via `_TRANSITION_EXTRACTORS` below) to *have* a direction concept,
+# so a failed parse here is "we could not tell", not "there is nothing to
+# tell". ``None`` on `RoutingDecision.transition` is reserved for a mnemonic
+# with no entry in `_TRANSITION_EXTRACTORS` at all -- see that dataclass
+# field's docstring for why the two must never collapse into one value.
+# --------------------------------------------------------------------------- #
+
+
+def _bgp_transition(text: str) -> str:
+    match = _NEIGHBOR.search(text)
+    return match.group(2).lower() if match else "unknown"
+
+
+def _interface_transition(text: str) -> str:
+    match = _INTERFACE_TRANSITION.search(text)
+    return match.group(1).lower() if match else "unknown"
+
+
+#: mnemonic -> its transition extractor. Deliberately a separate table from
+#: `MNEMONIC_FLOW_TABLE` rather than a fourth tuple element on it:
+#: `event_watch.py` unpacks that table's entries as exactly
+#: ``mnemonic, flow, extract`` in more than one place (`_flow_and_extractor_
+#: for`, `validate_trigger_table`), and widening the tuple would break that
+#: unpacking for a module this change has no reason to touch. A mnemonic
+#: absent from this dict has no direction concept -- `_transition_for`
+#: returns ``None`` for it, never "unknown".
+_TRANSITION_EXTRACTORS: dict[str, Callable[[str], str]] = {
+    "ROUTING-BGP-5-ADJCHANGE": _bgp_transition,
+    "PKT_INFRA-LINK-3-UPDOWN": _interface_transition,
+    "PKT_INFRA-LINEPROTO-5-UPDOWN": _interface_transition,
+}
+
+
+def _transition_for(mnemonic: str, text: str) -> str | None:
+    extractor = _TRANSITION_EXTRACTORS.get(mnemonic)
+    return extractor(text) if extractor else None
 
 
 # --------------------------------------------------------------------------- #
@@ -232,24 +318,48 @@ def route_syslog_line(line: str, *, device: str | None = None) -> RoutingDecisio
                    "deliberately unrouted, not unrecognised",
         )
     _, flow, extract = entry
+    # Computed here, before device/subject resolution can short-circuit,
+    # so every decision returned from this point on -- routable or not --
+    # carries it. B-711's "absence is never zero": a human reading a refusal
+    # for an unknown device should still be able to see this was a Down (or
+    # an Up), not just that it was refused.
+    transition = _transition_for(mnemonic, text)
 
     resolved, problem = _validated_device(device, source_kind="syslog")
     if problem:
         return RoutingDecision(routable=False, source_kind="syslog",
-                               matched=mnemonic, flow=flow, reason=problem)
+                               matched=mnemonic, flow=flow, reason=problem,
+                               transition=transition)
 
     subject = extract(text)
     if subject is None:
         return RoutingDecision(
             routable=False, source_kind="syslog", matched=mnemonic, flow=flow,
-            device=resolved,
+            device=resolved, transition=transition,
             reason="no valid subject could be extracted from the message text "
                    "(a subject that does not parse is not a subject)",
         )
 
+    if transition == "up":
+        return RoutingDecision(
+            routable=False, flow=flow, device=resolved, subject=subject,
+            source_kind="syslog", matched=mnemonic, transition=transition,
+            reason=f"{mnemonic} is a recovery (transition=up), not a fault — "
+                   "deliberately not routed for investigation (B-711: "
+                   "investigating a recovery spends the window on nothing)",
+        )
+    if transition == "unknown":
+        return RoutingDecision(
+            routable=False, flow=flow, device=resolved, subject=subject,
+            source_kind="syslog", matched=mnemonic, transition=transition,
+            reason=f"{mnemonic} has a direction concept but it could not be "
+                   "determined from this message text — refusing rather "
+                   "than guessing whether this is a fault or a recovery",
+        )
+
     return RoutingDecision(
         routable=True, flow=flow, device=resolved, subject=subject,
-        source_kind="syslog", matched=mnemonic,
+        source_kind="syslog", matched=mnemonic, transition=transition,
         reason=f"{mnemonic} routes to the {flow} flow",
     )
 

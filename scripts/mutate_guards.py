@@ -102,6 +102,20 @@ MUTATIONS = [
      "    return text\n",
      "test_an_alertmanager_subject_carrying_shell_metacharacters_is_refused"),
 
+    # B-711: `_NEIGHBOR`/`_INTERFACE_TRANSITION` used to match the Up/Down
+    # direction word and discard it, so a recovery (`neighbor X Up`,
+    # `Interface X, changed state to Up`) produced the identical routable
+    # `RoutingDecision` as a fault. This is the line that actually refuses
+    # to route a recovery once the direction IS known -- mutating it away
+    # is exactly the regression B-711 fixed. Anchor occurs exactly once in
+    # event_routing.py (`grep -c`, 2026-08-22).
+    ("B-711-RECOVERY-REFUSED", "a syslog line whose direction parsed as Up "
+     "is refused, not routed as if it were a fault",
+     "src/agent_nettools/event_routing.py",
+     '    if transition == "up":\n',
+     "    if False:\n",
+     "test_a_bgp_recovery_is_refused_not_investigated"),
+
     ("SAFETY-ALLOWLIST", "the allowlist check itself",
      "src/agent_nettools/network_tools.py",
      "    unsafe_commands = [command for command in commands if not is_approved(platform, command)]\n",
