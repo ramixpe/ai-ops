@@ -7999,3 +7999,114 @@ raw line would leave one parser instead of two. That is an interface change
 rather than a bugfix — `route_syslog_line`'s contract is "a raw line in", which
 `route_event`'s JSON sniffing also relies on — so it is filed (B-714) rather
 than done under a stopped campaign.
+
+---
+
+## OBS-704 · A night of faults, zero model measurements, and three defects worth more
+
+The overnight campaign ran 7 of 22 rounds before its own guard stopped it. It
+produced **no model data at all**, and three defects that no fixture-backed test
+could have found. The second one is the important one.
+
+### 1. A fault whose effect outlives its cause defeats config-snapshot restore
+
+Round 7 applied `maximum-prefix 1` on PE2's vpnv4 address-family toward RR1.
+`fault_lab` reverted it and verified the restore the way it always does — by
+comparing the config to a pre-fault snapshot — and reported success. **The
+config really was byte-identical.** Confirmed by hand the next morning: no
+`maximum-prefix` line anywhere on PE2.
+
+The session stayed down for eight hours.
+
+```
+PE2:  10.255.0.31  ...  07:54:55  Idle (PfxCt)
+RR1:  10.255.0.12  ...  07:47:58  Idle
+```
+
+`Idle (PfxCt)` is IOS-XR's prefix-count shutdown. Exceeding the limit disables
+the neighbour, and **removing the configuration does not re-enable it** — it
+needs an exec `clear bgp`. A neighbour shut/no-shut did not clear it either.
+
+`fault_lab.py`'s own docstring states the guarantee precisely: *"Restore is
+verified by config snapshot comparison, never by trusting the write. A write
+that reports failure may have succeeded (and vice versa) — see B-412."* That
+guarantee is sound and it held. It is simply about **the write**, and this
+fault's damage was not in the write. Config equality proves the cause is gone;
+it says nothing about whether the effect went with it.
+
+Every check in the harness passed while the fabric stayed broken. The campaign's
+own independent fabric probe is what actually caught it — and only because it
+had been added as belt and braces after a different bug.
+
+Fault 13 is now refused by the campaign runner, with the reason at the point of
+refusal rather than in a comment somewhere else.
+
+**The general form, worth carrying beyond this fault:** a restore that verifies
+its own input has verified that it did its job, not that the job was enough.
+Protocol state, ARP and MAC tables, learned routes, session counters and
+anything else with hysteresis can outlive the configuration that produced it.
+
+### 2. `.env` is loaded by entry points, not by the library
+
+Every model call in the campaign failed:
+
+```
+"Missing credentials. Please pass an `api_key` ... or set the
+ OPENAI_API_KEY environment variable."
+```
+
+`cli.main()` and `mcp_server/server.py` each call `load_dotenv` themselves, and
+until now every consumer of the model path was one of those two. The campaign
+runner was the **first standalone entry point**, so it was the first to discover
+that the loading is the entry point's job and not the library's.
+
+Seven rounds, each failing identically, none of them noticed until morning —
+because a `caller_error` degrades into a populated `EventRun` rather than
+raising, which is the correct behaviour for an unattended handler and is exactly
+what let it fail quietly seven times.
+
+Two fixes: load `.env` the way the two real entry points do, and **probe the
+model once before starting** — a campaign whose model calls cannot succeed now
+refuses to start rather than discovering it one round at a time.
+
+**Third instance today of one pattern.** OBS-701: `complete` was permanently
+`False` because every hand-written fake said `"end_turn"`. OBS-703: the router
+could not read a real Loki line because every test line came from a `show
+logging` fixture. Now this. Each is the same shape — **code that has only ever
+run in a context that happened to supply what it needed** — and all three were
+found by running against the real thing, not by testing harder.
+
+### 3. A detected-but-unroutable event silenced the probe
+
+Rounds 3 and 6 detected real syslog 25 seconds after an IS-IS fault:
+`ROUTING-ISIS-5-ADJCHANGE`. Routing refused it correctly — it is not in
+`MNEMONIC_FLOW_TABLE`, and saying so is right. But the campaign treated
+"detected something" as "this round is handled" and skipped the synthetic probe.
+So on two rounds the fault was live, the fabric was broken, and nothing asked
+the model anything.
+
+Fixed by falling through to the probe whenever the real event does not route.
+`ROUTING-ISIS-5-ADJCHANGE` is kept in the watch list deliberately, as a negative
+control: the fabric emits it, routing refuses it, and both halves are worth
+recording.
+
+### What did work
+
+- **7/7 restores verified**, config byte-identical every time — the mechanism
+  did its job even where its job was not sufficient.
+- **The adaptive hold**, added after a fixed 90s hold proved too short for
+  timer-driven faults: real detection at 25s.
+- **The abort guard**, which stopped the run rather than stacking faults onto a
+  fabric that had not recovered. It is the only reason this was seven rounds of
+  damage and not twenty-two.
+- **The descent, on the real breakage**, verified afterwards on the still-broken
+  fabric: route to peer healthy (2 paths), IGP healthy (2 adjacencies), interface
+  healthy, transport broken — *"reset 00:00:12 ago with reason 'Peer closing down
+  the session'"*. Lowest broken rung, correctly identified, with the device text
+  quoted and contained. It also answered the question the whole design exists to
+  ask: it reported the rung it could see and did **not** invent the prefix-count
+  cause it had no command to observe.
+- **P1's `CRITICAL`**, seen twice and flagged as suspicious the night before, was
+  a transient collection failure — all four intents `UNEVALUATED`, self-cleared
+  by morning. Worth its own row: an unreachable device currently presents as a
+  critical fault, and at Stage 3 that pages.

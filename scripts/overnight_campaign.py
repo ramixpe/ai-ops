@@ -67,6 +67,23 @@ LOKI = os.environ.get("NETTOOLS_LOKI_URL", "http://172.20.250.103:3100")
 
 sys.path.insert(0, str(REPO / "src"))
 
+#: THE bug that voided the first campaign: every model call failed with
+#: "Missing credentials ... set the OPENAI_API_KEY environment variable", so
+#: seven rounds produced zero model measurements.
+#:
+#: `cli.main()` and `mcp_server/server.py` each load `.env` themselves, and
+#: every previous caller of the model path was one of those two. This script is
+#: the first standalone entry point, so it was the first to discover that the
+#: loading is done by the entry point and not by the library. Same shape as the
+#: other two defects this campaign found: the code had only ever run in a
+#: context that happened to supply what it needed.
+#:
+#: Matches how the two real entry points do it, deliberately, rather than
+#: inventing a third convention.
+from dotenv import find_dotenv, load_dotenv  # noqa: E402
+
+load_dotenv(find_dotenv(usecwd=True)) or load_dotenv()
+
 #: fault_lab prints this the moment the change is applied and confirmed by a
 #: read-back. The hold is timed from HERE, never from when the menu choice was
 #: sent -- connecting and applying takes several seconds and varies, so timing
@@ -329,12 +346,24 @@ def one_round(n: int, fault: int, hold_s: float, outdir: Path, mnemonics: list[s
             record["held_for_s"] = round(time.monotonic() - t_live, 1)
 
             fresh = record.get("loki_events") or []
+            routed_for_real = False
             if fresh:
                 ev = fresh[-1]
                 log(f"  {len(fresh)} event(s); driving the agent on {ev['mnemonic']} @ {ev['host']}")
-                record["agent"] = run_agent(ev["line"], ev["host"], outdir / "tickets")
+                attempt = run_agent(ev["line"], ev["host"], outdir / "tickets")
+                record["agent"] = attempt
                 record["trigger_kind"] = "real"
-            else:
+                routed_for_real = bool(attempt.get("routable"))
+                if not routed_for_real:
+                    # Measured: rounds 3 and 6 detected a real
+                    # ROUTING-ISIS-5-ADJCHANGE in 25s, which routing correctly
+                    # refuses (not in MNEMONIC_FLOW_TABLE). Detecting something
+                    # unroutable then skipping the probe meant those rounds
+                    # measured nothing at all -- the fault was live, the fabric
+                    # was broken, and nobody asked the model anything.
+                    record["real_event_unroutable"] = attempt.get("route_reason")
+                    log("  real event did not route; falling through to the probe")
+            if not routed_for_real:
                 # No syslog -- and for most of the out-of-coverage faults that is
                 # the CORRECT fabric behaviour, not a miss. A route-policy DENY,
                 # a changed export route-target, a static blackhole and an IS-IS
@@ -391,7 +420,20 @@ def main() -> int:
     ap.add_argument("--hours", type=float, default=9.0)
     ap.add_argument("--interval-min", type=float, default=20.0)
     ap.add_argument("--hold", type=float, default=90.0, help="MAXIMUM hold; polling stops early on detection")
-    ap.add_argument("--faults", default="", help="comma-separated menu numbers to draw from")
+    #: 13 (maximum-prefix on the vpnv4 AF) is EXCLUDED and must stay excluded.
+    #: It is not safely revertible by config alone: exceeding the limit puts the
+    #: neighbour into `Idle (PfxCt)` on IOS-XR, and removing the config does not
+    #: clear that state -- nor does a neighbour shut/no-shut. It needs an exec
+    #: `clear bgp`, which neither this repo (read-only by design) nor fault_lab
+    #: (config push only) can issue.
+    #:
+    #: Measured 2026-08-23: round 7 left PE2's session to RR1 Idle for eight
+    #: hours. fault_lab's restore was CORRECT and reported success correctly --
+    #: the config really was byte-identical. Config-snapshot verification
+    #: cannot see protocol state, so a fault whose effect outlives its cause
+    #: passes every check the harness has.
+    ap.add_argument("--faults", default="1,2,3,4,5,6,7,8,9,10,11,12,14,15,16,17,17,17",
+                    help="comma-separated menu numbers; 13 excluded by default (see source)")
     ap.add_argument("--seed", type=int, default=20260822)
     ap.add_argument("--out", default=str(REPO / "scripts" / "overnight_out"))
     ap.add_argument("--rehearse", action="store_true",
@@ -399,16 +441,38 @@ def main() -> int:
     ap.add_argument("--rounds", type=int, help="override the computed round count")
     args = ap.parse_args()
 
-    pool = [int(x) for x in args.faults.split(",") if x.strip()] or [1, 2, 3, 4, 5, 6, 7, 8]
+    pool = [int(x) for x in args.faults.split(",") if x.strip()]
+    if 13 in pool:
+        log("REFUSING fault 13: not revertible by config alone -- see --faults in the source")
+        pool = [f for f in pool if f != 13]
     rng = random.Random(args.seed)
     outdir = Path(args.out) / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     (outdir / "tickets").mkdir(parents=True, exist_ok=True)
 
+    #: The first three are `event_routing.MNEMONIC_FLOW_TABLE`'s whole contents
+    #: -- the only mnemonics that can route. ROUTING-ISIS-5-ADJCHANGE is kept
+    #: deliberately as a NEGATIVE control: the fabric emits it (measured, 25s
+    #: after an IS-IS shutdown) and routing refuses it by design. Seeing it
+    #: arrive and be refused is worth recording; it is why the unroutable
+    #: fall-through above exists.
     mnemonics = ["ROUTING-BGP-5-ADJCHANGE", "PKT_INFRA-LINK-3-UPDOWN",
                  "PKT_INFRA-LINEPROTO-5-UPDOWN", "ROUTING-ISIS-5-ADJCHANGE"]
 
     rounds = args.rounds or (1 if args.rehearse else int(args.hours * 60 / args.interval_min))
     log(f"campaign: {rounds} round(s), pool={pool}, hold={args.hold}s -> {outdir}")
+
+    # Prove the model path works BEFORE spending a night on it. The first
+    # campaign discovered its credentials were missing only by failing every
+    # round, one at a time, for seven rounds.
+    try:
+        from agent_nettools.event_caller import minimax_event_caller
+        probe = minimax_event_caller(system="Reply with OK.", tools=[], timeout_s=60,
+                                     messages=[{"role": "user", "content": "Reply with OK."}])
+        log(f"model preflight OK: {str(probe.get('text'))[:40]!r}")
+    except Exception as exc:  # noqa: BLE001
+        log(f"model preflight FAILED: {type(exc).__name__}: {exc}")
+        log("refusing to start a campaign whose model calls cannot succeed")
+        return 2
 
     baseline = fabric_ok()
     log(f"baseline fabric: {baseline.get('finding')}")
