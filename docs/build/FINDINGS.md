@@ -8110,3 +8110,70 @@ recording.
   a transient collection failure — all four intents `UNEVALUATED`, self-cleared
   by morning. Worth its own row: an unreachable device currently presents as a
   critical fault, and at Stage 3 that pages.
+
+---
+
+## OBS-705 · The pipeline ships recoveries and drops faults
+
+Measured 2026-08-23 while chasing why a fault campaign detected nothing.
+
+| Source | `Up` | `Down` |
+|---|---|---|
+| RR1's own log buffer | 10 | **11** |
+| Loki, 24h, all nine devices | 73 | **6** |
+
+The device buffer is balanced, as it must be — every session that goes down and
+comes back logs one of each. Loki holds twelve times more recoveries than
+faults. And a full-text search of Loki over 24h for `"Peer closing down the
+session"` — the reason string on every one of RR1's Down events — returns
+**zero lines**, while RR1's buffer holds it repeatedly:
+
+```
+RR1 buffer:  10:16:54.385  Down  neighbor 10.255.0.12 Down - Peer closing down the session
+             10:22:34.982  Up    neighbor 10.255.0.12 Up (VRF: default)
+Loki:        (absent)
+             10:22:34      Up    present
+```
+
+The Down was emitted **16 seconds after the fault went live**. Detection timing
+was never the problem.
+
+**Where it is not being lost.** `syslog-ng-ctl stats`: 9,911,217 processed,
+9,911,213 written to Loki, `dropped 0`. The messages are not reaching syslog-ng
+at all, so the loss is between the router's own buffer and what the router
+sends — its trap/destination path, not the collector and not Loki.
+
+### Why this matters more than a missing log line
+
+**It inverts the event-driven design.** The events the design exists to react
+to are the ones being dropped; the events it should ignore arrive reliably. An
+event pipeline that delivers recoveries and swallows faults is worse than one
+that delivers nothing, because it looks like it is working.
+
+**It also corrects OBS-702's own measurement, which I made two days ago.** That
+finding recorded *"6 of the 10 distinct `ROUTING-BGP-5-ADJCHANGE` events in the
+last 48h were `Up`"*, and drew from it that promoting the mnemonic would fire an
+unattended investigation on a recovery most of the time. The ratio was real; the
+inference from it was not. Downs are not rare on this fabric — they are being
+dropped before they reach the store I measured. I measured the pipeline and
+described the fabric.
+
+The conclusion B-711 drew still stands, and stands more firmly: routing had to
+learn the difference between a fault and a recovery. But the reason was wrong.
+It is not that this fabric mostly recovers. It is that **this fabric's faults do
+not arrive**.
+
+**And the two defects compound.** With B-711 now correctly refusing to route a
+recovery, and the pipeline delivering almost nothing but recoveries, promoting
+`ROUTING-BGP-5-ADJCHANGE` today would produce a trigger that fires on almost
+nothing at all — while every check reported healthy. Two individually correct
+behaviours multiplying into silence is a worse failure than either alone,
+because nothing anywhere reports an error.
+
+**Stage 2 is blocked on this, not on the trigger table.** B-706 asked which
+mnemonic has earned promotion. No mnemonic can earn it while the transport
+underneath delivers one class of event and not the other. Filed as B-717.
+
+The campaign's synthetic-probe path is unaffected and still measuring what it
+was built to measure — it wakes the agent directly and never depended on the
+syslog arriving.

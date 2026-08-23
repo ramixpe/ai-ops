@@ -1,0 +1,228 @@
+{
+  "round": 1,
+  "fault_choice": 7,
+  "started": "2026-08-23T10:16:38Z",
+  "fault_confirmed_live": true,
+  "subject": {
+    "device": "RR1",
+    "subject": "10.255.0.12"
+  },
+  "observations": [
+    {
+      "at_s": 25.0,
+      "new_events": 0
+    },
+    {
+      "at_s": 50.0,
+      "new_events": 0
+    },
+    {
+      "at_s": 75.1,
+      "new_events": 0
+    },
+    {
+      "at_s": 100.1,
+      "new_events": 0
+    },
+    {
+      "at_s": 125.1,
+      "new_events": 0
+    },
+    {
+      "at_s": 150.1,
+      "new_events": 0
+    },
+    {
+      "at_s": 175.1,
+      "new_events": 0
+    },
+    {
+      "at_s": 200.1,
+      "new_events": 0
+    },
+    {
+      "at_s": 225.1,
+      "new_events": 0
+    },
+    {
+      "at_s": 250.1,
+      "new_events": 0
+    },
+    {
+      "at_s": 262.1,
+      "new_events": 0
+    }
+  ],
+  "held_for_s": 262.1,
+  "agent": {
+    "device": "PE2",
+    "line": "PE2.sota-xrd RP/0/RP0/CPU0:Aug 23 10:21:26.000 UTC: bgp[1084]: %ROUTING-BGP-5-ADJCHANGE : neighbor 10.255.0.31 Down - synthetic campaign probe, no real syslog fired",
+    "routable": true,
+    "transition": "down",
+    "flow": "bgp_session",
+    "subject": "10.255.0.31",
+    "matched": "ROUTING-BGP-5-ADJCHANGE",
+    "route_reason": "ROUTING-BGP-5-ADJCHANGE routes to the bgp_session flow",
+    "agent_seconds": 57.9,
+    "event_run": {
+      "ran": true,
+      "reason": "dispatched against live tools; stopped because completed",
+      "mode": "live",
+      "decision": {
+        "routable": true,
+        "flow": "bgp_session",
+        "device": "PE2",
+        "subject": "10.255.0.31",
+        "reason": "ROUTING-BGP-5-ADJCHANGE routes to the bgp_session flow",
+        "source_kind": "syslog",
+        "matched": "ROUTING-BGP-5-ADJCHANGE",
+        "transition": "down",
+        "suggested_command": [
+          "nettools",
+          "investigate",
+          "PE2",
+          "10.255.0.31",
+          "--flow",
+          "bgp_session"
+        ]
+      },
+      "bounds": {
+        "max_iterations": 4,
+        "time_budget_s": 90.0,
+        "max_tool_calls": 6,
+        "max_calls_per_tool": {
+          "investigate_lab": 1
+        },
+        "max_result_chars": 20000
+      },
+      "tools_offered": [
+        "explore_lab",
+        "check_lab",
+        "investigate_lab",
+        "history_lab"
+      ],
+      "tool_calls": [
+        {
+          "tool": "explore_lab",
+          "arguments": {
+            "device_name": "PE2"
+          },
+          "is_error": false,
+          "detail": null,
+          "duration_ms": 1803.3090229146183,
+          "truncated_chars": 544,
+          "skipped": false
+        },
+        {
+          "tool": "check_lab",
+          "arguments": {
+            "scope": "PE2",
+            "intent": "bgp"
+          },
+          "is_error": false,
+          "detail": null,
+          "duration_ms": 7743.586922995746,
+          "truncated_chars": 742,
+          "skipped": false
+        },
+        {
+          "tool": "investigate_lab",
+          "arguments": {
+            "device_name": "PE2",
+            "subject": "10.255.0.31",
+            "flow": "bgp_session"
+          },
+          "is_error": false,
+          "detail": null,
+          "duration_ms": 41993.18239605054,
+          "truncated_chars": 0,
+          "skipped": false
+        }
+      ],
+      "exchanges": [
+        {
+          "purpose": "event_agent_turn",
+          "iteration": 1,
+          "response_text": "I'll investigate this BGP session change event on PE2 for peer 10.255.0.31. Starting with a broad view of the lab and then focusing on the specific issue.",
+          "stop_reason": "tool_calls",
+          "tokens": {
+            "input_tokens": 1562,
+            "output_tokens": 57,
+            "total_tokens": 1619,
+            "calls": 1,
+            "reported": true,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 0
+          },
+          "tool_calls_requested": [
+            {
+              "tool": "explore_lab",
+              "arguments": {}
+            }
+          ]
+        },
+        {
+          "purpose": "event_agent_turn",
+          "iteration": 2,
+          "response_text": "The broad check confirms the BGP session to 10.255.0.31 is in Idle state. Let me get the detailed BGP state and then run the targeted investigation.",
+          "stop_reason": "tool_calls",
+          "tokens": {
+            "input_tokens": 2114,
+            "output_tokens": 78,
+            "total_tokens": 2192,
+            "calls": 1,
+            "reported": true,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 0
+          },
+          "tool_calls_requested": [
+            {
+              "tool": "check_lab",
+              "arguments": {
+                "intent": "bgp"
+              }
+            },
+            {
+              "tool": "investigate_lab",
+              "arguments": {}
+            }
+          ]
+        },
+        {
+          "purpose": "event_agent_turn",
+          "iteration": 3,
+          "response_text": "The investigation is complete. The authoritative finding from the descent is clear, and both ends of the stability window agree on the transport-layer diagnosis.\n\n## Finding\n\n**transport_blocked** \u2014 BGP session to 10.255.0.31 is down at the TCP transport layer, not at routing.\n\n### Causal chain\n\nThe dependency descent (5/5 rungs examined, `trustworthy: true`) places the lowest broken rung at **transport** on PE2:\n\n1. **bgp_session** \u2014 broken: session to 10.255.0.31 is Idle (Up/Down counter shows 00:04:45).\n2. **transport** \u2014 broken: no TCP socket armed for read toward 10.255.0.31; the device last recorded a reset 10s before the second read with reason **\"BGP Notification sent: peer in wrong AS\"**.\n3. **route_to_peer** \u2014 healthy: route to 10.255.0.31/32 present (2 paths).\n4. **igp_adjacency** (RR1) \u2014 healthy: 2 IS-IS adjacencies Up.\n5. **interface** (RR1) \u2014 healthy: both members up.\n\n### Corroborating timeline (PE2, last ~80 min)\n\n- 10:16:54.343 UTC \u2014 **neighbor 10.255.0.31 Down \u2014 Remote AS configuration changed (AS: 65001)** \u2190 the event under investigation\n- Earlier in the window: Admin. shutdown (CEASE) at 09:55, hold-time expiry at 09:32, intermittent L2-BFD resource errors around 10:01\u201310:02.\n\n### Interpretation\n\nThe session is not failing because the peer is unreachable or the IGP is broken \u2014 routing and the underlying interfaces are fine. It is failing because **PE2 and 10.255.0.31 disagree on the remote AS**: PE2's BGP summary shows the configured remote AS as **65001**, and the device emitted a \"peer in wrong AS\" notification. Lower layers (IS-IS, interfaces) are not contributing to the fault.\n\nThe two read-points (33.7s apart, slightly over the 30s bound) both agreed on this state, and `stable: true` \u2014 the finding is bracketed, not continuously observed.\n\n### Recommended next check\n\nThis requires a human: compare the configured `remote-as` for neighbor 10.255.0.31 on PE2 against the AS actually advertised by the peer (65001 per PE2's summary). A mismatch will keep producing \"peer in wrong AS\" notifications on every retry.",
+          "stop_reason": "completed",
+          "tokens": {
+            "input_tokens": 5961,
+            "output_tokens": 551,
+            "total_tokens": 6512,
+            "calls": 1,
+            "reported": true,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 0
+          }
+        }
+      ],
+      "stopped_because": "completed",
+      "complete": true,
+      "limits_hit": [],
+      "fabrication_attempts": [],
+      "ticket_run_id": "f729a37c870f48df8feb04766b51c32e",
+      "elapsed_s": 57.652714535128325
+    }
+  },
+  "trigger_kind": "synthetic",
+  "synthetic_reason": "no matching syslog reached Loki within the cap; the agent was woken deliberately to measure what it reports about a fabric broken in a way it has no approved command to observe. NOT a detection.",
+  "fault_lab_rc": 2,
+  "restore_verified": true,
+  "session_dir": null,
+  "fabric_after": {
+    "finding": "all_layers_healthy",
+    "trustworthy": true,
+    "exit": 0,
+    "attempts": 2,
+    "settled_after_s": 31.7
+  },
+  "ended": "2026-08-23T10:22:58Z"
+}
