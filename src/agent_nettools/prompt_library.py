@@ -145,14 +145,18 @@ def _packaged_prompts_dir() -> Path:
     `--no-model` and touches no LLM at all (`build_report_prompt` is still
     reachable from a plain descent report). Follows the same precedent as
     `inventory_model._packaged_fallback_path`: `src/agent_nettools/data/
-    prompts/*.txt` are checked-in byte-identical copies of the six
-    runtime-required versions (`report.v1/v2`, `correlate.v1..v4` --
-    `load_prompt` accepts any version and superseded versions are kept
-    reachable on purpose), declared in `pyproject.toml`'s
-    `[tool.setuptools.package-data]`, resolved through `importlib.resources`
-    so it works whether this is an editable or an installed copy. Kept honest
-    by `tests/test_packaging_prompts.py`, which fails loudly if a packaged
-    copy ever drifts from its source-tree original.
+    prompts/*.txt` are checked-in byte-identical copies of every prompt file
+    under the source-tree `prompts/` -- `load_prompt` accepts any version and
+    superseded versions (`report.v1`, `correlate.v1..v3`) are kept reachable
+    on purpose, not just the two named in `CURRENT_VERSION` -- declared in
+    `pyproject.toml`'s `[tool.setuptools.package-data]`, resolved through
+    `importlib.resources` so it works whether this is an editable or an
+    installed copy. Kept honest by `tests/test_packaging_prompts.py`, which
+    derives the required set from `prompts/*.txt` itself (not a hand-
+    maintained list -- one of those went stale and shipped `event_agent.v1`
+    with no packaged twin, docs/findings_gpt_23aug.md H1, closed 2026-08-23)
+    and fails loudly if a packaged copy is missing or ever drifts from its
+    source-tree original.
 
     `prompts/tests/cases/*.json` and `prompts/README.md` are test-only and
     are deliberately NOT packaged here -- nothing at runtime reads them.

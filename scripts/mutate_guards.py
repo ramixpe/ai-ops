@@ -974,6 +974,22 @@ MUTATIONS = [
      'r"^(?P<host>\\S+)\\s+(?=RP/0/RP0/CPU0:)"',
      'r"^(?P<host>\\S+).*(?=RP/0/RP0/CPU0:)"',
      "test_junk_between_a_host_token_and_the_rp_marker_still_refuses"),
+
+    # Counted before adding (OBS-191): the client-construction line below
+    # occurs exactly once in fabric_analysis.py (`grep -c`, 2026-08-23).
+    ("H2-FABRIC-ANTHROPIC-TIMEOUT", "fabric_analysis's Anthropic client is "
+     "constructed with a RESOLVED timeout (NETTOOLS_LLM_TIMEOUT_SECONDS via "
+     "_resolve_llm_timeout), matching every other provider entry point's "
+     "EER-010 convention -- not the unbounded default it shipped with. Found "
+     "by an external review which reproduced it with a fake Anthropic module: "
+     "with the env var set to 17.5 the client was built as {'api_key': 'x'} "
+     "and the call carried no timeout at all. A hung fabric analysis is where "
+     "the ceiling users are told protects them matters most -- it is the "
+     "broadest and most expensive model path in the tool",
+     "src/agent_nettools/fabric_analysis.py",
+     '        api_key=os.getenv("ANTHROPIC_API_KEY"), timeout=_resolve_llm_timeout(timeout)\n',
+     '        api_key=os.getenv("ANTHROPIC_API_KEY")\n',
+     "test_fabric_analyze_client_uses_the_default_timeout"),
 ]
 
 

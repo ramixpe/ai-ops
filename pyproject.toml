@@ -93,13 +93,17 @@ nettools-mcp = "mcp_server.server:main"
 
 [tool.setuptools.package-data]
 # data/*.yaml: inventory/lab.yaml's packaged fallback copy (R2).
-# data/prompts/*.txt: the nine runtime-required prompt versions (EER-003) --
-# report.v1/v2, correlate.v1..v4, and troubleshooting/fabric_analysis/
-# agent_system at v1 (moved out of Python 2026-08-21). `.txt` needs its own
-# entry; the yaml glob above does not cover it. The glob already covered the
-# three new files, so nothing here changed but the count -- which is exactly
-# why the count is written down: a stale number is the only thing that would
-# have made this drift visible.
+# data/prompts/*.txt: every runtime-required prompt version (EER-003) --
+# report.v1/v2, correlate.v1..v4, troubleshooting/fabric_analysis/
+# agent_system at v1 (moved out of Python 2026-08-21), and event_agent.v1
+# (packaged 2026-08-23 -- docs/findings_gpt_23aug.md H1; it shipped without a
+# packaged twin for two days because a hand-maintained test list didn't know
+# it existed). `.txt` needs its own entry; the yaml glob above does not cover
+# it. The count is deliberately NOT written here any more -- a stale count is
+# exactly what let H1 happen once already (this comment used to say "nine"
+# while the tree held ten). `tests/test_packaging_prompts.py` now derives the
+# required set from `prompts/*.txt` itself and fails if this glob ever misses
+# one of them, which is the only guard worth trusting.
 # data/fixtures/**/*.txt: the packaged demo fixture subset (EER-004) -- the
 # files the README-documented `--from-fixtures` commands actually read, not
 # the full tests/fixtures/ corpus. See fixtures.py's `_packaged_fixture_root`.

@@ -885,9 +885,9 @@ def test_get_lab_logs_wraps_a_free_text_canary_through_the_actual_registered_too
 
 def test_get_lab_logs_attaches_coverage_so_absence_never_reads_as_zero(monkeypatch):
     """Constraint 3: the four-case distinction survives to the model. A
-    successful, complete Loki read still reports gaps (the severity floor,
-    MEASURED_SEVERITY_AVAILABLE=(3,4), makes every read incomplete for an
-    absence claim -- that is not a bug in this test, it is the documented
+    successful, complete Loki read still reports gaps (the severity range,
+    MEASURED_SEVERITY_AVAILABLE=(2,3,4,5), makes every read incomplete for
+    an absence claim -- that is not a bug in this test, it is the documented
     behaviour logs_loki.py exists to encode)."""
 
     monkeypatch.setattr(

@@ -1153,14 +1153,18 @@ def get_lab_logs(device_name: str, since_seconds: int = 3600, limit: int = 200) 
     whether the device itself answers right now. This queries an external
     log store (Loki), not the device: no SSH session is opened.
 
-    It will NOT show every severity: only IOS-XR severities 3 (err) and 4
-    (warning) reach this pipeline today, a measured platform gap upstream of
-    this tool, not a filter it applies -- an absence of critical/emergency
-    lines here is never evidence none occurred. Check ``data.coverage``
-    before reporting an absence: ``coverage.complete`` is true only when
-    this read can support that claim, and ``coverage.gaps`` says why not
-    when it cannot (the severity floor makes this true of every call, by
-    design -- see `logs_loki.py`).
+    It will NOT show every severity: only IOS-XR severities 2 (crit) through
+    5 (notice) reach this pipeline, a measured platform ceiling upstream of
+    this tool, not a filter it applies -- an absence of severity 0/1/6/7
+    lines is never evidence none occurred. Separately, and NOT visible in
+    ``data.coverage``: severity-5 fault lines (e.g. a BGP session going
+    Down) are currently being dropped before Loki while their matching
+    recoveries arrive normally (B-717, open) -- treat a missing Down/fault
+    line as inconclusive, not confirmed absent, until B-717 closes. Check
+    ``data.coverage`` regardless: ``coverage.complete`` is true only when
+    this read can support an absence claim, and ``coverage.gaps`` says why
+    not when it cannot (the severity range above makes this true of every
+    call, by design -- see `logs_loki.py`).
 
     ``since_seconds`` how far back to search, 1-604800 (Loki's own retention
     is one week). ``limit`` how many lines to return, most recent first,

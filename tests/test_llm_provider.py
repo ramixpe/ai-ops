@@ -713,6 +713,91 @@ def test_complete_prompt_anthropic_client_carries_a_timeout(monkeypatch):
     assert client_kwargs[0]["timeout"] == DEFAULT_LLM_TIMEOUT_SECONDS
 
 
+# --------------------------------------------------------------------------- #
+# H2 (docs/findings_gpt_23aug.md, 2026-08-23): `fabric_analysis.py` built its
+# own Anthropic client with `anthropic.Anthropic(api_key=...)` and no timeout
+# at all -- `_resolve_llm_timeout` appeared nowhere in that file, so a hung
+# fabric-wide analysis (the broadest, most expensive LLM call this project
+# makes) ignored the one setting every other entry point in this module
+# honours. Fixed by threading the same `_resolve_llm_timeout(timeout)` call
+# `analyze_with_anthropic` already makes into
+# `fabric_analysis._analyze_fabric_with_anthropic`. These three mirror
+# `test_anthropic_analyze_client_uses_the_default_timeout` /
+# `test_anthropic_analyze_client_honours_the_env_var` /
+# `test_anthropic_analyze_explicit_timeout_wins_over_the_env_var` above,
+# against `fabric_analysis.analyze_fabric` instead of
+# `llm_analysis.analyze_with_anthropic`.
+# --------------------------------------------------------------------------- #
+
+
+def test_fabric_analyze_client_uses_the_default_timeout(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
+    monkeypatch.delenv("NETTOOLS_LLM_TIMEOUT_SECONDS", raising=False)
+    from agent_nettools.fabric_analysis import analyze_fabric
+    from agent_nettools.llm_analysis import DEFAULT_LLM_TIMEOUT_SECONDS
+
+    client_kwargs = []
+    install_fake_anthropic(
+        monkeypatch, lambda **kwargs: fake_message("ok"), client_kwargs=client_kwargs
+    )
+
+    analyze_fabric({}, verdicts={})
+
+    assert client_kwargs[0]["timeout"] == DEFAULT_LLM_TIMEOUT_SECONDS
+
+
+def test_fabric_analyze_client_honours_the_env_var(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
+    monkeypatch.setenv("NETTOOLS_LLM_TIMEOUT_SECONDS", "17.5")
+    from agent_nettools.fabric_analysis import analyze_fabric
+
+    client_kwargs = []
+    install_fake_anthropic(
+        monkeypatch, lambda **kwargs: fake_message("ok"), client_kwargs=client_kwargs
+    )
+
+    analyze_fabric({}, verdicts={})
+
+    assert client_kwargs[0]["timeout"] == 17.5
+
+
+def test_fabric_analyze_explicit_timeout_wins_over_the_env_var(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
+    monkeypatch.setenv("NETTOOLS_LLM_TIMEOUT_SECONDS", "17.5")
+    from agent_nettools.fabric_analysis import analyze_fabric
+
+    client_kwargs = []
+    install_fake_anthropic(
+        monkeypatch, lambda **kwargs: fake_message("ok"), client_kwargs=client_kwargs
+    )
+
+    analyze_fabric({}, verdicts={}, timeout=3.0)
+
+    assert client_kwargs[0]["timeout"] == 3.0
+
+
+def test_fabric_analyze_no_timeout_kwarg_reaches_the_stream_call(monkeypatch):
+    """The client-level timeout is what bounds the call, not a per-call
+    override -- matching `analyze_with_anthropic`'s own convention (see that
+    function's docstring). A stray `timeout=` on the `.stream()` call itself
+    would be redundant at best; this pins that `_analyze_fabric_with_anthropic`
+    does not add one."""
+
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
+    from agent_nettools.fabric_analysis import analyze_fabric
+
+    calls = []
+    install_fake_anthropic(monkeypatch, lambda **kwargs: fake_message("ok"), captured=calls)
+
+    analyze_fabric({}, verdicts={}, timeout=3.0)
+
+    assert "timeout" not in calls[0]
+
+
 def test_openai_client_carries_a_timeout(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
     monkeypatch.delenv("OPENAI_MODEL", raising=False)

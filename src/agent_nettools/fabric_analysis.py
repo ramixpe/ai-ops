@@ -35,6 +35,7 @@ from .llm_analysis import (
     _minimax_call_kwargs,
     _ollama_call,
     _openai_call,
+    _resolve_llm_timeout,
     get_provider,
 )
 from .prompt_library import load_prompt
@@ -96,12 +97,23 @@ def build_fabric_prompt(
     return f"{FABRIC_ANALYSIS_PROMPT}\n\n{content}"
 
 
-def _analyze_fabric_with_anthropic(user_content: str) -> str:
-    """The Anthropic path: static prompt cached in ``system``, evidence in ``messages``."""
+def _analyze_fabric_with_anthropic(user_content: str, *, timeout: float | None = None) -> str:
+    """The Anthropic path: static prompt cached in ``system``, evidence in ``messages``.
+
+    EER-010, closed here 2026-08-23: this client used to be constructed with
+    no timeout at all -- the one Anthropic entry point `_resolve_llm_timeout`
+    never reached, because this module predates EER-010 and was never
+    revisited when that convention landed on `llm_analysis.py`'s four
+    `analyze_with_*` functions. Matches `analyze_with_anthropic`'s own
+    convention exactly: an explicit ``timeout`` argument wins, else
+    ``NETTOOLS_LLM_TIMEOUT_SECONDS``, else ``DEFAULT_LLM_TIMEOUT_SECONDS``.
+    """
 
     import anthropic  # noqa: F401 - imported to construct the client below.
 
-    client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    client = anthropic.Anthropic(
+        api_key=os.getenv("ANTHROPIC_API_KEY"), timeout=_resolve_llm_timeout(timeout)
+    )
     model = os.getenv("ANTHROPIC_MODEL", ANTHROPIC_MODEL_DEFAULT)
     system = [
         {"type": "text", "text": FABRIC_ANALYSIS_PROMPT, "cache_control": {"type": "ephemeral"}}
@@ -130,6 +142,8 @@ def _analyze_fabric_with_anthropic(user_content: str) -> str:
 def analyze_fabric(
     evidence_by_device: dict[str, Any],
     verdicts: dict[str, Any] | None = None,
+    *,
+    timeout: float | None = None,
 ) -> dict[str, Any]:
     """Cross-device fabric analysis: evidence + Phase 4 health verdicts, correlated.
 
@@ -139,6 +153,17 @@ def analyze_fabric(
     report ``evidence_budget.budget_fabric_evidence`` produces, surfaced here
     so a caller can tell whether the model's answer was working from partial
     evidence.
+
+    ``timeout`` (EER-010's usual precedence -- an explicit value, else
+    ``NETTOOLS_LLM_TIMEOUT_SECONDS``, else ``DEFAULT_LLM_TIMEOUT_SECONDS``) is
+    threaded to whichever provider is configured, matching
+    ``llm_analysis.analyze_with_anthropic``/``analyze_with_openai``/
+    ``analyze_with_minimax``/``analyze_with_ollama``'s own signatures. The
+    OpenAI/MiniMax/Ollama branches already resolved a timeout on their own
+    when this was left unset (``_openai_call``/``_ollama_call`` each call
+    ``_resolve_llm_timeout`` internally) -- passing it through here just lets
+    an explicit caller-supplied value win on every provider, not only
+    Anthropic's.
     """
 
     if verdicts is None:
@@ -148,14 +173,16 @@ def analyze_fabric(
 
     provider = get_provider()
     if provider == "anthropic":
-        analysis = _analyze_fabric_with_anthropic(user_content)
+        analysis = _analyze_fabric_with_anthropic(user_content, timeout=timeout)
     elif provider == "ollama":
-        analysis = _ollama_call(f"{FABRIC_ANALYSIS_PROMPT}\n\n{user_content}")
+        analysis = _ollama_call(f"{FABRIC_ANALYSIS_PROMPT}\n\n{user_content}", timeout=timeout)
     elif provider == "minimax":
         analysis = _openai_call(
-            f"{FABRIC_ANALYSIS_PROMPT}\n\n{user_content}", **_minimax_call_kwargs()
+            f"{FABRIC_ANALYSIS_PROMPT}\n\n{user_content}",
+            timeout=timeout,
+            **_minimax_call_kwargs(),
         )
     else:
-        analysis = _openai_call(f"{FABRIC_ANALYSIS_PROMPT}\n\n{user_content}")
+        analysis = _openai_call(f"{FABRIC_ANALYSIS_PROMPT}\n\n{user_content}", timeout=timeout)
 
     return {"analysis": analysis, "truncated": truncated}
