@@ -58,6 +58,8 @@ ios-xr-nettools/
 │   │   │                               Binding: model roles, escalation ladder, frozen files
 │   │   ├── FINDINGS.md                 Append-only log + the Open Questions table
 │   │   ├── BACKLOG.md                  Every open item with its reconciled state — current status
+│   │   ├── SOTA-PLAN-2026-08-23.md     Current forward plan package for peer review — wide/narrow,
+│   │   │                               n8n as envelope, pinned-schema model control, SOP direction
 │   │   ├── MVP0-REVIEW.md              The M4 review: what it does, and what it does not
 │   │   ├── HOLISTIC-REVIEW.md          The 2026-08-18 five-perspective review: B-481/B-482
 │   │   │                               fixed, 18 UX fixes, the two-lens-convergence finding

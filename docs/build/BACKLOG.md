@@ -10,6 +10,27 @@ Work beyond MVP-0, staged. Nothing here is scheduled — this is the ordered lis
 
 ---
 
+## Current planning package — SOTA track, peer review draft
+
+The current forward plan lives in
+[`docs/build/SOTA-PLAN-2026-08-23.md`](SOTA-PLAN-2026-08-23.md).
+It is a **peer-review draft**, not an implementation authorization. Two
+external reviewers should annotate that file directly with `[PEER-A]` and
+`[PEER-B]` notes; the follow-up synthesis pass will add `[COPILOT-REVIEW]`,
+and the operator's approved version will be marked `[FINAL]`.
+
+The governing concept for the SOTA track is:
+
+> Wide context, narrow deterministic diagnosis, side effects behind declared
+> workflows. The model selects and fills approved structures; it never authors
+> commands, targets, diagnoses, or procedures.
+
+Do not insert draft SOTA items into the authoritative Reconciliation table
+until the peer notes have been reviewed and the operator approves the final
+plan. The table below remains the current source of truth for existing IDs.
+
+---
+
 ## State vocabulary
 
 Seven states are in use below — this section used to document five of them; EER-016 found the other two (`CLOSED-AS-REFUSED`, `CLOSED-AS-MEASURED`) already in the Reconciliation table's own rows since 2026-08-19 but never added here. **A vocabulary a reader is told exists must be exactly the vocabulary the table uses, not a subset of it** — that gap is closed below.
