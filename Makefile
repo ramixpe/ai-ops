@@ -22,8 +22,26 @@ VENV := .venv
 VENV_BIN := $(VENV)/bin
 NETTOOLS := $(if $(wildcard $(VENV_BIN)/nettools),$(VENV_BIN)/nettools,nettools)
 NETTOOLS_MCP := $(if $(wildcard $(VENV_BIN)/nettools-mcp),$(VENV_BIN)/nettools-mcp,nettools-mcp)
-PYTEST := $(if $(wildcard $(VENV_BIN)/pytest),$(VENV_BIN)/pytest,pytest)
-RUFF := $(if $(wildcard $(VENV_BIN)/ruff),$(VENV_BIN)/ruff,ruff)
+# ...with one refinement for the two that are DEPENDENCY console scripts
+# rather than this package's own. A console script is a generated file with the
+# interpreter path baked into its shebang, so it can exist and still be
+# unrunnable: rename or rebuild the venv and `$(wildcard ...)` still finds it
+# while the shebang points at an interpreter that is gone.
+#
+# Measured 2026-08-23 by an external review: `.venv/bin/pytest` began
+# `#!/.../.venv312/bin/python`, a directory that no longer exists, so `make
+# test` failed with a bare "No such file or directory" while
+# `.venv/bin/python -m pytest` ran 3755 tests green. That is a confusing
+# failure at the worst moment -- `docs/build/MIGRATION.md`'s acceptance gate
+# tells an agent rebuilding this repo on a new host to run `make test`, so the
+# checkpoint written to prove the build works is the one that breaks.
+#
+# `$(VENV_BIN)/python -m <tool>` resolves the interpreter directly and never
+# reads a generated shebang. `nettools`/`nettools-mcp` above stay as they are:
+# they are this package's own entry points, `make setup` regenerates them with
+# the editable install, and they have no `-m` form.
+PYTEST := $(if $(wildcard $(VENV_BIN)/python),$(VENV_BIN)/python -m pytest,pytest)
+RUFF := $(if $(wildcard $(VENV_BIN)/python),$(VENV_BIN)/python -m ruff,ruff)
 
 # PE1 matches agent_nettools.inventory.get_default_device_name()'s own
 # fallback, so this is an explicit spelling of the same default, not a new
