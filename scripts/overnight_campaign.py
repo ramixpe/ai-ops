@@ -135,6 +135,25 @@ def _paced_get(url: str, *, attempts: int = 4) -> dict | None:
     return None
 
 
+def _device_epoch(device_time: str) -> float | None:
+    """The device's own clock, as epoch seconds. `None` if it did not parse.
+
+    `None` is NOT treated as "old" anywhere below -- an event whose timestamp
+    could not be read is still a real event, and dropping it because a regex
+    failed would be the absence-is-never-zero mistake in the code written to
+    measure it.
+    """
+
+    for fmt in ("%b %d %H:%M:%S", "%b  %d %H:%M:%S"):
+        try:
+            t = datetime.strptime(device_time.strip(), fmt)
+        except ValueError:
+            continue
+        now = datetime.now()
+        return t.replace(year=now.year).timestamp()
+    return None
+
+
 def loki_events(mnemonics: list[str], since_s: int) -> list[dict]:
     """Distinct DEVICE events for these mnemonics, deduped by the device's own
     timestamp -- never by raw line, which counts syslog retransmits (up to 10x
@@ -170,6 +189,7 @@ def loki_events(mnemonics: list[str], since_s: int) -> list[dict]:
                 continue
             seen[key] = {
                 "host": host, "device_time": key[1], "mnemonic": key[2],
+                "device_epoch": _device_epoch(key[1]),
                 "ingest_ns": int(ingest_ns), "line": line.strip(), "retransmits": 1,
             }
     return sorted(seen.values(), key=lambda e: e["ingest_ns"])
@@ -329,12 +349,29 @@ def one_round(n: int, fault: int, hold_s: float, outdir: Path, mnemonics: list[s
             # the room they need. A fixed hold had to be wrong in one direction
             # or the other.
             observations = []
+            #: TWO filters, because each catches what the other misses.
+            #:
+            #: `baseline_keys` is a set-difference against what was already
+            #: there. On its own it was defeated by close spacing: at 5-minute
+            #: intervals, round N's events landed AFTER its hold closed and
+            #: were captured in round N+1's 15-minute lookback, so they were
+            #: subtracted as pre-existing and no round ever saw them. Measured:
+            #: three consecutive rounds detected nothing while Loki held 35 BGP
+            #: ADJCHANGE lines for the period.
+            #:
+            #: `wall_floor` fixes that at the root and is spacing-independent:
+            #: an event counts only if the DEVICE's own clock says it happened
+            #: at or after this fault went live. A 60s grace absorbs clock skew
+            #: between the routers and this host (the fabric's own measured
+            #: skew bound is 30s).
+            wall_floor = time.time() - 60.0
             baseline_keys = {(e["host"], e["device_time"], e["mnemonic"])
                              for e in loki_events(mnemonics, since_s=900)}
             while time.monotonic() - t_live < hold_s:
                 time.sleep(min(25.0, max(0.0, hold_s - (time.monotonic() - t_live))))
                 evs = [e for e in loki_events(mnemonics, since_s=int(hold_s) + 180)
-                       if (e["host"], e["device_time"], e["mnemonic"]) not in baseline_keys]
+                       if (e["host"], e["device_time"], e["mnemonic"]) not in baseline_keys
+                       and (e["device_epoch"] is None or e["device_epoch"] >= wall_floor)]
                 at = round(time.monotonic() - t_live, 1)
                 observations.append({"at_s": at, "new_events": len(evs)})
                 if evs:
