@@ -300,6 +300,7 @@ def test_get_lab_interface_forwards_the_caller_spelling_unchanged(monkeypatch):
         return {"tool": "get_interface", "status": "success", "data": {}}
 
     monkeypatch.setattr(server, "get_interface", fake_get_interface)
+    monkeypatch.setattr(server, "_object_is_currently_valid", lambda *_args, **_kwargs: None)
 
     server.get_lab_interface("PE2", "Gi0/0/0/0")
     assert captured == {"device_name": "PE2", "name": "Gi0/0/0/0"}
