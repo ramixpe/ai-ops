@@ -1,7 +1,0 @@
-{
-  "finding": "transport_blocked",
-  "trustworthy": true,
-  "exit": 1,
-  "attempts": 1,
-  "settled_after_s": null
-}

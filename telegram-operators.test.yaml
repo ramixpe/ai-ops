@@ -1,5 +1,0 @@
-version: 1
-operators:
-  - telegram_user_id: 100000001
-    role: incident_manager
-    enabled: true

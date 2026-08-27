@@ -132,12 +132,12 @@ The real log record reads `Aug 16 14:04:28.238 UTC`. Characters were dropped, pr
   invariants and baseline drift, so an LLM never has to look at a healthy
   device -- only anomalies.
 - Exposes the same narrow tools through MCP, with no shell or config access --
-  including snapshot diffing, health verdicts, and flap detection (Phase 8),
+  including snapshot diffing, health verdicts, and flap detection,
   plus read-only-hinted tools, inventory/topology resources, and a
   troubleshooting prompt (see `mcp_server/README.md`).
 - Reports operational metrics (`nettools metrics`) and supports `--format
   table|summary`/`--quiet` and consistent exit codes on top of the default
-  JSON output (Phase 8).
+  JSON output.
 - **Investigates a fault deterministically** (`nettools investigate`) by walking
   a flow's protocol dependency stack and reporting the *lowest* broken rung plus
   the causal chain above it -- with no model involved in reaching the answer.
@@ -180,11 +180,10 @@ Management network `172.20.250.0/24`:
 | RR1  | 172.20.250.31 |
 
 The full device table (with roles) is rendered on demand from the inventory by
-`agent_nettools.devices_doc.render_devices_doc()` -- `docs/devices.md` was the
-committed copy until M0 (2026-08-18) retired it as a second source that could
-drift from `inventory/lab.yaml`; `tests/test_docs.py` now pins that the
-generator itself still renders and reads the inventory. The linux CE nodes are
-not IOS-XR and are intentionally excluded.
+`agent_nettools.devices_doc.render_devices_doc()` so the inventory remains the
+single source of truth. `tests/test_docs.py` pins that the generator still
+renders and reads the inventory. The linux CE nodes are not IOS-XR and are
+intentionally excluded.
 
 The inventory file location follows the same env-then-default pattern as
 snapshots and fixtures: the `NETTOOLS_INVENTORY` environment variable, else
@@ -214,17 +213,14 @@ is how those specifics stay visible instead of being smoothed into a
 clean-looking inventory. Only per-device *counts* are ever written back --
 never a specific link claim (see the comment in `inventory/lab.yaml`).
 
-**Corrected 2026-08-17.** This paragraph said the LLDP data was *"genuinely
-inconsistent"* and that it *"cannot support a link claim truthfully"*. **It is
-not inconsistent** (OBS-103). At the `t0`/`t1` captures three devices ran
-hostnames differing from their inventory labels -- P1 was
+At the `t0`/`t1` captures three devices ran hostnames differing from their
+inventory labels -- P1 was
 `LEAF05_DHCP_SERVER`, P3 `Lab-leaf01`, PE4 `SDWAN-Edge01` -- so LLDP was
 correct at both ends and the disagreement was between LLDP's device-reported
 names and this inventory's labels. **The count-only rule is still right**, for
 the reasons above and because a count survives a naming disagreement that a
-link claim has to take a side on. It is not right for the reason originally
-given, and the anomaly report still classifies those three as unknown
-neighbours until B-435 lands.
+link claim has to take a side on. The anomaly report classifies those three as
+unknown neighbours.
 
 ## Moving this repo to a new host
 
@@ -253,12 +249,14 @@ a CLI investigation traced end to end, the full live event pipeline (syslog
 line to Telegram page, unattended), the data model, the model boundary,
 admission & pacing, and the release story map. Start at
 [`docs/diagrams/index.html`](docs/diagrams/index.html). This used to be two
-layers — a generated, byte-pinned SVG set plus a separate hand-authored
-presentation set — retired 2026-08-23 into one. There is no regeneration step
-and no CI byte-pin: these diagrams can drift from the code as the code moves,
-and are only as current as the date on the page.
+layers; the repository now keeps only the hand-authored presentation set.
+There is no regeneration step or CI byte-pin, so the diagrams are only as
+current as the date on each page.
 
 ## Quick Start
+
+Prerequisites are Git, GNU Make, and Python 3.10 or newer. Docker with the
+Compose plugin is optional and needed only for the HTTP MCP deployment.
 
 ```bash
 make setup
@@ -283,12 +281,11 @@ Everything above answers *"what is the state of this device?"*. This layer answe
 *"why is this thing broken, and what is the evidence?"* — and it is built so the
 second answer is not a model's opinion.
 
-**Scope, stated precisely** (review history is retained in
-[`docs/build/FINDINGS.md`](docs/build/FINDINGS.md)): *the model cannot alter
-device configuration, and **this one investigation
+**Scope, stated precisely:** *the model cannot alter device configuration, and
+**this one investigation
 path** localises a finding using deterministic predicates.* `nettools agent` is a
 different path — a bounded tool-calling loop where the model chooses what to call,
-and disabled by default ("Bounded Agent Loop" below; B-488).
+and disabled by default (see "Bounded Agent Loop" below).
 Both are read-only; only `investigate` is deterministic, and the trust language
 below applies to it alone.
 
@@ -309,7 +306,7 @@ depends on which one:
 | `isis_adjacency` | a local interface name | `Gi0/0/0/0` |
 | `ldp_session` | a local interface name | `Gi0/0/0/0` |
 
-### Free-text flow selection (B-112)
+### Free-text flow selection
 
 `--flow` names the object type directly, but a caller does not have to know
 that vocabulary. Omit `--flow` and hand a sentence as `<subject>` instead:
@@ -319,8 +316,8 @@ nettools investigate RR1 "why can't RR1 reach 10.255.0.12?" --from-fixtures
 ```
 
 `flow_selection.py` matches the sentence against a **declared table of
-phrases** — never a model — the same shape `event_routing.py` already uses
-for syslog/Alertmanager routing (D5). It picks the flow, resolves the device
+phrases** — never a model — the same shape `event_routing.py` uses for
+syslog/Alertmanager routing. It picks the flow, resolves the device
 against the live inventory, and re-derives the subject (an IPv4 address or a
 full interface name) by reconstruction; nothing extracted from the sentence
 is ever passed through unvalidated. A sentence naming two devices, matching
@@ -365,7 +362,7 @@ it actually read; absence is `unevaluated`, and an unread rung ends the walk wit
 
 **No model runs by default.** The descent finds the cause, and `investigate`
 prints the deterministic chain with no model call at all — *"No model produced
-that"*, exactly as the demo above says (B-439). A model is invoked only when you
+that"*, exactly as the demo above says. A model is invoked only when you
 pass **`--paraphrase`**; the `report:`/`correlation:` lines you see under other
 formats read *"rendered from the descent"* until you do, and even with
 `--paraphrase` the model never *reaches* the answer.
@@ -426,10 +423,10 @@ not assume one scheme.
 
 ### Design documents
 
-`docs/design/` carries the reasoning: `design-thinking.md` (decisions D1–D20),
+`docs/design/` carries the reasoning: `design-thinking.md`,
 `evidence-reduction.md` (how large sources are made model-readable without a
-model reading them), `chaos-harness.md` (fault injection as the Stage 2
-acceptance vehicle), and `glossary.md` — read that one first, since `intent`
+model reading them), `chaos-harness.md` (fault-injection acceptance), and
+`glossary.md` — read that one first, since `intent`
 means *a question name* here, not intended state.
 
 ---
@@ -517,7 +514,7 @@ for troubleshooting); set it to `0`/`false`/`no`/`off` to disable them. A
 human typing this command has asked for the probe explicitly, so this gate
 defaults open; the MCP surface is a model deciding to probe on its own and
 defaults **closed** behind a second, separate gate -- see
-`mcp_server/README.md`, "Active probes" (B-493).
+`mcp_server/README.md`, "Active probes".
 
 ```bash
 nettools route PE1 10.255.0.31
@@ -534,7 +531,7 @@ kept for the same reason `cisco_iosxe`'s static commands are: to prove the
 template abstraction holds across a vendor with different syntax
 (`show ip route`/`show ip bgp neighbors`).
 
-### The config axis — observed vs. intended (B-104, D16)
+### The config axis — observed vs. intended
 
 Two more `cisco_xr`-only templates, `config_isis` (`show running-config
 router isis`, no parameter) and `config_interface` (`show running-config
@@ -549,7 +546,7 @@ dedicated CLI subcommand yet (there is no generic "run any template by
 name" CLI surface, and none was added for these two); they are reachable
 today through `agent_nettools.network_tools.run_template("PE3",
 "config_isis")` and are captured into fixtures by `nettools capture
---templates`, same as every other Phase 5 template.
+--templates`, like every other parameterized template.
 
 Parsed output never carries a secret: neither parser stores the text that
 follows an `authentication`/`password`-shaped keyword, only whether one was
@@ -807,7 +804,7 @@ Device credentials resolve through a small, pluggable interface
 environment inline. Two working providers, selected by
 `NETTOOLS_CREDENTIAL_PROVIDER` (env-then-default, default `env`):
 
-- **`env`** (default, and this project's only behavior through Phase 7): a
+- **`env`** (default): a
   credential group's `username_env`/`password_env`/`ssh_keyfile_env` name
   environment variables whose *value* is the secret itself.
 - **`file`**: the same named environment variables, but their value is a
@@ -928,7 +925,7 @@ disable them even for those models.
 ## Fabric-Wide Analysis
 
 `nettools analyze --fabric` collects evidence from every inventory device,
-computes Phase 4 health verdicts for all of them, and sends both to the LLM
+computes deterministic health verdicts for all of them, and sends both to the LLM
 together -- so it can correlate a finding on one device with a related
 finding on another (`check_fabric` only ever concatenates per-device
 results; nothing ties them together). The evidence is passed through an
@@ -950,7 +947,7 @@ see `.env.example`.
 
 ## Bounded Agent Loop
 
-**Disabled by default (B-488).** `nettools agent` is a free-form,
+**Disabled by default.** `nettools agent` is a free-form,
 model-driven tool-calling loop -- the one command where the model chooses its
 own tools and writes its own prose answer, which is the opposite of this
 project's central claim that the model only navigates a menu and never
@@ -977,7 +974,7 @@ each a thin wrapper over an already-safe function: listing devices, running
 one intent or one validated template, checking the fabric, collecting full
 evidence, and evaluating health. Every model-supplied argument goes through
 the same validation a human CLI/MCP caller would -- a template parameter is
-still canonicalized by reconstruction (Phase 5), not passed through as text.
+still canonicalized by reconstruction, not passed through as text.
 
 ```bash
 nettools agent "Why is RR1 unhappy right now?"
@@ -1004,10 +1001,10 @@ src/agent_nettools/network_tools.py  Allowlist, SSH, evidence, fabric, diff, gol
 src/agent_nettools/evidence_store.py  Snapshot storage backends: JSON files (default) or SQLite
 src/agent_nettools/health.py       Deterministic health verdicts: role invariants + baseline rules
 src/agent_nettools/topology.py     Derived expected topology + the fabric anomaly report
-src/agent_nettools/devices_doc.py  Renders the device table from the inventory on demand (docs/devices.md, the committed copy, was retired at M0)
+src/agent_nettools/devices_doc.py  Renders the device table from the inventory on demand
 src/agent_nettools/llm_analysis.py   Provider selection + single-device analysis + Anthropic plumbing
 src/agent_nettools/evidence_budget.py  Character budget + middle-truncation for fabric-wide evidence
-src/agent_nettools/fabric_analysis.py  Cross-device correlation over evidence + Phase 4 health verdicts
+src/agent_nettools/fabric_analysis.py  Cross-device correlation over evidence + deterministic health verdicts
 src/agent_nettools/agent_loop.py   Bounded, read-only, tool-calling agent loop (Anthropic only)
 src/agent_nettools/metrics.py      Per-device collection/latency/retry and health-verdict metrics
 src/agent_nettools/output.py       json (default)/table/summary rendering for CLI results
@@ -1093,14 +1090,14 @@ nettools ledger verdict <diagnosis-id> confirmed_correct --by alice --note "chec
 `investigate` appends **what** it diagnosed (device, subject, flow, finding,
 cause, trustworthy) to the ledger on its own, every run, and prints the
 `diagnosis-id` `ledger verdict` needs; only a human appends **whether it was
-right** (B-485 — there is no verb that lets the tool score itself). Set
+right — there is no verb that lets the tool score itself. Set
 `NETTOOLS_DIAGNOSIS_LEDGER_FILE` to a path to persist it as newline-delimited
 JSON across runs; unset (the default), diagnoses are recorded in memory only
 and nothing accumulates once the process exits.
 
 Separately, every `investigate` run writes a **ticket** — one append-only
 Markdown file per interaction, the escalation-grade run bundle a human can
-paste into a real ticketing system (B-446): a header, a section per device
+paste into a real ticketing system: a header, a section per device
 interaction, and a section for the final answer, each a fenced JSON block
 appended as the run progresses. Unlike the ledger this has a real default
 rather than being opt-in: it always writes, to `./tickets` in the working
@@ -1118,7 +1115,5 @@ is and is not enforced, and where to report a problem.
 
 **On the evidence behind the claims above.** This has run on a thirteen-node
 containerlab fabric, on one vendor, with a small number of blind fault-injection
-trials whose cases were designed by someone who knows the ladder. Current
-limitations and evidence are tracked in [docs/build/FINDINGS.md](docs/build/FINDINGS.md)
-and [docs/build/SOTA-IMPLEMENTATION-REVIEW-CHECKLIST.md](docs/build/SOTA-IMPLEMENTATION-REVIEW-CHECKLIST.md).
-Nothing here has run in production.
+trials whose cases were designed by someone who knows the ladder. Nothing here
+has run in production.

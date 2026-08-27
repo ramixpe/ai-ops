@@ -1,4 +1,5 @@
 .venv/
+node_modules/
 __pycache__/
 *.pyc
 .env
@@ -27,12 +28,23 @@ images/
 evidence/
 *.egg-info/
 /build/
+/dist/
 .DS_Store
+Thumbs.db
 .pytest_cache/
+.hypothesis/
 .ruff_cache/
 .mypy_cache/
 .coverage
 htmlcov/
+coverage.xml
+*.db
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
+*.sqlite-wal
+*.sqlite-shm
 
 # docs/diagrams/facts.py's speedup cache for the expensive measurements (a
 # full pytest run, a real `investigate --from-fixtures` invocation) -- a
@@ -44,6 +56,11 @@ docs/diagrams/.facts_cache.json
 
 # Agent worktrees and session scratch (never committed)
 .claude/
+.cursor/
+.copilot/
+.aider*
+.vscode/
+.idea/
 
 # Flight-recorder tickets (B-446). A ticket is a RUN ARTEFACT, like the evidence
 # store and unlike evidence-archive/: it records one interaction that already
@@ -69,3 +86,10 @@ session_memory/
 # Legacy B-707 lifecycle state from before its default moved to the user state
 # directory. Existing local files must remain untracked.
 event-notifications.json
+event-notifications.json.lock
+
+# Local operator policy may contain deployment-specific identities.
+telegram-operators.test.yaml
+
+# Generated campaign runs; immutable evidence belongs in evidence-archive/.
+scripts/overnight_out/
