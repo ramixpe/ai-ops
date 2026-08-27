@@ -50,6 +50,17 @@ def test_campaign_phase_queues_durable_card_only_when_notification_is_enabled(mo
     assert queued[0].destination == "telegram:123"
     assert store.get("campaign:campaign-a:round:1") is not None
 
+
+def test_campaign_phase_refuses_mutating_its_target_identity(monkeypatch, tmp_path):
+    store = EventStore(tmp_path / "events.sqlite3")
+    monkeypatch.setenv("NETTOOLS_EVENT_NOTIFY", "0")
+    first = CampaignPhaseEvent("campaign-a", 1, 24, "started", "PE2", "edge", "interface_shutdown", "pending")
+    changed_target = CampaignPhaseEvent("campaign-a", 1, 24, "armed", "PE3", "edge", "interface_shutdown", "pending")
+
+    queue_campaign_phase(store, first)
+    with pytest.raises(Exception, match="cannot move"):
+        queue_campaign_phase(store, changed_target)
+
     recovered = CampaignPhaseEvent(
         "campaign-a", 1, 24, "recovered", "PE2", "edge",
         "interface_shutdown", "verified",

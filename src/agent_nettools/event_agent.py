@@ -795,7 +795,7 @@ def run_event(
                 elapsed_s=now_fn() - start,
             )
 
-    age_refusal = _event_age_refusal(decision)
+    age_refusal = None if active_lease is not None else _event_age_refusal(decision)
     if age_refusal is not None:
         return EventRun(
             ran=False, reason=age_refusal, mode="plan", decision=decision.as_dict(),

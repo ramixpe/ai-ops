@@ -4,6 +4,7 @@ import os
 import sqlite3
 import stat
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -58,6 +59,20 @@ def test_strict_duplicate_refuses_reused_identity_with_changed_content(tmp_path)
         )
 
 
+def test_syslog_identity_allows_only_received_timestamp_to_change(tmp_path):
+    store = _store(tmp_path)
+    original = {"schema_version": 2, "source_kind": "syslog", "received_at": "2026-08-27T00:00:00+00:00", "mnemonic": "BGP"}
+    later = {**original, "received_at": "2026-08-27T00:01:00+00:00"}
+    store.create_or_get(event_id="event-1", device="PE2", payload=original)
+
+    record, created = store.create_or_get(event_id="event-1", device="PE2", payload=later)
+
+    assert created is False
+    assert record.payload == original
+    with pytest.raises(EventStoreError, match="identity differs"):
+        store.create_or_get(event_id="event-1", device="PE2", payload={**later, "mnemonic": "ISIS"})
+
+
 def test_store_refuses_an_unknown_future_schema_version(tmp_path):
     path = tmp_path / "state" / "events.sqlite3"
     EventStore(path)
@@ -68,7 +83,7 @@ def test_store_refuses_an_unknown_future_schema_version(tmp_path):
         EventStore(path)
 
 
-def test_populated_v1_store_upgrades_to_v5_without_losing_event_state(tmp_path):
+def test_populated_v1_store_upgrades_to_v7_without_losing_event_state(tmp_path):
     path = tmp_path / "state" / "events.sqlite3"
     path.parent.mkdir()
     with sqlite3.connect(path) as connection:
@@ -98,9 +113,43 @@ def test_populated_v1_store_upgrades_to_v5_without_losing_event_state(tmp_path):
         version = connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
         columns = {row[1] for row in connection.execute("PRAGMA table_info(events)")}
         tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-    assert version == 5
+    assert version == 7
     assert {"retry_at", "lease_epoch"} <= columns
     assert {"incidents", "narrowing_shadow_records", "procedure_approvals", "procedure_simulations"} <= tables
+
+
+def test_compaction_report_is_read_only_and_reports_database_bytes(tmp_path):
+    store = _store(tmp_path)
+    now = datetime(2026, 8, 27, tzinfo=timezone.utc)
+    store.create_or_get(event_id="event-1", device="PE2", payload={})
+    store.transition("event-1", "admitted", now=now - timedelta(days=8))
+    store.transition("event-1", "running", now=now - timedelta(days=8))
+    store.transition("event-1", "completed", now=now - timedelta(days=8))
+
+    report = store.compaction_report(now=now)
+
+    assert report["database_bytes"] > 0
+    assert report["completed_event_candidates"] == 1
+    assert store.get("event-1") is not None
+
+
+def test_compaction_backs_up_and_deletes_only_unreferenced_aged_records(tmp_path):
+    store = _store(tmp_path)
+    now = datetime(2026, 8, 27, tzinfo=timezone.utc)
+    store.create_or_get(event_id="old", device="PE2", payload={})
+    store.transition("old", "admitted", now=now - timedelta(days=8))
+    store.transition("old", "running", now=now - timedelta(days=8))
+    store.transition("old", "completed", now=now - timedelta(days=8))
+    store.create_or_get(event_id="retained", device="PE2", payload={})
+    store.transition("retained", "admitted", now=now - timedelta(days=8))
+    store.enqueue_notification(event_id="retained", destination="telegram:1", kind="card:x", payload={})
+
+    result = store.compact(now=now)
+
+    assert result["events_deleted"] == 1
+    assert store.get("old") is None
+    assert store.get("retained") is not None
+    assert Path(result["backup_path"]).is_file()
 
 
 def test_state_machine_records_a_ticket_bound_terminal_transition(tmp_path):
@@ -113,6 +162,45 @@ def test_state_machine_records_a_ticket_bound_terminal_transition(tmp_path):
 
     assert completed.state == "completed"
     assert completed.ticket_id == "000001"
+
+
+def test_lease_renewal_requires_the_current_owner_epoch_and_live_lease(tmp_path):
+    store = _store(tmp_path)
+    started = datetime(2026, 8, 27, tzinfo=timezone.utc)
+    store.create_or_get(event_id="event-1", device="PE2", payload={})
+    store.transition("event-1", "admitted", now=started)
+    leased = store.acquire_lease("event-1", owner="worker-a", lease_seconds=10, now=started)
+
+    renewed = store.renew_lease(
+        "event-1", owner="worker-a", lease_epoch=leased.lease_epoch, lease_seconds=30,
+        now=started + timedelta(seconds=5),
+    )
+
+    assert renewed.lease_epoch == leased.lease_epoch
+    assert renewed.lease_expires_at is not None
+    with pytest.raises(EventLeaseError, match="requires lease owner"):
+        store.renew_lease(
+            "event-1", owner="worker-b", lease_epoch=leased.lease_epoch, lease_seconds=30,
+            now=started + timedelta(seconds=5),
+        )
+    with pytest.raises(EventLeaseError, match="expired"):
+        store.renew_lease(
+            "event-1", owner="worker-a", lease_epoch=leased.lease_epoch, lease_seconds=30,
+            now=started + timedelta(seconds=36),
+        )
+
+
+def test_notification_finish_refuses_a_stale_same_owner_epoch(tmp_path):
+    store = _store(tmp_path)
+    now = datetime(2026, 8, 27, tzinfo=timezone.utc)
+    store.create_or_get(event_id="event-1", device="PE2", payload={})
+    item, _ = store.enqueue_notification(event_id="event-1", destination="telegram:1", kind="card:test", payload={})
+    first = store.claim_notification(item.outbox_id, owner="worker", lease_seconds=1, now=now)
+    second = store.claim_notification(item.outbox_id, owner="worker", lease_seconds=10, now=now + timedelta(seconds=2))
+
+    with pytest.raises(EventLeaseError, match="epoch"):
+        store.finish_notification(item.outbox_id, sent=True, owner="worker", lease_epoch=first.lease_epoch, now=now + timedelta(seconds=2))
+    assert store.finish_notification(item.outbox_id, sent=True, owner="worker", lease_epoch=second.lease_epoch, now=now + timedelta(seconds=2)).state == "sent"
 
 
 def test_incident_store_joins_exact_active_identity_and_allows_resolved_recurrence(tmp_path):
@@ -321,6 +409,7 @@ def test_notification_outbox_is_idempotent_leased_and_retryable(tmp_path):
             sent=True,
             now=started,
             owner="worker-b",
+            lease_epoch=claimed.lease_epoch,
         )
     retryable = store.finish_notification(
         item.outbox_id,
@@ -328,6 +417,7 @@ def test_notification_outbox_is_idempotent_leased_and_retryable(tmp_path):
         error="provider timeout",
         now=started,
         owner="worker-a",
+        lease_epoch=claimed.lease_epoch,
     )
     assert store.eligible_notifications(now=started + timedelta(seconds=4)) == ()
     retried = store.claim_notification(
@@ -341,6 +431,7 @@ def test_notification_outbox_is_idempotent_leased_and_retryable(tmp_path):
         sent=True,
         now=started + timedelta(seconds=5),
         owner="worker-b",
+        lease_epoch=retried.lease_epoch,
     )
 
     assert created is True
@@ -362,7 +453,7 @@ def test_notification_retries_dead_letter_and_surface_in_health(tmp_path):
     )
     started = datetime(2026, 8, 24, tzinfo=timezone.utc)
 
-    store.claim_notification(item.outbox_id, owner="worker", lease_seconds=30, now=started)
+    claimed = store.claim_notification(item.outbox_id, owner="worker", lease_seconds=30, now=started)
     dead = store.finish_notification(
         item.outbox_id,
         sent=False,
@@ -370,6 +461,7 @@ def test_notification_retries_dead_letter_and_surface_in_health(tmp_path):
         max_attempts=1,
         now=started,
         owner="worker",
+        lease_epoch=claimed.lease_epoch,
     )
 
     assert dead.state == "dead_letter"

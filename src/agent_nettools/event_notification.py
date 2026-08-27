@@ -206,6 +206,12 @@ def _telegram_sender() -> notifier.TelegramNotifier | None:
     return selected if isinstance(selected, notifier.TelegramNotifier) else None
 
 
+def configured_telegram_sender() -> notifier.TelegramNotifier | None:
+    """Return the configured outbound Telegram sender for durable recovery work."""
+
+    return _telegram_sender()
+
+
 def _send(sender: notifier.TelegramNotifier, text: str, reply_to: tuple[int, ...] = ()) -> tuple[int, ...]:
     return tuple(sender.send_text(text, reply_to_message_ids=reply_to))
 

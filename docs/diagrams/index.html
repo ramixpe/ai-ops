@@ -73,7 +73,7 @@
 <body>
   <div class="frame">
     <p class="eyebrow">Diagram set · ios-xr-nettools v1.2.0 · 2026-08-27</p>
-    <h1>Thirteen views of a read-only network inspection tool</h1>
+    <h1>Sixteen views of a read-only network inspection tool</h1>
     <p class="standfirst">Hand-authored with the <code>diagram-design</code> skill, describing the system end to end as it stood on 2026-08-27 — the tool, the lab platform it runs beside, and the fabric it reads. Every figure in them was derived from the tree or measured against the running system at build time, not recalled. Updated 2026-08-27 for the durable event store, the containerized authenticated-HTTP MCP transport, and the three tickets (B-706/707/717) that closed since the last pass.</p>
 
     <div class="note">
@@ -129,6 +129,21 @@
       </a>
     </div>
 
+    <h2>Scale</h2>
+    <p>Two A3 posters, not the usual curated ~9-node diagram &mdash; every one of the 102 source modules and every one of the 30 running containers, deliberately dense. Print-sized on purpose: if this looks like a lot, that is the honest answer to whether it got over-built, not an artifact of how it&rsquo;s drawn.</p>
+    <div class="grid">
+      <a class="card" href="full-system.html">
+        <div class="card-head"><span class="dot coral"></span><h3>All 102 modules, grouped by what they actually import</h3></div>
+        <p class="type">Architecture · faithful detail · A3</p>
+        <p>24 subsystem clusters across 4 zones, connected by the 28 heaviest of 120 real cross-cluster <code>import</code> edges &mdash; counted mechanically from the source, not recalled. Every file name is printed inside its cluster.</p>
+      </a>
+      <a class="card" href="docker-fleet.html">
+        <div class="card-head"><span class="dot coral"></span><h3>Every container actually running, and what nettools actually calls</h3></div>
+        <p class="type">Deployment · faithful detail · A3</p>
+        <p>All 30 containers <code>docker ps</code> reports right now &mdash; the 14 platform services individually, not collapsed into &ldquo;+8 more services.&rdquo; Solid arrows are outbound calls this codebase's own source makes to NetBox, Loki, Prometheus, Neo4j and the device fabric; dashed arrows are real dataflow it doesn't originate.</p>
+      </a>
+    </div>
+
     <h2>Behaviour</h2>
     <p>What happens when it runs — the deterministic path a human drives, and the one nobody has to.</p>
     <div class="grid">
@@ -146,6 +161,11 @@
         <div class="card-head"><span class="dot coral"></span><h3>The model's one decision</h3></div>
         <p class="type">Swimlane</p>
         <p>Not a spectrum — a narrow slot. Everything is code except which tool to call, and for two of the four offered there is nothing left to supply. 24 adversarial runs, 0 fabricated devices.</p>
+      </a>
+      <a class="card" href="call-lifecycle.html">
+        <div class="card-head"><span class="dot coral"></span><h3>The full lifecycle of one investigation, every real payload included</h3></div>
+        <p class="type">Sequence · exhaustive · vertical scroll</p>
+        <p>Sixteen stages of one real, already-happened run — the actual syslog line, the actual system prompt, a real fabrication attempt and its real refusal, the actual device output, and a Telegram card rendered by actually calling the renderer. New.</p>
       </a>
     </div>
 

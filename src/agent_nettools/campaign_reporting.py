@@ -67,14 +67,28 @@ def render_campaign_phase(event: CampaignPhaseEvent) -> TelegramRender:
 def queue_campaign_phase(store: EventStore, event: CampaignPhaseEvent) -> tuple[OutboxRecord, ...]:
     """Queue configured Telegram cards; notification availability is non-authoritative."""
 
-    if not event_notification.notifications_enabled():
-        return ()
     event_id = event.event_id or f"campaign:{event.campaign_id}:round:{event.round_ordinal}"
     store.create_or_update(
         event_id=event_id,
         device=event.target,
-        payload={"kind": "campaign_phase", "campaign_id": event.campaign_id, "phase": event.phase},
+        payload={
+            "kind": "campaign_phase",
+            "campaign_id": event.campaign_id,
+            "round_ordinal": event.round_ordinal,
+            "round_total": event.round_total,
+            "target": event.target,
+            "role": event.role,
+            "fault_id": event.fault_id,
+            "phase": event.phase,
+            "outcome": event.outcome,
+            "rollback_deadline": event.rollback_deadline,
+            "ticket_id": event.ticket_id,
+            "incident_id": event.incident_id,
+            "event_id": event.event_id,
+        },
     )
+    if not event_notification.notifications_enabled():
+        return ()
     render = render_campaign_phase(event)
     queued = tuple(
         record

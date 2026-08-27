@@ -63,6 +63,35 @@ services:
       - platform-services
       - legacy-platform-services
 
+  event-recovery:
+    image: ${NETTOOLS_MCP_IMAGE:-ios-xr-nettools-mcp:http-dev}
+    entrypoint: ["python", "/app/scripts/event_recovery_worker.py"]
+    restart: unless-stopped
+    depends_on:
+      mcp-state-init:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+      - path: .env.mcp-http
+        required: false
+    environment:
+      NETTOOLS_SSH_KNOWN_HOSTS: /var/lib/nettools/known_hosts
+      NETTOOLS_ADMISSION_DIR: /var/lib/nettools/admission
+      NETTOOLS_EVIDENCE_DIR: /var/lib/nettools/evidence
+      NETTOOLS_INCIDENT_DIR: /var/lib/nettools/incidents
+      NETTOOLS_SESSION_MEMORY_DIR: /var/lib/nettools/session-memory
+      NETTOOLS_TICKET_DIR: /var/lib/nettools/tickets
+      NETTOOLS_EVENT_DB_PATH: /var/lib/nettools/state/events.sqlite3
+      NETTOOLS_EVENT_NOTIFICATION_STATE_FILE: /var/lib/nettools/state/event-notifications.json
+      NETTOOLS_RECOVERY_SWEEP_SECONDS: "15"
+      NETTOOLS_RECOVERY_LEASE_SECONDS: "180"
+    volumes:
+      - mcp-state:/var/lib/nettools
+    networks:
+      - router-management
+      - platform-services
+      - legacy-platform-services
+
 volumes:
   mcp-state:
     name: ios-xr-nettools-mcp-state

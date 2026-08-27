@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ios-xr-nettools -- Full system map</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f5f5f5;
+      --color-ink:     #2d3142;
+      --color-muted:   #4f5d75;
+      --color-accent:  #eb6c36;
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      padding: 3rem 2rem;
+    }
+    .frame { max-width: 1584px; margin: 0 auto; }
+    .eyebrow {
+      font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500;
+      letter-spacing: 0.18em; text-transform: uppercase;
+      color: var(--color-muted); margin-bottom: 0.5rem;
+    }
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400; letter-spacing: -0.02em; line-height: 1.15;
+      color: var(--color-ink); margin-bottom: 0.5rem;
+    }
+    .standfirst {
+      font-size: 0.9rem; color: var(--color-muted);
+      max-width: 90ch; margin-bottom: 1.5rem; line-height: 1.5;
+    }
+    svg { width: 100%; min-width: 1200px; display: block; }
+    .print-note {
+      font-family: var(--font-mono); font-size: 0.72rem; color: var(--color-muted);
+      background: #ffffff; border: 1px solid rgba(45,49,66,0.12); border-radius: 6px;
+      padding: 0.6rem 0.9rem; margin-bottom: 1.25rem; display: inline-block;
+    }
+    .colophon {
+      margin-top: 2rem; padding-top: 1rem; border-top: 1px solid rgba(45,49,66,0.10);
+      font-family: var(--font-mono); font-size: 0.7rem; color: var(--color-muted);
+    }
+    a { color: var(--color-accent); }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">ios-xr-nettools &middot; full system map</p>
+    <h1>All 102 modules, grouped by what they actually import</h1>
+    <p class="standfirst">Sized for A3 landscape (297&times;420mm). Every one of the 24 clusters below is real: a group of 1&ndash;8 modules from the current tree, with the modules named inside the box. Every arrow is a real <code>import</code> statement counted mechanically from the source, not recalled &mdash; 120 real cross-cluster import edges exist between these 24 clusters; the 28 heaviest are drawn (at least one kept per cluster so nothing floats disconnected), and the rest are summarized rather than hidden. Two single-purpose internal helpers (<code>_env.py</code>, <code>_persist.py</code>) are omitted as too small to be their own piece. If this reads as dense, that is the honest answer to "did I over-engineer this" &mdash; four zones, but the middle two (the diagnosis core and the live event pipeline) carry most of the real coupling.</p>
+    <p class="print-note">Print: A3 landscape, borderless, ~100% scale (viewBox already matches A3 at 96dpi with margin allowance).</p>
+
+    <svg viewBox="0 0 1584 1120" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="full-system-title full-system-desc">
+      <title id="full-system-title">ios-xr-nettools full system map: 102 modules in 24 clusters across 4 zones</title>
+      <desc id="full-system-desc">Faithful-detail zoned architecture diagram of the entire ios-xr-nettools source tree: 102 Python modules grouped into 24 subsystem clusters across four zones -- the live event pipeline, interfaces and model boundary, diagnosis and records, and device and safety -- connected by 28 of the 120 real cross-cluster import relationships measured directly from the source, weighted by how many individual files participate in each relationship.</desc>
+
+      <defs>
+        <marker id="arr-muted" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+        <marker id="arr-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+      </defs>
+
+      <rect width="1584" height="1120" fill="#f5f5f5"/>
+            <rect x="40" y="48" width="1504" height="268" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.14)" stroke-width="0.8"/>
+            <rect x="56" y="52" width="148" height="14" rx="2" fill="#f5f5f5"/>
+            <text x="128" y="62" fill="rgba(45,49,66,0.55)" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.14em">LIVE EVENT PIPELINE</text>
+            <rect x="40" y="332" width="1504" height="232" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.14)" stroke-width="0.8"/>
+            <rect x="56" y="336" width="204" height="14" rx="2" fill="#f5f5f5"/>
+            <text x="160" y="346" fill="rgba(45,49,66,0.55)" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.14em">INTERFACES &amp; MODEL BOUNDARY</text>
+            <rect x="40" y="580" width="1504" height="232" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.14)" stroke-width="0.8"/>
+            <rect x="56" y="584" width="148" height="14" rx="2" fill="#f5f5f5"/>
+            <text x="128" y="594" fill="rgba(45,49,66,0.55)" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.14em">DIAGNOSIS &amp; RECORDS</text>
+            <rect x="40" y="828" width="1504" height="160" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.14)" stroke-width="0.8"/>
+            <rect x="56" y="832" width="124" height="14" rx="2" fill="#f5f5f5"/>
+            <text x="120" y="842" fill="rgba(45,49,66,0.55)" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.14em">DEVICE &amp; SAFETY</text>
+            <path d="M 1124,176 V 298 Q 1124,306 1116,306 H 636 Q 628,306 628,314 V 364" fill="none" stroke="#eb6c36" stroke-width="1.3" marker-end="url(#arr-accent)"/>
+            <path d="M 1292,708 V 794 Q 1292,802 1284,802 H 964 Q 956,802 956,810 V 860" fill="none" stroke="#eb6c36" stroke-width="1.3" marker-end="url(#arr-accent)"/>
+            <path d="M 628,460 V 546 Q 628,554 636,554 H 1116 Q 1124,554 1124,562 V 612" fill="none" stroke="#eb6c36" stroke-width="1.3" marker-end="url(#arr-accent)"/>
+            <path d="M 956,460 V 534 Q 956,542 948,542 H 468 Q 460,542 460,550 V 612" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arr-muted)"/>
+            <path d="M 628,460 V 522 Q 628,530 620,530 H 300 Q 292,530 292,538 V 612" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arr-muted)"/>
+            <path d="M 628,364 V 302 Q 628,294 620,294 H 136 Q 128,294 128,286 V 176" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arr-muted)"/>
+            <path d="M 628,364 V 290 Q 628,282 636,282 H 784 Q 792,282 792,274 V 176" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arr-muted)"/>
+            <path d="M 628,460 V 510 Q 628,518 620,518 H 552 Q 544,518 544,526 V 782 Q 544,790 552,790 H 948 Q 956,790 956,798 V 860" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arr-muted)"/>
+            <path d="M 628,460 V 498 Q 628,506 620,506 H 468 Q 460,506 460,514 V 612" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arr-muted)"/>
+            <path d="M 956,460 V 486 Q 956,494 964,494 H 1284 Q 1292,494 1292,502 V 612" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arr-muted)"/>
+            <path d="M 128,176 V 262 Q 128,270 136,270 H 368 Q 376,270 376,278 V 770 Q 376,778 384,778 H 784 Q 792,778 792,786 V 860" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arr-muted)"/>
+            <path d="M 1124,460 V 474 Q 1124,482 1116,482 H 1048 Q 1040,482 1040,490 V 758 Q 1040,766 1032,766 H 800 Q 792,766 792,774 V 860" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arr-muted)"/>
+            <line x1="368" y1="660" x2="384" y2="660" stroke="#4f5d75" stroke-width="1" marker-end="url(#arr-muted)"/>
+            <path d="M 628,176 V 250 Q 628,258 620,258 H 136 Q 128,258 128,250 V 176" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arr-muted)"/>
+            <line x1="880" y1="908" x2="868" y2="908" stroke="#4f5d75" stroke-width="1" marker-end="url(#arr-muted)"/>
+            <path d="M 1124,176 V 238 Q 1124,246 1116,246 H 468 Q 460,246 460,238 V 176" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arr-muted)"/>
+            <path d="M 792,460 V 462 Q 792,470 784,470 H 468 Q 460,470 460,462 V 460" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arr-muted)"/>
+            <path d="M 1292,708 V 746 Q 1292,754 1284,754 H 468 Q 460,754 460,746 V 708" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arr-muted)"/>
+            <path d="M 956,708 V 734 Q 956,742 948,742 H 468 Q 460,742 460,734 V 708" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arr-muted)"/>
+            <path d="M 956,956 V 970 Q 956,978 948,978 H 636 Q 628,978 628,970 V 956" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arr-muted)"/>
+            <line x1="552" y1="128" x2="536" y2="128" stroke="#4f5d75" stroke-width="1" marker-end="url(#arr-muted)"/>
+            <path d="M 792,708 V 722 Q 792,730 784,730 H 468 Q 460,730 460,722 V 708" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arr-muted)"/>
+            <path d="M 628,176 V 226 Q 628,234 636,234 H 948 Q 956,234 956,226 V 176" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arr-muted)"/>
+            <path d="M 628,176 V 214 Q 628,222 636,222 H 1116 Q 1124,222 1124,214 V 176" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arr-muted)"/>
+            <path d="M 1456,176 V 202 Q 1456,210 1448,210 H 1132 Q 1124,210 1124,202 V 176" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arr-muted)"/>
+            <path d="M 628,708 V 710 Q 628,718 620,718 H 300 Q 292,718 292,710 V 708" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arr-muted)"/>
+            <path d="M 628,176 V 190 Q 628,198 620,198 H 300 Q 292,198 292,190 V 176" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arr-muted)"/>
+            <path d="M 1292,176 V 178 Q 1292,186 1284,186 H 468 Q 460,186 460,178 V 176" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arr-muted)"/>
+            <rect x="52" y="80" width="152" height="96" rx="6" fill="#f5f5f5"/>
+            <rect x="52" y="80" width="152" height="96" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+            <rect x="58" y="86" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.55)" stroke-width="0.8"/>
+            <text x="72" y="95" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">C16</text>
+            <text x="128" y="108" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Event Ingest &amp;</text>
+            <text x="128" y="120" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Routing</text>
+            <text x="128" y="136" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">event_routing</text>
+            <text x="128" y="148" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">event_watch</text>
+            <text x="128" y="160" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" font-style="italic">+3 more</text>
+            <rect x="216" y="80" width="152" height="96" rx="6" fill="#f5f5f5"/>
+            <rect x="216" y="80" width="152" height="96" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+            <rect x="222" y="86" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.55)" stroke-width="0.8"/>
+            <text x="236" y="95" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">C17</text>
+            <text x="292" y="108" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Admission &amp;</text>
+            <text x="292" y="120" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Pacing</text>
+            <text x="292" y="136" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">admission</text>
+            <rect x="384" y="80" width="152" height="96" rx="6" fill="#f5f5f5"/>
+            <rect x="384" y="80" width="152" height="96" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1.2"/>
+            <rect x="390" y="86" width="28" height="12" rx="2" fill="transparent" stroke="#eb6c36" stroke-width="0.8"/>
+            <text x="404" y="95" fill="#eb6c36" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">C18</text>
+            <text x="460" y="108" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Durable Event</text>
+            <text x="460" y="120" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Store</text>
+            <text x="460" y="136" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">event_store</text>
+            <rect x="552" y="80" width="152" height="96" rx="6" fill="#f5f5f5"/>
+            <rect x="552" y="80" width="152" height="96" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+            <rect x="558" y="86" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.55)" stroke-width="0.8"/>
+            <text x="572" y="95" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">C19</text>
+            <text x="628" y="108" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Event Agent &amp;</text>
+            <text x="628" y="120" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Recovery</text>
+            <text x="628" y="136" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">event_agent</text>
+            <text x="628" y="148" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">event_caller</text>
+            <text x="628" y="160" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" font-style="italic">+2 more</text>
+            <rect x="716" y="80" width="152" height="96" rx="6" fill="#f5f5f5"/>
+            <rect x="716" y="80" width="152" height="96" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+            <rect x="722" y="86" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.55)" stroke-width="0.8"/>
+            <text x="736" y="95" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">C20</text>
+            <text x="792" y="108" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Reporting &amp;</text>
+            <text x="792" y="120" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Query</text>
+            <text x="792" y="136" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">event_query</text>
+            <text x="792" y="148" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">event_reporting</text>
+            <text x="792" y="160" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" font-style="italic">+1 more</text>
+            <rect x="880" y="80" width="152" height="96" rx="6" fill="#f5f5f5"/>
+            <rect x="880" y="80" width="152" height="96" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+            <rect x="886" y="86" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.55)" stroke-width="0.8"/>
+            <text x="900" y="95" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">C21</text>
+            <text x="956" y="108" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Notification</text>
+            <text x="956" y="120" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Core</text>
+            <text x="956" y="136" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">event_notification</text>
+            <text x="956" y="148" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">notifier</text>
+            <rect x="1048" y="80" width="152" height="96" rx="6" fill="#f5f5f5"/>
+            <rect x="1048" y="80" width="152" height="96" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+            <rect x="1054" y="86" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.55)" stroke-width="0.8"/>
+            <text x="1068" y="95" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">C22</text>
+            <text x="1124" y="108" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Telegram</text>
+            <text x="1124" y="120" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Delivery</text>
+            <text x="1124" y="136" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">telegram_card_coordinator</text>
+            <text x="1124" y="148" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">telegram_chat_renderer</text>
+            <text x="1124" y="160" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" font-style="italic">+4 more</text>
+            <rect x="1216" y="80" width="152" height="96" rx="6" fill="#f5f5f5"/>
+            <rect x="1216" y="80" width="152" height="96" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+            <rect x="1222" y="86" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.55)" stroke-width="0.8"/>
+            <text x="1236" y="95" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">C23</text>
+            <text x="1292" y="108" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Procedure</text>
+            <text x="1292" y="120" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Workflow</text>
+            <text x="1292" y="136" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">procedure_workflow</text>
+            <text x="1292" y="148" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">procedure_registry</text>
+            <rect x="1380" y="80" width="152" height="96" rx="6" fill="#f5f5f5"/>
+            <rect x="1380" y="80" width="152" height="96" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+            <rect x="1386" y="86" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.55)" stroke-width="0.8"/>
+            <text x="1400" y="95" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">C24</text>
+            <text x="1456" y="108" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Campaign</text>
+            <text x="1456" y="120" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Integration</text>
+            <text x="1456" y="136" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">campaign_reporting</text>
+            <rect x="384" y="364" width="152" height="96" rx="6" fill="#f5f5f5"/>
+            <rect x="384" y="364" width="152" height="96" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+            <rect x="390" y="370" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.55)" stroke-width="0.8"/>
+            <text x="404" y="379" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">C11</text>
+            <text x="460" y="396" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Model Boundary</text>
+            <text x="460" y="412" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">model_ingress</text>
+            <text x="460" y="424" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">model_egress</text>
+            <text x="460" y="432" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" font-style="italic">+2 more</text>
+            <rect x="552" y="364" width="152" height="96" rx="6" fill="#f5f5f5"/>
+            <rect x="552" y="364" width="152" height="96" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+            <rect x="558" y="370" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.55)" stroke-width="0.8"/>
+            <text x="572" y="379" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">C12</text>
+            <text x="628" y="392" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">CLI &amp;</text>
+            <text x="628" y="408" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Investigation</text>
+            <text x="628" y="420" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">cli</text>
+            <text x="628" y="432" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">investigation</text>
+            <text x="628" y="440" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" font-style="italic">+4 more</text>
+            <rect x="716" y="364" width="152" height="96" rx="6" fill="#f5f5f5"/>
+            <rect x="716" y="364" width="152" height="96" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+            <rect x="722" y="370" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.55)" stroke-width="0.8"/>
+            <text x="736" y="379" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">C13</text>
+            <text x="792" y="392" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Agent Loop &amp;</text>
+            <text x="792" y="408" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Eval</text>
+            <text x="792" y="420" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">agent_loop</text>
+            <text x="792" y="432" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">llm_analysis</text>
+            <text x="792" y="440" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" font-style="italic">+1 more</text>
+            <rect x="880" y="364" width="152" height="96" rx="6" fill="#f5f5f5"/>
+            <rect x="880" y="364" width="152" height="96" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+            <rect x="886" y="370" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.55)" stroke-width="0.8"/>
+            <text x="900" y="379" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">C14</text>
+            <text x="956" y="392" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">MCP Server &amp;</text>
+            <text x="956" y="408" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Client</text>
+            <text x="956" y="420" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">server</text>
+            <text x="956" y="432" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">boundary</text>
+            <text x="956" y="440" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" font-style="italic">+5 more</text>
+            <rect x="1048" y="364" width="152" height="96" rx="6" fill="#f5f5f5"/>
+            <rect x="1048" y="364" width="152" height="96" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+            <rect x="1054" y="370" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.55)" stroke-width="0.8"/>
+            <text x="1068" y="379" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">C15</text>
+            <text x="1124" y="392" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Settings &amp;</text>
+            <text x="1124" y="408" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Config Surface</text>
+            <text x="1124" y="420" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">settings</text>
+            <rect x="216" y="612" width="152" height="96" rx="6" fill="#f5f5f5"/>
+            <rect x="216" y="612" width="152" height="96" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1.2"/>
+            <rect x="222" y="618" width="24" height="12" rx="2" fill="transparent" stroke="#eb6c36" stroke-width="0.8"/>
+            <text x="232" y="627" fill="#eb6c36" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">C4</text>
+            <text x="292" y="640" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Deterministic</text>
+            <text x="292" y="656" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Descent</text>
+            <text x="292" y="668" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">descent</text>
+            <text x="292" y="680" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">flows</text>
+            <text x="292" y="688" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" font-style="italic">+3 more</text>
+            <rect x="384" y="612" width="152" height="96" rx="6" fill="#f5f5f5"/>
+            <rect x="384" y="612" width="152" height="96" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+            <rect x="390" y="618" width="24" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.55)" stroke-width="0.8"/>
+            <text x="400" y="627" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">C5</text>
+            <text x="460" y="644" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Health &amp; Checks</text>
+            <text x="460" y="660" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">checks</text>
+            <text x="460" y="672" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">health</text>
+            <text x="460" y="680" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" font-style="italic">+4 more</text>
+            <rect x="552" y="612" width="152" height="96" rx="6" fill="#f5f5f5"/>
+            <rect x="552" y="612" width="152" height="96" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+            <rect x="558" y="618" width="24" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.55)" stroke-width="0.8"/>
+            <text x="568" y="627" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">C6</text>
+            <text x="628" y="640" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Evidence &amp;</text>
+            <text x="628" y="656" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Session</text>
+            <text x="628" y="668" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">evidence_store</text>
+            <text x="628" y="680" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">evidence_budget</text>
+            <text x="628" y="688" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" font-style="italic">+4 more</text>
+            <rect x="716" y="612" width="152" height="96" rx="6" fill="#f5f5f5"/>
+            <rect x="716" y="612" width="152" height="96" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+            <rect x="722" y="618" width="24" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.55)" stroke-width="0.8"/>
+            <text x="736" y="627" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">C7</text>
+            <text x="792" y="640" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Logs &amp;</text>
+            <text x="792" y="656" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Correlation</text>
+            <text x="792" y="668" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">logs_loki</text>
+            <text x="792" y="680" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">log_window</text>
+            <text x="792" y="688" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" font-style="italic">+6 more</text>
+            <rect x="880" y="612" width="152" height="96" rx="6" fill="#f5f5f5"/>
+            <rect x="880" y="612" width="152" height="96" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+            <rect x="886" y="618" width="24" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.55)" stroke-width="0.8"/>
+            <text x="896" y="627" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">C8</text>
+            <text x="956" y="644" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Config Analysis</text>
+            <text x="956" y="660" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">config_diff</text>
+            <text x="956" y="672" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">config_section</text>
+            <text x="956" y="680" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" font-style="italic">+1 more</text>
+            <rect x="1048" y="612" width="152" height="96" rx="6" fill="#f5f5f5"/>
+            <rect x="1048" y="612" width="152" height="96" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+            <rect x="1054" y="618" width="24" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.55)" stroke-width="0.8"/>
+            <text x="1064" y="627" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">C9</text>
+            <text x="1124" y="644" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Ledger &amp; Ticket</text>
+            <text x="1124" y="660" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">ledger</text>
+            <text x="1124" y="672" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">ticket</text>
+            <text x="1124" y="680" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" font-style="italic">+5 more</text>
+            <rect x="1216" y="612" width="152" height="96" rx="6" fill="#f5f5f5"/>
+            <rect x="1216" y="612" width="152" height="96" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+            <rect x="1222" y="618" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.55)" stroke-width="0.8"/>
+            <text x="1236" y="627" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">C10</text>
+            <text x="1292" y="640" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">External Data</text>
+            <text x="1292" y="656" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Sources</text>
+            <text x="1292" y="668" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">netbox</text>
+            <text x="1292" y="680" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">topology</text>
+            <text x="1292" y="688" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" font-style="italic">+4 more</text>
+            <rect x="552" y="860" width="152" height="96" rx="6" fill="#f5f5f5"/>
+            <rect x="552" y="860" width="152" height="96" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+            <rect x="558" y="866" width="24" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.55)" stroke-width="0.8"/>
+            <text x="568" y="875" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">C1</text>
+            <text x="628" y="888" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Safety &amp;</text>
+            <text x="628" y="904" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Templates</text>
+            <text x="628" y="916" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">platforms</text>
+            <text x="628" y="928" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">templates</text>
+            <text x="628" y="936" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" font-style="italic">+1 more</text>
+            <rect x="716" y="860" width="152" height="96" rx="6" fill="#f5f5f5"/>
+            <rect x="716" y="860" width="152" height="96" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+            <rect x="722" y="866" width="24" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.55)" stroke-width="0.8"/>
+            <text x="736" y="875" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">C2</text>
+            <text x="792" y="888" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Inventory &amp;</text>
+            <text x="792" y="904" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Credentials</text>
+            <text x="792" y="916" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">lab</text>
+            <text x="792" y="928" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">inventory</text>
+            <text x="792" y="936" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" font-style="italic">+3 more</text>
+            <rect x="880" y="860" width="152" height="96" rx="6" fill="#f5f5f5"/>
+            <rect x="880" y="860" width="152" height="96" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+            <rect x="886" y="866" width="24" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.55)" stroke-width="0.8"/>
+            <text x="896" y="875" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">C3</text>
+            <text x="956" y="888" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Collection &amp;</text>
+            <text x="956" y="904" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Parsing</text>
+            <text x="956" y="916" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">network_tools</text>
+            <text x="956" y="928" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">status</text>
+            <text x="956" y="936" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" font-style="italic">+3 more</text>
+            <line x1="40" y1="1004" x2="1544" y2="1004" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+            <text x="40" y="1022" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" letter-spacing="0.16em">LEGEND</text>
+            <rect x="40" y="1034" width="16" height="12" rx="2" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1.2"/>
+            <text x="64" y="1043" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Focal cluster (heaviest real fan-in)</text>
+            <rect x="340" y="1034" width="16" height="12" rx="2" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+            <text x="364" y="1043" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Cluster of 1-8 modules (files named inside)</text>
+            <rect x="700" y="1026" width="90" height="20" rx="4" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.14)" stroke-width="0.8"/>
+            <text x="745" y="1040" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif" text-anchor="middle">Zone</text>
+            <line x1="840" y1="1039" x2="872" y2="1039" stroke="#eb6c36" stroke-width="1.3" marker-end="url(#arr-accent)"/>
+            <text x="880" y="1043" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">&#8805;5 real imports between clusters</text>
+            <line x1="1160" y1="1039" x2="1192" y2="1039" stroke="#4f5d75" stroke-width="1" marker-end="url(#arr-muted)"/>
+            <text x="1200" y="1043" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">1-4 real imports</text>
+            <text x="40" y="1062" fill="#7a8399" font-size="9" font-family="'Geist', sans-serif" font-style="italic">102 modules -&gt; 24 clusters -&gt; 4 zones. 28 of 120 real cross-cluster import edges shown (&#8805;1 kept per cluster so nothing floats disconnected). 2 leaf helpers (_env.py, _persist.py) omitted -- see fidelity note.</text>
+
+    </svg>
+
+    <p class="colophon">Hand-authored with the diagram-design skill (faithful detail, zoned, A3 landscape) &middot; derived mechanically from the current source tree, 2026-08-27 &middot; <a href="index.html">back to the diagram index</a></p>
+  </div>
+</body>
+</html>

@@ -68,7 +68,7 @@ def deliver_card(
         return store.finish_notification(
             outbox_id,
             sent=False,
-            error="invalid Telegram card payload",
+            error="invalid Telegram card payload", lease_epoch=claimed.lease_epoch,
             now=now,
             owner=owner,
         )
@@ -85,7 +85,7 @@ def deliver_card(
             message_id=message_id,
             render_hash=render_hash,
         )
-        return store.finish_notification(outbox_id, sent=True, now=now, owner=owner)
+        return store.finish_notification(outbox_id, sent=True, now=now, owner=owner, lease_epoch=claimed.lease_epoch)
     except NotifierError as exc:
         return store.finish_notification(
             outbox_id,
@@ -94,6 +94,7 @@ def deliver_card(
             now=now,
             retry_after_seconds=exc.retry_after_seconds,
             owner=owner,
+            lease_epoch=claimed.lease_epoch,
         )
 
 
@@ -135,7 +136,7 @@ def deliver_activity(
         return store.finish_notification(
             outbox_id,
             sent=False,
-            error="invalid Telegram activity payload",
+            error="invalid Telegram activity payload", lease_epoch=claimed.lease_epoch,
             now=now,
             owner=owner,
         )
@@ -144,13 +145,13 @@ def deliver_activity(
         return store.finish_notification(
             outbox_id,
             sent=False,
-            error="card root receipt is unavailable",
+            error="card root receipt is unavailable", lease_epoch=claimed.lease_epoch,
             now=now,
             owner=owner,
         )
     try:
         notifier.send_reply_text(chat_id=chat_id, reply_to_message_id=receipt.message_id, text=text)
-        return store.finish_notification(outbox_id, sent=True, now=now, owner=owner)
+        return store.finish_notification(outbox_id, sent=True, now=now, owner=owner, lease_epoch=claimed.lease_epoch)
     except NotifierError as exc:
         return store.finish_notification(
             outbox_id,
@@ -159,6 +160,7 @@ def deliver_activity(
             now=now,
             retry_after_seconds=exc.retry_after_seconds,
             owner=owner,
+            lease_epoch=claimed.lease_epoch,
         )
 
 
@@ -192,7 +194,7 @@ def drain_notifications(
                     now=now,
                 )
             else:
-                store.claim_notification(
+                claimed = store.claim_notification(
                     record.outbox_id,
                     owner=owner,
                     lease_seconds=30,
@@ -204,6 +206,7 @@ def drain_notifications(
                     error=f"unsupported notification kind {record.kind!r}",
                     now=now,
                     owner=owner,
+                    lease_epoch=claimed.lease_epoch,
                 )
             outcomes.append(outcome)
             if outcome.state != "sent":

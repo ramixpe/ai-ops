@@ -6,7 +6,12 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from agent_nettools.event_receiver import EventReceiverError, EventWorker, receive_syslog
+from agent_nettools.event_receiver import (
+    EventReceiverError,
+    EventWorker,
+    LeaseHeartbeat,
+    receive_syslog,
+)
 from agent_nettools.event_store import EventStore
 
 
@@ -107,3 +112,22 @@ def test_worker_reconstructs_a_schema_validated_routing_decision(tmp_path):
 
     assert len(decisions) == 1
     assert decisions[0].event_id == received.envelope.event_id
+
+
+def test_lease_heartbeat_renews_the_exact_fenced_lease(monkeypatch, tmp_path):
+    store = EventStore(tmp_path / "events.sqlite3")
+    now = datetime(2026, 8, 27, tzinfo=timezone.utc)
+    store.create_or_get(event_id="event-1", device="PE2", payload={})
+    store.transition("event-1", "admitted", now=now)
+    lease = store.acquire_lease("event-1", owner="worker", lease_seconds=180, now=now)
+    calls = []
+    monkeypatch.setattr(store, "renew_lease", lambda *args, **kwargs: calls.append((args, kwargs)) or lease)
+    heartbeat = LeaseHeartbeat(store, lease, lease_seconds=180, interval_seconds=0.01)
+
+    heartbeat.start()
+    heartbeat._stop.wait(0.03)
+    heartbeat.stop()
+
+    assert calls
+    assert calls[0][1]["lease_epoch"] == lease.lease_epoch
+    assert heartbeat.failed is False

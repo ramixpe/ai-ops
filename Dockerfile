@@ -29,7 +29,8 @@ COPY pyproject.toml README.md constraints.txt ./
 COPY src/ ./src/
 COPY mcp_server/ ./mcp_server/
 COPY scripts/campaign_phase_bridge.py ./scripts/campaign_phase_bridge.py
-RUN pip install --no-cache-dir -c constraints.txt ".[graph]"
+COPY scripts/event_recovery_worker.py ./scripts/event_recovery_worker.py
+RUN pip install --no-cache-dir -c constraints.txt ".[graph,llm]"
 
 # Run as a non-root user.
 RUN useradd --create-home --uid 10001 appuser

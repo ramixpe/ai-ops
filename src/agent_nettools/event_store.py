@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ from pathlib import Path
 from typing import Any, Iterator, Literal
 
 from ._persist import _SECURE_FILE_MODE, _secure_mkdir
+from .event_identity import EventIdentityError, validate_payload_update
 from .incident_case import IncidentIdentity, IncidentState
 
 __all__ = [
@@ -44,7 +46,7 @@ __all__ = [
 
 NETTOOLS_EVENT_DB_PATH_ENV = "NETTOOLS_EVENT_DB_PATH"
 DEFAULT_EVENT_DB_PATH = "~/.local/state/agent-nettools/events.sqlite3"
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 7
 
 EventState = Literal[
     "received",
@@ -163,6 +165,15 @@ class EventAttempt:
 
 
 @dataclass(frozen=True)
+class RecoverySweepRecord:
+    worker_id: str
+    started_at: str
+    completed_at: str
+    events_claimed: int
+    notifications_attempted: int
+
+
+@dataclass(frozen=True)
 class OutboxRecord:
     """One idempotent destination-scoped notification delivery intent."""
 
@@ -175,6 +186,7 @@ class OutboxRecord:
     attempts: int
     lease_owner: str | None
     lease_expires_at: str | None
+    lease_epoch: int
     retry_at: str | None
     created_at: str
     updated_at: str
@@ -502,6 +514,31 @@ class EventStore:
                 connection.execute(
                     "CREATE INDEX IF NOT EXISTS idx_outbox_delivery "
                     "ON notification_outbox(state, retry_at, lease_expires_at, outbox_id)"
+                )
+            if newest_version is None or newest_version < 6:
+                outbox_columns = {
+                    row["name"] for row in connection.execute("PRAGMA table_info(notification_outbox)")
+                }
+                if "lease_epoch" not in outbox_columns:
+                    connection.execute(
+                        "ALTER TABLE notification_outbox ADD COLUMN lease_epoch INTEGER NOT NULL DEFAULT 0"
+                    )
+            if newest_version is None or newest_version < 7:
+                connection.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS recovery_sweeps (
+                        sweep_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        worker_id TEXT NOT NULL,
+                        started_at TEXT NOT NULL,
+                        completed_at TEXT NOT NULL,
+                        events_claimed INTEGER NOT NULL,
+                        notifications_attempted INTEGER NOT NULL
+                    )
+                    """
+                )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_recovery_sweeps_completed "
+                    "ON recovery_sweeps(completed_at DESC)"
                 )
             connection.execute(
                 "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
@@ -997,6 +1034,9 @@ class EventStore:
                 "WHERE state = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?",
                 (current.isoformat(),),
             ).fetchone()["lease_expires_at"]
+            latest_sweep = connection.execute(
+                "SELECT * FROM recovery_sweeps ORDER BY sweep_id DESC LIMIT 1"
+            ).fetchone()
         event_counts = {row["state"]: row["count"] for row in event_rows}
         outbox_counts = {row["state"]: row["count"] for row in outbox_rows}
         shadows = {"legacy_admitted": 0, "legacy_refused": 0}
@@ -1022,6 +1062,132 @@ class EventStore:
             "oldest_expired_lease_age_seconds": expired_lease_age_seconds,
             "dead_letter_count": event_counts.get("dead_letter", 0),
             "outbox_dead_letter_count": outbox_counts.get("dead_letter", 0),
+            "recovery_sweep": (
+                {
+                    "worker_id": latest_sweep["worker_id"],
+                    "completed_at": latest_sweep["completed_at"],
+                    "age_seconds": max(0.0, (current - _parse_time(latest_sweep["completed_at"])).total_seconds()),
+                    "events_claimed": latest_sweep["events_claimed"],
+                    "notifications_attempted": latest_sweep["notifications_attempted"],
+                }
+                if latest_sweep is not None else None
+            ),
+        }
+
+    def record_recovery_sweep(
+        self,
+        *,
+        worker_id: str,
+        started_at: datetime,
+        completed_at: datetime,
+        events_claimed: int,
+        notifications_attempted: int,
+    ) -> RecoverySweepRecord:
+        """Append one bounded sweep outcome for recovery-service liveness."""
+
+        if not worker_id.strip() or events_claimed < 0 or notifications_attempted < 0:
+            raise EventStoreError("recovery sweep fields are invalid")
+        started = _require_aware(started_at, label="recovery sweep start timestamp")
+        completed = _require_aware(completed_at, label="recovery sweep completion timestamp")
+        if completed < started:
+            raise EventStoreError("recovery sweep completion precedes start")
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO recovery_sweeps(worker_id, started_at, completed_at, events_claimed, notifications_attempted)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (worker_id, started.isoformat(), completed.isoformat(), events_claimed, notifications_attempted),
+            )
+        return RecoverySweepRecord(worker_id, started.isoformat(), completed.isoformat(), events_claimed, notifications_attempted)
+
+    def compaction_report(self, *, now: datetime | None = None, completed_days: int = 7, audit_days: int = 30) -> dict[str, int]:
+        """Report retention candidates and SQLite bytes without deleting any record."""
+
+        current = _require_aware(now, label="compaction report timestamp")
+        if completed_days < 1 or audit_days < completed_days:
+            raise EventStoreError("retention days are invalid")
+        completed_before = (current - timedelta(days=completed_days)).isoformat()
+        audit_before = (current - timedelta(days=audit_days)).isoformat()
+        with self._connect() as connection:
+            completed = connection.execute(
+                "SELECT COUNT(*) FROM events WHERE state IN ('completed', 'terminal_failed') AND updated_at < ?",
+                (completed_before,),
+            ).fetchone()[0]
+            sent_outbox = connection.execute(
+                "SELECT COUNT(*) FROM notification_outbox WHERE state = 'sent' AND updated_at < ?",
+                (completed_before,),
+            ).fetchone()[0]
+            audit = connection.execute(
+                "SELECT COUNT(*) FROM recovery_sweeps WHERE completed_at < ?", (audit_before,)
+            ).fetchone()[0]
+        files = (self.path, Path(f"{self.path}-wal"), Path(f"{self.path}-shm"))
+        return {
+            "database_bytes": sum(path.stat().st_size for path in files if path.exists()),
+            "completed_event_candidates": completed,
+            "sent_outbox_candidates": sent_outbox,
+            "recovery_sweep_audit_candidates": audit,
+        }
+
+    def compact(
+        self,
+        *,
+        now: datetime | None = None,
+        completed_days: int = 7,
+        audit_days: int = 30,
+    ) -> dict[str, int | str]:
+        """Back up then conservatively delete only unreferenced aged lifecycle rows."""
+
+        current = _require_aware(now, label="compaction timestamp")
+        report = self.compaction_report(now=current, completed_days=completed_days, audit_days=audit_days)
+        backup = self.path.with_name(f"{self.path.name}.backup-{int(time.time())}")
+        with sqlite3.connect(self.path) as source, sqlite3.connect(backup) as destination:
+            source.backup(destination)
+        os.chmod(backup, _SECURE_FILE_MODE)
+        completed_before = (current - timedelta(days=completed_days)).isoformat()
+        audit_before = (current - timedelta(days=audit_days)).isoformat()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            outbox_deleted = connection.execute(
+                "DELETE FROM notification_outbox WHERE state = 'sent' AND updated_at < ?", (completed_before,)
+            ).rowcount
+            sweeps_deleted = connection.execute(
+                "DELETE FROM recovery_sweeps WHERE completed_at < ?", (audit_before,)
+            ).rowcount
+            event_ids = [
+                row["event_id"]
+                for row in connection.execute(
+                    """
+                    SELECT event_id FROM events
+                    WHERE state IN ('completed', 'terminal_failed') AND updated_at < ?
+                      AND NOT EXISTS (SELECT 1 FROM notification_outbox WHERE notification_outbox.event_id = events.event_id)
+                      AND NOT EXISTS (SELECT 1 FROM incident_events WHERE incident_events.event_id = events.event_id)
+                      AND NOT EXISTS (SELECT 1 FROM telegram_card_receipts WHERE telegram_card_receipts.event_id = events.event_id)
+                      AND NOT EXISTS (SELECT 1 FROM telegram_card_states WHERE telegram_card_states.event_id = events.event_id)
+                      AND NOT EXISTS (SELECT 1 FROM operator_callbacks WHERE operator_callbacks.event_id = events.event_id)
+                    """,
+                    (completed_before,),
+                ).fetchall()
+            ]
+            for event_id in event_ids:
+                connection.execute("DELETE FROM event_attempts WHERE event_id = ?", (event_id,))
+                connection.execute("DELETE FROM admission_shadow WHERE event_id = ?", (event_id,))
+                connection.execute("DELETE FROM narrowing_shadow_records WHERE event_id = ?", (event_id,))
+                connection.execute("DELETE FROM events WHERE event_id = ?", (event_id,))
+            violations = connection.execute("PRAGMA foreign_key_check").fetchall()
+            if violations:
+                connection.execute("ROLLBACK")
+                backup.unlink(missing_ok=True)
+                raise EventStoreError("compaction foreign key check failed")
+            connection.execute("COMMIT")
+            connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        self._secure_sqlite_files()
+        return {
+            **report,
+            "backup_path": str(backup),
+            "sent_outbox_deleted": outbox_deleted,
+            "recovery_sweeps_deleted": sweeps_deleted,
+            "events_deleted": len(event_ids),
         }
 
     def create_or_get(
@@ -1047,11 +1213,22 @@ class EventStore:
             row = connection.execute("SELECT * FROM events WHERE event_id = ?", (event_id,)).fetchone()
             if row is not None:
                 existing = self._record(row)
-                if strict and (existing.device != device or existing.payload != payload):
+                if existing.device != device:
                     connection.execute("ROLLBACK")
                     raise EventStoreError(
                         f"event {event_id!r} was reused with different content"
                     )
+                known_kind = (
+                    (existing.payload.get("schema_version") == 2 and isinstance(existing.payload.get("source_kind"), str))
+                    or existing.payload.get("kind") == "campaign_phase"
+                )
+                if strict or known_kind:
+                    try:
+                        validate_payload_update(existing.payload, payload)
+                    except EventIdentityError as exc:
+                        connection.execute("ROLLBACK")
+                        message = "was reused with different content" if strict else f"identity differs: {exc}"
+                        raise EventStoreError(f"event {event_id!r} {message}") from exc
                 connection.execute("COMMIT")
                 return existing, False
             connection.execute(
@@ -1104,6 +1281,11 @@ class EventStore:
                     raise EventStoreError(
                         f"event {event_id!r} cannot move from device {row['device']!r} to {device!r}"
                     )
+                try:
+                    validate_payload_update(self._record(row).payload, payload)
+                except EventIdentityError as exc:
+                    connection.execute("ROLLBACK")
+                    raise EventStoreError(f"event {event_id!r} identity differs: {exc}") from exc
                 if row["state"] != "received":
                     connection.execute("ROLLBACK")
                     raise EventStoreError(
@@ -1342,6 +1524,39 @@ class EventStore:
             connection.execute("COMMIT")
         return self._record(_require_row(updated, context=f"event lease {event_id!r}"))
 
+    def renew_lease(
+        self,
+        event_id: str,
+        *,
+        owner: str,
+        lease_epoch: int,
+        lease_seconds: float,
+        now: datetime | None = None,
+    ) -> EventRecord:
+        """Extend one live fenced lease without changing its epoch."""
+
+        if not owner.strip() or lease_seconds <= 0:
+            raise EventLeaseError("lease owner and duration must be positive")
+        current = _require_aware(now, label="event lease renewal timestamp")
+        expiry = (current + timedelta(seconds=lease_seconds)).isoformat()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT * FROM events WHERE event_id = ?", (event_id,)).fetchone()
+            if row is None:
+                connection.execute("ROLLBACK")
+                raise EventLeaseError(f"event {event_id!r} does not exist")
+            if row["state"] != "running":
+                connection.execute("ROLLBACK")
+                raise EventLeaseError(f"event {event_id} is not running")
+            self._validate_lease_fence(row, owner=owner, lease_epoch=lease_epoch, now=current)
+            connection.execute(
+                "UPDATE events SET lease_expires_at = ?, updated_at = ? WHERE event_id = ?",
+                (expiry, current.isoformat(), event_id),
+            )
+            updated = connection.execute("SELECT * FROM events WHERE event_id = ?", (event_id,)).fetchone()
+            connection.execute("COMMIT")
+        return self._record(_require_row(updated, context=f"renewed event lease {event_id!r}"))
+
     @staticmethod
     def _outbox_record(row: sqlite3.Row) -> OutboxRecord:
         payload = json.loads(row["payload_json"])
@@ -1357,6 +1572,7 @@ class EventStore:
             attempts=row["attempts"],
             lease_owner=row["lease_owner"],
             lease_expires_at=row["lease_expires_at"],
+            lease_epoch=row["lease_epoch"],
             retry_at=row["retry_at"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
@@ -1468,7 +1684,7 @@ class EventStore:
                 """
                 UPDATE notification_outbox
                 SET state = 'sending', attempts = attempts + 1, lease_owner = ?,
-                    lease_expires_at = ?, retry_at = NULL, updated_at = ?
+                    lease_expires_at = ?, lease_epoch = lease_epoch + 1, retry_at = NULL, updated_at = ?
                 WHERE outbox_id = ?
                 """,
                 (owner, expiry_text, now_text, outbox_id),
@@ -1490,6 +1706,7 @@ class EventStore:
         base_seconds: float = 5.0,
         max_attempts: int = 5,
         owner: str | None = None,
+        lease_epoch: int | None = None,
     ) -> OutboxRecord:
         """Record provider outcome with bounded backoff and dead-lettering."""
 
@@ -1508,10 +1725,10 @@ class EventStore:
             if row["state"] != "sending":
                 connection.execute("ROLLBACK")
                 raise EventTransitionError(f"outbox {outbox_id} is not sending")
-            if owner != row["lease_owner"]:
+            if owner != row["lease_owner"] or lease_epoch != row["lease_epoch"]:
                 connection.execute("ROLLBACK")
                 raise EventLeaseError(
-                    f"outbox {outbox_id} requires lease owner {row['lease_owner']!r}"
+                    f"outbox {outbox_id} requires lease owner {row['lease_owner']!r} at epoch {row['lease_epoch']}"
                 )
             if sent:
                 state, retry_at = "sent", None

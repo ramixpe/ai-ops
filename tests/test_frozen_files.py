@@ -103,7 +103,7 @@ _REPINNED: dict[str, tuple[str, str, Signoff]] = {
         "sayable next time.",
     ),
     "src/agent_nettools/templates.py": (
-        "09b1b799472e57973b30afecd82a1f9fa45f797b",
+        "beb95c9b76cfa1f9b57bc34b5bc802ebf0d6ab9d",
         "B-104 (prior repin, operator-approved -- see that signoff string, "
         "preserved below): added `config_isis`/`config_interface`. "
         "B-515 (this repin, same additive discipline): added ONE more "

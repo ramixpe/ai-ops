@@ -744,9 +744,20 @@ SETTINGS: tuple[Setting, ...] = (
     ),
     Setting(
         "NETTOOLS_EVENT_DB_PATH", "path", "~/.local/state/agent-nettools/events.sqlite3",
-        "Version 2 event transaction database. It is not wired into the live "
-        "event path until repository parity is accepted.",
+        "Version 2 event transaction database shared by the event worker and recovery sidecar.",
         "event_store",
+    ),
+    Setting(
+        "NETTOOLS_RECOVERY_SWEEP_SECONDS", "float", 15.0,
+        "Cadence for the persistent durable event and Telegram outbox recovery sweep.",
+        "recovery_service",
+        minimum=1,
+    ),
+    Setting(
+        "NETTOOLS_RECOVERY_LEASE_SECONDS", "float", 180.0,
+        "Recovery worker lease duration; must retain a margin beyond the event-agent budget.",
+        "recovery_service",
+        minimum=150,
     ),
     Setting(
         "TELEGRAM_BOT_TOKEN", "secret", None,
