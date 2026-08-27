@@ -212,7 +212,7 @@ def test_pe1_findings_are_one_line_down_subinterface_one_sr_policy_and_info(monk
     assert {f["subject"] for f in by_rule["sr_policy_down"]} == {"20:10.255.0.13"}
     assert by_rule["bgp_no_prefixes"][0]["severity"] == "info"
     assert verdict["severity"] == "warning"
-    assert verdict["counts"] == {"critical": 0, "warning": 2, "info": 1}
+    assert verdict["counts"] == {"critical": 0, "unreachable": 0, "warning": 2, "info": 1}
 
 
 def test_pe3_shows_the_confirmed_b496_fault_as_drift_not_a_baked_in_baseline(monkeypatch):
@@ -675,8 +675,8 @@ def test_every_intent_failing_collection_is_device_unreachable_critical():
 
     verdict = evaluate_device(evidence, device)
 
-    assert verdict["severity"] == "critical"
-    assert verdict["severity"] != "ok"
+    assert verdict["severity"] == "unreachable"
+    assert verdict["severity"] not in {"ok", "critical"}
     assert "device_unreachable" in {f["rule"] for f in verdict["findings"]}
 
 
@@ -732,16 +732,15 @@ def test_parse_failed_with_output_present_is_intent_unparsed_warning():
     assert verdict["severity"] == "warning"
 
 
-def test_exit_code_fails_the_gate_when_every_intent_failed_collection():
-    """The whole point of the fix: a cron/CI gate must fail (nonzero exit)
-    when a device is unreachable, not pass with exit code 0."""
+def test_exit_code_reports_unreachable_as_actionable_but_not_critical():
+    """B-715: a cron/CI gate must fail without calling unreachability a fault."""
 
     device = _device("PE9")
     evidence = {"platform": "cisco_xr"}
 
     verdict = evaluate_device(evidence, device)
 
-    assert exit_code_for_severity(verdict["severity"]) == 2
+    assert exit_code_for_severity(verdict["severity"]) == 1
 
 
 # --------------------------------------------------------------------------- #
@@ -749,10 +748,9 @@ def test_exit_code_fails_the_gate_when_every_intent_failed_collection():
 # --------------------------------------------------------------------------- #
 
 
-def test_severity_rank_orders_ok_below_info_below_warning_below_critical():
-    assert severity_rank("ok") < severity_rank("info") < severity_rank("warning") < severity_rank(
-        "critical"
-    )
+def test_severity_rank_keeps_unreachable_distinct_from_confirmed_critical():
+    assert severity_rank("ok") < severity_rank("info") < severity_rank("warning")
+    assert severity_rank("warning") < severity_rank("unreachable") < severity_rank("critical")
 
 
 def test_device_severity_is_the_max_of_its_findings():
@@ -773,7 +771,7 @@ def test_device_severity_is_the_max_of_its_findings():
     verdict = evaluate_device(evidence, device)
 
     assert verdict["severity"] == "critical"
-    assert verdict["counts"] == {"critical": 1, "warning": 1, "info": 1}
+    assert verdict["counts"] == {"critical": 1, "unreachable": 0, "warning": 1, "info": 1}
 
 
 def test_evaluate_fabric_rolls_up_to_the_worst_device_severity():
@@ -804,4 +802,5 @@ def test_exit_code_for_severity_maps_to_ci_gate_levels():
     assert exit_code_for_severity("ok") == 0
     assert exit_code_for_severity("info") == 0
     assert exit_code_for_severity("warning") == 1
+    assert exit_code_for_severity("unreachable") == 1
     assert exit_code_for_severity("critical") == 2

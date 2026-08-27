@@ -29,6 +29,9 @@ dependencies = [
     # major version rather than exclude it, since the shim already covers
     # both sides of the rename.
     "mcp>=1.9.0,<3.0",
+    # Direct dependencies for the authenticated native MCP HTTP transports.
+    "starlette>=1.6.0,<2.0",
+    "uvicorn>=0.52.0,<1.0",
     "python-dotenv>=1.0.1,<2.0",
     "pydantic>=2.7,<3.0",
     "pyyaml>=6.0,<7.0",
@@ -140,12 +143,6 @@ select = ["E", "F", "I", "B"]
 ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
-# The diagram generators under docs/diagrams are single-purpose scripts that
-# emit the SVGs sitting beside them. They import a local layout helper with a
-# star import on purpose -- `svgkit` is a drawing vocabulary rather than an
-# API, and spelling out forty names at the top of six scripts would make the
-# layout harder to read, not safer. The one-line "draw, then advance the
-# cursor" idiom is the same argument. Everything else ruff checks still
-# applies here: an undefined name or an unused import in a generator is still
-# a real defect, and this list is deliberately narrow so those stay visible.
-"docs/diagrams/*.py" = ["F403", "F405", "E701", "E702", "E741", "B007"]
+# (The docs/diagrams generator scripts this section once carved an exception
+# for were retired 2026-08-23: the diagram set is now a single hand-authored
+# HTML layer, not generated, so there is no generator code left to ignore.)

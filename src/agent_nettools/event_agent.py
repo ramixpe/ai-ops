@@ -39,26 +39,13 @@ mechanism is proven by what it does with a table that CAN say `fires: true`
 (a synthetic table, in the positive-control test), never by what it does
 with the one table that currently says no to everything.
 
-Where the trigger table comes from (and why `event_watch.py` is not imported)
--------------------------------------------------------------------------------
-`event_watch.build_trigger_index`/`validate_trigger_table` already do
-exactly this lookup and this check. This module does not import them:
-`event_watch.py` opens with ``from . import event_routing, logs_loki`` at
-module level, and `logs_loki.py` is a real, separate dependency chain
-(`log_window`, `coverage`, `inventory_model`, `parsers`, `urllib`) that this
-module -- a bounded model-calling loop, not a Loki reader -- has no reason
-to pull in just to read a YAML table. So `build_trigger_index`/
-`validate_trigger_table`/`TriggerTableInconsistency` below are a **second,
-deliberately duplicated copy**, reading `knowledge.load_mnemonic_table`
-directly (which imports only `yaml` and `inventory_model` -- no
-`logs_loki`). The logic is byte-for-byte the same check, and that duplication
-is a real cost: if this project ever needs a third caller of the trigger
-table, the right fix is to extract `build_trigger_index`/
-`validate_trigger_table`/`TriggerTableInconsistency` out of `event_watch.py`
-into a small leaf module (say, `trigger_table.py`, importing only
-`knowledge.py`) that BOTH `event_watch.py` and this module import instead --
-recorded here as the proposal rather than done in this change, because
-`event_watch.py` is not this task's file to restructure.
+Where the trigger table comes from
+-----------------------------------
+`trigger_table.py` owns the reviewed table lookup, validation, and exception
+type. It depends only on `knowledge.py`; neither this bounded model loop nor
+the Loki watcher import the other to apply trigger policy. The small local
+wrappers retain their prior public seams for callers/tests while delegating
+all policy decisions to that leaf module.
 
 Two measured facts this loop's dispatch must honour (today's lanes)
 ------------------------------------------------------------------------
@@ -116,7 +103,22 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from . import admission, event_notification
+from . import trigger_table as _trigger_table
+from ._env import _float_env
+from .event_envelope import EventEnvelopeV2
+from .event_reporting import InvestigationReceipt, ReceiptValidationError
 from .event_routing import MNEMONIC_FLOW_TABLE, RoutingDecision
+from .event_store import EventRecord, EventStore, EventStoreError, EventTransitionError
+from .incident_case import IncidentIdentity
+from .investigation_activity_adapters import (
+    activities_for_receipt,
+    command_preview_activity,
+    started_activity,
+    tool_result_activity,
+    tool_selected_activity,
+    visible_reasoning_tail_activity,
+)
 from .knowledge import load_mnemonic_table
 from .mcp_client import McpToolset, ToolCallResult, child_server_env
 from .model_ingress import (
@@ -127,7 +129,11 @@ from .model_ingress import (
     resolve_arguments,
 )
 from .prompt_library import load_prompt
+from .telegram_card_coordinator import TelegramCardCoordinator
 from .ticket import open_ticket
+
+NETTOOLS_MAX_EVENT_AGE_SECONDS_ENV = "NETTOOLS_MAX_EVENT_AGE_SECONDS"
+DEFAULT_MAX_EVENT_AGE_SECONDS = 300.0
 
 __all__ = [
     "AgentBounds",
@@ -278,24 +284,11 @@ class ModelCaller(Protocol):
 
 
 # --------------------------------------------------------------------------- #
-# The trigger table -- a deliberate second copy of event_watch's own logic.
-# See the module docstring's "Where the trigger table comes from" section.
+# The trigger table -- public compatibility wrappers over the shared policy.
 # --------------------------------------------------------------------------- #
 
 
-class TriggerTableInconsistency(RuntimeError):
-    """``mnemonics.yaml`` declares ``trigger.fires: true`` for a mnemonic
-    this module cannot actually route.
-
-    A separate class from `event_watch.TriggerTableInconsistency` -- not an
-    alias, not a subclass sharing a base neither module currently imports --
-    for the same reason `build_trigger_index`/`validate_trigger_table` below
-    are a second copy rather than an import (see the module docstring).
-    Raised, never swallowed: a reviewed data table's own internal
-    inconsistency is a defect this project owns and reviews like code, the
-    same argument `event_watch.TriggerTableInconsistency`'s own docstring
-    makes, restated at this call site.
-    """
+TriggerTableInconsistency = _trigger_table.TriggerTableInconsistency
 
 
 def build_trigger_index(
@@ -303,52 +296,28 @@ def build_trigger_index(
 ) -> dict[str, dict[str, Any]]:
     """``mnemonic -> its trigger block``, from ``mnemonics.yaml`` by default.
 
-    Byte-for-byte the same lookup as `event_watch.build_trigger_index`.
-    ``table=`` is the same injection seam that function documents: a test
+    ``table=`` is the same injection seam the watcher exposes: a test
     supplies a synthetic table so a positive control can prove this
     mechanism fires on a table that CAN say yes, without needing the live,
     reviewed table to have any `fires: true` entries today (it does not).
     """
 
     entries = table if table is not None else load_mnemonic_table()
-    return {
-        entry["mnemonic"]: entry["trigger"]
-        for entry in entries
-        if isinstance(entry, Mapping) and "trigger" in entry
-    }
+    return _trigger_table.build_trigger_index(entries)
 
 
 def validate_trigger_table(table: Iterable[Mapping[str, Any]] | None = None) -> None:
     """Every ``fires: true`` entry must have a working route, or raise.
 
-    Byte-for-byte the same check as `event_watch.validate_trigger_table` --
-    see that function's docstring for the full reasoning, and this module's
-    own docstring for why this is a deliberate duplication rather than an
-    import.
+    The policy lives in `trigger_table.validate_trigger_table`; this wrapper
+    supplies the event route table while preserving the caller-facing API.
     """
 
     entries = table if table is not None else load_mnemonic_table()
-    routable_mnemonics = {m for m, _flow, _extract in MNEMONIC_FLOW_TABLE}
-
-    for entry in entries:
-        if not isinstance(entry, Mapping):
-            continue
-        trigger = entry.get("trigger")
-        if not isinstance(trigger, Mapping) or not trigger.get("fires"):
-            continue
-        mnemonic = entry.get("mnemonic")
-        if not entry.get("investigate_with"):
-            raise TriggerTableInconsistency(
-                f"{mnemonic!r}: trigger.fires is true but investigate_with is "
-                "null -- there is no flow to route to"
-            )
-        if mnemonic not in routable_mnemonics:
-            raise TriggerTableInconsistency(
-                f"{mnemonic!r}: trigger.fires is true but it has no "
-                "event_routing.MNEMONIC_FLOW_TABLE entry -- there is no "
-                "subject extractor, so this mnemonic cannot actually be "
-                "routed no matter how many times it is observed"
-            )
+    _trigger_table.validate_trigger_table(
+        entries,
+        routable_mnemonics=(mnemonic for mnemonic, _flow, _extract in MNEMONIC_FLOW_TABLE),
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -397,7 +366,7 @@ _PLANNING_TOOL_SCHEMAS: tuple[dict[str, Any], ...] = (
                     "enum": ["facts", "interfaces", "bgp", "lldp", "isis", "sr"],
                 },
             },
-            "required": [],
+            "required": ["scope"],
         },
     },
     {
@@ -408,7 +377,10 @@ _PLANNING_TOOL_SCHEMAS: tuple[dict[str, Any], ...] = (
             "properties": {
                 "device_name": {"type": "string"},
                 "subject": {"type": "string"},
-                "flow": {"type": "string", "enum": ["bgp_session", "interface"]},
+                "flow": {
+                    "type": "string",
+                    "enum": ["bgp_session", "interface", "isis_adjacency", "ldp_session"],
+                },
             },
             "required": ["device_name", "subject"],
         },
@@ -646,6 +618,32 @@ def _classify_call_result(result: ToolCallResult) -> tuple[bool, str | None]:
 # --------------------------------------------------------------------------- #
 
 
+def _event_age_refusal(decision: RoutingDecision) -> str | None:
+    """Refuse stale Loki replays before any MCP/model activity.
+
+    IOS-XR device timestamps omit the year and cannot establish age safely.
+    Only Loki decisions carry an epoch ingest timestamp. Direct receiver
+    decisions are immediate and therefore have no replay-age comparison.
+    """
+
+    if decision.ingest_timestamp_ns is None:
+        return None
+    try:
+        ingest_seconds = int(decision.ingest_timestamp_ns) / 1_000_000_000
+    except (TypeError, ValueError):
+        return "Loki event ingest timestamp is unusable; refusing before model activity"
+    max_age = _float_env(NETTOOLS_MAX_EVENT_AGE_SECONDS_ENV, DEFAULT_MAX_EVENT_AGE_SECONDS)
+    if max_age < 0:
+        max_age = DEFAULT_MAX_EVENT_AGE_SECONDS
+    age = time.time() - ingest_seconds
+    if age > max_age:
+        return (
+            f"Loki event is stale ({age:.1f}s old; maximum {max_age:g}s); "
+            "refusing before model activity"
+        )
+    return None
+
+
 def run_event(
     decision: RoutingDecision,
     *,
@@ -653,6 +651,9 @@ def run_event(
     toolset: McpToolset | None = None,
     caller: ModelCaller | None = None,
     now: Any = None,
+    admit: bool = True,
+    event_store: EventStore | None = None,
+    event_lease: EventRecord | None = None,
 ) -> EventRun:
     """Run the bounded, event-woken tool-calling loop for one routing
     decision.
@@ -693,6 +694,116 @@ def run_event(
     bounds = bounds or AgentBounds()
     now_fn = now or time.monotonic
     start = now_fn()
+    active_lease = event_lease
+
+    def lease_arguments() -> dict[str, Any]:
+        if active_lease is None:
+            return {}
+        return {
+            "lease_owner": active_lease.lease_owner,
+            "lease_epoch": active_lease.lease_epoch,
+        }
+
+    def store_terminal(run: EventRun) -> EventRun:
+        if event_store is None:
+            return run
+        try:
+            current = event_store.get(decision.event_id)
+            if current is None:
+                return run
+            if run.complete:
+                event_store.transition(
+                    decision.event_id,
+                    "completed",
+                    ticket_id=run.ticket_run_id,
+                    **lease_arguments(),
+                )
+            elif current.state in {"admitted", "running"}:
+                event_store.schedule_retry(
+                    decision.event_id,
+                    reason=run.stopped_because,
+                    ticket_id=run.ticket_run_id,
+                    **lease_arguments(),
+                )
+        except (EventStoreError, EventTransitionError):
+            # The existing filesystem admission remains authoritative during
+            # this migration slice; storage mirroring must not consume a run.
+            pass
+        return run
+
+    if event_store is not None:
+        envelope = EventEnvelopeV2.from_routing_decision(decision)
+        try:
+            record, created = event_store.create_or_get(
+                event_id=envelope.event_id,
+                device=envelope.device or "unknown",
+                payload=envelope.payload(),
+            )
+            if active_lease is not None:
+                current = event_store.get(decision.event_id)
+                if (
+                    active_lease.event_id != decision.event_id
+                    or current is None
+                    or current.state != "running"
+                    or current.lease_owner != active_lease.lease_owner
+                    or current.lease_epoch != active_lease.lease_epoch
+                ):
+                    raise EventStoreError("event lease does not match current durable work")
+                record = current
+            elif record.state == "running" and record.lease_owner is not None:
+                raise EventStoreError("active event lease context is required")
+            if not created and record.state == "completed":
+                return EventRun(
+                    ran=False,
+                    reason="event already completed in durable store",
+                    mode="plan",
+                    decision=decision.as_dict(),
+                    bounds=bounds.as_dict(),
+                    tools_offered=(),
+                    tool_calls=(),
+                    exchanges=(),
+                    stopped_because="event_store_completed_duplicate",
+                    complete=True,
+                    limits_hit=(),
+                    fabrication_attempts=(),
+                    ticket_run_id=record.ticket_id,
+                    elapsed_s=now_fn() - start,
+                )
+            if active_lease is not None:
+                pass
+            elif record.state == "retryable_failed":
+                event_store.transition(decision.event_id, "admitted")
+            elif record.state == "received":
+                event_store.transition(decision.event_id, "admitted")
+            if record.state != "running":
+                event_store.transition(decision.event_id, "running")
+        except (EventStoreError, EventTransitionError) as exc:
+            return EventRun(
+                ran=False,
+                reason=f"durable event store unavailable: {exc}",
+                mode="plan",
+                decision=decision.as_dict(),
+                bounds=bounds.as_dict(),
+                tools_offered=(),
+                tool_calls=(),
+                exchanges=(),
+                stopped_because="event_store_failed",
+                complete=False,
+                limits_hit=(),
+                fabrication_attempts=(),
+                ticket_run_id=None,
+                elapsed_s=now_fn() - start,
+            )
+
+    age_refusal = _event_age_refusal(decision)
+    if age_refusal is not None:
+        return EventRun(
+            ran=False, reason=age_refusal, mode="plan", decision=decision.as_dict(),
+            bounds=bounds.as_dict(), tools_offered=(), tool_calls=(), exchanges=(),
+            stopped_because="stale_event", complete=False,
+            limits_hit=({"limit": "event_age", "reason": age_refusal},),
+            fabrication_attempts=(), ticket_run_id=None, elapsed_s=now_fn() - start,
+        )
 
     ok, reason, context = _resolve_context(decision)
     if not ok:
@@ -702,7 +813,10 @@ def run_event(
             stopped_because="not_run", complete=False, limits_hit=(),
             fabrication_attempts=(), ticket_run_id=None, elapsed_s=now_fn() - start,
         )
-    assert context is not None  # guaranteed by ok=True above
+    if context is None:
+        raise TriggerTableInconsistency(
+            "event context resolver returned success without a pinned context"
+        )
 
     if caller is None:
         return EventRun(
@@ -714,19 +828,63 @@ def run_event(
             elapsed_s=now_fn() - start,
         )
 
+    mode = "fixtures" if toolset is not None else "live"
+    if admit:
+        try:
+            admission.admit_event_run(decision.event_id, context.device)
+        except admission.AdmissionDenied as exc:
+            if event_store is not None:
+                try:
+                    event_store.record_admission_shadow(
+                        event_id=decision.event_id,
+                        legacy_admitted=False,
+                        legacy_reason=f"{exc.refusal.scope}: {exc.refusal.reason}",
+                    )
+                    event_store.schedule_retry(
+                        decision.event_id,
+                        reason=f"legacy admission refused: {exc.refusal.scope}",
+                    )
+                except (EventStoreError, EventTransitionError):
+                    pass
+            return EventRun(
+                ran=False, reason=f"event admission refused ({exc.refusal.scope}): {exc.refusal.reason}",
+                mode=mode, decision=decision.as_dict(), bounds=bounds.as_dict(), tools_offered=(),
+                tool_calls=(), exchanges=(), stopped_because="event_admission_refused", complete=False,
+                limits_hit=({"limit": exc.refusal.scope, "reason": exc.refusal.reason},),
+                fabrication_attempts=(), ticket_run_id=None, elapsed_s=now_fn() - start,
+            )
+        if event_store is not None:
+            try:
+                event_store.record_admission_shadow(
+                    event_id=decision.event_id,
+                    legacy_admitted=True,
+                    legacy_reason=None,
+                )
+            except EventStoreError:
+                pass
+
+    def finish_admission(run: EventRun) -> EventRun:
+        if admit:
+            admission.finish_event_run(decision.event_id, completed=run.complete)
+        return run
+
     if toolset is not None:
-        return _dispatch(decision, context, bounds, toolset, caller, "fixtures", now_fn, start)
+        return store_terminal(finish_admission(
+            _dispatch(decision, context, bounds, toolset, caller, "fixtures", now_fn, start, event_store)
+        ))
 
     try:
         with McpToolset(env_overrides=child_server_env()) as live_toolset:
-            return _dispatch(decision, context, bounds, live_toolset, caller, "live", now_fn, start)
+            return store_terminal(finish_admission(
+                _dispatch(decision, context, bounds, live_toolset, caller, "live", now_fn, start, event_store)
+            ))
     except Exception as exc:  # noqa: BLE001 -- starting the live MCP server must degrade, never crash an unattended event handler
-        return EventRun(
+        return store_terminal(finish_admission(EventRun(
             ran=False, reason=f"could not start the live MCP server: {exc}", mode="live",
             decision=decision.as_dict(), bounds=bounds.as_dict(), tools_offered=(),
             tool_calls=(), exchanges=(), stopped_because="mcp_start_failed", complete=False,
             limits_hit=(), fabrication_attempts=(), ticket_run_id=None, elapsed_s=now_fn() - start,
-        )
+        )))
 
 
 def _dispatch(
@@ -738,6 +896,7 @@ def _dispatch(
     mode: str,
     now_fn: Any,
     start: float,
+    event_store: EventStore | None,
 ) -> EventRun:
     """The gate has already passed and a toolset/caller are in hand. Build
     the real manifest, open the ticket, and run the bounded loop."""
@@ -790,7 +949,7 @@ def _dispatch(
     ticket.record_question(
         _question_text(decision),
         device=decision.device, subject=decision.subject, flow_hint=decision.flow,
-        extra={"decision": decision.as_dict(), "mode": mode},
+        extra={"decision": decision.as_dict(), "mode": mode, "raw_event": decision.raw_event},
     )
     ticket.record_intent(
         flow=decision.flow, resolved_subject=context.subject, resolver="event_routing",
@@ -808,6 +967,43 @@ def _dispatch(
             "tools_offered": list(tools_offered),
         },
     )
+    live_card_mode = (
+        event_store is not None
+        and event_notification.notifications_enabled()
+        and event_notification.live_card_replaces_legacy()
+    )
+    coordinators = tuple(
+        TelegramCardCoordinator(event_store, chat_id=chat_id)
+        for chat_id in event_notification.live_card_chat_ids()
+    ) if live_card_mode and event_store is not None else ()
+    if coordinators:
+        activity = started_activity(decision, incident_id=ticket.incident_id)
+        for coordinator in coordinators:
+            event_notification.deliver_live_card(event_store, coordinator.apply(activity))
+        notification = None
+    else:
+        notification = event_notification.open_notification(
+            decision.event_id,
+            ticket_id=ticket.incident_id,
+            device=context.device,
+            subject=context.subject,
+        )
+        event_notification.investigation_plan(
+            notification,
+            flow=context.flow,
+            max_iterations=bounds.max_iterations,
+            max_tool_calls=bounds.max_tool_calls,
+            time_budget_s=bounds.time_budget_s,
+        )
+
+    activity_sequence = 10
+
+    def emit_chat_activity(activity) -> None:
+        if not coordinators:
+            return
+        for coordinator in coordinators:
+            event_notification.deliver_live_card(event_store, coordinator.apply(activity))
+            event_notification.deliver_live_activity(event_store, chat_id=coordinator.chat_id, activity=activity)
 
     messages: list[dict[str, Any]] = [{"role": "user", "content": _initial_user_content(decision)}]
     exchanges: list[dict[str, Any]] = []
@@ -837,7 +1033,11 @@ def _dispatch(
     #: break again on the next provider. Completion is a fact about this loop's
     #: control flow, which this module owns, not about a string it receives.
     model_finished = False
+    tool_failure = False
     investigate_lab_recorded = False
+    final_finding: str | None = None
+    final_trustworthy: bool | None = None
+    final_receipt: InvestigationReceipt | None = None
 
     def record_limit(key: str, value: Any, observed: Any) -> None:
         # One entry per LIMIT, not per occurrence -- a limit hit five times
@@ -988,6 +1188,17 @@ def _dispatch(
                 refuse(call_id, name, args, f"{name!r} is not an offered tool for this event")
                 continue
 
+            activity_sequence += 1
+            emit_chat_activity(
+                tool_selected_activity(
+                    incident_id=ticket.incident_id,
+                    event_id=decision.event_id,
+                    sequence=activity_sequence,
+                    tool=str(name),
+                    stage=context.flow,
+                )
+            )
+
             try:
                 resolved_args = resolve_arguments(offer, args)
             except ArgumentRefusal as exc:
@@ -997,10 +1208,35 @@ def _dispatch(
                 refuse(call_id, name, args, str(exc), fabrication=True)
                 continue
 
+            activity_sequence += 1
+            emit_chat_activity(
+                command_preview_activity(
+                    incident_id=ticket.incident_id,
+                    event_id=decision.event_id,
+                    sequence=activity_sequence,
+                    tool=str(name),
+                    device=context.device,
+                    command_label=_chat_command_label(str(name), resolved_args),
+                )
+            )
+
             total_calls += 1
             calls_per_tool[name] = calls_per_tool.get(name, 0) + 1
             remaining = max(5.0, deadline - now_fn())
-            call_result: ToolCallResult = toolset.call_tool(name, resolved_args, timeout_s=remaining)
+            try:
+                call_result: ToolCallResult = toolset.call_tool(
+                    name, resolved_args, timeout_s=remaining
+                )
+            except Exception as exc:  # noqa: BLE001 -- tool failures are event data, not loop crashes
+                tool_failure = True
+                call_result = ToolCallResult(
+                    name=name,
+                    arguments=resolved_args,
+                    text=f"tool call failed: {exc}",
+                    is_error=True,
+                    elapsed_s=0.0,
+                    truncated_chars=None,
+                )
 
             is_error, detail = _classify_call_result(call_result)
             content_text = call_result.text
@@ -1025,24 +1261,81 @@ def _dispatch(
                 duration_ms=call_result.elapsed_s * 1000, detail=detail,
                 extra={"arguments": resolved_args, "truncated_chars": call_result.truncated_chars},
             )
+            activity_sequence += 1
+            emit_chat_activity(
+                tool_result_activity(
+                    incident_id=ticket.incident_id,
+                    event_id=decision.event_id,
+                    sequence=activity_sequence,
+                    tool=str(name),
+                    device=context.device,
+                    is_error=is_error,
+                    duration_ms=round(call_result.elapsed_s * 1000),
+                )
+            )
 
             if name == "investigate_lab" and not is_error and not investigate_lab_recorded:
                 payload = _safe_json(call_result.text)
-                if isinstance(payload, Mapping) and "finding" in payload and "trustworthy" in payload:
-                    report = payload.get("report")
-                    correlation = payload.get("correlation")
-                    ticket.record_answer(
-                        str(payload.get("finding")),
-                        trustworthy=bool(payload.get("trustworthy")),
-                        cause=payload.get("cause"),
-                        coherence=payload.get("coherence"),
-                        report_status=(report.get("status") if isinstance(report, Mapping) else None),
-                        correlation_status=(
-                            correlation.get("status") if isinstance(correlation, Mapping) else None
-                        ),
-                        extra={"causal_chain": payload.get("causal_chain"), "reason": payload.get("reason")},
-                    )
-                    investigate_lab_recorded = True
+                if isinstance(payload, Mapping):
+                    try:
+                        receipt = InvestigationReceipt.parse(payload)
+                    except ReceiptValidationError as exc:
+                        is_error = True
+                        tool_calls[-1]["is_error"] = True
+                        tool_calls[-1]["detail"] = f"invalid deterministic investigation receipt: {exc}"
+                        ticket.record_tool_event(
+                            name, status="error", device=decision.device,
+                            detail=tool_calls[-1]["detail"],
+                            extra={"receipt_refused": True},
+                        )
+                        results[-1]["is_error"] = True
+                        results[-1]["content"] = tool_calls[-1]["detail"]
+                    else:
+                        ticket.record_answer(
+                            receipt.finding,
+                            trustworthy=receipt.trustworthy,
+                            cause=receipt.cause,
+                            coherence=receipt.coherence,
+                            report_status=receipt.report_status,
+                            correlation_status=receipt.correlation_status,
+                            extra=receipt.ticket_extra(),
+                        )
+                        investigate_lab_recorded = True
+                        final_finding = receipt.finding
+                        final_trustworthy = receipt.trustworthy
+                        final_receipt = receipt
+                        _record_receipt_shadows(event_store, decision.event_id, receipt)
+                        if coordinators:
+                            if event_notification.reasoning_tail_enabled():
+                                coverage_complete = (
+                                    receipt.coverage.get("complete")
+                                    if receipt.coverage is not None
+                                    and isinstance(receipt.coverage.get("complete"), bool)
+                                    else None
+                                )
+                                activity_sequence += 1
+                                emit_chat_activity(
+                                    visible_reasoning_tail_activity(
+                                        incident_id=ticket.incident_id,
+                                        event_id=decision.event_id,
+                                        sequence=activity_sequence,
+                                        finding=receipt.finding,
+                                        trustworthy=receipt.trustworthy,
+                                        coverage_complete=coverage_complete,
+                                    )
+                                )
+                            receipt_activities = activities_for_receipt(
+                                receipt,
+                                incident_id=ticket.incident_id,
+                                event_id=decision.event_id,
+                                sequence_start=activity_sequence,
+                            )
+                            for activity in receipt_activities:
+                                for coordinator in coordinators:
+                                    event_notification.deliver_live_card(event_store, coordinator.apply(activity))
+                            activity_sequence = receipt_activities[-1].sequence
+                        else:
+                            event_notification.deterministic_drill(notification, receipt)
                 # A dispatched, non-error investigate_lab call whose payload
                 # does NOT carry finding/trustworthy is NOT recorded as an
                 # answer either -- absence is never zero: an unrecognisable
@@ -1052,7 +1345,39 @@ def _dispatch(
         messages.append({"role": "tool_results", "results": results})
 
     elapsed_s = now_fn() - start
-    ticket.close()
+    try:
+        ticket.close()
+    except Exception as exc:  # noqa: BLE001 -- a terminal write failure must leave the event retryable
+        stopped_because = "ticket_close_failed"
+        model_finished = False
+        if notification is not None:
+            event_notification.close(notification, outcome="needs human review")
+        return EventRun(
+            ran=True,
+            reason=f"dispatched against {mode} tools; ticket close failed: {exc}",
+            mode=mode,
+            decision=decision.as_dict(),
+            bounds=bounds.as_dict(),
+            tools_offered=tools_offered,
+            tool_calls=tuple(tool_calls),
+            exchanges=tuple(exchanges),
+            stopped_because=stopped_because,
+            complete=False,
+            limits_hit=tuple(limits_hit),
+            fabrication_attempts=tuple(fabrication_attempts),
+            ticket_run_id=ticket.run_id,
+            elapsed_s=elapsed_s,
+        )
+    if coordinators:
+        pass  # Receipt activities already emitted the terminal card state.
+    elif final_receipt is not None:
+        event_notification.final_diagnosis(notification, final_receipt)
+    elif final_finding == "no_fault_on_path":
+        event_notification.close(notification, outcome="no fault found", finding=final_finding)
+    elif final_finding is not None and final_trustworthy:
+        event_notification.close(notification, outcome="resolved", finding=final_finding)
+    else:
+        event_notification.close(notification, outcome="needs human review")
 
     return EventRun(
         ran=True,
@@ -1064,9 +1389,61 @@ def _dispatch(
         tool_calls=tuple(tool_calls),
         exchanges=tuple(exchanges),
         stopped_because=stopped_because,
-        complete=model_finished,
+        complete=model_finished and not tool_failure,
         limits_hit=tuple(limits_hit),
         fabrication_attempts=tuple(fabrication_attempts),
         ticket_run_id=ticket.run_id,
         elapsed_s=elapsed_s,
     )
+
+
+def _record_receipt_shadows(
+    store: EventStore | None,
+    event_id: str,
+    receipt: InvestigationReceipt,
+) -> None:
+    """Mirror deterministic receipt metadata without changing event authority."""
+
+    if store is None:
+        return
+    try:
+        shadow = receipt.narrowing_shadow
+        if shadow is not None and shadow.get("mode") == "shadow" and shadow.get("active") is False:
+            candidates = shadow.get("candidates")
+            decision = shadow.get("decision")
+            refusal = shadow.get("refusal")
+            if (
+                isinstance(candidates, list)
+                and all(isinstance(candidate, dict) for candidate in candidates)
+                and (decision is None or isinstance(decision, dict))
+                and (refusal is None or isinstance(refusal, str))
+            ):
+                store.record_narrowing_shadow(
+                    event_id=event_id,
+                    mode="shadow",
+                    candidates=tuple(candidates),
+                    decision=decision,
+                    refusal=refusal,
+                )
+        if receipt.trustworthy and receipt.cause is not None:
+            cause_rung = receipt.cause.get("rung")
+            cause_device = receipt.cause.get("device")
+            if isinstance(cause_rung, str) and isinstance(cause_device, str):
+                store.create_or_join_incident(
+                    identity=IncidentIdentity(cause_device, cause_rung, receipt.subject),
+                    event_id=event_id,
+                )
+    except (EventStoreError, ValueError):
+        pass
+
+
+def _chat_command_label(tool: str, arguments: Mapping[str, Any]) -> str:
+    """A safe operator label from resolved approved arguments, never raw CLI."""
+
+    if tool == "investigate_lab":
+        return f"deterministic {arguments.get('flow', 'network')} investigation"
+    if tool == "explore_lab":
+        return "inventory and health context"
+    if tool == "check_lab":
+        return f"{arguments.get('intent', 'network')} status check"
+    return f"approved {tool} check"

@@ -120,6 +120,7 @@ from . import log_window
 from ._env import _float_env
 from .coverage import Coverage
 from .inventory_model import find_device
+from .iosxr_syslog import match_iosxr_syslog_line
 from .parsers import PARSE_FAILED, PARSE_OK
 
 __all__ = [
@@ -307,6 +308,17 @@ class _BoundedIntSlot:
         return value
 
 
+class _MnemonicSlot:
+    """One reviewed mnemonic from the B-712 closed filter set."""
+
+    def parse(self, name: str, value: object) -> str:
+        if not isinstance(value, str):
+            raise LokiQueryError(f"{name}: expected a string, got {type(value).__name__}")
+        if value not in _MNEMONIC_FILTERS:
+            raise LokiQueryError(f"{name}: is not in the declared mnemonic filter set")
+        return value
+
+
 #: `{source_ip="<ip>"}` -- a Loki stream selector over exactly one label.
 #: `resolved["device"]` is `_DeviceSlot.parse`'s return value: a string that
 #: can only ever be `str(ipaddress.IPv4Address(...))`'s own output, i.e. only
@@ -317,9 +329,22 @@ class _BoundedIntSlot:
 #: typed parser produced from looking that name up does.
 _SELECTOR_SHAPE = re.compile(r'^\{source_ip="(?:[0-9]{1,3}\.){3}[0-9]{1,3}"\}$')
 
+# B-712 starts with the one severity-5 event whose history was measured to be
+# hidden behind the generic query cap. This is a review-time allowlist, never
+# a caller-supplied regex or substring.
+_MNEMONIC_FILTERS: frozenset[str] = frozenset({"ROUTING-BGP-5-ADJCHANGE"})
+_MNEMONIC_QUERY_SHAPE = re.compile(
+    r'^\{source_ip="(?:[0-9]{1,3}\.){3}[0-9]{1,3}"\} \|= '
+    r'"%ROUTING-BGP-5-ADJCHANGE :"$'
+)
+
 
 def _build_logs_for_device_selector(resolved: Mapping[str, Any]) -> str:
     return '{{source_ip="{0}"}}'.format(resolved["device"])
+
+
+def _build_logs_for_device_mnemonic_selector(resolved: Mapping[str, Any]) -> str:
+    return f'{_build_logs_for_device_selector(resolved)} |= "%{resolved["mnemonic"]} :"'
 
 
 @dataclass(frozen=True)
@@ -337,18 +362,15 @@ class LokiQuery:
     name: str
     params: Mapping[str, Any]
     build_selector: Callable[[Mapping[str, Any]], str]
+    selector_shape: re.Pattern[str]
     description: str
 
 
 #: The exact-match table. Adding a query means adding an entry here with its
 #: own declared, typed slots -- never a function that accepts a LogQL string.
-#: One entry today, deliberately: see the module's own report / FINDINGS-style
-#: reasoning in the PR description for why a mnemonic- or regex-filtered
-#: variant is not added yet (a caller-supplied LogQL line filter is a much
-#: larger validation surface -- arbitrary regex from a caller is its own
-#: denial-of-service vector -- and mnemonic filtering is already possible
-#: client-side over this query's own structured `records`, with no new LogQL
-#: surface at all).
+#: B-712 adds one mnemonic-filtered entry alongside the generic query. Its
+#: filter is a review-time constant with an exact post-build shape check;
+#: callers still cannot supply a regex, substring, or pipeline expression.
 LOKI_QUERIES: dict[str, LokiQuery] = {
     "logs_for_device": LokiQuery(
         name="logs_for_device",
@@ -366,9 +388,25 @@ LOKI_QUERIES: dict[str, LokiQuery] = {
             "limit": _BoundedIntSlot(minimum=1, maximum=1000),
         },
         build_selector=_build_logs_for_device_selector,
+        selector_shape=_SELECTOR_SHAPE,
         description=(
             "Every log line Loki holds for one device's management IP, most "
             "recent first, within the last `since_seconds`."
+        ),
+    ),
+    "logs_for_device_mnemonic": LokiQuery(
+        name="logs_for_device_mnemonic",
+        params={
+            "device": _DeviceSlot(),
+            "mnemonic": _MnemonicSlot(),
+            "since_seconds": _BoundedIntSlot(minimum=1, maximum=7 * 24 * 3600),
+            "limit": _BoundedIntSlot(minimum=1, maximum=1000),
+        },
+        build_selector=_build_logs_for_device_mnemonic_selector,
+        selector_shape=_MNEMONIC_QUERY_SHAPE,
+        description=(
+            "Records for one reviewed IOS-XR mnemonic on one device across "
+            "the requested Loki window, newest first."
         ),
     ),
 }
@@ -487,21 +525,6 @@ def _http_fetcher(base_url: str, params: dict[str, str]) -> dict[str, Any]:
 # Record extraction
 # --------------------------------------------------------------------------- #
 
-# Confirmed against real 2026-08-18 Loki output (T-004 groundwork,
-# re-verified live): the Loki copy of one line is prefixed with syslog-ng's
-# rewritten `HOST` field (`P2.sota-xrd `) *before* the device's own
-# `RP/0/RP0/CPU0:` node token -- the on-device `show logging` buffer carries
-# no such prefix. This is therefore intentionally NOT
-# `template_parsers._LOG_ENTRY` with a shared import: the wire shape genuinely
-# differs by one leading token, template_parsers.py is out of scope for edits
-# here, and `event_routing.py`'s own precedent (importing that private regex
-# for its unprefixed syslog-receiver case) does not apply to a prefixed line.
-_LOKI_LOG_LINE = re.compile(
-    r"^(?P<host>\S+)\s+RP/0/RP0/CPU0:(?P<timestamp>\w{3}\s+\d+\s+\d{2}:\d{2}:\d{2}\.\d+\s+\w+): "
-    r"(?P<process>[A-Za-z0-9_]+)\[(?P<pid>\d+)\]: %(?P<mnemonic>[A-Za-z0-9_-]+) : (?P<text>.*)$"
-)
-
-
 def _record_from_line(labels: Mapping[str, Any], ingest_ns: str, line: str) -> dict[str, Any]:
     """One Loki value -> one structured record, in the same field shape
     `template_parsers.py`'s `logging` template already uses
@@ -517,6 +540,10 @@ def _record_from_line(labels: Mapping[str, Any], ingest_ns: str, line: str) -> d
     """
 
     base: dict[str, Any] = {
+        # Preserve the transport line separately from its parsed text. Event
+        # routing/ticket provenance needs the literal trigger, while `text`
+        # remains the normalized message body for existing consumers.
+        "raw_event": line,
         "host": labels.get("host"),
         "source_ip": labels.get("source_ip"),
         # Loki's own PRI-derived label ("err"/"warning") -- NOT the IOS-XR
@@ -531,8 +558,8 @@ def _record_from_line(labels: Mapping[str, Any], ingest_ns: str, line: str) -> d
         "ingest_timestamp_ns": ingest_ns,
     }
 
-    match = _LOKI_LOG_LINE.match(line)
-    if not match:
+    match = match_iosxr_syslog_line(line)
+    if not match or match["host"] is None:
         return {
             **base,
             "timestamp": "",
@@ -656,7 +683,7 @@ def run_named_query(
         return _error_envelope(query_name, device_name, str(exc))
 
     selector = query.build_selector(resolved)
-    if not _SELECTOR_SHAPE.fullmatch(selector):
+    if not query.selector_shape.fullmatch(selector):
         # Layer-4-style post-build check, mirroring
         # `templates._validate_rendered_command`'s shape check: this can only
         # fire if `LOKI_QUERIES` itself is written wrong (a future query

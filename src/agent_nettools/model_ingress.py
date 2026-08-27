@@ -48,15 +48,17 @@ not exist on the wire.
 This is `reasoning_gate.py`'s own mechanism -- its docstring: "the wire
 schema `parse_decision` reads has no field for a target's identity at all"
 -- moved from candidate selection to tool arguments. **The structure is
-borrowed, the module is not imported.** `docs/diagrams/d9.py` carries a
-self-invalidating tripwire keyed on `reasoning_gate.py` gaining a live,
-non-test caller (`facts.reasoning_gate_consumers()`, which scans
-`src/`+`mcp_server/` imports); this module must never be the import that
-trips it, so nothing here does `from .reasoning_gate import ...` or
-`from . import reasoning_gate`. What is reused is the *idea* --
-delete-the-field beats validate-the-value -- reimplemented independently
-against a different wire shape (a tool's `input_schema`, not a gate's
-decision payload).
+borrowed, the module is not imported.** `reasoning_gate.py` gaining a live,
+non-test caller used to be tripwired by `docs/diagrams/d9.py`'s
+self-invalidating diagram guard (`facts.reasoning_gate_consumers()`, which
+scanned `src/`+`mcp_server/` imports); that generated-diagram system was
+retired 2026-08-23 and nothing currently re-derives this automatically, but
+the invariant it guarded is unchanged: this module must never be the import
+that makes `reasoning_gate` live, so nothing here does
+`from .reasoning_gate import ...` or `from . import reasoning_gate`. What is
+reused is the *idea* -- delete-the-field beats validate-the-value --
+reimplemented independently against a different wire shape (a tool's
+`input_schema`, not a gate's decision payload).
 
 Also borrowed, independently: `mcp_server` depends on `agent_nettools`,
 never the reverse (`model_egress.py`'s own rule, restated here because it
@@ -147,8 +149,9 @@ class PinnedContext:
 
     ``flow`` -- the flow name `event_routing.MNEMONIC_FLOW_TABLE` (or a
     future Alertmanager rule) already decided, **not a model's choice**.
-    `investigate_lab`'s own Literal accepts exactly the two flow names that
-    table produces today (`bgp_session`, `interface`) -- see `PIN_TABLE`.
+    `investigate_lab` accepts all four implemented flows. Event routing
+    currently produces only `bgp_session` and `interface`; IS-IS and LDP are
+    available through explicit guided MCP calls -- see `PIN_TABLE`.
     ``None`` means no flow was determined (or the context is not
     event-shaped at all), which excludes `investigate_lab` from the offered
     manifest rather than letting the model pick one -- see
@@ -246,15 +249,17 @@ def _is_ipv4_host(value: str) -> bool:
     return True
 
 
-#: The two flow names `investigate_lab`'s own `Literal["bgp_session",
-#: "interface"]` accepts -- read directly from `mcp_server/staged_surface.py`
-#: -- which is also, exactly, `event_routing.MNEMONIC_FLOW_TABLE`'s flow
-#: column today. Not imported from either module (this module must not
+#: The four flow names `investigate_lab`'s own Literal accepts -- read directly
+#: from `mcp_server/staged_surface.py`. Event routing currently produces only
+#: `bgp_session` and `interface`; explicit MCP calls may select the other two.
+#: This is not imported from either module (this module must not
 #: import `mcp_server`, and importing `event_routing` only to re-derive two
 #: literal strings would add a dependency for no new information) -- kept as
 #: a small literal tuple, the same "copied, not imported" choice
 #: `model_egress.ERROR_KINDS` documents for the identical reason.
-_INVESTIGATE_LAB_FLOWS: tuple[str, ...] = ("bgp_session", "interface")
+_INVESTIGATE_LAB_FLOWS: tuple[str, ...] = (
+    "bgp_session", "interface", "isis_adjacency", "ldp_session"
+)
 
 
 def _is_known_investigate_flow(value: str) -> bool:
@@ -262,13 +267,10 @@ def _is_known_investigate_flow(value: str) -> bool:
 
     `PinnedContext.flow` is typed `str | None`, not a closed enum, because
     it is meant to carry whatever `event_routing.MNEMONIC_FLOW_TABLE` (or a
-    future flow) produces -- and that table is a superset of what
-    `investigate_lab` currently exposes (`flows.FLOWS` also has
-    `isis_adjacency`/`ldp_session`, neither in this tool's `Literal`). A
-    `PinnedContext` carrying one of those excludes `investigate_lab` from
-    the offer rather than pinning a value the tool's own schema would
-    reject -- the same "never repairs" rule applied to context data instead
-    of model input.
+    future flow) produces. The staged surface accepts all currently
+    implemented flows; a future unknown flow remains excluded rather than
+    pinning a value the tool's own schema would reject -- the same "never
+    repairs" rule applied to context data instead of model input.
     """
 
     return value in _INVESTIGATE_LAB_FLOWS
@@ -297,7 +299,7 @@ def _is_known_investigate_flow(value: str) -> bool:
 #:   bug.  `intent` is a genuine closed vocabulary -- enumerated.
 #:
 #: investigate_lab(device_name: str, subject: str, flow: Literal[
-#:                  "bgp_session","interface"] = "bgp_session")
+#:                  "bgp_session","interface","isis_adjacency","ldp_session"] = "bgp_session")
 #:   All three parameters pin. `device_name`/`subject` from the identically-
 #:   named context fields; `flow` is explicitly NOT enumerated even though
 #:   its vocabulary is small and closed -- B-459/S6.3's own framing is that

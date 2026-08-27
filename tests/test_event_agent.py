@@ -20,10 +20,10 @@ from pathlib import Path
 
 import pytest
 
+from agent_nettools import admission, model_ingress
 from agent_nettools import event_agent as ea
 from agent_nettools import event_routing as er
 from agent_nettools import event_watch as ew
-from agent_nettools import model_ingress
 from agent_nettools import ticket as ticket_module
 from agent_nettools.mcp_client import ToolCallResult, ToolDescriptor
 
@@ -135,22 +135,36 @@ def _tool_result(name: str, payload: dict, *, is_error: bool = False, elapsed_s:
     )
 
 
-_INVESTIGATE_LAB_OK = {
-    "tool": "investigate", "device": "RR1", "subject": "10.255.0.12", "flow": "bgp_session",
-    "finding": "bgp_hold_timer_expired", "reason": "hold timer expired",
-    "cause": {"rung": "bgp_session", "device": "RR1", "reason": "hold timer expired"},
-    "causal_chain": [{"rung": "bgp_session", "device": "RR1", "reason": "hold timer expired"}],
-    "report": {"status": "ok"}, "correlation": {"status": "ok"},
-    "coherence": None, "trustworthy": True,
-}
+def _investigate_payload(*, finding: str, cause: dict | None, statuses: tuple[str, str]) -> dict:
+    rungs = [
+        {
+            "position": 1, "of": 2, "rung": "bgp_session", "device": "RR1",
+            "status": statuses[0], "reason": "BGP session state observed", "evidence_keys": ["bgp:RR1"],
+        },
+        {
+            "position": 2, "of": 2, "rung": "transport", "device": "RR1",
+            "status": statuses[1], "reason": "TCP transport state observed", "evidence_keys": ["bgp_neighbor:RR1"],
+        },
+    ]
+    return {
+        "tool": "investigate", "device": "RR1", "subject": "10.255.0.12", "flow": "bgp_session",
+        "finding": finding, "reason": "deterministic descent completed", "cause": cause,
+        "causal_chain": [cause] if cause is not None else [], "rungs_examined": len(rungs), "rungs": rungs,
+        "report": {"status": "emitted"}, "correlation": {"status": "not_attempted"},
+        "coherence": {"refuses": False}, "coverage": None, "sessions": None,
+        "operator_notes": [], "off_path": [], "trustworthy": True,
+    }
 
-_INVESTIGATE_LAB_NO_FAULT = {
-    "tool": "investigate", "device": "RR1", "subject": "10.255.0.12", "flow": "bgp_session",
-    "finding": "no_fault_on_path", "reason": "every rung checked out",
-    "cause": None, "causal_chain": [],
-    "report": {"status": "ok"}, "correlation": {"status": "ok"},
-    "coherence": None, "trustworthy": True,
-}
+
+_INVESTIGATE_LAB_OK = _investigate_payload(
+    finding="peer_not_established",
+    cause={"rung": "bgp_session", "device": "RR1", "reason": "BGP session state observed"},
+    statuses=("broken", "healthy"),
+)
+
+_INVESTIGATE_LAB_NO_FAULT = _investigate_payload(
+    finding="no_fault_on_path", cause=None, statuses=("healthy", "broken")
+)
 
 _EXPLORE_LAB_OK = {"tool": "explore_lab", "device": "RR1", "facts": {}, "health": {"status": "ok"}}
 
@@ -167,7 +181,9 @@ def _open_ticket_run(monkeypatch, tmp_path, *, turns, toolset_responses, bounds=
     decision = _bgp_decision()
     toolset = FakeToolset(ea._PLANNING_TOOL_SCHEMAS, toolset_responses)
     caller = ScriptedCaller(turns)
-    run = ea.run_event(decision, bounds=bounds, toolset=toolset, caller=caller, now=now)
+    run = ea.run_event(
+        decision, bounds=bounds, toolset=toolset, caller=caller, now=now, admit=False
+    )
     return run, toolset, caller, decision
 
 
@@ -216,8 +232,11 @@ def test_a_well_behaved_fake_model_completes_a_wide_then_narrow_run(monkeypatch,
     read = ticket_module.read_ticket(ticket_path)
     assert read["run_id"] == run.ticket_run_id
     assert read["answer"] is not None
-    assert read["answer"]["finding"] == "bgp_hold_timer_expired"
+    assert read["answer"]["finding"] == "peer_not_established"
     assert read["answer"]["trustworthy"] is True
+    assert read["question"]["raw_event"] == _real_line(
+        "ROUTING-BGP-5-ADJCHANGE : neighbor 10.255.0.12"
+    )
     assert len(read["model_exchanges"]) == 3
     # The model's closing prose is on a model_exchange, never mistaken for
     # the answer.
@@ -226,6 +245,170 @@ def test_a_well_behaved_fake_model_completes_a_wide_then_narrow_run(monkeypatch,
     # grounding_ok is None, always -- never False (there is no DescentResult
     # for this loop's free-form prose).
     assert all(ex["grounding_ok"] is None for ex in read["model_exchanges"])
+
+
+def test_durable_store_mirrors_completion_and_refuses_a_completed_replay(monkeypatch, tmp_path):
+    from agent_nettools.event_store import EventStore
+
+    turns = [
+        {"text": "", "tool_calls": [{"id": "1", "name": "investigate_lab", "arguments": {}}],
+         "stop_reason": "tool_use"},
+        {"text": "done", "tool_calls": [], "stop_reason": "end_turn"},
+    ]
+    responses = {"investigate_lab": [_tool_result("investigate_lab", _INVESTIGATE_LAB_OK)]}
+    monkeypatch.setattr(ea, "load_mnemonic_table", lambda: _FIRES_TABLE)
+    monkeypatch.setenv(ticket_module.NETTOOLS_TICKET_DIR_ENV, str(tmp_path / "tickets"))
+    decision = _bgp_decision()
+    store = EventStore(tmp_path / "events.sqlite3")
+
+    completed = ea.run_event(
+        decision,
+        toolset=FakeToolset(ea._PLANNING_TOOL_SCHEMAS, responses),
+        caller=ScriptedCaller(turns),
+        admit=False,
+        event_store=store,
+    )
+    replay = ea.run_event(
+        decision,
+        toolset=ExplodingToolset(),
+        caller=ExplodingCaller(),
+        admit=False,
+        event_store=store,
+    )
+
+    assert completed.complete is True
+    assert store.get(decision.event_id).state == "completed"
+    assert replay.stopped_because == "event_store_completed_duplicate"
+    assert replay.ticket_run_id == completed.ticket_run_id
+
+
+def test_worker_lease_fence_reaches_terminal_event_write(monkeypatch, tmp_path):
+    from agent_nettools.event_envelope import EventEnvelopeV2
+    from agent_nettools.event_store import EventStore
+
+    turns = [
+        {"text": "", "tool_calls": [{"id": "1", "name": "investigate_lab", "arguments": {}}],
+         "stop_reason": "tool_use"},
+        {"text": "done", "tool_calls": [], "stop_reason": "end_turn"},
+    ]
+    monkeypatch.setattr(ea, "load_mnemonic_table", lambda: _FIRES_TABLE)
+    monkeypatch.setenv(ticket_module.NETTOOLS_TICKET_DIR_ENV, str(tmp_path / "tickets"))
+    decision = _bgp_decision()
+    envelope = EventEnvelopeV2.from_routing_decision(decision)
+    store = EventStore(tmp_path / "events.sqlite3")
+    store.create_or_get(
+        event_id=decision.event_id,
+        device=envelope.device or "unknown",
+        payload=envelope.payload(),
+    )
+    store.transition(decision.event_id, "admitted")
+    lease = store.acquire_lease(decision.event_id, owner="worker", lease_seconds=300)
+
+    run = ea.run_event(
+        decision,
+        toolset=FakeToolset(
+            ea._PLANNING_TOOL_SCHEMAS,
+            {"investigate_lab": [_tool_result("investigate_lab", _INVESTIGATE_LAB_OK)]},
+        ),
+        caller=ScriptedCaller(turns),
+        admit=False,
+        event_store=store,
+        event_lease=lease,
+    )
+
+    assert run.complete is True
+    assert store.get(decision.event_id).state == "completed"
+
+
+def test_validated_receipt_persists_inactive_narrowing_and_exact_cause_incident(monkeypatch, tmp_path):
+    from agent_nettools.event_store import EventStore
+
+    turns = [
+        {"text": "", "tool_calls": [{"id": "1", "name": "investigate_lab", "arguments": {}}], "stop_reason": "tool_use"},
+        {"text": "done", "tool_calls": [], "stop_reason": "end_turn"},
+    ]
+    payload = {
+        **_INVESTIGATE_LAB_OK,
+        "narrowing_shadow": {
+            "mode": "shadow", "active": False,
+            "candidates": [{"kind": "interface", "id": "Gi0/0/0/0", "device": "RR1"}],
+            "decision": {"kind": "stop"}, "refusal": None,
+        },
+    }
+    monkeypatch.setattr(ea, "load_mnemonic_table", lambda: _FIRES_TABLE)
+    monkeypatch.setenv(ticket_module.NETTOOLS_TICKET_DIR_ENV, str(tmp_path / "tickets"))
+    decision = _bgp_decision()
+    store = EventStore(tmp_path / "events.sqlite3")
+
+    run = ea.run_event(
+        decision,
+        toolset=FakeToolset(ea._PLANNING_TOOL_SCHEMAS, {"investigate_lab": [_tool_result("investigate_lab", payload)]}),
+        caller=ScriptedCaller(turns),
+        admit=False,
+        event_store=store,
+    )
+
+    assert run.complete is True
+    assert store.narrowing_shadow_records(event_id=decision.event_id)[0].active is False
+    incident = store.list_incidents()[0]
+    assert incident.identity.device == "RR1"
+    assert incident.identity.cause_rung == "bgp_session"
+    assert incident.identity.cause_subject == "10.255.0.12"
+
+
+def test_durable_store_schedules_a_retryable_agent_failure(monkeypatch, tmp_path):
+    from agent_nettools.event_store import EventStore
+
+    class FailingToolset(FakeToolset):
+        def call_tool(self, name, arguments, *, timeout_s):
+            raise BrokenPipeError("MCP connection closed")
+
+    monkeypatch.setattr(ea, "load_mnemonic_table", lambda: _FIRES_TABLE)
+    monkeypatch.setenv(ticket_module.NETTOOLS_TICKET_DIR_ENV, str(tmp_path / "tickets"))
+    decision = _bgp_decision()
+    store = EventStore(tmp_path / "events.sqlite3")
+    run = ea.run_event(
+        decision,
+        toolset=FailingToolset(ea._PLANNING_TOOL_SCHEMAS, {}),
+        caller=ScriptedCaller([
+            {"text": "", "tool_calls": [{"id": "1", "name": "investigate_lab", "arguments": {}}], "stop_reason": "tool_use"},
+            {"text": "failed", "tool_calls": [], "stop_reason": "end_turn"},
+        ]),
+        admit=False,
+        event_store=store,
+    )
+
+    durable = store.get(decision.event_id)
+    assert run.complete is False
+    assert durable.state == "retryable_failed"
+    assert durable.retry_at is not None
+    assert durable.ticket_id == run.ticket_run_id
+
+
+def test_legacy_admission_refusal_is_shadowed_and_released_for_durable_retry(monkeypatch, tmp_path):
+    from agent_nettools.event_store import EventStore
+
+    monkeypatch.setattr(ea, "load_mnemonic_table", lambda: _FIRES_TABLE)
+    monkeypatch.setenv(admission.NETTOOLS_ADMISSION_DIR_ENV, str(tmp_path / "admission"))
+    monkeypatch.setenv("NETTOOLS_MAX_EVENT_RUNS_PER_DEVICE", "1")
+    monkeypatch.setenv("NETTOOLS_MAX_EVENT_RUNS_FABRIC", "1")
+    decision = _bgp_decision()
+    admission.admit_event_run(decision.event_id, "RR1")
+    store = EventStore(tmp_path / "events.sqlite3")
+
+    run = ea.run_event(
+        decision,
+        toolset=ExplodingToolset(),
+        caller=ExplodingCaller(),
+        event_store=store,
+    )
+
+    durable = store.get(decision.event_id)
+    shadow = store.admission_shadow_records(event_id=decision.event_id)
+    assert run.stopped_because == "event_admission_refused"
+    assert durable.state == "retryable_failed"
+    assert durable.retry_at is not None
+    assert shadow[-1].legacy_admitted is False
 
 
 def test_no_fault_found_is_recorded_verbatim_not_overridden_by_the_models_prose(monkeypatch, tmp_path):
@@ -250,19 +433,293 @@ def test_no_fault_found_is_recorded_verbatim_not_overridden_by_the_models_prose(
     assert "flapping interface" not in json.dumps(read["answer"])
 
 
+def test_undeclared_investigation_finding_never_becomes_a_ticket_answer(monkeypatch, tmp_path):
+    turns = [
+        {"text": "", "tool_calls": [{"id": "1", "name": "investigate_lab", "arguments": {}}],
+         "stop_reason": "tool_use"},
+        {"text": "done", "tool_calls": [], "stop_reason": "end_turn"},
+    ]
+    invalid = dict(_INVESTIGATE_LAB_OK, finding="bgp_hold_timer_expired")
+    run, _toolset, _caller, _decision = _open_ticket_run(
+        monkeypatch,
+        tmp_path,
+        turns=turns,
+        toolset_responses={"investigate_lab": [_tool_result("investigate_lab", invalid)]},
+    )
+
+    ticket_path = next(tmp_path.glob("*.md"))
+    read = ticket_module.read_ticket(ticket_path)
+    assert read["answer"] is None
+    assert run.tool_calls[0]["is_error"] is True
+    assert "undeclared finding" in run.tool_calls[0]["detail"]
+
+
+def test_tool_exception_is_recorded_closed_and_retryable(monkeypatch, tmp_path):
+    class FailingToolset(FakeToolset):
+        def call_tool(self, name, arguments, *, timeout_s):
+            raise BrokenPipeError("MCP connection closed")
+
+    monkeypatch.setattr(ea, "load_mnemonic_table", lambda: _FIRES_TABLE)
+    monkeypatch.setenv(ticket_module.NETTOOLS_TICKET_DIR_ENV, str(tmp_path))
+    monkeypatch.setenv("NETTOOLS_MAX_EVENT_RUNS_PER_DEVICE", "10")
+    monkeypatch.setenv("NETTOOLS_MAX_EVENT_RUNS_FABRIC", "10")
+    decision = _bgp_decision()
+    failing = FailingToolset(ea._PLANNING_TOOL_SCHEMAS, {})
+    caller = ScriptedCaller([
+        {"text": "", "tool_calls": [{"id": "1", "name": "investigate_lab", "arguments": {}}],
+         "stop_reason": "tool_use"},
+        {"text": "unable to collect", "tool_calls": [], "stop_reason": "end_turn"},
+    ])
+
+    failed = ea.run_event(decision, toolset=failing, caller=caller)
+
+    assert failed.ran is True
+    assert failed.complete is False
+    assert failed.tool_calls[0]["is_error"] is True
+    assert "tool call failed" in failed.tool_calls[0]["detail"]
+    assert failed.ticket_run_id
+    assert ticket_module.read_ticket(next(tmp_path.glob("*.md")))["closed"] is not None
+
+    retry = ea.run_event(
+        decision,
+        toolset=FakeToolset(ea._PLANNING_TOOL_SCHEMAS, {
+            "investigate_lab": [_tool_result("investigate_lab", _INVESTIGATE_LAB_OK)],
+        }),
+        caller=ScriptedCaller([
+            {"text": "", "tool_calls": [{"id": "1", "name": "investigate_lab", "arguments": {}}],
+             "stop_reason": "tool_use"},
+            {"text": "done", "tool_calls": [], "stop_reason": "end_turn"},
+        ]),
+    )
+
+    assert retry.ran is True
+    assert retry.complete is True
+
+
+def test_enabled_lifecycle_threads_only_code_authored_ticket_states(monkeypatch, tmp_path):
+    class Sender:
+        def __init__(self):
+            self.calls: list[tuple[str, tuple[int, ...]]] = []
+
+        def send_text(self, text, *, reply_to_message_ids=(), require_message_ids=True):
+            self.calls.append((text, tuple(reply_to_message_ids)))
+            return [100 + len(self.calls)]
+
+    sender = Sender()
+    relay_calls: list[dict] = []
+    monkeypatch.setenv(ea.event_notification.NETTOOLS_EVENT_NOTIFY_ENV, "1")
+    monkeypatch.setenv(
+        ea.event_notification.NETTOOLS_EVENT_NOTIFICATION_STATE_FILE_ENV,
+        str(tmp_path / "notification-state.json"),
+    )
+    monkeypatch.setattr(ea.event_notification, "_telegram_sender", lambda: sender)
+    monkeypatch.setattr(
+        ea.event_notification.relay_policy,
+        "relay",
+        lambda report, **kwargs: relay_calls.append({"report": report, **kwargs}) or {
+            "decision": "sent", "deliveries": [{"ok": True, "message_ids": [101]}]
+        },
+    )
+    turns = [
+        {"text": "", "tool_calls": [{"id": "1", "name": "investigate_lab", "arguments": {}}],
+         "stop_reason": "tool_use"},
+        {"text": "done", "tool_calls": [], "stop_reason": "completed"},
+    ]
+    run, _toolset, _caller, _decision = _open_ticket_run(
+        monkeypatch,
+        tmp_path,
+        turns=turns,
+        toolset_responses={"investigate_lab": [_tool_result("investigate_lab", _INVESTIGATE_LAB_OK)]},
+    )
+
+    assert run.complete is True
+    assert len(relay_calls) == 1
+    assert relay_calls[0]["ticket_id"] == ticket_module.read_ticket(
+        next(tmp_path.glob("*.md"))
+    )["header"]["incident_id"]
+    assert len(sender.calls) == 3
+    assert sender.calls[0][1] == (101,)
+    assert sender.calls[1][1] == (101,)
+    assert sender.calls[2][1] == (101,)
+    assert "investigation plan" in sender.calls[0][0]
+    assert "Deterministic rungs: bgp_session, transport, route_to_peer, igp_adjacency, interface" in sender.calls[0][0]
+    assert "deterministic drill" in sender.calls[1][0]
+    assert "bgp_session @ RR1: BROKEN" in sender.calls[1][0]
+    assert "ACTIVE_FAULT_LOCALIZED" in sender.calls[2][0]
+    assert "RCA: lowest broken rung is bgp_session @ RR1" in sender.calls[2][0]
+    assert "done" not in "\n".join(text for text, _ in sender.calls)
+    assert _INVESTIGATE_LAB_OK["reason"] not in "\n".join(text for text, _ in sender.calls)
+
+
+def test_live_card_mode_never_calls_the_legacy_reply_chain(monkeypatch, tmp_path):
+    from agent_nettools.event_store import EventStore
+
+    monkeypatch.setattr(ea, "load_mnemonic_table", lambda: _FIRES_TABLE)
+    monkeypatch.setenv(ticket_module.NETTOOLS_TICKET_DIR_ENV, str(tmp_path / "tickets"))
+    monkeypatch.setenv(ea.event_notification.NETTOOLS_EVENT_NOTIFY_ENV, "1")
+    monkeypatch.setenv(ea.event_notification.NETTOOLS_TELEGRAM_LIVE_CARD_ENV, "1")
+    monkeypatch.setenv(ea.event_notification.notifier.TELEGRAM_CHAT_ENV, "123")
+    monkeypatch.setenv(ea.event_notification.NETTOOLS_TELEGRAM_LIVE_CARD_CHAT_IDS_ENV, "123")
+    monkeypatch.setattr(
+        ea.event_notification,
+        "open_notification",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("legacy root send")),
+    )
+    monkeypatch.setattr(
+        ea.event_notification,
+        "deterministic_drill",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("legacy reply")),
+    )
+    decision = _bgp_decision()
+    store = EventStore(tmp_path / "events.sqlite3")
+    run = ea.run_event(
+        decision,
+        toolset=FakeToolset(
+            ea._PLANNING_TOOL_SCHEMAS,
+            {"investigate_lab": [_tool_result("investigate_lab", _INVESTIGATE_LAB_OK)]},
+        ),
+        caller=ScriptedCaller([
+            {"text": "", "tool_calls": [{"id": "1", "name": "investigate_lab", "arguments": {}}],
+             "stop_reason": "tool_use"},
+            {"text": "done", "tool_calls": [], "stop_reason": "end_turn"},
+        ]),
+        admit=False,
+        event_store=store,
+    )
+
+    assert run.complete is True
+    state = store.telegram_card_state(event_id=decision.event_id)
+    assert state is not None
+    assert state.payload["terminal"] is True
+
+
+def test_live_card_mode_delivers_initial_and_terminal_revisions(monkeypatch, tmp_path):
+    class Sender:
+        def __init__(self):
+            self.calls: list[tuple[str, int | None]] = []
+
+        def send_text_to(self, *, chat_id, text):
+            self.calls.append((chat_id, None))
+            return 71
+
+        def edit_text(self, *, chat_id, message_id, text):
+            self.calls.append((chat_id, message_id))
+            return message_id
+
+    from agent_nettools.event_store import EventStore
+
+    sender = Sender()
+    monkeypatch.setattr(ea, "load_mnemonic_table", lambda: _FIRES_TABLE)
+    monkeypatch.setenv(ticket_module.NETTOOLS_TICKET_DIR_ENV, str(tmp_path / "tickets"))
+    monkeypatch.setenv(ea.event_notification.NETTOOLS_EVENT_NOTIFY_ENV, "1")
+    monkeypatch.setenv(ea.event_notification.NETTOOLS_TELEGRAM_LIVE_CARD_ENV, "1")
+    monkeypatch.setenv(ea.event_notification.notifier.TELEGRAM_CHAT_ENV, "123")
+    monkeypatch.setenv(ea.event_notification.NETTOOLS_TELEGRAM_LIVE_CARD_CHAT_IDS_ENV, "123")
+    monkeypatch.setattr(ea.event_notification, "_telegram_sender", lambda: sender)
+    decision = _bgp_decision()
+    store = EventStore(tmp_path / "events.sqlite3")
+    run = ea.run_event(
+        decision,
+        toolset=FakeToolset(
+            ea._PLANNING_TOOL_SCHEMAS,
+            {"investigate_lab": [_tool_result("investigate_lab", _INVESTIGATE_LAB_OK)]},
+        ),
+        caller=ScriptedCaller([
+            {"text": "", "tool_calls": [{"id": "1", "name": "investigate_lab", "arguments": {}}],
+             "stop_reason": "tool_use"},
+            {"text": "done", "tool_calls": [], "stop_reason": "end_turn"},
+        ]),
+        admit=False,
+        event_store=store,
+    )
+
+    assert run.complete is True
+    assert sender.calls == [("123", None), ("123", 71)]
+    assert store.telegram_card_receipt(event_id=decision.event_id, chat_id="123").message_id == 71
+
+
+def test_live_card_activity_hooks_never_render_raw_tool_result_text(monkeypatch, tmp_path):
+    from agent_nettools.event_store import EventStore
+
+    monkeypatch.setattr(ea, "load_mnemonic_table", lambda: _FIRES_TABLE)
+    monkeypatch.setenv(ticket_module.NETTOOLS_TICKET_DIR_ENV, str(tmp_path / "tickets"))
+    monkeypatch.setenv(ea.event_notification.NETTOOLS_EVENT_NOTIFY_ENV, "1")
+    monkeypatch.setenv(ea.event_notification.NETTOOLS_TELEGRAM_LIVE_CARD_ENV, "1")
+    monkeypatch.setenv(ea.event_notification.notifier.TELEGRAM_CHAT_ENV, "123")
+    monkeypatch.setenv(ea.event_notification.NETTOOLS_TELEGRAM_LIVE_CARD_CHAT_IDS_ENV, "123")
+    monkeypatch.setattr(ea.event_notification, "_telegram_sender", lambda: None)
+    decision = _bgp_decision()
+    store = EventStore(tmp_path / "events.sqlite3")
+    raw = "CANARY-RAW-DEVICE-OUTPUT-MUST-NOT-RENDER"
+    run = ea.run_event(
+        decision,
+        toolset=FakeToolset(
+            ea._PLANNING_TOOL_SCHEMAS,
+            {"investigate_lab": [_tool_result("investigate_lab", {**_INVESTIGATE_LAB_OK, "reason": raw})]},
+        ),
+        caller=ScriptedCaller([
+            {"text": "", "tool_calls": [{"id": "1", "name": "investigate_lab", "arguments": {}}], "stop_reason": "tool_use"},
+            {"text": "done", "tool_calls": [], "stop_reason": "end_turn"},
+        ]),
+        admit=False,
+        event_store=store,
+    )
+
+    assert run.complete is True
+    state = store.telegram_card_state(event_id=decision.event_id)
+    assert raw not in str(state.payload)
+
+
+def test_live_card_reasoning_tail_is_opt_in_and_never_uses_receipt_reason(monkeypatch, tmp_path):
+    from agent_nettools.event_store import EventStore
+
+    activities = []
+    monkeypatch.setattr(ea, "load_mnemonic_table", lambda: _FIRES_TABLE)
+    monkeypatch.setenv(ticket_module.NETTOOLS_TICKET_DIR_ENV, str(tmp_path / "tickets"))
+    monkeypatch.setenv(ea.event_notification.NETTOOLS_EVENT_NOTIFY_ENV, "1")
+    monkeypatch.setenv(ea.event_notification.NETTOOLS_TELEGRAM_LIVE_CARD_ENV, "1")
+    monkeypatch.setenv(ea.event_notification.NETTOOLS_TELEGRAM_SHOW_REASONING_TAIL_ENV, "1")
+    monkeypatch.setenv(ea.event_notification.notifier.TELEGRAM_CHAT_ENV, "123")
+    monkeypatch.setenv(ea.event_notification.NETTOOLS_TELEGRAM_LIVE_CARD_CHAT_IDS_ENV, "123")
+    monkeypatch.setattr(ea.event_notification, "_telegram_sender", lambda: None)
+    monkeypatch.setattr(
+        ea.event_notification,
+        "deliver_live_activity",
+        lambda store, *, chat_id, activity: activities.append(activity),
+    )
+    decision = _bgp_decision()
+    raw = "CANARY-RECEIPT-REASON-MUST-NOT-RENDER"
+    store = EventStore(tmp_path / "events.sqlite3")
+
+    ea.run_event(
+        decision,
+        toolset=FakeToolset(
+            ea._PLANNING_TOOL_SCHEMAS,
+            {"investigate_lab": [_tool_result("investigate_lab", {**_INVESTIGATE_LAB_OK, "reason": raw})]},
+        ),
+        caller=ScriptedCaller([
+            {"text": "", "tool_calls": [{"id": "1", "name": "investigate_lab", "arguments": {}}], "stop_reason": "tool_use"},
+            {"text": "done", "tool_calls": [], "stop_reason": "end_turn"},
+        ]),
+        admit=False,
+        event_store=store,
+    )
+
+    tail = next(activity for activity in activities if activity.kind.value == "visible_reasoning_tail")
+    assert raw not in " ".join(tail.visible_summary)
+
+
 # --------------------------------------------------------------------------- #
 # The hard gate: mnemonics.yaml's trigger.fires, checked before anything
 # else touches a toolset or a model.
 # --------------------------------------------------------------------------- #
 
+def test_a_live_reviewed_nontrigger_refuses_before_model_or_mcp():
+    """Non-promoted mnemonics remain hard-gated on the real table."""
 
-def test_the_live_reviewed_table_refuses_every_mnemonic_today():
-    """As of 2026-08-21 every mnemonics.yaml entry is trigger.fires: false --
-    the module docstring's own claim, pinned. Uses the REAL table (no
-    monkeypatch) and the exploding fakes, so a regression that ever let a
-    live call reach the model or the MCP server fails loudly here."""
-
-    decision = _bgp_decision()
+    decision = er.route_syslog_line(
+        _real_line("PKT_INFRA-LINK-3-UPDOWN", device="PE2"), device="PE2"
+    )
     run = ea.run_event(decision, toolset=ExplodingToolset(), caller=ExplodingCaller())
 
     assert run.ran is False
@@ -282,7 +739,6 @@ def test_trigger_fires_false_names_the_mnemonic_and_never_dispatches(monkeypatch
     )
     monkeypatch.setattr(ea, "load_mnemonic_table", lambda: table)
     decision = _bgp_decision()
-
     run = ea.run_event(decision, toolset=ExplodingToolset(), caller=ExplodingCaller())
 
     assert run.ran is False
@@ -329,12 +785,49 @@ def test_an_unroutable_decision_is_refused_before_the_gate_is_even_checked():
     assert "not routable" in run.reason
 
 
+def test_stale_loki_event_is_refused_before_model_or_mcp(monkeypatch):
+    monkeypatch.setattr(ea, "load_mnemonic_table", lambda: _FIRES_TABLE)
+    monkeypatch.setenv(ea.NETTOOLS_MAX_EVENT_AGE_SECONDS_ENV, "60")
+    decision = _bgp_decision()
+    decision = er.RoutingDecision(
+        **{**decision.__dict__, "source_kind": "loki", "ingest_timestamp_ns": "1"}
+    )
+
+    run = ea.run_event(decision, toolset=ExplodingToolset(), caller=ExplodingCaller())
+
+    assert run.ran is False
+    assert run.stopped_because == "stale_event"
+    assert "stale" in run.reason
+
+
 def test_run_event_refuses_cleanly_with_no_caller(monkeypatch):
     monkeypatch.setattr(ea, "load_mnemonic_table", lambda: _FIRES_TABLE)
     decision = _bgp_decision()
     run = ea.run_event(decision, toolset=ExplodingToolset())
     assert run.ran is False
     assert "ModelCaller" in run.reason
+
+
+def test_replayed_injected_toolset_run_is_refused_before_caller_or_toolset(monkeypatch, tmp_path):
+    monkeypatch.setattr(ea, "load_mnemonic_table", lambda: _FIRES_TABLE)
+    monkeypatch.setenv(admission.NETTOOLS_ADMISSION_DIR_ENV, str(tmp_path / "admission"))
+    monkeypatch.setenv("NETTOOLS_MAX_EVENT_RUNS_PER_DEVICE", "100")
+    monkeypatch.setenv("NETTOOLS_MAX_EVENT_RUNS_FABRIC", "100")
+    monkeypatch.setenv(ticket_module.NETTOOLS_TICKET_DIR_ENV, str(tmp_path / "tickets"))
+    decision = _bgp_decision()
+    initial_toolset = FakeToolset(ea._PLANNING_TOOL_SCHEMAS, {})
+    initial_caller = ScriptedCaller([
+        {"text": "receipt complete", "tool_calls": [], "stop_reason": "end_turn"},
+    ])
+
+    initial = ea.run_event(decision, toolset=initial_toolset, caller=initial_caller)
+    replay = ea.run_event(decision, toolset=ExplodingToolset(), caller=ExplodingCaller())
+
+    assert initial.ran is True
+    assert replay.ran is False
+    assert replay.mode == "fixtures"
+    assert replay.stopped_because == "event_admission_refused"
+    assert replay.limits_hit[0]["limit"] == "event_idempotency"
 
 
 # --------------------------------------------------------------------------- #
@@ -474,7 +967,7 @@ def test_max_calls_per_tool_refuses_a_second_investigate_lab_call(monkeypatch, t
     # investigate_lab's finding is still recorded once, from the ONE real call
     ticket_path = next(tmp_path.glob("*.md"))
     read = ticket_module.read_ticket(ticket_path)
-    assert read["answer"]["finding"] == "bgp_hold_timer_expired"
+    assert read["answer"]["finding"] == "peer_not_established"
 
 
 def test_time_budget_stops_before_the_first_turn_and_the_caller_is_never_invoked(monkeypatch, tmp_path):
@@ -863,24 +1356,23 @@ def test_event_agent_module_does_not_actually_import_logs_loki_transitively():
 
 
 # --------------------------------------------------------------------------- #
-# Duplicated-logic parity: this module's own build_trigger_index/
-# validate_trigger_table agree with event_watch's, on the same inputs.
+# One shared trigger-table policy: both consumers expose the same exception
+# and preserve their public helper functions for callers.
 # --------------------------------------------------------------------------- #
 
 
-def test_build_trigger_index_matches_event_watchs_own_on_the_real_table():
+def test_build_trigger_index_matches_event_watchs_shared_policy_on_the_real_table():
     assert ea.build_trigger_index() == ew.build_trigger_index()
 
 
-def test_validate_trigger_table_agrees_with_event_watch_on_a_bad_table():
+def test_validate_trigger_table_uses_one_shared_exception_type():
     bad = (
         {"mnemonic": "X", "investigate_with": None,
          "trigger": {"fires": True, "reason": "bad"}},
     )
+    assert ea.TriggerTableInconsistency is ew.TriggerTableInconsistency
     with pytest.raises(ea.TriggerTableInconsistency):
         ea.validate_trigger_table(bad)
-    with pytest.raises(ew.TriggerTableInconsistency):
-        ew.validate_trigger_table(bad)
 
 
 # --------------------------------------------------------------------------- #

@@ -15,6 +15,7 @@ import json
 import sys
 import urllib.error
 from datetime import datetime, timezone
+from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
@@ -444,6 +445,29 @@ def test_every_chat_in_the_allowlist_gets_the_message(monkeypatch):
     assert sent == ["11", "22", "33"]
 
 
+def test_edit_text_targets_one_allowlisted_card(monkeypatch):
+    capture = _Capture()
+    capture.read = lambda: b'{"ok": true, "result": {"message_id": 91}}'
+    notifier = _telegram(monkeypatch, capture, chats="11,22")
+
+    returned = notifier.edit_text(chat_id="22", message_id=91, text="incident card")
+
+    request = capture.requests[0]
+    assert request.full_url.endswith("/editMessageText")
+    assert json.loads(request.data) == {"chat_id": "22", "message_id": 91, "text": "incident card"}
+    assert returned == 91
+
+
+def test_edit_text_refuses_a_destination_outside_the_allowlist(monkeypatch):
+    capture = _Capture()
+    notifier = _telegram(monkeypatch, capture, chats="11")
+
+    with pytest.raises(N.NotifierError, match="allowlist"):
+        notifier.edit_text(chat_id="22", message_id=91, text="incident card")
+
+    assert capture.requests == []
+
+
 def test_the_token_never_appears_in_the_returned_error(monkeypatch):
     """Telegram puts the token in the URL, so urllib puts it in the exception.
 
@@ -462,6 +486,17 @@ def test_the_token_never_appears_in_the_returned_error(monkeypatch):
     assert token not in record["error"]
     assert token not in json.dumps(record)
     assert "[REDACTED]" in record["error"]
+
+
+def test_telegram_429_exposes_retry_after_to_the_durable_delivery_layer(monkeypatch):
+    response = BytesIO(b'{"ok":false,"parameters":{"retry_after":17}}')
+    error = urllib.error.HTTPError("https://example.invalid", 429, "rate limited", {}, response)
+    notifier = _telegram(monkeypatch, _Capture(raises=error))
+
+    with pytest.raises(N.NotifierError, match="HTTP 429") as raised:
+        notifier.send_text("bounded lifecycle message")
+
+    assert raised.value.retry_after_seconds == 17.0
 
 
 def test_a_report_over_the_limit_is_refused_rather_than_truncated(monkeypatch):

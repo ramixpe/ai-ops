@@ -1,0 +1,196 @@
+{
+  "index": 0,
+  "device": "RR1",
+  "flow": "bgp_session",
+  "subject": "10.255.0.12",
+  "mnemonic": "ROUTING-BGP-5-ADJCHANGE",
+  "hung": false,
+  "error": null,
+  "wall_s": 15.680150782922283,
+  "event_run": {
+    "ran": true,
+    "reason": "dispatched against live tools; stopped because completed",
+    "mode": "live",
+    "decision": {
+      "routable": true,
+      "flow": "bgp_session",
+      "device": "RR1",
+      "subject": "10.255.0.12",
+      "reason": "ROUTING-BGP-5-ADJCHANGE routes to the bgp_session flow",
+      "source_kind": "syslog",
+      "matched": "ROUTING-BGP-5-ADJCHANGE",
+      "transition": "down",
+      "event_id": "0f97e798ab924cd08230c40c",
+      "suggested_command": [
+        "nettools",
+        "investigate",
+        "RR1",
+        "10.255.0.12",
+        "--flow",
+        "bgp_session"
+      ],
+      "raw_event": "RP/0/RP0/CPU0:Aug 20 00:00:00.000 UTC: bgp[1084]: %ROUTING-BGP-5-ADJCHANGE : neighbor 10.255.0.12 Down - BGP Notification sent, hold time expired (VRF: default) (AS: 65000) "
+    },
+    "bounds": {
+      "max_iterations": 4,
+      "time_budget_s": 90.0,
+      "max_tool_calls": 6,
+      "max_calls_per_tool": {
+        "investigate_lab": 1
+      },
+      "max_result_chars": 20000
+    },
+    "tools_offered": [
+      "explore_lab",
+      "check_lab",
+      "investigate_lab",
+      "history_lab"
+    ],
+    "tool_calls": [
+      {
+        "tool": "explore_lab",
+        "arguments": {
+          "device_name": "RR1"
+        },
+        "is_error": false,
+        "detail": null,
+        "duration_ms": 1688.0659880116582,
+        "truncated_chars": 544,
+        "skipped": false
+      },
+      {
+        "tool": "check_lab",
+        "arguments": {
+          "scope": "RR1",
+          "intent": "bgp"
+        },
+        "is_error": true,
+        "detail": "check_lab: the model supplied pinned argument(s) ['scope']; refusing rather than silently overwriting -- a validated value already came from context (B-459, MCP-EXPERIMENT.md S6.3), and a silent overwrite would hide the one measurement this design exists to produce: how often an unattended model tries to fabricate an identity argument",
+        "skipped": true,
+        "fabrication": true
+      },
+      {
+        "tool": "investigate_lab",
+        "arguments": {
+          "device_name": "RR1",
+          "subject": "10.255.0.12",
+          "flow": "bgp_session"
+        },
+        "is_error": false,
+        "detail": null,
+        "duration_ms": 4873.06871288456,
+        "truncated_chars": 0,
+        "skipped": false
+      }
+    ],
+    "exchanges": [
+      {
+        "purpose": "event_agent_turn",
+        "iteration": 1,
+        "response_text": "I'll investigate this BGP adjacency change event on RR1 with peer 10.255.0.12. Starting with a wide view of the fabric.",
+        "stop_reason": "tool_calls",
+        "tokens": {
+          "input_tokens": 1562,
+          "output_tokens": 83,
+          "total_tokens": 1645,
+          "calls": 1,
+          "reported": true,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 0
+        },
+        "tool_calls_requested": [
+          {
+            "tool": "explore_lab",
+            "arguments": {}
+          },
+          {
+            "tool": "check_lab",
+            "arguments": {
+              "scope": "RR1",
+              "intent": "bgp"
+            }
+          }
+        ]
+      },
+      {
+        "purpose": "event_agent_turn",
+        "iteration": 2,
+        "response_text": "Good \u2014 RR1 is up and BGP peer 10.255.0.12 is Established. The `check_lab` call was refused due to a pinned argument; that's fine \u2014 I have what I need from the wide tool. Now I'll run the targeted investigation for the cause.",
+        "stop_reason": "tool_calls",
+        "tokens": {
+          "input_tokens": 2474,
+          "output_tokens": 78,
+          "total_tokens": 2552,
+          "calls": 1,
+          "reported": true,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 0
+        },
+        "tool_calls_requested": [
+          {
+            "tool": "investigate_lab",
+            "arguments": {}
+          }
+        ]
+      },
+      {
+        "purpose": "event_agent_turn",
+        "iteration": 3,
+        "response_text": "**Finding: no fault found.**\n\nThe dependency descent walked all 5 rungs between RR1 and peer 10.255.0.12, and every layer is healthy:\n\n1. **bgp_session** (RR1): Established, 0 prefixes\n2. **transport** (RR1): TCP socket up\n3. **route_to_peer** (RR1): 10.255.0.12/32 present (2 paths)\n4. **igp_adjacency** (PE2, the peer side): 2 IS-IS adjacencies, all Up\n5. **interface** (PE2): both members healthy\n\n`trustworthy: true`, coherence check passed (re-read stable). Note: `bgp_no_prefixes` for 10.255.0.12 was flagged at `info` severity, but per the operator note on this device, 0 prefixes is the normal state for this lab \u2014 not a fault.\n\nThe `ROUTING-BGP-5-ADJCHANGE` syslog woke the loop, but the session is currently Established and all underlying layers are healthy. If this is a flap alert, no active fault was observed in this investigation window; recommend correlating against flap history if the alert persists.",
+        "stop_reason": "completed",
+        "tokens": {
+          "input_tokens": 4787,
+          "output_tokens": 257,
+          "total_tokens": 5044,
+          "calls": 1,
+          "reported": true,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 0
+        }
+      }
+    ],
+    "stopped_because": "completed",
+    "complete": true,
+    "limits_hit": [],
+    "fabrication_attempts": [
+      {
+        "tool": "check_lab",
+        "model_supplied": {
+          "scope": "RR1",
+          "intent": "bgp"
+        },
+        "reason": "check_lab: the model supplied pinned argument(s) ['scope']; refusing rather than silently overwriting -- a validated value already came from context (B-459, MCP-EXPERIMENT.md S6.3), and a silent overwrite would hide the one measurement this design exists to produce: how often an unattended model tries to fabricate an identity argument"
+      }
+    ],
+    "ticket_run_id": "000001",
+    "elapsed_s": 14.272319222800434
+  },
+  "raw_tool_calls": [
+    {
+      "id": "call_01a030c981527340b0dd1b74",
+      "name": "explore_lab",
+      "arguments": {},
+      "raw_arguments": "{}",
+      "parse_error": null
+    },
+    {
+      "id": "call_01a030c981527340b0dd1b82",
+      "name": "check_lab",
+      "arguments": {
+        "scope": "RR1",
+        "intent": "bgp"
+      },
+      "raw_arguments": "{\"scope\":\"RR1\",\"intent\":\"bgp\"}",
+      "parse_error": null
+    },
+    {
+      "id": "call_01a030c98c977fe39313538d",
+      "name": "investigate_lab",
+      "arguments": {},
+      "raw_arguments": "{}",
+      "parse_error": null
+    }
+  ],
+  "answer_present": true,
+  "ticket_path": "scripts/measure_event_agent_out/20260823-reporting-smoke-2/tickets/20260823T224145.192948Z_10-255-0-12.md"
+}

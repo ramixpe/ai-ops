@@ -93,15 +93,13 @@ NOISE_PATTERNS = (
     re.compile(r"(^|/)__pycache__(/|$)"),
     re.compile(r"(^|/)\.pytest_cache(/|$)"),
     re.compile(r"(^|/)\.ruff_cache(/|$)"),
-    re.compile(r"(^|/)\.facts_cache\.json$"),
     re.compile(r"(^|/)agent_nettools\.egg-info(/|$)"),
     re.compile(r"(^|/)\.venv(/|$)"),
-    # Diagram SVGs in a WORKTREE are always a stale regeneration: the .py
-    # generators and facts.py are the authored work (and classify normally);
-    # the SVG is their output for a tree state that no longer exists, and main
-    # deliberately regenerates on every merge. Holding on them told us nothing
-    # eight times in the first real run.
-    re.compile(r"^docs/diagrams/[^/]+\.svg$"),
+    # (A docs/diagrams/*.svg pattern used to live here: the old generated
+    # diagram set produced regenerable SVGs that were noise in a worktree
+    # diff. Retired 2026-08-23 -- docs/diagrams/ is now a single hand-authored
+    # HTML layer, and every file under it is authored work, not output, so it
+    # classifies normally and needs no special-case entry.)
     re.compile(r"\.log$"),
     re.compile(r"\.jsonl$"),
 )

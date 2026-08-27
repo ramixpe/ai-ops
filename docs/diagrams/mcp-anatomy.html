@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ios-xr-nettools — MCP anatomy</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f5f5f5;
+      --color-ink:     #2d3142;
+      --color-muted:   #4f5d75;
+      --color-accent:  #eb6c36;
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      padding: 3rem 2rem;
+    }
+    .frame { max-width: 1080px; margin: 0 auto; }
+    .eyebrow {
+      font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500;
+      letter-spacing: 0.18em; text-transform: uppercase;
+      color: var(--color-muted); margin-bottom: 0.5rem;
+    }
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400; letter-spacing: -0.02em; line-height: 1.15;
+      color: var(--color-ink); margin-bottom: 0.5rem;
+    }
+    h2 {
+      font-family: var(--font-serif); font-size: 1.25rem; font-weight: 400;
+      margin: 2.5rem 0 0.25rem;
+    }
+    h2 + p.lede { color: var(--color-muted); font-size: 0.88rem; max-width: 72ch; margin-bottom: 1.25rem; }
+    .standfirst {
+      font-size: 0.9rem; color: var(--color-muted);
+      max-width: 74ch; margin-bottom: 1.5rem; line-height: 1.5;
+    }
+    svg { width: 100%; min-width: 900px; display: block; }
+    .cards {
+      display: grid;
+      grid-template-columns: 1.05fr 0.95fr 1fr;
+      gap: 1rem;
+      margin: 1.5rem 0 0.5rem;
+    }
+    .cards.consumers { grid-template-columns: 0.95fr 1.05fr 0.85fr 0.9fr; }
+    .card {
+      background: #ffffff;
+      border: 1px solid rgba(45,49,66,0.12);
+      border-radius: 6px;
+      padding: 1.1rem 1.25rem;
+    }
+    .card .eyebrow { margin-bottom: 0.6rem; }
+    .card-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+    .card-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .card-dot.accent { background: var(--color-accent); }
+    .card-dot.muted { background: var(--color-muted); }
+    .card-dot.soft { background: #7a8399; }
+    .card h3 {
+      font-family: var(--font-sans); font-size: 0.92rem; font-weight: 600;
+      color: var(--color-ink);
+    }
+    .card ul { padding-left: 1.05rem; }
+    .card li {
+      font-size: 0.81rem; color: var(--color-muted); line-height: 1.5;
+      margin-bottom: 0.35rem;
+    }
+    .card li:last-child { margin-bottom: 0; }
+    .card li b { color: var(--color-ink); font-weight: 600; }
+    .card p.stat {
+      font-family: var(--font-mono); font-size: 1.6rem; font-weight: 600;
+      color: var(--color-ink); line-height: 1; margin-bottom: 0.25rem;
+    }
+    .card p.stat-sub { font-size: 0.78rem; color: var(--color-muted); margin-bottom: 0.75rem; }
+    code { font-family: var(--font-mono); font-size: 0.85em; }
+
+    /* ---- tool census table ---- */
+    .census-legend {
+      display: flex; flex-wrap: wrap; gap: 1.25rem;
+      font-family: var(--font-mono); font-size: 0.72rem; color: var(--color-muted);
+      margin-bottom: 0.75rem;
+    }
+    .census-legend span.tag {
+      display: inline-block; padding: 0.05rem 0.4rem; border-radius: 3px;
+      border: 1px solid rgba(45,49,66,0.25); margin-right: 0.35rem;
+    }
+    table.census {
+      width: 100%; border-collapse: collapse; font-size: 0.8rem;
+      margin-bottom: 1.75rem;
+    }
+    table.census caption {
+      text-align: left; font-family: var(--font-mono); font-size: 0.68rem;
+      letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+    table.census th {
+      text-align: left; font-family: var(--font-mono); font-size: 0.68rem;
+      letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-muted);
+      font-weight: 500; border-bottom: 1px solid rgba(45,49,66,0.18);
+      padding: 0.4rem 0.6rem;
+    }
+    table.census td {
+      padding: 0.36rem 0.6rem; border-bottom: 1px solid rgba(45,49,66,0.07);
+      vertical-align: top;
+    }
+    table.census td.name { font-family: var(--font-mono); font-size: 0.78rem; white-space: nowrap; }
+    table.census tr.fam-head td {
+      font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.08em;
+      text-transform: uppercase; color: var(--color-muted); background: rgba(45,49,66,0.03);
+      border-bottom: 1px solid rgba(45,49,66,0.1); padding-top: 0.55rem;
+    }
+    .badge {
+      display: inline-block; font-family: var(--font-mono); font-size: 0.66rem;
+      letter-spacing: 0.04em; padding: 0.04rem 0.36rem; border-radius: 3px;
+      border: 1px solid rgba(45,49,66,0.3); color: var(--color-muted);
+      white-space: nowrap;
+    }
+    .badge.ro { border-color: rgba(45,49,66,0.3); color: var(--color-muted); }
+    .badge.ap { border-color: var(--color-accent); color: var(--color-accent); }
+    .badge.es { border-color: #2e5aa8; color: #2e5aa8; }
+    .badge.dev { border-color: rgba(45,49,66,0.2); color: rgba(45,49,66,0.55); }
+    .colophon {
+      margin-top: 2rem; padding-top: 1rem; border-top: 1px solid rgba(45,49,66,0.10);
+      font-family: var(--font-mono); font-size: 0.7rem; color: var(--color-muted);
+    }
+    a { color: var(--color-accent); }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">ios-xr-nettools · MCP anatomy</p>
+    <h1>Between a model naming a tool and a device seeing a command</h1>
+    <p class="standfirst">The MCP server (<code>nettools-mcp</code>) is one process with two public shapes — a 37-tool <b>classic</b> compatibility surface and a 6-tool <b>staged</b> surface built for a local model — chosen once at startup and never per-call. Every tool, on either surface, is registered through the same wrapper: it is what applies sanitisation, the inventory gate, the evidence gate, and the active-probe/external-source gates, before the tool's own body ever runs. This page draws that wrapper once, then censuses everything it wraps.</p>
+
+    <svg viewBox="0 0 1280 640" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="mcp-anatomy-title mcp-anatomy-desc">
+      <title id="mcp-anatomy-title">Anatomy of the ios-xr-nettools MCP server</title>
+      <desc id="mcp-anatomy-desc">Architecture diagram of the MCP server's registration wrapper: a client selects a surface at startup through a fail-closed profile lookup, every call then passes an inventory gate and an evidence-freshness gate plus an active-probe and an external-source gate inside one registration wrapper, before the tool function runs against a device or an external store and the result returns through registration-time sanitisation, with a separate merge-time manifest-parity check called out as not part of this runtime path.</desc>
+
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/>
+        </marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/>
+        </marker>
+        <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/>
+        </marker>
+      </defs>
+
+      <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+      <!-- ============ ZONE (bg, before arrows/nodes) ============ -->
+      <rect x="432" y="108" width="352" height="112" rx="8"
+            fill="rgba(235,108,54,0.05)" stroke="rgba(235,108,54,0.50)" stroke-width="1" stroke-dasharray="4,4"/>
+      <rect x="452" y="112" width="216" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="560" y="121" fill="rgba(235,108,54,0.75)" font-size="7" font-family="'Geist Mono', monospace"
+            text-anchor="middle" letter-spacing="0.12em">REGISTRATION WRAPPER</text>
+
+      <!-- ============ ARROWS (before nodes) ============ -->
+      <!-- Forward path: one row, same y -->
+      <line x1="220" y1="172" x2="248" y2="172" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <line x1="408" y1="172" x2="448" y2="172" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <line x1="600" y1="172" x2="616" y2="172" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <line x1="768" y1="172" x2="812" y2="172" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <line x1="952" y1="172" x2="980" y2="172" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <!-- Return path 1: device/external -> egress sanitize (dashed) -->
+      <path d="M 1050 204 V 396 Q 1050 404 1042 404 H 756"
+            fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+      <rect x="867" y="384" width="72" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="903" y="393" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace"
+            text-anchor="middle" letter-spacing="0.05em">RAW RESULT</text>
+
+      <!-- Return path 2: egress sanitize -> client (dashed) -->
+      <path d="M 606 372 V 280 Q 606 272 598 272 H 158 Q 150 272 150 264 V 204"
+            fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+      <rect x="330" y="252" width="64" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="362" y="261" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace"
+            text-anchor="middle" letter-spacing="0.05em">SANITIZED</text>
+
+      <!-- Forbidden path 1: object gates refuse -->
+      <path d="M 524 204 V 244" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3"/>
+      <line x1="512" y1="244" x2="536" y2="244" stroke="#4f5d75" stroke-width="1.4"/>
+      <rect x="536" y="222" width="52" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="562" y="231" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace"
+            text-anchor="middle" letter-spacing="0.05em">REFUSED</text>
+
+      <!-- Forbidden path 2: traffic gates refuse -->
+      <path d="M 692 204 V 244" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3"/>
+      <line x1="680" y1="244" x2="704" y2="244" stroke="#4f5d75" stroke-width="1.4"/>
+      <rect x="704" y="222" width="52" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="730" y="231" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace"
+            text-anchor="middle" letter-spacing="0.05em">REFUSED</text>
+
+      <!-- ============ ANNOTATION CALLOUT (merge-time gate, not this path) ============ -->
+      <text x="588" y="28" fill="#2d3142" font-size="14" font-style="italic"
+            font-family="'Instrument Serif', serif" text-anchor="middle">manifest parity is checked at merge</text>
+      <text x="588" y="44" fill="#2d3142" font-size="14" font-style="italic"
+            font-family="'Instrument Serif', serif" text-anchor="middle">&mdash; never a hop on this path</text>
+      <path d="M 588 50 Q 588 78 588 104" fill="none" stroke="rgba(45,49,66,0.40)" stroke-width="1" stroke-dasharray="4,3"/>
+      <circle cx="588" cy="106" r="2" fill="#2d3142"/>
+
+      <!-- ============ NODES ============ -->
+      <!-- 1. MCP client (input) -->
+      <rect x="80" y="140" width="140" height="64" rx="6" fill="#f5f5f5"/>
+      <rect x="80" y="140" width="140" height="64" rx="6" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/>
+      <rect x="88" y="148" width="28" height="12" rx="2" fill="transparent" stroke="rgba(122,131,153,0.40)" stroke-width="0.8"/>
+      <text x="102" y="157" fill="#7a8399" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">MCP</text>
+      <text x="150" y="176" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">MCP client</text>
+      <text x="150" y="192" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">LM Studio &middot; loop &middot; CLI</text>
+
+      <!-- 2. Entry + surface select (FOCAL) -->
+      <rect x="248" y="140" width="160" height="64" rx="6" fill="#f5f5f5"/>
+      <rect x="248" y="140" width="160" height="64" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1.2"/>
+      <rect x="256" y="148" width="28" height="12" rx="2" fill="transparent" stroke="rgba(235,108,54,0.50)" stroke-width="0.8"/>
+      <text x="270" y="157" fill="#eb6c36" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">SVC</text>
+      <text x="328" y="176" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Entry &amp; surface</text>
+      <text x="328" y="192" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">profile_for() &middot; fail-closed</text>
+
+      <!-- 3a. Object gates (L1 inventory + L3 evidence) -->
+      <rect x="448" y="140" width="152" height="64" rx="6" fill="#f5f5f5"/>
+      <rect x="448" y="140" width="152" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="456" y="148" width="32" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="472" y="157" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">L1+L3</text>
+      <text x="524" y="176" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Object gates</text>
+      <text x="524" y="192" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">inventory + epoch_valid</text>
+
+      <!-- 3b. Traffic gates (active-probe / external-source) -->
+      <rect x="616" y="140" width="152" height="64" rx="6" fill="#f5f5f5"/>
+      <rect x="616" y="140" width="152" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="624" y="148" width="32" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="640" y="157" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">GATE</text>
+      <text x="692" y="176" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Traffic gates</text>
+      <text x="692" y="192" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">probe off &middot; external on</text>
+
+      <!-- 4. Tool function -->
+      <rect x="812" y="140" width="140" height="64" rx="6" fill="#f5f5f5"/>
+      <rect x="812" y="140" width="140" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="820" y="148" width="24" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="832" y="157" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">FN</text>
+      <text x="882" y="176" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Tool function</text>
+      <text x="882" y="192" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">37 classic / 6 staged</text>
+
+      <!-- 5. Device / external (external) -->
+      <rect x="980" y="140" width="140" height="64" rx="6" fill="#f5f5f5"/>
+      <rect x="980" y="140" width="140" height="64" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+      <rect x="988" y="148" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.22)" stroke-width="0.8"/>
+      <text x="1002" y="157" fill="#7a8399" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">EXT</text>
+      <text x="1050" y="176" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Device / external</text>
+      <text x="1050" y="192" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">SSH &middot; Loki &middot; Prom &middot; Neo4j</text>
+
+      <!-- 6. Egress sanitize (FOCAL) -->
+      <rect x="456" y="372" width="300" height="64" rx="6" fill="#f5f5f5"/>
+      <rect x="456" y="372" width="300" height="64" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1.2"/>
+      <rect x="464" y="380" width="24" height="12" rx="2" fill="transparent" stroke="rgba(235,108,54,0.50)" stroke-width="0.8"/>
+      <text x="476" y="389" fill="#eb6c36" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">FN</text>
+      <text x="606" y="408" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Egress sanitize</text>
+      <text x="606" y="424" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">boundary.sanitize() &middot; registration-time</text>
+
+      <!-- ============ LEGEND ============ -->
+      <line x1="40" y1="552" x2="1240" y2="552" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+      <text x="40" y="568" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.18em">LEGEND</text>
+
+      <rect x="40" y="584" width="14" height="10" rx="2" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1.2"/>
+      <text x="60" y="592" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Focal enforcement point</text>
+
+      <rect x="272" y="584" width="14" height="10" rx="2" fill="rgba(235,108,54,0.05)" stroke="rgba(235,108,54,0.50)" stroke-width="1" stroke-dasharray="3,2"/>
+      <text x="292" y="592" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Registration wrapper</text>
+
+      <line x1="470" y1="589" x2="498" y2="589" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <text x="506" y="592" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Call path</text>
+
+      <line x1="628" y1="589" x2="656" y2="589" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+      <text x="664" y="592" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Return (sanitized)</text>
+
+      <line x1="856" y1="589" x2="876" y2="589" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3"/>
+      <line x1="876" y1="589" x2="876" y2="583" stroke="#4f5d75" stroke-width="1.4"/>
+      <text x="888" y="592" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Refused (forbidden)</text>
+    </svg>
+
+    <div class="cards">
+      <div class="card">
+        <p class="eyebrow">FAIL-CLOSED, STARTUP-ONLY</p>
+        <div class="card-header"><span class="card-dot accent"></span><h3>Two names, one policy</h3></div>
+        <ul>
+          <li><code>mcp_profiles.profile_for()</code> resolves <code>NETTOOLS_MCP_SURFACE</code>: unset defaults to <code>classic</code> (compatibility), any recognised value passes through, and any other, unrecognised value fails closed to <code>staged</code> &mdash; the narrower surface, never the wider one.</li>
+          <li>No third profile exists at runtime. <code>GUIDED_TOOL_NAMES</code>/<code>GUIDED_CAPABILITIES</code> is <code>staged</code>'s own internal name (<code>label="guided"</code>) for the same six tools, not a separate offering.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <p class="eyebrow">B-703, ALL THREE LAYERS</p>
+        <div class="card-header"><span class="card-dot accent"></span><h3>The registration gates</h3></div>
+        <ul>
+          <li><b>L1 inventory</b> &mdash; any <code>device_name</code> not in <code>lab.yaml</code> is refused before platform, credentials, or a socket resolve.</li>
+          <li><b>L3 evidence</b> &mdash; for asserted-object tools, <code>mcp_epoch_validation.validate_asserted_object()</code> checks <code>evidence_cache.EvidenceCache</code> (10s TTL, 0 = always-live).</li>
+          <li><b>Manifest parity</b> &mdash; a CI test, not a gate a request passes through: it fails the build if the staged registry, <code>PIN_TABLE</code>, and the event loop's offline schema disagree.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <p class="eyebrow">B-473 / B-512, DEFAULT-OPPOSITE</p>
+        <div class="card-header"><span class="card-dot muted"></span><h3>The two traffic gates</h3></div>
+        <ul>
+          <li><b>Active probes</b> (<code>get_lab_ping</code>/<code>traceroute</code>/<code>probe_lab</code>) &mdash; <code>NETTOOLS_MCP_ALLOW_ACTIVE_PROBES</code>, default <b>off</b>. A model firing an unprompted probe was measured live.</li>
+          <li><b>External sources</b> (Loki/Prometheus/NetBox/graph, 8 tools) &mdash; <code>NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES</code>, default <b>on</b>. No caller-chosen destination, so no SSRF-shaped risk.</li>
+        </ul>
+      </div>
+    </div>
+
+    <h2>Who consumes which surface</h2>
+    <p class="lede">Four callers spawn or connect to <code>nettools-mcp</code>, and none of them gets the server's ambient environment by accident &mdash; each chooses, or has chosen for it, exactly what it needs.</p>
+    <div class="cards consumers">
+      <div class="card">
+        <p class="eyebrow">HUMAN-DRIVEN</p>
+        <div class="card-header"><span class="card-dot soft"></span><h3>LM Studio</h3></div>
+        <ul>
+          <li>Reads the operator's own <code>.env</code>. <code>staged</code> is the recommended profile for a local model; <code>classic</code> (37 tools) is the compatibility default until the surface-level A/B lands.</li>
+          <li>Active probes and external sources follow whatever the operator set for the CLI/MCP more broadly &mdash; nothing forces them here.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <p class="eyebrow">UNATTENDED</p>
+        <div class="card-header"><span class="card-dot accent"></span><h3>Event loop</h3></div>
+        <ul>
+          <li><code>child_server_env()</code> spawns the child with three values forced regardless of the operator's own <code>.env</code>: <code>NETTOOLS_MCP_SURFACE=staged</code>, <code>NETTOOLS_MCP_ALLOW_ACTIVE_PROBES=0</code>, <code>NETTOOLS_MCP_ALLOW_EXTERNAL_SOURCES=1</code>.</li>
+          <li>Of the 6 staged tools, only <b>4</b> are ever offered to the model: <code>explore_lab</code>, <code>check_lab</code>, <code>investigate_lab</code>, <code>history_lab</code>. <code>lookup_lab</code> has no safe pin schema; <code>probe_lab</code> is pinnable but deliberately withheld &mdash; a model fired it unprompted once, and this is the second, structural layer that makes that unreachable even if the first (the forced env above) ever failed.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <p class="eyebrow">DIAGNOSTIC</p>
+        <div class="card-header"><span class="card-dot soft"></span><h3>CLI inspect</h3></div>
+        <ul>
+          <li><code>nettools inspect</code> forwards the operator's environment verbatim &mdash; no <code>env_overrides</code> &mdash; and calls classic-surface tools by name (<code>list_lab_devices</code>, <code>check_lab_bgp_neighbors</code>), so it assumes <code>classic</code> is active.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <p class="eyebrow">REMOTE, TUNNELED &middot; NEW</p>
+        <div class="card-header"><span class="card-dot accent"></span><h3>nettools-mcp (HTTP)</h3></div>
+        <ul>
+          <li>A bearer-token-authenticated <code>streamable-http</code> transport (<code>mcp_server/http_api.py</code>), containerized and bound to loopback (<code>127.0.0.1:8000</code>) for an SSH-tunneled client off-host.</li>
+          <li>No <code>NETTOOLS_MCP_SURFACE</code> is forced in its Compose environment, so it defaults to <code>classic</code> &mdash; the same 37-tool surface and registration wrapper as any other classic caller.</li>
+        </ul>
+      </div>
+    </div>
+
+    <h2>The tool census</h2>
+    <p class="lede">All 37 classic tools, read from <code>mcp_server/server.py</code>'s own decorators, plus the 6 staged tools from <code>mcp_server/staged_surface.py</code>. <code>device_name</code> marks a tool the L1/L3 gates above actually run against.</p>
+
+    <div class="census-legend">
+      <span><span class="badge ro">RO</span>read-only &middot; 27</span>
+      <span><span class="badge ap">AP</span>active-probe &middot; 2</span>
+      <span><span class="badge es">ES</span>external-source &middot; 8</span>
+      <span><span class="badge dev">device_name</span>26 of 37 take it</span>
+    </div>
+
+    <table class="census">
+      <caption>Classic surface &middot; 37 tools &middot; mcp_server/server.py</caption>
+      <thead><tr><th>Tool</th><th>Class</th><th>device_name</th></tr></thead>
+      <tbody>
+        <tr class="fam-head"><td colspan="3">Orient &amp; facts</td></tr>
+        <tr><td class="name">list_lab_devices</td><td><span class="badge ro">RO</span></td><td></td></tr>
+        <tr><td class="name">get_lab_device_facts</td><td><span class="badge ro">RO</span></td><td><span class="badge dev">&bull;</span></td></tr>
+
+        <tr class="fam-head"><td colspan="3">Protocol checks</td></tr>
+        <tr><td class="name">check_lab_interfaces</td><td><span class="badge ro">RO</span></td><td><span class="badge dev">&bull;</span></td></tr>
+        <tr><td class="name">check_lab_bgp_neighbors</td><td><span class="badge ro">RO</span></td><td><span class="badge dev">&bull;</span></td></tr>
+        <tr><td class="name">check_lab_bgp_vpnv4_neighbors</td><td><span class="badge ro">RO</span></td><td><span class="badge dev">&bull;</span></td></tr>
+        <tr><td class="name">check_lab_lldp_neighbors</td><td><span class="badge ro">RO</span></td><td><span class="badge dev">&bull;</span></td></tr>
+        <tr><td class="name">check_lab_isis_neighbors</td><td><span class="badge ro">RO</span></td><td><span class="badge dev">&bull;</span></td></tr>
+        <tr><td class="name">check_lab_ldp_neighbors</td><td><span class="badge ro">RO</span></td><td><span class="badge dev">&bull;</span></td></tr>
+        <tr><td class="name">check_lab_ldp_discovery</td><td><span class="badge ro">RO</span></td><td><span class="badge dev">&bull;</span></td></tr>
+        <tr><td class="name">check_lab_sr_policies</td><td><span class="badge ro">RO</span></td><td><span class="badge dev">&bull;</span></td></tr>
+        <tr><td class="name">check_lab_fabric</td><td><span class="badge ro">RO</span></td><td></td></tr>
+
+        <tr class="fam-head"><td colspan="3">get_* lookups &amp; detail</td></tr>
+        <tr><td class="name">get_lab_sr_policy_detail</td><td><span class="badge ro">RO</span></td><td><span class="badge dev">&bull;</span></td></tr>
+        <tr><td class="name">get_lab_route</td><td><span class="badge ro">RO</span></td><td><span class="badge dev">&bull;</span></td></tr>
+        <tr><td class="name">get_lab_bgp_neighbor</td><td><span class="badge ro">RO</span></td><td><span class="badge dev">&bull;</span></td></tr>
+        <tr><td class="name">get_lab_interface</td><td><span class="badge ro">RO</span></td><td><span class="badge dev">&bull;</span></td></tr>
+        <tr><td class="name">get_lab_logging</td><td><span class="badge ro">RO</span></td><td><span class="badge dev">&bull;</span></td></tr>
+
+        <tr class="fam-head"><td colspan="3">Active probes</td></tr>
+        <tr><td class="name">get_lab_ping</td><td><span class="badge ap">AP</span></td><td><span class="badge dev">&bull;</span></td></tr>
+        <tr><td class="name">get_lab_traceroute</td><td><span class="badge ap">AP</span></td><td><span class="badge dev">&bull;</span></td></tr>
+
+        <tr class="fam-head"><td colspan="3">Diff, history &amp; health</td></tr>
+        <tr><td class="name">diff_lab_device_against_latest</td><td><span class="badge ro">RO</span></td><td><span class="badge dev">&bull;</span></td></tr>
+        <tr><td class="name">diff_lab_device_against_golden</td><td><span class="badge ro">RO</span></td><td><span class="badge dev">&bull;</span></td></tr>
+        <tr><td class="name">detect_lab_flaps</td><td><span class="badge ro">RO</span></td><td><span class="badge dev">&bull;</span></td></tr>
+        <tr><td class="name">assess_lab_device_health</td><td><span class="badge ro">RO</span></td><td><span class="badge dev">&bull;</span></td></tr>
+        <tr><td class="name">assess_lab_fabric_health</td><td><span class="badge ro">RO</span></td><td></td></tr>
+
+        <tr class="fam-head"><td colspan="3">Evidence, session &amp; knowledge</td></tr>
+        <tr><td class="name">collect_lab_evidence</td><td><span class="badge ro">RO</span></td><td><span class="badge dev">&bull;</span></td></tr>
+        <tr><td class="name">investigate_lab_session</td><td><span class="badge ro">RO</span></td><td></td></tr>
+        <tr><td class="name">search_lab_knowledge</td><td><span class="badge ro">RO</span></td><td></td></tr>
+        <tr><td class="name">explain_lab_mnemonic</td><td><span class="badge ro">RO</span></td><td></td></tr>
+
+        <tr class="fam-head"><td colspan="3">Tickets</td></tr>
+        <tr><td class="name">list_lab_tickets</td><td><span class="badge ro">RO</span></td><td></td></tr>
+        <tr><td class="name">read_lab_ticket</td><td><span class="badge ro">RO</span></td><td></td></tr>
+
+        <tr class="fam-head"><td colspan="3">External sources &mdash; Prometheus (4), Loki (1), NetBox (2), graph (1)</td></tr>
+        <tr><td class="name">get_lab_interface_rate_history</td><td><span class="badge es">ES</span></td><td><span class="badge dev">&bull;</span></td></tr>
+        <tr><td class="name">get_lab_isis_adjacency_history</td><td><span class="badge es">ES</span></td><td><span class="badge dev">&bull;</span></td></tr>
+        <tr><td class="name">get_lab_ldp_session_history</td><td><span class="badge es">ES</span></td><td><span class="badge dev">&bull;</span></td></tr>
+        <tr><td class="name">get_lab_device_uptime_history</td><td><span class="badge es">ES</span></td><td><span class="badge dev">&bull;</span></td></tr>
+        <tr><td class="name">get_lab_logs</td><td><span class="badge es">ES</span></td><td><span class="badge dev">&bull;</span></td></tr>
+        <tr><td class="name">get_lab_netbox_inventory</td><td><span class="badge es">ES</span></td><td></td></tr>
+        <tr><td class="name">get_lab_netbox_topology</td><td><span class="badge es">ES</span></td><td></td></tr>
+        <tr><td class="name">get_lab_graph_topology</td><td><span class="badge es">ES</span></td><td></td></tr>
+      </tbody>
+    </table>
+
+    <table class="census">
+      <caption>Staged surface &middot; 6 tools &middot; mcp_server/staged_surface.py</caption>
+      <thead><tr><th>Tool</th><th>Registration</th><th>Offered to the event loop</th></tr></thead>
+      <tbody>
+        <tr><td class="name">explore_lab</td><td><span class="badge ro">RO</span></td><td>yes &mdash; device_name pinned</td></tr>
+        <tr><td class="name">check_lab</td><td><span class="badge ro">RO</span></td><td>yes &mdash; scope pinned, intent enumerated</td></tr>
+        <tr><td class="name">lookup_lab</td><td><span class="badge ro">RO</span></td><td>no &mdash; structurally excluded (no safe pin for <code>value</code>)</td></tr>
+        <tr><td class="name">investigate_lab</td><td><span class="badge ro">RO</span></td><td>yes &mdash; device_name, subject, flow all pinned</td></tr>
+        <tr><td class="name">history_lab</td><td><span class="badge ro">RO</span></td><td>yes &mdash; device_name pinned, mode enumerated</td></tr>
+        <tr><td class="name">probe_lab</td><td><span class="badge ap">AP</span></td><td>no &mdash; pinnable, but deliberately withheld (OBS-701)</td></tr>
+      </tbody>
+    </table>
+
+    <p class="colophon">Hand-authored with the diagram-design skill · derived from a live MCP server spawn and the tree, 2026-08-27 · <a href="index.html">back to the diagram index</a></p>
+  </div>
+</body>
+</html>

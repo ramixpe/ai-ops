@@ -55,23 +55,43 @@ different fact from ``"unknown"`` and the two are never conflated.
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable
 
 from .inventory_model import load_inventory_file
-from .template_parsers import _LOG_ENTRY  # the one syslog line format, defined once
+from .iosxr_syslog import match_iosxr_syslog_line
 
 __all__ = [
     "MNEMONIC_FLOW_TABLE",
     "ALERTNAME_FLOW_TABLE",
+    "EventEnvelope",
     "RoutingDecision",
     "route_alertmanager",
     "route_event",
+    "route_loki_record",
     "route_syslog_line",
 ]
+
+
+@dataclass(frozen=True)
+class EventEnvelope:
+    """One normalized IOS-XR event before routing.
+
+    Loki owns parsing its wire shape. Direct syslog input is normalized through
+    the same fields before it reaches the routing decision core, so neither
+    path can quietly develop separate mnemonic/transition behavior.
+    """
+
+    source_kind: str
+    raw_event: str
+    mnemonic: str | None
+    text: str | None
+    device_time: str | None = None
+    ingest_time: str | None = None
 
 
 @dataclass(frozen=True)
@@ -97,6 +117,36 @@ class RoutingDecision:
     #: exactly the silent-absence shape this project's `unevaluated`/
     #: `Coverage.gaps()` discipline exists to rule out elsewhere.
     transition: str | None = None
+    #: The literal syslog line that produced this decision, when one exists.
+    #: Device-authored text is retained for ticket provenance only; it is not
+    #: an authority for routing and event_agent never adds it to model input.
+    raw_event: str | None = None
+    #: Epoch nanoseconds when this decision came from a parsed Loki record.
+    #: Direct syslog receiver events have no equivalent source timestamp.
+    ingest_timestamp_ns: str | None = None
+
+    @property
+    def event_id(self) -> str:
+        """Stable identity for this event's routing/ticket/relay lifecycle."""
+
+        raw_event = self.raw_event or ""
+        parsed = match_iosxr_syslog_line(raw_event.strip())
+        if parsed is not None:
+            raw_event = "\x1e".join(
+                parsed[name] or ""
+                for name in ("node", "timestamp", "process", "pid", "mnemonic", "text")
+            )
+        material = "\x1f".join(
+            str(value or "")
+            for value in (
+                self.device,
+                self.matched,
+                self.transition,
+                self.subject,
+                raw_event,
+            )
+        )
+        return hashlib.sha256(material.encode("utf-8")).hexdigest()[:24]
 
     def suggested_command(self) -> list[str] | None:
         """The exact ``nettools`` argv this decision suggests, or ``None``.
@@ -114,13 +164,19 @@ class RoutingDecision:
                 "--flow", str(self.flow)]
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "routable": self.routable, "flow": self.flow, "device": self.device,
             "subject": self.subject, "reason": self.reason,
             "source_kind": self.source_kind, "matched": self.matched,
             "transition": self.transition,
+            "event_id": self.event_id,
             "suggested_command": self.suggested_command(),
         }
+        if self.raw_event is not None:
+            payload["raw_event"] = self.raw_event
+        if self.ingest_timestamp_ns is not None:
+            payload["ingest_timestamp_ns"] = self.ingest_timestamp_ns
+        return payload
 
 
 # --------------------------------------------------------------------------- #
@@ -287,31 +343,94 @@ def _validated_device(name: str | None, *, source_kind: str) -> tuple[str | None
     return name, None
 
 
+def _route_iosxr_envelope(envelope: EventEnvelope, *, device: str | None) -> RoutingDecision:
+    """Apply the one IOS-XR routing policy to already-parsed event fields."""
+
+    if envelope.mnemonic is None or envelope.text is None:
+        return RoutingDecision(
+            routable=False, source_kind=envelope.source_kind,
+            reason="not an IOS-XR log line this fabric's parser recognises",
+            raw_event=envelope.raw_event,
+        )
+
+    entry = next((entry for entry in MNEMONIC_FLOW_TABLE if entry[0] == envelope.mnemonic), None)
+    if entry is None:
+        return RoutingDecision(
+            routable=False, source_kind=envelope.source_kind, matched=envelope.mnemonic,
+            reason=f"mnemonic {envelope.mnemonic!r} is not in MNEMONIC_FLOW_TABLE — "
+                   "deliberately unrouted, not unrecognised",
+            raw_event=envelope.raw_event,
+        )
+
+    _, flow, extract = entry
+    transition = _transition_for(envelope.mnemonic, envelope.text)
+    resolved, problem = _validated_device(device, source_kind=envelope.source_kind)
+    if problem:
+        return RoutingDecision(
+            routable=False, source_kind=envelope.source_kind, matched=envelope.mnemonic,
+            flow=flow, reason=problem, transition=transition, raw_event=envelope.raw_event,
+        )
+
+    subject = extract(envelope.text)
+    if subject is None:
+        return RoutingDecision(
+            routable=False, source_kind=envelope.source_kind, matched=envelope.mnemonic,
+            flow=flow, device=resolved, transition=transition,
+            reason="no valid subject could be extracted from the message text "
+                   "(a subject that does not parse is not a subject)",
+            raw_event=envelope.raw_event,
+        )
+    if transition == "up":
+        return RoutingDecision(
+            routable=False, flow=flow, device=resolved, subject=subject,
+            source_kind=envelope.source_kind, matched=envelope.mnemonic, transition=transition,
+            reason=f"{envelope.mnemonic} is a recovery (transition=up), not a fault — "
+                   "deliberately not routed for investigation (B-711: "
+                   "investigating a recovery spends the window on nothing)",
+            raw_event=envelope.raw_event,
+        )
+    if transition == "unknown":
+        return RoutingDecision(
+            routable=False, flow=flow, device=resolved, subject=subject,
+            source_kind=envelope.source_kind, matched=envelope.mnemonic, transition=transition,
+            reason=f"{envelope.mnemonic} has a direction concept but it could not be "
+                   "determined from this message text — refusing rather "
+                   "than guessing whether this is a fault or a recovery",
+            raw_event=envelope.raw_event,
+        )
+    return RoutingDecision(
+        routable=True, flow=flow, device=resolved, subject=subject,
+        source_kind=envelope.source_kind, matched=envelope.mnemonic, transition=transition,
+        reason=f"{envelope.mnemonic} routes to the {flow} flow",
+        raw_event=envelope.raw_event,
+    )
+
+
+def route_loki_record(record: dict[str, Any], *, device: str | None) -> RoutingDecision:
+    """Route a record already parsed by :mod:`logs_loki`, without re-parsing it."""
+
+    raw_event = record.get("raw_event")
+    ingest_timestamp_ns = record.get("ingest_timestamp_ns")
+    decision = _route_iosxr_envelope(
+        EventEnvelope(
+            source_kind="loki",
+            raw_event=raw_event if isinstance(raw_event, str) else "",
+            mnemonic=record.get("mnemonic") if isinstance(record.get("mnemonic"), str) else None,
+            text=record.get("text") if isinstance(record.get("text"), str) else None,
+            device_time=record.get("timestamp") if isinstance(record.get("timestamp"), str) else None,
+            ingest_time=record.get("ingest_timestamp_ns") if isinstance(record.get("ingest_timestamp_ns"), str) else None,
+        ),
+        device=device,
+    )
+    return replace(
+        decision,
+        ingest_timestamp_ns=ingest_timestamp_ns if isinstance(ingest_timestamp_ns, str) else None,
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Routers.
 # --------------------------------------------------------------------------- #
-
-#: syslog-ng prepends the sending host before the ``RP/0/RP0/CPU0:`` node
-#: token that `template_parsers._LOG_ENTRY` (built for ``show logging``
-#: output, which has no such prefix) starts at. This is transport framing,
-#: not part of the log line format itself, so it is stripped *here* rather
-#: than by widening the shared parser -- `logs_loki.py`'s `_LOKI_LOG_LINE`
-#: already carries the equivalent ``^(?P<host>\S+)\s+RP/0/RP0/CPU0:`` shape;
-#: this constant deliberately mirrors it rather than defining a third,
-#: possibly-drifting version of the same fact.
-#:
-#: Deliberately conservative: anchored at the *start* of the (already
-#: ``.strip()``-ed) line, and ``\S+`` cannot itself match the whitespace that
-#: separates it from ``RP/0/RP0/CPU0:`` -- so this can only ever consume a
-#: single leading whitespace-delimited token immediately followed by that
-#: literal marker. It does not scan forward for ``RP/0/RP0/CPU0:`` anywhere
-#: in the string: a line with junk between a host-shaped token and the
-#: marker (``"PE2 stray RP/0/RP0/CPU0:..."``) does not match here, is passed
-#: through unstripped, and then correctly fails `_LOG_ENTRY` below --
-#: genuinely malformed input still refuses rather than being "rescued" by
-#: skipping ahead to the first recognisable marker.
-_SYSLOG_HOST_PREFIX = re.compile(r"^(?P<host>\S+)\s+(?=RP/0/RP0/CPU0:)")
-
 
 def route_syslog_line(line: str, *, device: str | None = None) -> RoutingDecision:
     """Route one raw IOS-XR syslog line -- either shape Loki actually stores.
@@ -322,8 +441,8 @@ def route_syslog_line(line: str, *, device: str | None = None) -> RoutingDecisio
     device-authored and, transitively, attacker-influenceable).
 
     A syslog-ng-forwarded line (as Loki stores it) carries an additional
-    leading host token before the ``show logging``-shaped body -- see
-    `_SYSLOG_HOST_PREFIX`. That token *is* parsed and, if present, is a
+    leading host token before the ``show logging``-shaped body. That token is
+    parsed by :mod:`iosxr_syslog` and, if present, is a
     genuine origin hostname; it is nonetheless never promoted to `device`.
     It is transport framing added by this fabric's own syslog-ng, not
     attacker-reachable message text, so the B-467 threat model does not
@@ -339,77 +458,20 @@ def route_syslog_line(line: str, *, device: str | None = None) -> RoutingDecisio
     transport metadata rather than trust either blindly), surface it as a new
     field then, deliberately, rather than silently here.
 
-    The line format is `template_parsers._LOG_ENTRY` — the one place the
-    ``show logging``/syslog-ng body format is defined; a second regex here
-    would drift from the parser the descent itself trusts. Only the leading
-    host token, if any, is handled outside it.
+    The line format is `iosxr_syslog.match_iosxr_syslog_line` — the one parser
+    used by device-buffer, Loki, and routing consumers.
     """
 
-    stripped = line.strip()
-    host_match = _SYSLOG_HOST_PREFIX.match(stripped)
-    body = stripped[host_match.end():] if host_match else stripped
-
-    match = _LOG_ENTRY.match(body)
-    if not match:
-        return RoutingDecision(
-            routable=False, source_kind="syslog",
-            reason="not an IOS-XR log line this fabric's parser recognises",
-        )
-
-    mnemonic = match["mnemonic"]
-    text = match["text"]
-
-    entry = next((e for e in MNEMONIC_FLOW_TABLE if e[0] == mnemonic), None)
-    if entry is None:
-        return RoutingDecision(
-            routable=False, source_kind="syslog", matched=mnemonic,
-            reason=f"mnemonic {mnemonic!r} is not in MNEMONIC_FLOW_TABLE — "
-                   "deliberately unrouted, not unrecognised",
-        )
-    _, flow, extract = entry
-    # Computed here, before device/subject resolution can short-circuit,
-    # so every decision returned from this point on -- routable or not --
-    # carries it. B-711's "absence is never zero": a human reading a refusal
-    # for an unknown device should still be able to see this was a Down (or
-    # an Up), not just that it was refused.
-    transition = _transition_for(mnemonic, text)
-
-    resolved, problem = _validated_device(device, source_kind="syslog")
-    if problem:
-        return RoutingDecision(routable=False, source_kind="syslog",
-                               matched=mnemonic, flow=flow, reason=problem,
-                               transition=transition)
-
-    subject = extract(text)
-    if subject is None:
-        return RoutingDecision(
-            routable=False, source_kind="syslog", matched=mnemonic, flow=flow,
-            device=resolved, transition=transition,
-            reason="no valid subject could be extracted from the message text "
-                   "(a subject that does not parse is not a subject)",
-        )
-
-    if transition == "up":
-        return RoutingDecision(
-            routable=False, flow=flow, device=resolved, subject=subject,
-            source_kind="syslog", matched=mnemonic, transition=transition,
-            reason=f"{mnemonic} is a recovery (transition=up), not a fault — "
-                   "deliberately not routed for investigation (B-711: "
-                   "investigating a recovery spends the window on nothing)",
-        )
-    if transition == "unknown":
-        return RoutingDecision(
-            routable=False, flow=flow, device=resolved, subject=subject,
-            source_kind="syslog", matched=mnemonic, transition=transition,
-            reason=f"{mnemonic} has a direction concept but it could not be "
-                   "determined from this message text — refusing rather "
-                   "than guessing whether this is a fault or a recovery",
-        )
-
-    return RoutingDecision(
-        routable=True, flow=flow, device=resolved, subject=subject,
-        source_kind="syslog", matched=mnemonic, transition=transition,
-        reason=f"{mnemonic} routes to the {flow} flow",
+    match = match_iosxr_syslog_line(line.strip())
+    return _route_iosxr_envelope(
+        EventEnvelope(
+            source_kind="syslog",
+            raw_event=line,
+            mnemonic=match["mnemonic"] if match else None,
+            text=match["text"] if match else None,
+            device_time=match["timestamp"] if match else None,
+        ),
+        device=device,
     )
 
 

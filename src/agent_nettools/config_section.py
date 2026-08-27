@@ -12,10 +12,10 @@ authentication, network type, or whether IS-IS is enabled on this interface
 at all." This module is what lets a human (B-105/B-106 later let a *model*)
 read that.
 
-Two templates only -- section set and why
+Three templates only -- section set and why
 -------------------------------------------
-`templates.py`'s `PLATFORM_TEMPLATES["cisco_xr"]` gained exactly two new
-entries, `config_isis` and `config_interface`. The LLD's illustrative table
+`templates.py`'s `PLATFORM_TEMPLATES["cisco_xr"]` contains the bounded
+entries `config_isis`, `config_interface`, and `config_ldp`. The LLD's illustrative table
 (`docs/design/lld-investigation-layer.md` S5.5) also lists `config_bgp` and
 `config_bgp_neighbor`; they are deliberately NOT added here.
 
@@ -39,6 +39,12 @@ entries, `config_isis` and `config_interface`. The LLD's illustrative table
   The status-side `interface` template already answers "is it down"; only
   the config side answers "was it put there on purpose" (`shutdown`) versus
   a real fault -- the observed-vs-intended distinction D16 exists to build.
+
+* **`config_ldp`** (`show running-config mpls ldp`, no parameter) answers the
+    LDP acceptance gap directly: when an up interface has neither discovery nor
+    a session, the flow can distinguish a deliberately absent LDP interface
+    stanza from a configured interface whose LDP control plane is silent. Its
+    parser retains only the configured interface names.
 
 **`config_bgp`/`config_bgp_neighbor` refused for now.** `bgp_session`'s own
 unexplained finding (`peer_idle_transport_blocked` -- "an ACL, a
@@ -124,11 +130,13 @@ from .template_parsers import (
 
 __all__ = [
     "CONFIG_INTERFACE_IGNORES",
+    "CONFIG_LDP_IGNORES",
     "CONFIG_ISIS_IGNORES",
     "CONFIG_RECORD_KEYS",
     "CONFIG_TEMPLATE_PARSERS",
     "CONFIG_VOLATILE_FIELDS",
     "parse_xr_config_interface",
+    "parse_xr_config_ldp",
     "parse_xr_config_isis",
 ]
 
@@ -432,6 +440,45 @@ def parse_xr_config_interface(output: str) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
+# config_ldp
+# --------------------------------------------------------------------------- #
+
+CONFIG_LDP_IGNORES: tuple[IgnoreRule, ...] = (
+    IgnoreRule(r"^address-family (ipv4|ipv6)$", "address-family grouping", IgnoreKind.NOT_NEEDED_YET),
+    IgnoreRule(r"^!$", "block-end marker", IgnoreKind.NO_EXTRACTABLE_FIELD),
+)
+
+
+def parse_xr_config_ldp(output: str) -> dict[str, Any]:
+    """Parse `show running-config mpls ldp` into configured interface records."""
+
+    records: list[dict[str, str]] = []
+    consumed: list[str] = []
+    found_header = False
+
+    for raw_line in _nonblank_lines(output):
+        stripped = raw_line.strip()
+        if stripped == "mpls ldp":
+            found_header = True
+            consumed.append(stripped)
+            continue
+        if found_header and stripped.startswith("interface "):
+            records.append({"interface": stripped[len("interface "):].strip()})
+            consumed.append(stripped)
+
+    if not found_header:
+        raise ParseError("no 'mpls ldp' header line found")
+
+    return finalize(
+        raw=output,
+        meta={},
+        records=records,
+        consumed=consumed,
+        ignores=CONFIG_LDP_IGNORES,
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Registration -- merged into template_parsers.py's registries at the bottom
 # of that file. See this module's docstring for the import-ordering note.
 # --------------------------------------------------------------------------- #
@@ -439,6 +486,7 @@ def parse_xr_config_interface(output: str) -> dict[str, Any]:
 CONFIG_TEMPLATE_PARSERS: dict[tuple[str, str], Any] = {
     ("cisco_xr", "config_isis"): parse_xr_config_isis,
     ("cisco_xr", "config_interface"): parse_xr_config_interface,
+    ("cisco_xr", "config_ldp"): parse_xr_config_ldp,
 }
 
 # Configuration does not drift between two captures of an unchanged device
@@ -447,10 +495,23 @@ CONFIG_TEMPLATE_PARSERS: dict[tuple[str, str], Any] = {
 CONFIG_VOLATILE_FIELDS: dict[tuple[str, str], frozenset[str]] = {
     ("cisco_xr", "config_isis"): frozenset(),
     ("cisco_xr", "config_interface"): frozenset(),
+    ("cisco_xr", "config_ldp"): frozenset(),
 }
 
 CONFIG_RECORD_KEYS: dict[tuple[str, str], str | None] = {
     ("cisco_xr", "config_isis"): "interface",
     # Meta-only shape -- see parse_xr_config_interface's docstring.
     ("cisco_xr", "config_interface"): None,
+    ("cisco_xr", "config_ldp"): "interface",
 }
+
+
+# When this module was imported before template_parsers, the latter completed
+# its base registries before we reached these exports. Merge now so both import
+# orders expose the same config templates.
+from . import template_parsers as _template_parsers  # noqa: E402
+
+if hasattr(_template_parsers, "TEMPLATE_PARSERS"):
+    _template_parsers.TEMPLATE_PARSERS.update(CONFIG_TEMPLATE_PARSERS)
+    _template_parsers.TEMPLATE_VOLATILE_FIELDS.update(CONFIG_VOLATILE_FIELDS)
+    _template_parsers.TEMPLATE_RECORD_KEYS.update(CONFIG_RECORD_KEYS)

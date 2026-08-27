@@ -467,7 +467,9 @@ def apply_silences(
     device = str(verdict.get("device", ""))
 
     new_findings: list[dict[str, Any]] = []
-    counts = {"critical": 0, "warning": 0, "info": 0, "silenced": 0}
+    counts = {
+        "critical": 0, "unreachable": 0, "warning": 0, "info": 0, "silenced": 0,
+    }
     severity = "ok"
 
     for finding in verdict.get("findings", []):
@@ -518,7 +520,9 @@ def apply_silences_to_fabric(
     }
 
     fabric_severity = "ok"
-    by_severity: dict[str, int] = {"critical": 0, "warning": 0, "info": 0, "ok": 0}
+    by_severity: dict[str, int] = {
+        "critical": 0, "unreachable": 0, "warning": 0, "info": 0, "ok": 0,
+    }
     silenced_devices: list[str] = []
     for name, device_verdict in devices.items():
         fabric_severity = _max_severity(fabric_severity, device_verdict["severity"])

@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import concurrent.futures
+import contextlib
+import contextvars
 import functools
 import inspect
 import json
 import logging
 import os
 import sys
+import threading
+import time
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from dotenv import find_dotenv, load_dotenv
@@ -23,11 +28,15 @@ except ModuleNotFoundError:
     from mcp.server.fastmcp import FastMCP
 
 from agent_nettools import graph, logs_loki, metrics_prometheus, netbox
-from agent_nettools._env import _BOOL_TRUE
+from agent_nettools._env import _BOOL_TRUE, _float_env, _int_env
+from agent_nettools.checks import HEALTHY, bgp_peer_exists, interface_exists
+from agent_nettools.evidence_cache import EvidenceCache
 from agent_nettools.health import evaluate_fabric
 from agent_nettools.inventory_model import load_inventory_file
 from agent_nettools.investigation import investigate
 from agent_nettools.llm_analysis import TROUBLESHOOTING_PROMPT
+from agent_nettools.mcp_epoch_validation import validate_asserted_object
+from agent_nettools.mcp_profiles import CLASSIC_SURFACE, STAGED_SURFACE, profile_for
 from agent_nettools.network_tools import (
     check_bgp_neighbors,
     check_bgp_vpnv4_neighbors,
@@ -58,6 +67,42 @@ from agent_nettools.ticket_read import DEFAULT_LIST_LIMIT as TICKET_LIST_DEFAULT
 from agent_nettools.ticket_read import list_tickets, read_ticket_by_run_id
 
 mcp = FastMCP("IOS-XR Read-Only Network Tools")
+
+NETTOOLS_MCP_TRANSPORT_ENV = "NETTOOLS_MCP_TRANSPORT"
+NETTOOLS_MCP_HOST_ENV = "NETTOOLS_MCP_HOST"
+NETTOOLS_MCP_PORT_ENV = "NETTOOLS_MCP_PORT"
+NETTOOLS_MCP_HTTP_BEARER_TOKEN_ENV = "NETTOOLS_MCP_HTTP_BEARER_TOKEN"
+_MCP_TRANSPORTS = frozenset({"stdio", "sse", "streamable-http"})
+
+
+@dataclass(frozen=True)
+class MCPTransportConfig:
+    """Validated listener settings; bearer tokens are never printable."""
+
+    transport: str
+    host: str
+    port: int
+    bearer_token: str | None = field(repr=False)
+
+
+def mcp_transport_config() -> MCPTransportConfig:
+    """Read the native MCP transport settings, refusing unauthenticated HTTP."""
+
+    transport = os.getenv(NETTOOLS_MCP_TRANSPORT_ENV, "stdio").strip().lower()
+    if transport not in _MCP_TRANSPORTS:
+        raise ValueError(
+            f"{NETTOOLS_MCP_TRANSPORT_ENV} must be one of {sorted(_MCP_TRANSPORTS)}, not {transport!r}"
+        )
+    host = os.getenv(NETTOOLS_MCP_HOST_ENV, "127.0.0.1").strip() or "127.0.0.1"
+    port = _int_env(NETTOOLS_MCP_PORT_ENV, 8000)
+    if not 1 <= port <= 65535:
+        raise ValueError(f"{NETTOOLS_MCP_PORT_ENV} must be between 1 and 65535")
+    token = os.getenv(NETTOOLS_MCP_HTTP_BEARER_TOKEN_ENV, "").strip() or None
+    if transport != "stdio" and token is None:
+        raise ValueError(
+            f"{NETTOOLS_MCP_HTTP_BEARER_TOKEN_ENV} bearer token is required for MCP HTTP transport"
+        )
+    return MCPTransportConfig(transport=transport, host=host, port=port, bearer_token=token)
 
 # --------------------------------------------------------------------------- #
 # readOnlyHint annotations: every tool this server exposes is read-only (see
@@ -123,6 +168,29 @@ mcp = FastMCP("IOS-XR Read-Only Network Tools")
 NETTOOLS_MCP_ALLOW_ACTIVE_PROBES_ENV = "NETTOOLS_MCP_ALLOW_ACTIVE_PROBES"
 _MCP_ACTIVE_PROBES_TRUTHY = _BOOL_TRUE
 
+# B-703: direct MCP clients need evidence-bound object validation too. The
+# lab default avoids a new SSH collection for every lookup; `0` makes the
+# boundary always-live for active troubleshooting.
+NETTOOLS_MCP_OBJECT_EVIDENCE_TTL_SECONDS_ENV = "NETTOOLS_MCP_OBJECT_EVIDENCE_TTL_SECONDS"
+DEFAULT_MCP_OBJECT_EVIDENCE_TTL_SECONDS = 10.0
+_object_evidence_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_object_evidence_lock = threading.Lock()
+_epoch_validation_cache: contextvars.ContextVar[EvidenceCache | None] = contextvars.ContextVar(
+    "mcp_epoch_validation_cache", default=None
+)
+
+# B-703: caller-supplied identifiers are not one semantic class. An asserted
+# object must already be present in fresh evidence before a detail tool may
+# act on it; a lookup deliberately asks whether a typed identifier is absent.
+# Applying the asserted-object refusal to lookup tools would erase the valid
+# "not found" answer their diagnostic contract exists to return.
+_OBJECT_REQUEST_CONTRACTS = {
+    "get_lab_bgp_neighbor": "asserted",
+    "get_lab_interface": "asserted",
+    "get_lab_sr_policy_detail": "lookup",
+    "get_lab_route": "lookup",
+}
+
 
 def _mcp_active_probes_allowed() -> bool:
     value = os.getenv(NETTOOLS_MCP_ALLOW_ACTIVE_PROBES_ENV, "0").strip().lower()
@@ -167,6 +235,171 @@ def _device_name_from_call(call_args: tuple, call_kwargs: dict) -> Any:
     if device_name is None and call_args:
         device_name = call_args[0]
     return device_name
+
+
+def _device_exists_in_inventory(device_name: Any) -> bool:
+    """Whether a model-supplied device name is in the validated inventory.
+
+    This is B-703's first, inventory-bound enforcement layer. A typed device
+    name is not proof that it names a member of this lab; MCP clients can call
+    classic tools directly, bypassing event_agent's pinned schema entirely.
+    The registration wrapper below uses this before invoking any MCP tool that
+    accepts ``device_name``, so an unknown device is refused before a tool can
+    resolve platform data, credentials, or a socket.
+
+    ``load_inventory_file`` owns its own cache and schema validation, so this
+    remains a cheap lookup on the normal path. An inventory-load failure is
+    intentionally allowed to raise into the wrapper's existing sanitized
+    exception path: proceeding without the authority that establishes device
+    membership would be fail-open.
+    """
+
+    if not isinstance(device_name, str):
+        return False
+    return any(device.name == device_name for device in load_inventory_file().devices)
+
+
+def _device_validation_refused(
+    tool_name: str, call_args: tuple, call_kwargs: dict
+) -> dict:
+    """Return the standard envelope for an unknown MCP device argument."""
+
+    device_name = _device_name_from_call(call_args, call_kwargs)
+    return _error_envelope(
+        tool_name,
+        device_name,
+        f"{device_name!r} is not in the lab inventory",
+    )
+
+
+def _object_evidence_ttl_seconds() -> float:
+    return max(
+        0.0,
+        _float_env(
+            NETTOOLS_MCP_OBJECT_EVIDENCE_TTL_SECONDS_ENV,
+            DEFAULT_MCP_OBJECT_EVIDENCE_TTL_SECONDS,
+        ),
+    )
+
+
+def _clear_object_evidence_cache() -> None:
+    """Test/support hook for the process-local B-703 evidence cache."""
+
+    with _object_evidence_lock:
+        _object_evidence_cache.clear()
+
+
+@contextlib.contextmanager
+def use_epoch_validation_cache(cache: EvidenceCache):
+    """Scope trusted fresh epoch evidence around direct MCP tool validation."""
+
+    token = _epoch_validation_cache.set(cache)
+    try:
+        yield
+    finally:
+        _epoch_validation_cache.reset(token)
+
+
+def _current_object_evidence(device_name: str) -> dict[str, Any]:
+    """Return evidence fresh enough for MCP object validation."""
+
+    ttl_seconds = _object_evidence_ttl_seconds()
+    now = time.monotonic()
+    with _object_evidence_lock:
+        cached = _object_evidence_cache.get(device_name)
+        if cached is not None and ttl_seconds > 0 and now - cached[0] < ttl_seconds:
+            return cached[1]
+
+    evidence = collect_evidence(device_name)
+    with _object_evidence_lock:
+        _object_evidence_cache[device_name] = (time.monotonic(), evidence)
+    return evidence
+
+
+def _bound_arguments(function: Callable, call_args: tuple, call_kwargs: dict) -> dict[str, Any]:
+    bound = inspect.signature(function).bind_partial(*call_args, **call_kwargs)
+    bound.apply_defaults()
+    return dict(bound.arguments)
+
+
+def _object_request(function: Callable, call_args: tuple, call_kwargs: dict) -> tuple[str, str] | None:
+    """Return the evidence-bound identifier requested by a supported MCP tool."""
+
+    arguments = _bound_arguments(function, call_args, call_kwargs)
+    name = function.__name__
+    if name == "get_lab_bgp_neighbor":
+        return "bgp_peer", arguments.get("address")
+    if name == "get_lab_interface":
+        return "interface", arguments.get("name")
+    if name == "lookup_lab":
+        kind = arguments.get("kind")
+        if kind == "bgp_neighbor":
+            return "bgp_peer", arguments.get("value")
+        if kind == "interface":
+            return "interface", arguments.get("value")
+    if name in {"investigate_lab", "investigate_lab_session"}:
+        flow = arguments.get("flow")
+        if flow == "bgp_session":
+            return "bgp_peer", arguments.get("subject")
+        if flow == "interface":
+            return "interface", arguments.get("subject")
+    return None
+
+
+def _object_request_contract(function: Callable) -> str | None:
+    """Return the reviewed asserted-versus-lookup contract for a tool."""
+
+    return _OBJECT_REQUEST_CONTRACTS.get(function.__name__)
+
+
+def _object_validation_refused(
+    tool_name: str, device_name: str, kind: str, identifier: Any, reason: str
+) -> dict:
+    return _error_envelope(
+        tool_name,
+        device_name,
+        f"{kind} object is not present in current evidence: {reason}; identifier={identifier!r}",
+    )
+
+
+def _object_is_currently_valid(
+    function: Callable, call_args: tuple, call_kwargs: dict
+) -> dict | None:
+    """Return a refusal when an evidence-bound identifier is absent or unreadable."""
+
+    request = _object_request(function, call_args, call_kwargs)
+    if request is None:
+        return None
+    if _object_request_contract(function) != "asserted":
+        return None
+    kind, identifier = request
+    device_name = str(_device_name_from_call(call_args, call_kwargs))
+    if not isinstance(identifier, str) or not identifier:
+        return _object_validation_refused(
+            function.__name__, device_name, kind, identifier, "identifier is unusable"
+        )
+    epoch_cache = _epoch_validation_cache.get()
+    if epoch_cache is not None:
+        reason = validate_asserted_object(
+            epoch_cache,
+            device=device_name,
+            kind=kind,
+            identifier=identifier,
+            maximum_age_seconds=_object_evidence_ttl_seconds(),
+        )
+        if reason is None:
+            return None
+        return _object_validation_refused(function.__name__, device_name, kind, identifier, reason)
+    evidence = _current_object_evidence(device_name)
+    result = (
+        bgp_peer_exists(evidence, identifier)
+        if kind == "bgp_peer"
+        else interface_exists(evidence, identifier)
+    )
+    if result.status == HEALTHY:
+        return None
+    reason = "validation could not evaluate current evidence" if not result.is_conclusive else "object absent"
+    return _object_validation_refused(function.__name__, device_name, kind, identifier, reason)
 
 
 def _active_probes_refused(tool_name: str, call_args: tuple, call_kwargs: dict) -> dict:
@@ -438,8 +671,29 @@ def _register_sanitized_tool(
     register = mcp.tool(*args, **kwargs)
 
     def decorate(function: Callable) -> Callable:
+        # ``device_name`` is the shared identifier spelling on the classic,
+        # staged, and active-probe surfaces. Checking the real function
+        # signature at registration keeps this boundary future-proof: a new
+        # tool with that argument inherits the gate automatically, while
+        # inventory-wide and parameterless tools do not acquire a meaningless
+        # validation step.
+        validates_device = "device_name" in inspect.signature(function).parameters
+
         @functools.wraps(function)
         def sanitized(*call_args: Any, **call_kwargs: Any) -> Any:
+            device_name = _device_name_from_call(call_args, call_kwargs)
+            if (
+                validates_device
+                and device_name is not None
+                and not _device_exists_in_inventory(device_name)
+            ):
+                return sanitize(
+                    _device_validation_refused(function.__name__, call_args, call_kwargs)
+                )
+            if validates_device and device_name is not None:
+                object_refusal = _object_is_currently_valid(function, call_args, call_kwargs)
+                if object_refusal is not None:
+                    return sanitize(object_refusal)
             if active_probe and not _mcp_active_probes_allowed():
                 # Fails CLOSED, and SAYS SO: `function` (ping_device/
                 # traceroute_device/probe_lab) is never called, so no traffic
@@ -1004,8 +1258,10 @@ def assess_lab_device_health(device_name: str) -> dict:
     Prefer this over reading raw state yourself when the question is "is this
     device healthy?". It applies deterministic rules -- role invariants and
     drift from a recorded baseline -- and returns a severity
-    (``ok``/``info``/``warning``/``critical``) with the findings behind it. No
-    model is involved, so the verdict does not vary between calls.
+    (``ok``/``info``/``warning``/``unreachable``/``critical``) with the
+    findings behind it. ``unreachable`` means the device could not be
+    assessed, not that a fault was confirmed. No model is involved, so the
+    verdict does not vary between calls.
 
     It tells you *that* something is wrong, and which rule fired. If you then
     need to know *why* a session is down, prefer `investigate_lab_session`.
@@ -1722,7 +1978,7 @@ def protect_stdio() -> list[str]:
 # --------------------------------------------------------------------------- #
 
 NETTOOLS_MCP_SURFACE_ENV = "NETTOOLS_MCP_SURFACE"
-ACTIVE_SURFACE = "classic"
+ACTIVE_SURFACE = CLASSIC_SURFACE
 
 
 def _select_surface() -> None:
@@ -1762,19 +2018,18 @@ def _select_surface() -> None:
     """
 
     global ACTIVE_SURFACE
-    raw = os.getenv(NETTOOLS_MCP_SURFACE_ENV, "classic").strip().lower()
+    raw = os.getenv(NETTOOLS_MCP_SURFACE_ENV)
+    profile = profile_for(raw)
 
-    if raw not in ("classic", "staged"):
+    if raw is not None and raw.strip() and raw.strip().lower() not in (CLASSIC_SURFACE, STAGED_SURFACE):
         logging.getLogger(__name__).warning(
             "NETTOOLS_MCP_SURFACE=%r is not 'classic' or 'staged'; failing "
             "closed to 'staged' (the narrower surface) rather than widening "
             "to 'classic'",
             raw,
         )
-        raw = "staged"
-
-    ACTIVE_SURFACE = raw
-    if ACTIVE_SURFACE == "staged":
+    ACTIVE_SURFACE = profile.surface
+    if ACTIVE_SURFACE == STAGED_SURFACE:
         from . import staged_surface as _staged
 
         _staged.apply(sys.modules[__name__])
@@ -1784,7 +2039,7 @@ _select_surface()
 
 
 def main() -> None:
-    """Console-script entry point: start the MCP server over stdio."""
+    """Console-script entry point: start MCP over validated stdio or HTTP transport."""
 
     # Loaded here, not at import time (R8/OBS-50x): importing this module must
     # be side-effect-free, otherwise every process that merely imports
@@ -1797,6 +2052,20 @@ def main() -> None:
     # Re-resolve the surface now that .env is loaded -- see _select_surface's
     # docstring for why this is safe to call twice.
     _select_surface()
+
+    config = mcp_transport_config()
+    if config.transport != "stdio":
+        from .http_api import serve_authenticated_mcp
+
+        assert config.bearer_token is not None
+        serve_authenticated_mcp(
+            mcp,
+            transport=config.transport,
+            host=config.host,
+            port=config.port,
+            bearer_token=config.bearer_token,
+        )
+        return
 
     for change in protect_stdio():
         print(f"nettools-mcp: redirected {change} away from stdout", file=sys.stderr)

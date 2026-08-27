@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The model's one decision · ios-xr-nettools</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f5f5f5;
+      --color-ink:     #2d3142;
+      --color-muted:   #4f5d75;
+      --color-accent:  #eb6c36;
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      padding: 3rem 2rem;
+    }
+    .frame { max-width: 1080px; margin: 0 auto; }
+    .eyebrow {
+      font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500;
+      letter-spacing: 0.18em; text-transform: uppercase;
+      color: var(--color-muted); margin-bottom: 0.5rem;
+    }
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400; letter-spacing: -0.02em; line-height: 1.15;
+      color: var(--color-ink); margin-bottom: 0.5rem;
+    }
+    .standfirst {
+      font-size: 0.9rem; color: var(--color-muted);
+      max-width: 74ch; margin-bottom: 1.5rem; line-height: 1.5;
+    }
+    .standfirst em { font-style: italic; }
+    svg { width: 100%; min-width: 900px; display: block; }
+    .colophon {
+      margin-top: 2rem; padding-top: 1rem; border-top: 1px solid rgba(45,49,66,0.10);
+      font-family: var(--font-mono); font-size: 0.7rem; color: var(--color-muted);
+    }
+    a { color: var(--color-accent); }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">ios-xr-nettools · AI space vs deterministic space</p>
+    <h1>The model's one decision</h1>
+    <p class="standfirst">Not a spectrum — a narrow slot. Everything from the syslog line arriving to the deterministic descent producing a finding is code: parsed, gated, admitted, and stripped of every identifier before a token ever reaches a model. The model's only real decision is <em>which</em> tool to call, and for two of the four it is offered, there is nothing left to supply at all. That choice happens <em>before</em> the commands it triggers run, not after — the AI's turn is one narrow slot in the middle of a deterministic run, not a phase bolted onto the end of one.</p>
+
+    <svg viewBox="0 0 1400 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="aivd-title aivd-desc">
+      <title id="aivd-title">The model's one decision, in the live event pipeline</title>
+      <desc id="aivd-desc">Swimlane splitting the live event pipeline into deterministic code and AI-chosen actions, from a fault's syslog line to a Telegram notification, with the two crossings into and out of the model explicitly marked and the tool-selection boundary's safety mechanism called out.</desc>
+
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+      </defs>
+
+      <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+      <!-- ============================== Callout 1 (top margin): the "?!" answered structurally ============================== -->
+      <text x="900" y="24" fill="#eb6c36" font-size="14" font-style="italic" font-family="'Instrument Serif', serif" text-anchor="middle">not refused — unrepresentable</text>
+      <text x="900" y="42" fill="#4f5d75" font-size="10" font-style="italic" font-family="'Instrument Serif', serif" text-anchor="middle">the offered schema has no field to put a device name in</text>
+      <path d="M 820 48 Q 720 68 616 92" fill="none" stroke="rgba(235,108,54,0.50)" stroke-width="1" stroke-dasharray="4,3"/>
+      <circle cx="616" cy="92" r="2" fill="#eb6c36"/>
+
+      <!-- ============================== Lane table ============================== -->
+      <!-- Dividers: top + bottom dark, mid-lane divider light -->
+      <line x1="40" y1="80" x2="1360" y2="80" stroke="rgba(45,49,66,0.22)" stroke-width="1"/>
+      <line x1="40" y1="160" x2="1360" y2="160" stroke="rgba(45,49,66,0.14)" stroke-width="1"/>
+      <line x1="40" y1="240" x2="1360" y2="240" stroke="rgba(45,49,66,0.22)" stroke-width="1"/>
+      <!-- Actor column divider -->
+      <line x1="160" y1="80" x2="160" y2="240" stroke="rgba(45,49,66,0.22)" stroke-width="1"/>
+
+      <!-- Lane labels -->
+      <text x="56" y="124" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.10em">DETERMINISTIC</text>
+      <text x="56" y="204" fill="#eb6c36" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.10em">AI · MINIMAX</text>
+
+      <!-- ============================== Arrows (drawn before boxes) ============================== -->
+      <!-- 1→2 within Det lane -->
+      <line x1="320" y1="120" x2="348" y2="120" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <!-- 2→3 within Det lane -->
+      <line x1="488" y1="120" x2="516" y2="120" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <!-- 3→4 handoff Det→AI (the trust-critical crossing, coral) -->
+      <line x1="600" y1="144" x2="712" y2="176" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+      <!-- 4→5 handoff AI→Det -->
+      <line x1="796" y1="176" x2="880" y2="144" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <!-- 5→6 handoff Det→AI -->
+      <line x1="964" y1="144" x2="1048" y2="176" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <!-- 6→7 handoff AI→Det -->
+      <line x1="1132" y1="176" x2="1216" y2="144" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <!-- ============================== Nodes ============================== -->
+      <!-- 1. Route & gate (Det) -->
+      <rect x="180" y="96" width="140" height="48" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="250" y="118" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Route &amp; gate</text>
+      <text x="250" y="132" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">fires:true — 1 / 20</text>
+
+      <!-- 2. Admission (Det) -->
+      <rect x="348" y="96" width="140" height="48" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="418" y="118" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Admission</text>
+      <text x="418" y="132" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">replay &amp; storm gated</text>
+
+      <!-- 3. Pin schema (Det, FOCAL) -->
+      <rect x="516" y="96" width="140" height="48" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+      <text x="586" y="118" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Pin schema</text>
+      <text x="586" y="132" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">identifiers removed</text>
+
+      <!-- 4. Choose tool (AI, dashed) -->
+      <rect x="684" y="176" width="140" height="48" rx="6" fill="rgba(45,49,66,0.02)" stroke="#2d3142" stroke-width="1" stroke-dasharray="4,3"/>
+      <text x="754" y="198" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Choose tool</text>
+      <text x="754" y="212" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">1 of 4, no free text</text>
+
+      <!-- 5. Dispatch & descend (Det) -->
+      <rect x="852" y="96" width="140" height="48" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="922" y="118" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Run &amp; descend</text>
+      <text x="922" y="132" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">10 commands, 5 rungs</text>
+
+      <!-- 6. Narrate (AI, dashed) -->
+      <rect x="1020" y="176" width="140" height="48" rx="6" fill="rgba(45,49,66,0.02)" stroke="#2d3142" stroke-width="1" stroke-dasharray="4,3"/>
+      <text x="1090" y="198" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Narrate</text>
+      <text x="1090" y="212" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">prose, not the answer</text>
+
+      <!-- 7. Record & notify (Det) -->
+      <rect x="1188" y="96" width="140" height="48" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="1258" y="118" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Record &amp; notify</text>
+      <text x="1258" y="132" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">code's own finding</text>
+
+      <!-- ============================== Callout 2 (bottom margin): the measured result ============================== -->
+      <path d="M 754 260 Q 754 278 754 292" fill="none" stroke="rgba(45,49,66,0.40)" stroke-width="1" stroke-dasharray="4,3"/>
+      <circle cx="754" cy="260" r="2" fill="#2d3142"/>
+      <text x="754" y="312" fill="#2d3142" font-size="14" font-style="italic" font-family="'Instrument Serif', serif" text-anchor="middle">measured, not assumed</text>
+      <text x="754" y="330" fill="#4f5d75" font-size="10" font-style="italic" font-family="'Instrument Serif', serif" text-anchor="middle">24 adversarial runs, 2 providers — 0 named a device that wasn't already pinned</text>
+
+      <!-- ============================== Legend ============================== -->
+      <line x1="40" y1="360" x2="1360" y2="360" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+      <text x="40" y="376" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.18em">LEGEND</text>
+
+      <rect x="40" y="392" width="16" height="12" rx="2" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="64" y="401" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Deterministic step — code only</text>
+
+      <rect x="332" y="392" width="16" height="12" rx="2" fill="rgba(45,49,66,0.02)" stroke="#2d3142" stroke-width="1" stroke-dasharray="3,3"/>
+      <text x="356" y="401" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">AI step — dashed, never authoritative</text>
+
+      <rect x="676" y="392" width="16" height="12" rx="2" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+      <text x="700" y="401" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Where identity is removed, not merely refused</text>
+
+      <line x1="1052" y1="398" x2="1080" y2="398" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+      <text x="1088" y="401" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">First crossing into AI space</text>
+
+    </svg>
+    <p class="colophon">Hand-authored with the diagram-design skill · derived from the ios-xr-nettools tree, 2026-08-27 · <a href="index.html">back to the diagram index</a></p>
+  </div>
+</body>
+</html>

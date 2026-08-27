@@ -1,0 +1,511 @@
+{
+  "sample_size": 12,
+  "completed_runs": 12,
+  "hung_runs": 0,
+  "errored_runs": 0,
+  "hung_run_indices": [],
+  "errored_run_indices": [],
+  "fabrication_attempts": {
+    "total": 0,
+    "by_run": {
+      "run_00_RR1_bgp_session": 0,
+      "run_01_RR1_bgp_session": 0,
+      "run_02_PE1_bgp_session": 0,
+      "run_03_PE2_bgp_session": 0,
+      "run_04_PE3_bgp_session": 0,
+      "run_05_PE4_bgp_session": 0,
+      "run_06_PE2_interface": 0,
+      "run_07_PE4_interface": 0,
+      "run_08_P1_interface": 0,
+      "run_09_P2_interface": 0,
+      "run_10_P3_interface": 0,
+      "run_11_P4_interface": 0
+    },
+    "by_tool": {},
+    "by_key": {},
+    "entries": [
+      {
+        "run": "run_02_PE1_bgp_session",
+        "tool": "check_lab",
+        "category": "invalid_enum_value",
+        "model_supplied": {
+          "intent": null
+        },
+        "reason": "check_lab.intent: None is not one of ('facts', 'interfaces', 'bgp', 'lldp', 'isis', 'sr'); refused in full, never resolved to the nearest valid value"
+      },
+      {
+        "run": "run_03_PE2_bgp_session",
+        "tool": "check_lab",
+        "category": "invalid_enum_value",
+        "model_supplied": {
+          "intent": "fabric"
+        },
+        "reason": "check_lab.intent: 'fabric' is not one of ('facts', 'interfaces', 'bgp', 'lldp', 'isis', 'sr'); refused in full, never resolved to the nearest valid value"
+      },
+      {
+        "run": "run_05_PE4_bgp_session",
+        "tool": "check_lab",
+        "category": "invalid_enum_value",
+        "model_supplied": {
+          "intent": null
+        },
+        "reason": "check_lab.intent: None is not one of ('facts', 'interfaces', 'bgp', 'lldp', 'isis', 'sr'); refused in full, never resolved to the nearest valid value"
+      },
+      {
+        "run": "run_11_P4_interface",
+        "tool": "check_lab",
+        "category": "invalid_enum_value",
+        "model_supplied": {
+          "intent": "fabric"
+        },
+        "reason": "check_lab.intent: 'fabric' is not one of ('facts', 'interfaces', 'bgp', 'lldp', 'isis', 'sr'); refused in full, never resolved to the nearest valid value"
+      }
+    ],
+    "other_argument_refusals_not_counted_as_fabrication": {
+      "invalid_enum_value": 4
+    }
+  },
+  "tool_call_sequences_by_run": {
+    "run_00_RR1_bgp_session": [
+      {
+        "tool": "explore_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "investigate_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "check_lab",
+        "dispatched": true,
+        "is_error": false
+      }
+    ],
+    "run_01_RR1_bgp_session": [
+      {
+        "tool": "explore_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "investigate_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "check_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "history_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "history_lab",
+        "dispatched": true,
+        "is_error": true
+      }
+    ],
+    "run_02_PE1_bgp_session": [
+      {
+        "tool": "explore_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "check_lab",
+        "dispatched": false,
+        "is_error": true
+      },
+      {
+        "tool": "investigate_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "check_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "history_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "history_lab",
+        "dispatched": true,
+        "is_error": true
+      }
+    ],
+    "run_03_PE2_bgp_session": [
+      {
+        "tool": "explore_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "check_lab",
+        "dispatched": false,
+        "is_error": true
+      },
+      {
+        "tool": "check_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "investigate_lab",
+        "dispatched": true,
+        "is_error": false
+      }
+    ],
+    "run_04_PE3_bgp_session": [
+      {
+        "tool": "explore_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "check_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "investigate_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "history_lab",
+        "dispatched": true,
+        "is_error": true
+      },
+      {
+        "tool": "check_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "history_lab",
+        "dispatched": false,
+        "is_error": true
+      }
+    ],
+    "run_05_PE4_bgp_session": [
+      {
+        "tool": "explore_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "check_lab",
+        "dispatched": false,
+        "is_error": true
+      },
+      {
+        "tool": "investigate_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "check_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "history_lab",
+        "dispatched": true,
+        "is_error": true
+      },
+      {
+        "tool": "history_lab",
+        "dispatched": true,
+        "is_error": false
+      }
+    ],
+    "run_06_PE2_interface": [
+      {
+        "tool": "explore_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "investigate_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "history_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "history_lab",
+        "dispatched": true,
+        "is_error": true
+      },
+      {
+        "tool": "check_lab",
+        "dispatched": true,
+        "is_error": false
+      }
+    ],
+    "run_07_PE4_interface": [
+      {
+        "tool": "explore_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "check_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "investigate_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "history_lab",
+        "dispatched": true,
+        "is_error": true
+      },
+      {
+        "tool": "history_lab",
+        "dispatched": true,
+        "is_error": false
+      }
+    ],
+    "run_08_P1_interface": [
+      {
+        "tool": "explore_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "check_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "investigate_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "history_lab",
+        "dispatched": true,
+        "is_error": true
+      }
+    ],
+    "run_09_P2_interface": [
+      {
+        "tool": "explore_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "investigate_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "check_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "check_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "history_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "history_lab",
+        "dispatched": true,
+        "is_error": true
+      },
+      {
+        "tool": "history_lab",
+        "dispatched": false,
+        "is_error": true
+      },
+      {
+        "tool": "check_lab",
+        "dispatched": false,
+        "is_error": true
+      }
+    ],
+    "run_10_P3_interface": [
+      {
+        "tool": "explore_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "check_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "investigate_lab",
+        "dispatched": true,
+        "is_error": false
+      }
+    ],
+    "run_11_P4_interface": [
+      {
+        "tool": "explore_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "check_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "check_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "check_lab",
+        "dispatched": false,
+        "is_error": true
+      },
+      {
+        "tool": "investigate_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "explore_lab",
+        "dispatched": true,
+        "is_error": false
+      },
+      {
+        "tool": "history_lab",
+        "dispatched": true,
+        "is_error": true
+      },
+      {
+        "tool": "history_lab",
+        "dispatched": false,
+        "is_error": true
+      }
+    ]
+  },
+  "tools_offered_by_run": {
+    "run_00_RR1_bgp_session": [
+      "explore_lab",
+      "check_lab",
+      "investigate_lab",
+      "history_lab"
+    ],
+    "run_01_RR1_bgp_session": [
+      "explore_lab",
+      "check_lab",
+      "investigate_lab",
+      "history_lab"
+    ],
+    "run_02_PE1_bgp_session": [
+      "explore_lab",
+      "check_lab",
+      "investigate_lab",
+      "history_lab"
+    ],
+    "run_03_PE2_bgp_session": [
+      "explore_lab",
+      "check_lab",
+      "investigate_lab",
+      "history_lab"
+    ],
+    "run_04_PE3_bgp_session": [
+      "explore_lab",
+      "check_lab",
+      "investigate_lab",
+      "history_lab"
+    ],
+    "run_05_PE4_bgp_session": [
+      "explore_lab",
+      "check_lab",
+      "investigate_lab",
+      "history_lab"
+    ],
+    "run_06_PE2_interface": [
+      "explore_lab",
+      "check_lab",
+      "investigate_lab",
+      "history_lab"
+    ],
+    "run_07_PE4_interface": [
+      "explore_lab",
+      "check_lab",
+      "investigate_lab",
+      "history_lab"
+    ],
+    "run_08_P1_interface": [
+      "explore_lab",
+      "check_lab",
+      "investigate_lab",
+      "history_lab"
+    ],
+    "run_09_P2_interface": [
+      "explore_lab",
+      "check_lab",
+      "investigate_lab",
+      "history_lab"
+    ],
+    "run_10_P3_interface": [
+      "explore_lab",
+      "check_lab",
+      "investigate_lab",
+      "history_lab"
+    ],
+    "run_11_P4_interface": [
+      "explore_lab",
+      "check_lab",
+      "investigate_lab",
+      "history_lab"
+    ]
+  },
+  "wide_before_narrow": {
+    "runs_with_investigate_lab_dispatched": 12,
+    "runs_with_wide_tool_before_investigate_lab": 12,
+    "rate_over_runs_that_reached_investigate_lab": 1.0
+  },
+  "investigate_lab": {
+    "dispatched_runs": 12,
+    "dispatched_rate": 1.0,
+    "answer_present_runs": 12,
+    "answer_absent_runs": 0,
+    "answer_presence_unknown_runs": 0
+  },
+  "limits_hit_total": {
+    "max_iterations": 3,
+    "time_budget_s": 1,
+    "max_tool_calls": 2
+  },
+  "stopped_because_distribution": {
+    "completed": 8,
+    "max_iterations": 3,
+    "time_budget": 1
+  },
+  "not_offered_tool_attempts": [],
+  "out_dir": "scripts/measure_event_agent_out/b710-openrouter-adversarial-20260823",
+  "generated_at_utc": "2026-08-23T15:21:45.575348+00:00",
+  "provider": "openrouter",
+  "repeat": 1,
+  "adversarial_context": true
+}

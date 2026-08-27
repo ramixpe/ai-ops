@@ -127,6 +127,28 @@ class Expected(BaseModel):
     bgp_peers: int | None = Field(default=None, ge=0)
 
 
+class Intended(BaseModel):
+    """Version-controlled operator intent, distinct from observed baselines."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: Interfaces that are required to participate in LDP on this device.
+    #: An empty list is meaningful: the operator explicitly intends no local
+    #: LDP interfaces. Absent means no intent has been declared.
+    ldp_interfaces: list[str] | None = None
+
+    @field_validator("ldp_interfaces")
+    @classmethod
+    def _validate_ldp_interfaces(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        if any(not name.strip() for name in value):
+            raise ValueError("ldp_interfaces entries must be non-empty")
+        if len(set(value)) != len(value):
+            raise ValueError("ldp_interfaces must not contain duplicates")
+        return value
+
+
 class Note(BaseModel):
     """One operator-authored fact about this estate (B-402).
 
@@ -207,6 +229,7 @@ class Device(BaseModel):
     local_as: int | None = Field(default=None, ge=1, le=4294967295)
     tags: list[str] = Field(default_factory=list)
     expected: Expected | None = None
+    intended: Intended | None = None
     #: Operator-authored facts about this device (B-402). Empty by default;
     #: an estate with nothing worth saying about a device says nothing.
     notes: list[Note] = Field(default_factory=list)

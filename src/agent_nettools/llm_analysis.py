@@ -931,6 +931,33 @@ def openai_model_caller(
     return _openai_model_call(system=system, messages=messages, tools=tools, timeout=timeout)
 
 
+def openrouter_model_caller(
+    *,
+    system: str,
+    messages: Sequence[Mapping[str, Any]],
+    tools: Sequence[Mapping[str, Any]],
+    timeout: float | None,
+) -> ModelTurn:
+    """A tool-calling caller for OpenRouter's OpenAI-compatible endpoint.
+
+    This is deliberately a measurement adapter, not a change to
+    :func:`get_provider`: B-710 needs a second model/provider lane without
+    changing the application-wide model-selection policy.
+    """
+
+    return _openai_model_call(
+        system=system,
+        messages=messages,
+        tools=tools,
+        timeout=timeout,
+        api_key_env="OPENROUTER_API_KEY",
+        base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+        model_env="OPENROUTER_MODEL",
+        model_default="deepseek/deepseek-v4-flash-vision-exp",
+        provider_label="OpenRouter",
+    )
+
+
 def analyze_with_openai(evidence: dict[str, Any], *, timeout: float | None = None) -> str:
     """Analyze evidence with OpenAI Responses API."""
 

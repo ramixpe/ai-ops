@@ -44,15 +44,29 @@ def test_open_returns_a_ticket_with_a_run_id_and_a_persisted_header(tmp_path):
     tk = _open(tmp_path)
 
     assert tk.run_id
+    assert tk.incident_id.startswith("INC-")
     assert tk.open_result.persisted is True
     assert tk.open_result.warning is None
     assert Path(tk.path).is_file()
 
 
-def test_run_id_is_a_uuid4_hex_string_like_the_ledgers(tmp_path):
-    tk = _open(tmp_path)
+def test_run_id_is_a_persistent_six_digit_counter(tmp_path):
+    first = _open(tmp_path)
+    second = _open(tmp_path)
 
-    assert re.fullmatch(r"[0-9a-f]{32}", tk.run_id)
+    assert first.run_id == "000001"
+    assert second.run_id == "000002"
+
+
+def test_incident_id_is_global_across_separate_ticket_artifact_directories(tmp_path, monkeypatch):
+    monkeypatch.setenv(ticket.NETTOOLS_INCIDENT_DIR_ENV, str(tmp_path / "incidents"))
+    first = ticket.TicketRecorder(tmp_path / "campaign-a").open("one", entry_point="test")
+    second = ticket.TicketRecorder(tmp_path / "campaign-b").open("two", entry_point="test")
+
+    assert first.run_id == second.run_id == "000001"
+    assert re.fullmatch(r"INC-\d{8}-00001", first.incident_id)
+    assert re.fullmatch(r"INC-\d{8}-00002", second.incident_id)
+    assert first.incident_id[:12] == second.incident_id[:12]
 
 
 def test_a_caller_supplied_run_id_is_used_verbatim(tmp_path):
@@ -83,6 +97,7 @@ def test_header_carries_every_declared_identity_field(tmp_path):
 
     header = ticket.read_ticket(tk.path)["header"]
     assert header["run_id"] == tk.run_id
+    assert header["incident_id"] == tk.incident_id
     assert header["entry_point"] == "cli:investigate"
     assert header["device"] == "PE1"
     assert header["subject"] == "bgp session PE1 -> RR1"

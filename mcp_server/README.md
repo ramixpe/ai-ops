@@ -493,6 +493,62 @@ Start the client from an environment where `DEVICE_USERNAME` and
 `DEVICE_PASSWORD` are set so the MCP process inherits them. Never copy the
 password into this JSON.
 
+## Authenticated HTTP Docker API
+
+For LAN/VPN MCP clients, the same image can expose the native MCP
+`streamable-http` transport. It is protected by a required bearer token; keep
+the token in an environment file or secret manager, never in an image or
+client configuration committed to source control.
+
+```bash
+docker run --rm -p 8000:8000 --env-file /path/to/project/.env \
+  -e NETTOOLS_MCP_TRANSPORT=streamable-http \
+  -e NETTOOLS_MCP_HOST=0.0.0.0 \
+  -e NETTOOLS_MCP_PORT=8000 \
+  -e NETTOOLS_MCP_HTTP_BEARER_TOKEN="$(openssl rand -hex 32)" \
+  ios-xr-nettools-mcp
+```
+
+The MCP endpoint is `http://host:8000/mcp`. Clients must send
+`Authorization: Bearer <token>` for every request; missing or invalid tokens
+receive `401` before MCP sees the request. Use `NETTOOLS_MCP_TRANSPORT=sse`
+only for older MCP clients that do not support streamable HTTP.
+
+This mode is for trusted LAN/VPN deployment. Public-internet exposure, TLS
+termination, multi-user identity, and RBAC remain unsupported.
+
+## Persistent Compose Deployment
+
+`docker-compose.mcp-http.yml` is the reproducible deployment for this lab. It
+joins `sota_mgmt` for router SSH plus `sota-lab-platform_labnet` and
+`sota-lab-platform_default` for platform services. It resolves NetBox and
+Neo4j through Docker service DNS, not transient subnet IPs, persists
+tickets/evidence/event state in the `ios-xr-nettools-mcp-state` volume, and
+restarts the MCP container after reboot.
+
+On its first run, the initializer copies the existing local `tickets/`
+directory into an otherwise empty persistent ticket store. Later starts never
+overwrite the volume's tickets.
+```bash
+cp .env.mcp-http.example .env.mcp-http
+# Set a real NETTOOLS_MCP_HTTP_BEARER_TOKEN in .env.mcp-http.
+docker compose -f docker-compose.mcp-http.yml up -d --build
+```
+
+The default port publication is `127.0.0.1:8000`. Reach it from a Mac through
+an encrypted tunnel instead of exposing plaintext bearer authentication:
+
+```bash
+ssh -N -L 8000:127.0.0.1:8000 rami@a4000
+```
+
+Before the first start, refresh the dedicated strict SSH trust store only after
+verifying recreated-router fingerprints through the lab control plane:
+
+```bash
+python3 scripts/enroll_host_keys.py
+```
+
 ## Verify
 
 ```text
@@ -515,9 +571,9 @@ system uses as its own epistemic ground truth: a model could pin an outage state
 as golden, after which drift comparison suppresses that fault indefinitely.
 
 That contradicted **D12** (execution is never behind MCP) and **D14** (memory is
-derived, never authored). External review, `docs/design/peer-review-response.md`
-§3.1 — *"the architecture protects the managed network more carefully than it
-protects its own source of truth."*
+derived, never authored). The external-review correction is retained in
+`docs/build/FINDINGS.md` and the removed point-in-time review remains in Git
+history.
 
 The diff tools also stopped persisting their fresh collection, which the CLI
 still does. Snapshot history is what `detect_lab_flaps` reads, so a model
@@ -535,14 +591,20 @@ can reach one. `tests/test_mcp_server.py` asserts that.
 `NETTOOLS_MCP_SURFACE` selects what this server registers:
 
 - **`classic`** (default) — the full per-function tool set listed above,
-  byte-identical in behaviour to before the flag existed.
+  byte-identical in behaviour to before the flag existed. This is the
+  **expert** profile for manual, granular inspection.
 - **`staged`** — five stage-shaped tools plus a probe (`explore_lab`,
   `check_lab`, `lookup_lab`, `investigate_lab`, `history_lab`, `probe_lab`),
   each a thin composition of the same already-safe functions through the same
   sanitisation boundary, with the active probe still separately annotated.
+  This is the **guided** profile for model-assisted troubleshooting.
+  `investigate_lab` supports all four implemented flows: `bgp_session`,
+  `interface`, `isis_adjacency`, and `ldp_session`. Event routing currently
+  produces only BGP and interface flows; IS-IS and LDP are available through
+  explicit guided MCP calls until measured event mappings exist.
 
-Both exist because the tool-selection A/B (`MCP-EXPERIMENT.md` §9/§10,
-Appendix A) needs both surfaces measurable; the staged manifest is
-deliberately smaller than the classic one — a test asserts it — and the
-default flips only after the outstanding measurement lands.
-
+Both exist because the historical tool-selection A/B needs both surfaces
+measurable; the staged manifest is
+deliberately smaller than the classic one — a test asserts it. Guided/staged
+is the recommended LM Studio profile; classic remains the compatibility default
+until the outstanding surface-level measurement supports a default flip.

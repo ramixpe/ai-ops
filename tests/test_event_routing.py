@@ -38,9 +38,38 @@ def test_a_real_bgp_adjchange_line_routes_to_the_bgp_flow():
     assert d.flow == "bgp_session"
     assert d.subject == "10.255.0.12"
     assert d.transition == "down"
+    assert d.raw_event == line
     assert d.suggested_command() == [
         "nettools", "investigate", "RR1", "10.255.0.12", "--flow", "bgp_session"
     ]
+
+
+def test_one_routed_event_has_a_stable_identity_in_its_wire_payload():
+    line = _real_line("ROUTING-BGP-5-ADJCHANGE : neighbor 10.255.0.12")
+
+    first = er.route_syslog_line(line, device="RR1")
+    second = er.route_syslog_line(line, device="RR1")
+
+    assert first.event_id == second.event_id
+    assert first.as_dict()["event_id"] == first.event_id
+
+
+def test_equivalent_direct_syslog_and_loki_records_have_one_event_identity():
+    body = _real_line("ROUTING-BGP-5-ADJCHANGE : neighbor 10.255.0.12")
+    direct = er.route_syslog_line(body, device="RR1")
+    loki = er.route_loki_record(
+        {
+            "raw_event": f"RR1.sota-xrd {body}",
+            "mnemonic": "ROUTING-BGP-5-ADJCHANGE",
+            "text": body.split(" : ", 1)[1],
+            "timestamp": "Aug 16 07:44:06.366 UTC",
+            "ingest_timestamp_ns": "1755000000000000000",
+        },
+        device="RR1",
+    )
+
+    assert direct.routable and loki.routable
+    assert direct.event_id == loki.event_id
 
 
 def test_a_real_link_updown_line_routes_to_the_interface_flow():
@@ -67,6 +96,8 @@ def test_a_bgp_down_decision_is_byte_for_byte_unchanged_apart_from_transition():
     payload = d.as_dict()
 
     assert payload.pop("transition") == "down"
+    assert payload.pop("raw_event") == line
+    assert payload.pop("event_id") == d.event_id
     assert payload == {
         "routable": True,
         "flow": "bgp_session",
@@ -149,6 +180,8 @@ def test_a_link_updown_down_is_unaffected_by_the_fix():
     payload = d.as_dict()
 
     assert payload.pop("transition") == "down"
+    assert payload.pop("raw_event") == line
+    assert payload.pop("event_id") == d.event_id
     assert payload == {
         "routable": True,
         "flow": "interface",
@@ -331,7 +364,12 @@ def test_the_host_prefix_and_bare_forms_of_one_line_decide_identically():
     bare = er.route_syslog_line(body, device="RR1")
     prefixed = er.route_syslog_line(f"RR1.sota-xrd {body}", device="RR1")
 
-    assert bare.as_dict() == prefixed.as_dict()
+    bare_payload = bare.as_dict()
+    prefixed_payload = prefixed.as_dict()
+
+    assert bare_payload.pop("raw_event") == body
+    assert prefixed_payload.pop("raw_event") == f"RR1.sota-xrd {body}"
+    assert bare_payload == prefixed_payload
 
 
 def test_a_parsed_host_never_overrides_the_caller_supplied_device():

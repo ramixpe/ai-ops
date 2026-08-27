@@ -202,6 +202,7 @@ __all__ = [
 _UNTRUSTED_TEXT_FIELDS = frozenset(
     {
         "question",
+        "raw_event",
         "subject",
         "resolved_subject",
         "flow_hint",

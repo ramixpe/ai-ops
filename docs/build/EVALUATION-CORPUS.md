@@ -1,14 +1,14 @@
 # Evaluation corpus and confusion matrix (B-427)
 
+<!-- knowledge-search:exclude -- evaluation material (B-511) -->
+
 Companion to `docs/design/chaos-harness.md` (fault injection, the scoring
 vocabulary, §5's confusion-matrix requirement) and `docs/build/PROCESS.md`
-§0.13. Built from the six scored/sealed rounds on disk as of 2026-08-20:
-`docs/build/ROUND-5.md` through `ROUND-8.md` plus the pre-round-numbering
-trials recorded in `docs/build/FINDINGS.md` (OBS-076 through OBS-098, filed
-retroactively as "round 1" through "round 4"), and the payloads under
-`evidence-archive/round5|round7|round8|round8b/`.
-
-<!-- knowledge-search:exclude -- evaluation material (B-511) -->
+§0.13. This is the retained, concise record of six scored/sealed rounds plus
+the pre-round-numbering trials in `FINDINGS.md` (OBS-076 through OBS-098).
+Raw payload archives and narrative round reports were intentionally removed
+after their executable regression vectors and scored outcomes were preserved
+here.
 
 ## 0. Three rules this document does not violate
 
@@ -44,10 +44,10 @@ Six sealed rounds exist. Two shapes, not one:
 | Round | Shape | In the confusion matrix? |
 |---|---|---|
 | 1–4 (pre-numbering: T-033/OBS-076-077, OBS-087-090, OBS-091-093, OBS-082/094-098) | single blind diagnosis vs. an independent hand prediction, sealed before the run | **yes — §2** |
-| 5 (`ROUND-5.md`) | continuous sampling through a propagating fault; ground truth *changes* mid-round | **no — its own table, §3** |
-| 6 (`ROUND-6.md`) | sealed, **never run** — §5 of that file is empty | **excluded, §4** |
-| 7 (`ROUND-7.md`) | mechanism validation (B-462: does a down port persist as an LFA backup) — never ran `investigate`, produced no rung vector | **no — §5, mechanism validation** |
-| 8 / 8b (`ROUND-8.md`) | mechanism validation (B-463: can rungs 1/2 separate) — never ran `investigate`, produced no rung vector | **no — §5, mechanism validation** |
+| 5 | continuous sampling through a propagating fault; ground truth *changes* mid-round | **no — its own table, §3** |
+| 6 | sealed, **never run** | **excluded, §4** |
+| 7 | mechanism validation (B-462: does a down port persist as an LFA backup) — never ran `investigate`, produced no rung vector | **no — §5, mechanism validation** |
+| 8 / 8b | mechanism validation (B-463: can rungs 1/2 separate) — never ran `investigate`, produced no rung vector | **no — §5, mechanism validation** |
 
 This follows the backlog's own note on round 7, word for word: *"It is also
 the first scored round that validates shipped code rather than measuring
@@ -140,12 +140,9 @@ it is a real, distinct cost, and B-427's own row names the requirement this
 document is satisfying: *a matrix scoring rungs alone would have recorded a
 clean pass on a round that was weaker in two separate ways.*
 
-No per-sample raw envelope for round 3 is archived under
-`evidence-archive/` — it predates round 5's `§6.1d` archiving rule
-(2026-08-17). The field values above are quoted from OBS-092, recorded the
-day of the run; there is no fresher or more authoritative source to check
-them against, which is itself worth naming rather than treating the FINDINGS
-quote as equivalent to an archived payload.
+No per-sample raw envelope exists for round 3. The field values above are
+quoted from OBS-092, recorded the day of the run; there is no fresher source
+to check them against.
 
 ### 2.4 Anti-vacuity (OBS-089, BINDING) — checked once, and it failed
 
@@ -193,10 +190,8 @@ repeatedly and *did* produce rung vectors and findings — it simply produced
 many, against a moving target, so folding it into §2's matrix would average
 five different physical situations into one row.
 
-Thirteen probes, full payload archived per probe
-(`evidence-archive/round5/20260817-094426/`, thirteen files — §6.1d
-compliant). Four are representative of the three distinct mechanisms; all
-four are pinned executably in `tests/test_rounds_regression.py`.
+Four representative probes cover the three distinct mechanisms and are pinned
+executably in `tests/test_rounds_regression.py`.
 
 | Probe | T+ | Rungs (`BGP·TX·route·IGP·IF`) | Skew | Re-read | Finding **at the time** | Exit **then** | Finding **now** (current code) | Exit **now** |
 |---|---:|:---:|---:|---|---|:---:|---|:---:|
@@ -263,11 +258,10 @@ one with the other.
 
 ## 4. Round 6: excluded, pending
 
-`docs/build/ROUND-6.md` is fully sealed — subject, fault (`fault_lab.py`
-option 8: BGP neighbor shutdown plus a shut spare interface `Gi0/0/0/2`, the
-trust-loss scenario from reviewer B §3.3), predictions with falsifiers, a
-preflight checklist — and **§5, "Results", is empty**. `docs/build/BACKLOG.md`
-lists B-440 as `BLOCKED`, "needs the lab." No payload exists to score.
+Round 6 was fully sealed but never run: subject, fault (`fault_lab.py` option
+8: BGP neighbor shutdown plus a shut spare interface `Gi0/0/0/2`), prediction,
+and preflight existed, but no result/payload exists to score. `BACKLOG.md`
+lists B-440 as `BLOCKED`, "needs the lab."
 **Excluded from every table above and noted here as the reason.** When it
 runs, it is a fifth blind diagnostic trial and belongs in §2's matrix, not
 in a new heading — its shape (one subject, one sealed prediction, one true
@@ -371,3 +365,45 @@ do not describe one state — even though neither one should ever be
   (59 trials for a 5% bound, zero observed) does not apply yet — this
   corpus has trials, not an estimand, and reporting a rate from it would be
   the exact error §3.5 warns against.
+
+## 9. Operational acceptance: confirmed-commit fault 7
+
+**2026-08-24, PE2, not a blind scored trial.** Faultlab applied the
+wrong-remote-AS fault toward RR1 using a direct IOS-XR confirmed commit with a
+420-second rollback backstop. Device readback confirmed the BGP configuration
+change. An explicitly unblinded, read-only MiniMax event callback then ran
+during the hold and returned a deterministic `transport_blocked` finding for
+`RR1 -> 10.255.0.12`: BGP session and transport were broken while route,
+IS-IS, and interface rungs remained healthy. The event ticket recorded
+`INC-20260824-00001` and the code-observed Telegram drill/final diagnosis ran.
+
+Explicit revert restored the config; the declared `clear bgp 10.255.0.31`
+recovery restored `Established` on the first attempt; an independent post-run
+preflight passed. The injector's sealed receipt is
+`faultlab/runs/20260824-085930-pe2/truth.jsonl`; the event summary and ticket
+are under `scripts/measure_event_agent_out/20260824-fault7-e2e/`.
+
+This validates fault containment, event-agent execution, ticket/notification
+delivery, deterministic localization, and restore. It does **not** estimate
+diagnostic accuracy or replace a sealed blind trial.
+
+## 10. Operational acceptance: confirmed-commit fault 3
+
+**2026-08-24, PE2, not a blind scored trial.** Faultlab shut one PE2 core
+interface with the same direct IOS-XR confirmed-commit and coordinated
+read-only MiniMax callback. Device readback confirmed the interface config
+change. The `RR1 -> 10.255.0.12` BGP-session investigation returned
+`all_layers_healthy`: BGP, transport, route, IS-IS, and the *current* routed
+interface were healthy after the fabric used its alternate path. This is the
+correct absorbed-fault outcome for this subject; it did not fabricate an
+interface RCA merely because another PE2 interface was administratively down.
+
+Explicit revert restored the configuration. Faultlab verified the configured
+interface up/up, IS-IS adjacency on that interface, and BGP Established on the
+first attempt; independent post-run preflight passed. The sealed receipt is
+`faultlab/runs/20260824-095044-pe2/truth.jsonl`; event output is under
+`scripts/measure_event_agent_out/20260824-fault3-e2e/`.
+
+This acceptance validates the true-negative/absorbed-fault reporting path and
+restore contract. It is operational evidence, not a sealed blind trial or an
+accuracy-rate contribution.

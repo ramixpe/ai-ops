@@ -11,11 +11,9 @@ Loki's wire shape (host-prefixed) the way `logs_loki._LOKI_LOG_LINE` expects
 OBS-181's rule is followed deliberately: `test_positive_control_*` proves the
 mechanism CAN emit a routable decision, using the real, reviewed
 `event_routing.MNEMONIC_FLOW_TABLE` and a real flow name, with only the
-`trigger.fires` policy bit flipped via the injection seam — because as of
-this measurement (2026-08-19) the live, reviewed `mnemonics.yaml` table has
-zero `fires: true` entries (every one is excluded for a stated, measured
-reason — see that file's own header and `docs` this task produced), and a
-suite that only ever proves refusals is not proof the accept path works.
+``trigger.fires`` policy bit flipped via the injection seam. The live table
+now has one separately tested B-706 trigger; injected tables still let this
+suite prove arbitrary positive and invalid policy cases.
 """
 
 from __future__ import annotations
@@ -25,7 +23,7 @@ import json
 
 import pytest
 
-from agent_nettools import event_routing, logs_loki
+from agent_nettools import event_routing, logs_loki, trigger_table
 from agent_nettools import event_watch as W
 from agent_nettools import logs_loki as loki
 from agent_nettools.event_routing import RoutingDecision
@@ -139,22 +137,26 @@ def _table_with_override(mnemonic: str, **trigger_overrides) -> list[dict]:
 
 
 # --------------------------------------------------------------------------- #
-# The live, reviewed table: zero fires today, and why -- pinned so a future
-# change to mnemonics.yaml has to consciously touch this test, not silently
-# start (or stop) triggering.
+# The live, reviewed table has one accepted B-706 trigger. Pin its exact
+# identity so a second trigger cannot silently become active.
 # --------------------------------------------------------------------------- #
 
 
-def test_the_live_table_has_zero_fires_true_entries_as_of_the_2026_08_19_sweep():
-    """Pins the measured state this whole change reports: every mnemonic
-    this fabric's Loki feed carries was checked against the trigger bar and
-    excluded, each for its own stated reason. This is expected to change the
-    day a mnemonic is actually observed clearing the bar -- and that day
-    should touch this assertion deliberately, with a fresh measurement
-    beside it, not as a side effect of an unrelated edit."""
+def test_the_live_table_has_only_the_accepted_b706_trigger_enabled():
+    """A second active trigger requires an explicit acceptance campaign."""
 
     fires = [e["mnemonic"] for e in load_mnemonic_table() if e["trigger"]["fires"]]
-    assert fires == []
+    assert fires == ["ROUTING-BGP-5-ADJCHANGE"]
+
+
+def test_live_policy_validation_refuses_an_unreviewed_second_trigger(monkeypatch):
+    table = _table_with_override("PKT_INFRA-LINK-3-UPDOWN", fires=True)
+    monkeypatch.setattr(trigger_table, "load_mnemonic_table", lambda: table)
+
+    with pytest.raises(trigger_table.TriggerTableInconsistency, match="live trigger set"):
+        trigger_table.validate_trigger_table(
+            routable_mnemonics=(mnemonic for mnemonic, _flow, _extract in event_routing.MNEMONIC_FLOW_TABLE)
+        )
 
 
 def test_every_table_entry_has_a_well_shaped_trigger_block():
@@ -239,6 +241,21 @@ def test_positive_control_a_cleared_mnemonic_produces_a_routable_decision():
     assert obs.decision.suggested_command() == [
         "nettools", "investigate", "PE2", "GigabitEthernet0/0/0/0", "--flow", "interface",
     ]
+
+
+def test_loki_recovery_uses_the_shared_router_and_refuses_even_when_cleared():
+    table = _table_with_override("PKT_INFRA-LINK-3-UPDOWN", fires=True)
+    report = W.watch_device(
+        "PE2",
+        fetcher=_canned_fetcher(_loki_ok([_stream(_PE2_LABELS, _values(_LINK_UP))])),
+        trigger_table=table,
+    )
+
+    [observation] = report.observations
+    assert observation.decision.routable is False
+    assert observation.decision.transition == "up"
+    assert "recovery" in observation.decision.reason
+    assert observation.decision.raw_event == _LINK_UP
 
 
 def test_negative_control_the_same_line_is_unrouted_against_the_real_table():

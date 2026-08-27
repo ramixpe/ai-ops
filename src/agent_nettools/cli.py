@@ -1463,16 +1463,15 @@ def _config_reconciliation_for(args, result, sender) -> dict | None:
     interface = result.subject
 
     try:
-        # `from .config_diff import ...` (not `from . import config_diff`)
-        # deliberately: `docs/diagrams/facts.config_diff_consumers()` -- the
-        # scanner d1.py's self-invalidating guard reads -- only recognises an
-        # `ImportFrom` node whose own `module` names `config_diff` (or a
-        # plain `Import`), not a bare `from . import config_diff`. Using the
-        # form the guard actually detects is deliberate here: this file
-        # genuinely becomes config_diff.py's first live consumer, and the
-        # diagram's "unwired" pill label is now stale -- see this task's
-        # final report for the exact orchestrator hand-off (docs/diagrams/
-        # is out of scope for this lane to edit).
+        # `from .config_diff import ...` (not `from . import config_diff`):
+        # this file is config_diff.py's first live consumer. (Historical
+        # note: this specific import form used to matter to
+        # `docs/diagrams/facts.config_diff_consumers()`, a scanner
+        # `d1.py`'s self-invalidating guard read to recognise an `ImportFrom`
+        # node naming `config_diff` -- that generated-diagram system was
+        # retired 2026-08-23, so nothing parses this import shape anymore.
+        # Kept as-is for readability, not because a guard still depends on
+        # it.)
         from .config_diff import gather_reconciliation_evidence, reconcile_interface
 
         evidence = gather_reconciliation_evidence(device, [interface], sender=sender)
@@ -1601,6 +1600,7 @@ def _cmd_investigate(args: argparse.Namespace) -> int:
     """
 
     _require("flows", "looks_like_sentence", "select_flow", "investigate", "LLMAnalysisError")
+    from .narrowing_pass import NarrowingMode
 
     # B-407: a literal "it" DEVICE/SUBJECT resolves against this session's
     # last turn before anything else runs -- no fixtures loaded, no ticket
@@ -1686,10 +1686,17 @@ def _cmd_investigate(args: argparse.Namespace) -> int:
     # the SHORT spelling) miss a file for a caller who typed the long one.
     # See tests/test_interface_canonicalization.py for the full audit.
 
+    narrowing_mode_text = os.getenv("NETTOOLS_REASONING_GATE_MODE", "off").strip().lower()
+    narrowing_mode = NarrowingMode(narrowing_mode_text) if narrowing_mode_text in NarrowingMode else NarrowingMode.OFF
     try:
-        result = investigate(
-            args.device, subject, flow=flow, analyst=analyst, sender=sender
-        )
+        investigate_args = {
+            "flow": flow,
+            "analyst": analyst,
+            "sender": sender,
+        }
+        if narrowing_mode is NarrowingMode.SHADOW:
+            investigate_args["narrowing_mode"] = narrowing_mode
+        result = investigate(args.device, subject, **investigate_args)
     except (ValueError, KeyError) as exc:
         # A flow that does not exist, or a subject no device owns. The run
         # produced no answer at all, which is exit 2 by the rule above.

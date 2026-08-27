@@ -8,7 +8,7 @@ measurement has since run: B-103 is `CLOSED-AS-REFUSED` (BACKLOG.md, decided
 by measurement 2026-08-19, the day after this document). See the note at
 §"honest risks" #2 and the recommendation for what the measurement found.**
 
-> This document supersedes `lld-investigation-layer.md` §5.6, which sketched a
+> This document supersedes an earlier retired LLD design sketch, which sketched a
 > wider three-field decision schema (`sufficient`/`narrow` carrying `finding`
 > and `object`). That earlier shape let a model return a **finding**, which is
 > precisely what the approved design makes unrepresentable. The LLD predates
@@ -135,6 +135,14 @@ have to justify keeping.
 > against, so it was not built. `docs/diagrams/d9.py` refuses to regenerate
 > `09-model-boundary.svg` if `reasoning_gate` ever gains a live caller — that
 > guard is this decision's tripwire.
+
+> **2026-08-23 update:** the generated diagram system this decision's guard
+> lived in (`docs/diagrams/d9.py`, which refused to regenerate
+> `09-model-boundary.svg` if `reasoning_gate` ever gained a live caller) was
+> retired in favour of a single hand-authored diagram layer. Nothing
+> currently re-derives "does `reasoning_gate` have a live caller" the way
+> that guard did — this file's own record above, and `model_ingress.py`'s
+> matching comment, are what's left of the tripwire.
 
 ## What I need from you
 

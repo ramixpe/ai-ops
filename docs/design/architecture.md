@@ -80,9 +80,9 @@ its own, each module depending only on the ones above it in this list:
 `cli.py`'s `investigate` subcommand has MCP parity in `investigate_lab_session`
 — both wrap the same `investigate()` runner. (**Correction, 2026-08-20**: an
 earlier pass of this cleanup wave cited this as landing with "B-113, closed
-2026-08-19." That is wrong — `investigate_lab_session` already existed by
-2026-08-17, per `MCP-EXPERIMENT.md`'s own baseline; B-113 is MCP tool
-consolidation/wording, an unrelated item. No backlog item is cited here
+2026-08-19." That is wrong — `investigate_lab_session` already existed before
+the current implementation review; B-113 is MCP tool consolidation/wording,
+an unrelated item. No backlog item is cited here
 because none was found that specifically tracks this parity.)
 
 > The four invariants this layer inherits, the two modules that look like
@@ -785,8 +785,8 @@ substitute.
 wiring, exit codes, and error handling -- `tests/test_cli.py` now drives
 `build_parser()`/every `_cmd_*` (monkeypatching the specific `cli`-module-bound
 function each one calls, never the network) and `main()` itself, including
-the exact regression `docs/archive/REVIEW.md` records (`analyze`/`demo` not catching
-the `ValueError` `get_provider()` raises on misconfiguration) and the
+the regression where `analyze`/`demo` did not catch the `ValueError`
+`get_provider()` raises on misconfiguration, and the
 top-level `InventoryError` → exit-2 handler. A live-lab integration tier
 (`tests/test_live_lab.py`, marker `live_lab` registered in `pyproject.toml`)
 exercises real SSH against the real lab; every test in it self-skips unless

@@ -184,6 +184,27 @@ def test_committed_lab_inventory_parses_and_has_nine_devices():
     names = {d.name for d in inventory.devices}
     assert names == {"P1", "P2", "P3", "P4", "PE1", "PE2", "PE3", "PE4", "RR1"}
 
+    pe2 = next(device for device in inventory.devices if device.name == "PE2")
+    assert pe2.intended is not None
+    assert pe2.intended.ldp_interfaces == [
+        "GigabitEthernet0/0/0/0",
+        "GigabitEthernet0/0/0/1",
+    ]
+
+
+def test_empty_or_duplicate_ldp_intent_interfaces_are_rejected(tmp_path):
+    empty = _base_document()
+    empty["devices"][1]["intended"] = {"ldp_interfaces": [""]}
+    with pytest.raises(InventoryError, match="ldp_interfaces entries must be non-empty"):
+        parse_inventory(_write(tmp_path, empty, "empty.yaml"))
+
+    duplicate = _base_document()
+    duplicate["devices"][1]["intended"] = {
+        "ldp_interfaces": ["GigabitEthernet0/0/0/0", "GigabitEthernet0/0/0/0"]
+    }
+    with pytest.raises(InventoryError, match="ldp_interfaces must not contain duplicates"):
+        parse_inventory(_write(tmp_path, duplicate, "duplicate.yaml"))
+
 
 def test_resolve_inventory_path_prefers_explicit_argument(tmp_path):
     explicit = tmp_path / "explicit.yaml"

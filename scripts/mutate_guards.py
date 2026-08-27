@@ -668,10 +668,15 @@ MUTATIONS = [
     ("B-630-TRIGGER-TABLE-GUARD", "validate_trigger_table raises when a "
      "fires:true mnemonic has no matching event_routing.MNEMONIC_FLOW_TABLE "
      "entry, rather than silently leaving it inert",
-     "src/agent_nettools/event_watch.py",
-     "        if mnemonic not in routable_mnemonics:\n",
+        "src/agent_nettools/trigger_table.py",
+        "        if mnemonic not in routable:\n",
      "        if False:\n",
      "test_fires_true_with_no_flow_table_entry_is_a_loud_error_not_a_silent_false"),
+    ("B-706-EXACT-LIVE-TRIGGER-GUARD", "the live reviewed trigger set stays exactly approved",
+     "src/agent_nettools/trigger_table.py",
+     "    if table is None and firing_mnemonics != REVIEWED_FIRING_MNEMONICS:\n",
+     "    if False:\n",
+     "test_live_policy_validation_refuses_an_unreviewed_second_trigger"),
     # ---- B-408/B-444: admission control for concurrent collection, and
     # active-probe rate budgeting. Two guards, not one -- the ENFORCEMENT
     # (does the per-device cap actually refuse a second concurrent
@@ -970,9 +975,9 @@ MUTATIONS = [
      "-- it must never scan forward to a marker buried later in the string, "
      "which would let a genuinely malformed line (junk between a host-shaped "
      "token and the marker) through as if it were well-formed",
-     "src/agent_nettools/event_routing.py",
-     'r"^(?P<host>\\S+)\\s+(?=RP/0/RP0/CPU0:)"',
-     'r"^(?P<host>\\S+).*(?=RP/0/RP0/CPU0:)"',
+    "src/agent_nettools/iosxr_syslog.py",
+    'r"^(?:(?P<host>\\S+)\\s+)?(?P<node>RP/0/RP0/CPU0):"',
+    'r"^(?:(?P<host>\\S+).*)?(?P<node>RP/0/RP0/CPU0):"',
      "test_junk_between_a_host_token_and_the_rp_marker_still_refuses"),
 
     # Counted before adding (OBS-191): the client-construction line below

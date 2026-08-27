@@ -65,3 +65,7 @@ admission/
 # twice more with new stores. The pattern is the finding: a new store inherits
 # none of the containment the previous ones learned.
 session_memory/
+
+# Legacy B-707 lifecycle state from before its default moved to the user state
+# directory. Existing local files must remain untracked.
+event-notifications.json

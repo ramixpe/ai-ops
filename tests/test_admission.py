@@ -265,6 +265,62 @@ def test_check_probe_budget_window_expiry_readmits(monkeypatch):
     admission.check_probe_budget("PE1")  # window elapsed -- admitted again.
 
 
+def test_event_run_budget_refuses_after_the_per_device_limit(monkeypatch):
+    monkeypatch.setenv("NETTOOLS_MAX_EVENT_RUNS_PER_DEVICE", "1")
+    monkeypatch.setenv("NETTOOLS_MAX_EVENT_RUNS_FABRIC", "100")
+    monkeypatch.setenv("NETTOOLS_EVENT_RUN_WINDOW_SECONDS", "60")
+
+    admission.check_event_run_budget("PE1")
+    with pytest.raises(admission.AdmissionDenied) as excinfo:
+        admission.check_event_run_budget("PE1")
+
+    assert excinfo.value.refusal.scope == "event_device"
+
+
+def test_event_idempotency_refuses_a_replayed_identifier(monkeypatch):
+    monkeypatch.setenv("NETTOOLS_EVENT_IDEMPOTENCY_WINDOW_SECONDS", "60")
+
+    admission.claim_event_id("event-123")
+    with pytest.raises(admission.AdmissionDenied) as excinfo:
+        admission.claim_event_id("event-123")
+
+    assert excinfo.value.refusal.scope == "event_idempotency"
+
+
+def test_event_admission_fabric_refusal_does_not_consume_the_device_budget(monkeypatch):
+    monkeypatch.setenv("NETTOOLS_MAX_EVENT_RUNS_PER_DEVICE", "1")
+    monkeypatch.setenv("NETTOOLS_MAX_EVENT_RUNS_FABRIC", "1")
+
+    admission.admit_event_run("event-1", "PE1")
+    with pytest.raises(admission.AdmissionDenied) as excinfo:
+        admission.admit_event_run("event-2", "PE2")
+    assert excinfo.value.refusal.scope == "event_fabric"
+
+    monkeypatch.setenv("NETTOOLS_MAX_EVENT_RUNS_FABRIC", "2")
+    admission.admit_event_run("event-2", "PE2")
+
+
+def test_event_admission_retryable_failure_releases_the_event_identity(monkeypatch):
+    monkeypatch.setenv("NETTOOLS_MAX_EVENT_RUNS_PER_DEVICE", "10")
+    monkeypatch.setenv("NETTOOLS_MAX_EVENT_RUNS_FABRIC", "10")
+
+    admission.admit_event_run("event-1", "PE1")
+    admission.finish_event_run("event-1", completed=False)
+    admission.admit_event_run("event-1", "PE1")
+
+
+def test_event_admission_completed_event_remains_deduplicated(monkeypatch):
+    monkeypatch.setenv("NETTOOLS_MAX_EVENT_RUNS_PER_DEVICE", "10")
+    monkeypatch.setenv("NETTOOLS_MAX_EVENT_RUNS_FABRIC", "10")
+
+    admission.admit_event_run("event-1", "PE1")
+    admission.finish_event_run("event-1", completed=True)
+    with pytest.raises(admission.AdmissionDenied) as excinfo:
+        admission.admit_event_run("event-1", "PE1")
+
+    assert excinfo.value.refusal.scope == "event_idempotency"
+
+
 # --------------------------------------------------------------------------- #
 # Wiring: network_tools.py's real (non-sender) call sites never return a
 # healthy-looking envelope on a refusal, and never even attempt a connection.

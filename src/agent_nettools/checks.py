@@ -994,11 +994,64 @@ def ldp_session_up(evidence: dict[str, Any], interface: str) -> CheckResult:
             )
         break
 
+    config_section, config_bail = require_parsed(evidence, "config_ldp", subject=interface)
+    if config_bail is not None:
+        return unevaluated(
+            reason=(
+                f"no LDP session record or discovery source on {interface}, and the "
+                f"bounded LDP configuration could not be read to establish whether "
+                f"LDP is enabled there ({config_bail.reason})"
+            ),
+            subject=interface,
+        )
+
+    config_key = evidence_key(device, "config_ldp")
+    if any(
+        same_interface(record.get("interface", ""), interface)
+        for record in parsed_records(config_section)
+    ):
+        discovery_key = evidence_key(device, "ldp_discovery", interface)
+        interfaces_key = evidence_key(device, "interfaces", interface)
+        return broken(
+            reason=(
+                f"LDP is configured on {interface}, but it has no LDP discovery "
+                f"source or session record while the interface is up"
+            ),
+            subject=interface,
+            evidence_keys=(ldp_key, discovery_key, interfaces_key, config_key),
+        )
+
+    intent_section, intent_bail = require_parsed(evidence, "ldp_intent", subject=interface)
+    if intent_bail is not None:
+        return unevaluated(
+            reason=(
+                f"no LDP session record or discovery source on {interface}, and the "
+                f"declared LDP intent could not be read ({intent_bail.reason})"
+            ),
+            subject=interface,
+        )
+
+    intent_key = evidence_key(device, "ldp_intent")
+    if any(
+        same_interface(record.get("interface", ""), interface)
+        for record in parsed_records(intent_section)
+    ):
+        discovery_key = evidence_key(device, "ldp_discovery", interface)
+        interfaces_key = evidence_key(device, "interfaces", interface)
+        return broken(
+            reason=(
+                f"inventory declares LDP is required on {interface}, but the current "
+                f"configuration, discovery, and session state are all absent"
+            ),
+            subject=interface,
+            evidence_keys=(ldp_key, discovery_key, interfaces_key, config_key, intent_key),
+        )
+
     return unevaluated(
         reason=(
             f"no LDP session record for interface {interface!r}, no LDP discovery source "
-            f"there, and the interface itself reads up -- it may simply not be an "
-            f"LDP-enabled link"
+            f"there, and the interface itself reads up -- LDP is not configured on "
+            f"this link"
         ),
         subject=interface,
     )
@@ -1271,7 +1324,7 @@ def interface_state(
 
 
 # Ordered weakest to strongest so "max severity" is a simple index comparison.
-SEVERITY_ORDER: tuple[str, ...] = ("ok", "info", "warning", "critical")
+SEVERITY_ORDER: tuple[str, ...] = ("ok", "info", "warning", "unreachable", "critical")
 
 # The four intents any health rule reads. Kept as one tuple so the
 # "unevaluated" bookkeeping in evaluate_device stays in lockstep with the
@@ -1293,14 +1346,14 @@ def _max_severity(a: str, b: str) -> str:
 def exit_code_for_severity(severity: str) -> int:
     """Map a verdict's severity to a process exit code for CI/cron gating.
 
-    ``0`` for ok/info (nothing actionable), ``1`` for warning, ``2`` for
-    critical -- so a scheduled ``nettools health --all`` can fail a pipeline
-    only when something actually needs attention.
+    ``0`` for ok/info (nothing actionable), ``1`` for warning/unreachable,
+    ``2`` for critical. An unreachable device needs attention but is not a
+    diagnosis, so it must not be rendered or paged as a confirmed critical.
     """
 
     if severity == "critical":
         return 2
-    if severity == "warning":
+    if severity in {"warning", "unreachable"}:
         return 1
     return 0
 
@@ -1827,11 +1880,12 @@ def evaluate_device(evidence: dict[str, Any], device: Device) -> dict[str, Any]:
     unevaluated = sorted(failed_collection + failed_parse)
 
     if failed_collection and not any(reasons[i] is None for i in _HEALTH_INTENTS):
-        # Nothing at all could be read: treat the device as down, not healthy.
+        # Nothing at all could be read: report an operationally distinct
+        # unreachable state, not a confirmed critical fault or healthy state.
         findings.append(
             {
                 "rule": "device_unreachable",
-                "severity": "critical",
+                "severity": "unreachable",
                 "intent": None,
                 "message": (
                     "no intent could be collected; the device is unreachable or "
@@ -1868,7 +1922,7 @@ def evaluate_device(evidence: dict[str, Any], device: Device) -> dict[str, Any]:
             }
         )
 
-    counts = {"critical": 0, "warning": 0, "info": 0}
+    counts = {"critical": 0, "unreachable": 0, "warning": 0, "info": 0}
     severity = "ok"
     for finding in findings:
         severity = _max_severity(severity, finding["severity"])
@@ -1924,7 +1978,9 @@ def evaluate_fabric(
     # Fabric-level roll-up: how many devices sit at each severity, and how many
     # had an intent that could not be evaluated. At fleet scale the per-device
     # list is unreadable, so this line is what an operator or a cron job reads.
-    by_severity: dict[str, int] = {"critical": 0, "warning": 0, "info": 0, "ok": 0}
+    by_severity: dict[str, int] = {
+        "critical": 0, "unreachable": 0, "warning": 0, "info": 0, "ok": 0,
+    }
     for verdict in device_verdicts.values():
         by_severity[verdict["severity"]] += 1
 

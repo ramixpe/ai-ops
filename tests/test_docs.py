@@ -154,3 +154,30 @@ def test_the_devices_doc_generator_still_renders_from_the_inventory():
     assert rendered.strip(), "the generator produces a document"
     for device in ("PE1", "PE2", "RR1"):
         assert device in rendered, f"{device} is in the inventory and must be rendered"
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    (
+        "README.md",
+        "CONTRIBUTING.md",
+        "SECURITY.md",
+        "CLAUDE.md",
+        "docs/README.md",
+        "mcp_server/README.md",
+    ),
+)
+def test_current_documentation_maps_do_not_link_to_removed_local_files(relative_path):
+    """Pin the live reading path without policing historical prose/log entries."""
+
+    document = REPO_ROOT / relative_path
+    text = document.read_text(encoding="utf-8")
+    missing = []
+    for raw_target in re.findall(r"\]\(([^)]+)\)", text):
+        target = raw_target.strip("<>").split("#", 1)[0]
+        if not target or target.startswith(("http://", "https://", "mailto:")):
+            continue
+        resolved = (document.parent / target).resolve()
+        if not resolved.exists():
+            missing.append(target)
+    assert not missing, f"{relative_path} links to missing local targets: {sorted(set(missing))}"

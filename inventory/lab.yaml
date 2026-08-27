@@ -167,6 +167,10 @@ devices:
     expected:
       isis_adjacencies: 2
       bgp_peers: 1
+    intended:
+      ldp_interfaces:
+        - GigabitEthernet0/0/0/0
+        - GigabitEthernet0/0/0/1
 
     notes:
       - applies_to: isis

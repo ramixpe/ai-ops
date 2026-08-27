@@ -692,7 +692,8 @@ These are genuinely undecided, and deciding them from first principles would be 
 > `nettools health` shipped as exactly this shape — breadth-first, no descent,
 > deterministic verdicts. **5** resolved by operator decision (B-495,
 > 2026-08-19): production is `qwen3.8-27b`, the test arm is `gemma-4-e4b`; see
-> `docs/build/MCP-EXPERIMENT.md` §11-§14b for the evidence.
+> the historical MCP experiment in Git history and `docs/build/FINDINGS.md`
+> for the evidence.
 
 1. **Active probes** (D13) — separate class and budget, or ordinary reads?
 2. **Is one narrowing pass enough?** Only running the descent against a real broken session on `sota-xrd` will say.

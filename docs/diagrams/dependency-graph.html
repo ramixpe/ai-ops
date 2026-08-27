@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ios-xr-nettools — Dependency graph</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f5f5f5;
+      --color-ink:     #2d3142;
+      --color-muted:   #4f5d75;
+      --color-accent:  #eb6c36;
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      padding: 3rem 2rem;
+    }
+    .frame { max-width: 1080px; margin: 0 auto; }
+    .eyebrow {
+      font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500;
+      letter-spacing: 0.18em; text-transform: uppercase;
+      color: var(--color-muted); margin-bottom: 0.5rem;
+    }
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400; letter-spacing: -0.02em; line-height: 1.15;
+      color: var(--color-ink); margin-bottom: 0.5rem;
+    }
+    .standfirst {
+      font-size: 0.9rem; color: var(--color-muted);
+      max-width: 72ch; margin-bottom: 1.5rem; line-height: 1.5;
+    }
+    svg { width: 100%; min-width: 900px; display: block; }
+    .colophon {
+      margin-top: 2rem; padding-top: 1rem; border-top: 1px solid rgba(45,49,66,0.10);
+      font-family: var(--font-mono); font-size: 0.7rem; color: var(--color-muted);
+    }
+    a { color: var(--color-accent); }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">ios-xr-nettools · dependency graph</p>
+    <h1>What actually imports inventory_model</h1>
+    <p class="standfirst">inventory_model.py is the single most-depended-on module in the codebase — 19 other modules import it directly, grouped here by subsystem so the graph stays readable. The MCP-server and event-agent edges alongside the star show this is a graph, not just one node with a badge.</p>
+    <svg viewBox="0 0 1280 370" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="dependency-title dependency-desc">
+      <title id="dependency-title">ios-xr-nettools dependency graph</title>
+      <desc id="dependency-desc">Ranked dependency graph showing inventory_model as the codebase's highest fan-in module, imported by nineteen other modules grouped into five subsystem clusters, alongside the separate event_agent and MCP-server edges that keep the graph from reading as a single star.</desc>
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/>
+        </marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/>
+        </marker>
+        <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/>
+        </marker>
+      </defs>
+
+      <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+      <!-- Rank labels -->
+      <text x="40" y="112" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.18em">RANK 0</text>
+      <text x="40" y="232" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.18em">RANK 1</text>
+
+      <!-- ============ CONNECTORS (drawn before boxes) ============ -->
+
+      <!-- H: MCP layer -> agent & tooling (same-rank horizontal) -->
+      <line x1="304" y1="108" x2="280" y2="108" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)"/>
+      <!-- I: event_agent.py -> observability/event (same-rank horizontal) -->
+      <line x1="1064" y1="108" x2="1016" y2="108" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)"/>
+
+      <!-- F: MCP layer -> boundary (straight, shared x=360) -->
+      <line x1="360" y1="136" x2="360" y2="200" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)"/>
+      <!-- G: event_agent.py -> admission / notify (straight, shared x=1144) -->
+      <line x1="1144" y1="136" x2="1144" y2="200" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)"/>
+      <!-- A: checks/health/invest -> inventory_model (straight, shared x=568) -->
+      <line x1="568" y1="136" x2="568" y2="200" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)"/>
+
+      <!-- B: agent & tooling -> inventory_model (elbow, bridges F at x=360 and C's exit leg at x=420) -->
+      <path d="M 200,136 V 140 Q 200,148 208,148 H 352 a 8,8 0 0,1 16,0 H 412 a 8,8 0 0,1 16,0 H 508 Q 516,148 516,156 V 200" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)"/>
+      <!-- C: MCP layer -> inventory_model (elbow, bridges B's entry leg at x=516) -->
+      <path d="M 420,136 V 152 Q 420,160 428,160 H 508 a 8,8 0 0,1 16,0 H 536 Q 544,160 544,168 V 200" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)"/>
+      <!-- D: device & fabric -> inventory_model (elbow, leftward) -->
+      <path d="M 752,136 V 164 Q 752,172 744,172 H 604 Q 596,172 596,180 V 200" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)"/>
+      <!-- E: observability/event -> inventory_model (elbow, leftward) -->
+      <path d="M 936,136 V 176 Q 936,184 928,184 H 628 Q 620,184 620,192 V 200" fill="none" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)"/>
+
+      <!-- ============ NODES ============ -->
+
+      <!-- 1. agent & tooling (rank0, x=120) -->
+      <rect x="120" y="80" width="160" height="56" rx="6" fill="#f5f5f5"/>
+      <rect x="120" y="80" width="160" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="128" y="86" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="142" y="95" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CLU</text>
+      <rect x="244" y="88" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="258" y="97" fill="#2d3142" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">0 IN</text>
+      <text x="200" y="114" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">agent &amp; tooling</text>
+      <text x="200" y="130" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">5 modules</text>
+
+      <!-- 2. MCP layer (rank0, x=304) -->
+      <rect x="304" y="80" width="160" height="56" rx="6" fill="#f5f5f5"/>
+      <rect x="304" y="80" width="160" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="312" y="86" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="326" y="95" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CLU</text>
+      <rect x="428" y="88" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="442" y="97" fill="#2d3142" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">0 IN</text>
+      <text x="384" y="114" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">MCP layer</text>
+      <text x="384" y="130" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">2 modules</text>
+
+      <!-- 3. checks/health/invest (rank0, x=488) -->
+      <rect x="488" y="80" width="160" height="56" rx="6" fill="#f5f5f5"/>
+      <rect x="488" y="80" width="160" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="496" y="86" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="510" y="95" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CLU</text>
+      <rect x="612" y="88" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="626" y="97" fill="#2d3142" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">0 IN</text>
+      <text x="568" y="114" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">checks/health/inv</text>
+      <text x="568" y="130" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">4 modules</text>
+
+      <!-- 4. device & fabric (rank0, x=672) -->
+      <rect x="672" y="80" width="160" height="56" rx="6" fill="#f5f5f5"/>
+      <rect x="672" y="80" width="160" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="680" y="86" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="694" y="95" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CLU</text>
+      <rect x="796" y="88" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="810" y="97" fill="#2d3142" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">0 IN</text>
+      <text x="752" y="114" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">device &amp; fabric</text>
+      <text x="752" y="130" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">4 modules</text>
+
+      <!-- 5. observability/event (rank0, x=856) -->
+      <rect x="856" y="80" width="160" height="56" rx="6" fill="#f5f5f5"/>
+      <rect x="856" y="80" width="160" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="864" y="86" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="878" y="95" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CLU</text>
+      <rect x="980" y="88" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="994" y="97" fill="#2d3142" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">1 IN</text>
+      <text x="936" y="114" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">observability/evt</text>
+      <text x="936" y="130" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">4 modules</text>
+
+      <!-- 6. event_agent.py (rank0, x=1064) -->
+      <rect x="1064" y="80" width="160" height="56" rx="6" fill="#f5f5f5"/>
+      <rect x="1064" y="80" width="160" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="1072" y="86" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="1086" y="95" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">MOD</text>
+      <rect x="1188" y="88" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="1202" y="97" fill="#2d3142" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">0 IN</text>
+      <text x="1144" y="114" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">event_agent.py</text>
+      <text x="1144" y="130" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">src/agent_nettools</text>
+
+      <!-- 7. boundary (rank1, x=280) — leaf -->
+      <rect x="280" y="200" width="160" height="56" rx="6" fill="#f5f5f5"/>
+      <rect x="280" y="200" width="160" height="56" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="0.8"/>
+      <rect x="288" y="206" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="302" y="215" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">MOD</text>
+      <rect x="404" y="208" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="418" y="217" fill="#2d3142" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">1 IN</text>
+      <text x="360" y="234" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">boundary</text>
+      <text x="360" y="250" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">sanitize()</text>
+
+      <!-- 8. inventory_model (rank1, x=488) — the hub -->
+      <rect x="488" y="200" width="160" height="56" rx="6" fill="#f5f5f5"/>
+      <rect x="488" y="200" width="160" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="496" y="206" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="510" y="215" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">HUB</text>
+      <rect x="612" y="208" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="626" y="217" fill="#2d3142" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">19 IN</text>
+      <text x="568" y="234" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">inventory_model</text>
+      <text x="568" y="250" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">inventory_model.py</text>
+
+      <!-- 9. admission / notify (rank1, x=1064) — leaf -->
+      <rect x="1064" y="200" width="160" height="56" rx="6" fill="#f5f5f5"/>
+      <rect x="1064" y="200" width="160" height="56" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="0.8"/>
+      <rect x="1072" y="206" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="1086" y="215" fill="#2d3142" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CLU</text>
+      <rect x="1188" y="208" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="1202" y="217" fill="#2d3142" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">1 IN</text>
+      <text x="1144" y="234" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">admission / notify</text>
+      <text x="1144" y="250" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">2 modules</text>
+
+      <!-- Legend strip -->
+      <line x1="40" y1="284" x2="1240" y2="284" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+      <text x="40" y="300" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.18em">LEGEND</text>
+
+      <rect x="40" y="316" width="16" height="12" rx="2" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="64" y="325" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Internal module</text>
+
+      <rect x="220" y="316" width="16" height="12" rx="2" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="0.8"/>
+      <text x="244" y="325" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Leaf (no outgoing)</text>
+
+      <text x="420" y="325" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif" font-style="italic">inventory_model's badge is a real count (19); other badges count edges drawn here.</text>
+    </svg>
+    <p class="colophon">Hand-authored with the diagram-design skill · derived from the ios-xr-nettools tree, 2026-08-27 · <a href="index.html">back to the diagram index</a></p>
+  </div>
+</body>
+</html>

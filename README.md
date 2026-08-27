@@ -243,24 +243,20 @@ is checking.
 
 ## Diagrams
 
-**Two layers, and they are not equivalent.**
-
-Nine SVGs in [`docs/diagrams/`](docs/diagrams/) describe the system as it
-stands: the [layer stack](docs/diagrams/01-repo-anatomy.svg), [one call traced
-end to end](docs/diagrams/02-call-path.svg), [how device text reaches a
-model](docs/diagrams/03-trust-boundary.svg), [every
-capability](docs/diagrams/04-capabilities.svg), [where the build
-is](docs/diagrams/05-current-state.svg), [how a diagnosis is
-reached](docs/diagrams/06-descent.svg), Stage 2, the event-driven loop, and the
-model boundary. They are generated from the tree by the scripts beside them and
-**byte-pinned by `tests/test_diagrams.py`**, so they cannot drift from the code
-without failing CI. Regenerate them; never edit them.
-
-Ten hand-authored diagrams in
-[`docs/diagrams/design/`](docs/diagrams/design/index.html) cover the whole stack
-— this tool, the lab platform beside it, and the fabric it reads. Nicer to
-read, and *able* to go stale in a way the generated set cannot. **When the two
-disagree, the generated ones are right.**
+Thirteen hand-authored diagrams in [`docs/diagrams/`](docs/diagrams/index.html)
+describe the system end to end as of 2026-08-24: the whole system at a
+glance, the four call paths into it (CLI, LM Studio over MCP-classic, LM
+Studio over MCP-staged, and the live syslog event path), the
+architecture/trust-boundary stack, the MCP server's own anatomy and its full
+tool census (37 classic + 6 staged tools), the dependency graph, deployment,
+a CLI investigation traced end to end, the full live event pipeline (syslog
+line to Telegram page, unattended), the data model, the model boundary,
+admission & pacing, and the release story map. Start at
+[`docs/diagrams/index.html`](docs/diagrams/index.html). This used to be two
+layers — a generated, byte-pinned SVG set plus a separate hand-authored
+presentation set — retired 2026-08-23 into one. There is no regeneration step
+and no CI byte-pin: these diagrams can drift from the code as the code moves,
+and are only as current as the date on the page.
 
 ## Quick Start
 
@@ -287,8 +283,9 @@ Everything above answers *"what is the state of this device?"*. This layer answe
 *"why is this thing broken, and what is the evidence?"* — and it is built so the
 second answer is not a model's opinion.
 
-**Scope, stated precisely** (external review, `docs/design/peer-review-response.md`
-§4): *the model cannot alter device configuration, and **this one investigation
+**Scope, stated precisely** (review history is retained in
+[`docs/build/FINDINGS.md`](docs/build/FINDINGS.md)): *the model cannot alter
+device configuration, and **this one investigation
 path** localises a finding using deterministic predicates.* `nettools agent` is a
 different path — a bounded tool-calling loop where the model chooses what to call,
 and disabled by default ("Bounded Agent Loop" below; B-488).
@@ -600,8 +597,12 @@ make evidence-prune  # Prune old snapshots (KEEP_DAYS=... KEEP_COUNT=...)
 make metrics     # Report operational metrics (ARGS=--format=prometheus for text exposition)
 make version     # Print the installed nettools version
 make mcp         # Start the MCP server over stdio
+make mcp-http-up # Start persistent authenticated MCP HTTP via Docker Compose
 make inspect     # Smoke-test the MCP server
 ```
+
+For an authenticated LAN/VPN MCP HTTP endpoint in Docker, see
+[`mcp_server/README.md`](mcp_server/README.md).
 
 Target another device:
 
@@ -1032,8 +1033,7 @@ documented tools carry that guarantee.
 
 ## Audit, event routing, and configuration
 
-Three operational commands (2026-08-18 wave; `docs/archive/OPS-WAVE-PLAN.md` has the
-design judgement behind them):
+Three operational commands:
 
 ```bash
 nettools audit [--from-fixtures [--label L]]   # the fabric judged against itself:
@@ -1118,8 +1118,7 @@ is and is not enforced, and where to report a problem.
 
 **On the evidence behind the claims above.** This has run on a thirteen-node
 containerlab fabric, on one vendor, with a small number of blind fault-injection
-trials whose cases were designed by someone who knows the ladder. Three
-independent external reviews are in `docs/`, and
-`docs/design/peer-review-response.md` records which claims they forced us to
-withdraw. `docs/build/MVP0-REVIEW.md` §5 is the honest list of what this does not
-do. Nothing here has run in production.
+trials whose cases were designed by someone who knows the ladder. Current
+limitations and evidence are tracked in [docs/build/FINDINGS.md](docs/build/FINDINGS.md)
+and [docs/build/SOTA-IMPLEMENTATION-REVIEW-CHECKLIST.md](docs/build/SOTA-IMPLEMENTATION-REVIEW-CHECKLIST.md).
+Nothing here has run in production.

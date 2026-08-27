@@ -183,6 +183,8 @@ def validate_prewalk_collection(flow: flows.Flow) -> None:
 
     for rung in flow.descent:
         for step in rung.collect:
+            if step.is_static:
+                continue
             if not step.is_template:
                 continue
             if step.fill is not None and step.fill not in FILL_STRATEGIES:
@@ -191,7 +193,7 @@ def validate_prewalk_collection(flow: flows.Flow) -> None:
                     f"{step.name!r} with fill strategy {step.fill!r}, which the epoch "
                     f"builder does not know. Known: {sorted(FILL_STRATEGIES)}."
                 )
-            if step.fill is not None or step.parameter in _RESOLVABLE:
+            if step.parameter is None or step.fill is not None or step.parameter in _RESOLVABLE:
                 continue
             raise ValueError(
                 f"flow {flow.object_type!r} rung {rung.name!r} collects template "
@@ -647,6 +649,10 @@ def template_calls(
         yield f"{step.name}:{origin_prefix}", {step.parameter: origin_prefix}
         return
 
+    if step.parameter is None:
+        yield step.name, {}
+        return
+
     if step.parameter in PREFIX_PARAMETERS:
         key = f"{subject}/32"
         yield f"{step.name}:{key}", {"prefix": key}
@@ -750,6 +756,27 @@ def collect_epoch(
     session_counts: dict[str, int] = {}
     opened = clock()
 
+    static_seen: set[tuple[str, str]] = set()
+    for rung in flow.descent:
+        for target in resolve_devices(rung, device, subject, resolver):
+            for step in rung.collect:
+                if not step.is_static or (target, step.name) in static_seen:
+                    continue
+                from .intent_evidence import collect_static_evidence
+
+                static_seen.add((target, step.name))
+                collected_at = _wall_clock_now()
+                observations.append(
+                    Observation(
+                        step.name,
+                        target,
+                        opened,
+                        opened,
+                        collect_static_evidence(step.name, target),
+                        collected_at,
+                    )
+                )
+
     for target, steps in _plan(flow, device, subject, resolver).items():
         # **One session per device**, intents and templates together (B-455).
         #
@@ -849,11 +876,18 @@ def _collect_one_rung(device: str, rung: flows.Rung, subject: str, *, sender=Non
     So this runs the rung's own intents and templates and nothing else.
     """
 
+    from .intent_evidence import collect_static_evidence
+
     evidence: dict[str, Any] = {
+        step.name: collect_static_evidence(step.name, device)
+        for step in rung.collect
+        if step.is_static
+    }
+    evidence.update({
         step.name: run_intent(device, step.name, sender=sender)
         for step in rung.collect
-        if not step.is_template
-    }
+        if not step.is_template and not step.is_static
+    })
 
     keys: list[str] = []
     manifest: list[tuple[str, dict[str, str]]] = []

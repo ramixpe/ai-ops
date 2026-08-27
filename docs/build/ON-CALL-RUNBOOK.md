@@ -331,11 +331,8 @@ nettools ledger verdict DIAGNOSIS_ID confirmed_correct|incorrect|unknown \
 
 ## See also
 
-- `docs/archive/OPERATOR-RUNBOOK.md` — the lab-window runbook (archived
-  2026-08-20 as a completed-process document per M0's convention; some of the
-  individual lab items it lists, e.g. B-440/round 6, are still `BLOCKED` in
-  `BACKLOG.md` rather than done — see that file for current status). Different
-  audience: a human at a terminal with the fabric in front of them.
+- `scripts/preflight.sh` — the executable lab-window preflight for a human at
+  a terminal with the fabric in front of them.
 - `SECURITY.md` — read §0 above first, then the full "Unsupported deployment
   modes" section if this is genuinely how your team runs this.
 - `examples/README.md` — the orchestrator boundary rule and the two example

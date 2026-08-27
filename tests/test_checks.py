@@ -765,6 +765,80 @@ def test_ldp_session_up_absent_from_all_three_is_unevaluated(monkeypatch):
     assert result.status != checks.BROKEN
 
 
+def test_ldp_session_up_configured_but_silent_is_broken():
+    evidence = {
+        "device": "PE2",
+        "ldp": _section(parsers.PARSE_OK, []),
+        "ldp_discovery": _section(parsers.PARSE_OK, []),
+        "interfaces": _section(
+            parsers.PARSE_OK,
+            [{"interface": "Gi0/0/0/0", "admin_state": "up", "line_protocol": "up"}],
+        ),
+        "config_ldp": _section(
+            parsers.PARSE_OK,
+            [{"interface": "GigabitEthernet0/0/0/0"}],
+        ),
+    }
+
+    result = checks.ldp_session_up(evidence, "Gi0/0/0/0")
+
+    assert result.status == checks.BROKEN
+    assert "LDP is configured" in result.reason
+    assert result.evidence_keys == (
+        "PE2:ldp:Gi0/0/0/0",
+        "PE2:ldp_discovery:Gi0/0/0/0",
+        "PE2:interfaces:Gi0/0/0/0",
+        "PE2:config_ldp",
+    )
+
+
+def test_ldp_session_up_unreadable_config_stays_unevaluated():
+    evidence = {
+        "device": "PE2",
+        "ldp": _section(parsers.PARSE_OK, []),
+        "ldp_discovery": _section(parsers.PARSE_OK, []),
+        "interfaces": _section(
+            parsers.PARSE_OK,
+            [{"interface": "Gi0/0/0/0", "admin_state": "up", "line_protocol": "up"}],
+        ),
+        "config_ldp": _section(parsers.PARSE_FAILED),
+    }
+
+    result = checks.ldp_session_up(evidence, "Gi0/0/0/0")
+
+    assert result.status == checks.UNEVALUATED
+    assert "configuration could not be read" in result.reason
+
+
+def test_ldp_session_up_declared_intent_attributes_a_missing_configured_interface():
+    evidence = {
+        "device": "PE2",
+        "ldp": _section(parsers.PARSE_OK, []),
+        "ldp_discovery": _section(parsers.PARSE_OK, []),
+        "interfaces": _section(
+            parsers.PARSE_OK,
+            [{"interface": "Gi0/0/0/0", "admin_state": "up", "line_protocol": "up"}],
+        ),
+        "config_ldp": _section(parsers.PARSE_OK, []),
+        "ldp_intent": _section(
+            parsers.PARSE_OK,
+            [{"interface": "GigabitEthernet0/0/0/0"}],
+        ),
+    }
+
+    result = checks.ldp_session_up(evidence, "Gi0/0/0/0")
+
+    assert result.status == checks.BROKEN
+    assert "inventory declares LDP is required" in result.reason
+    assert result.evidence_keys == (
+        "PE2:ldp:Gi0/0/0/0",
+        "PE2:ldp_discovery:Gi0/0/0/0",
+        "PE2:interfaces:Gi0/0/0/0",
+        "PE2:config_ldp",
+        "PE2:ldp_intent",
+    )
+
+
 def test_ldp_session_up_failed_ldp_parse_is_unevaluated():
     evidence = {"device": "PE1", "ldp": _section(parsers.PARSE_FAILED)}
     result = checks.ldp_session_up(evidence, "Gi0/0/0/0")

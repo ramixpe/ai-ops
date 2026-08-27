@@ -268,7 +268,9 @@ def test_fabric_roll_up_excludes_silenced_devices_from_paging_severity():
     result = H.apply_silences_to_fabric(fabric, [silence], now=NOW)
 
     assert result["severity"] == "ok"
-    assert result["counts"]["by_severity"] == {"critical": 0, "warning": 0, "info": 0, "ok": 2}
+    assert result["counts"]["by_severity"] == {
+        "critical": 0, "unreachable": 0, "warning": 0, "info": 0, "ok": 2,
+    }
     assert result["counts"]["silenced_devices"] == ["PE2"]
     # And the finding is still right there for a human to read.
     assert result["devices"]["PE2"]["findings"][0]["silenced"] is True

@@ -111,6 +111,7 @@ from __future__ import annotations
 
 import contextlib
 import fcntl
+import json
 import os
 import re
 import sys
@@ -125,7 +126,9 @@ __all__ = [
     "AdmissionDenied",
     "AdmissionRefusal",
     "admit",
+    "admit_event_run",
     "check_probe_budget",
+    "finish_event_run",
 ]
 
 
@@ -148,6 +151,10 @@ NETTOOLS_ADMISSION_WAIT_SECONDS_ENV = "NETTOOLS_ADMISSION_WAIT_SECONDS"
 NETTOOLS_MAX_ACTIVE_PROBES_PER_DEVICE_ENV = "NETTOOLS_MAX_ACTIVE_PROBES_PER_DEVICE"
 NETTOOLS_MAX_ACTIVE_PROBES_FABRIC_ENV = "NETTOOLS_MAX_ACTIVE_PROBES_FABRIC"
 NETTOOLS_ACTIVE_PROBE_WINDOW_SECONDS_ENV = "NETTOOLS_ACTIVE_PROBE_WINDOW_SECONDS"
+NETTOOLS_MAX_EVENT_RUNS_PER_DEVICE_ENV = "NETTOOLS_MAX_EVENT_RUNS_PER_DEVICE"
+NETTOOLS_MAX_EVENT_RUNS_FABRIC_ENV = "NETTOOLS_MAX_EVENT_RUNS_FABRIC"
+NETTOOLS_EVENT_RUN_WINDOW_SECONDS_ENV = "NETTOOLS_EVENT_RUN_WINDOW_SECONDS"
+NETTOOLS_EVENT_IDEMPOTENCY_WINDOW_SECONDS_ENV = "NETTOOLS_EVENT_IDEMPOTENCY_WINDOW_SECONDS"
 
 DEFAULT_ADMISSION_DIR = "admission"
 # Measured 2026-08-19 against the live 9-device lab -- see the module
@@ -159,6 +166,13 @@ DEFAULT_ADMISSION_WAIT_SECONDS = 0.0
 DEFAULT_MAX_ACTIVE_PROBES_PER_DEVICE = 3
 DEFAULT_MAX_ACTIVE_PROBES_FABRIC = 10
 DEFAULT_ACTIVE_PROBE_WINDOW_SECONDS = 60.0
+# Event-woken model runs are more expensive than probes. These are stated
+# defaults, held in cross-process files for the same reason probe budgets are.
+DEFAULT_MAX_EVENT_RUNS_PER_DEVICE = 6
+DEFAULT_MAX_EVENT_RUNS_FABRIC = 30
+DEFAULT_EVENT_RUN_WINDOW_SECONDS = 3600.0
+DEFAULT_EVENT_IDEMPOTENCY_WINDOW_SECONDS = 3600.0
+DEFAULT_EVENT_LEASE_SECONDS = 300.0
 
 _POLL_INTERVAL_SECONDS = 0.05
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -412,8 +426,7 @@ def _check_and_record_window(
     finally:
         fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
         handle.close()
-
-
+    return None
 def check_probe_budget(device_name: str) -> None:
     """Rate-gate one active probe (ping/traceroute) (B-408). Raises
     :class:`AdmissionDenied` when either the per-device or the fabric-wide
@@ -483,3 +496,260 @@ def check_probe_budget(device_name: str) -> None:
                 ),
             )
         )
+
+
+def check_event_run_budget(device_name: str) -> None:
+    """Rate-gate one live event-woken model run (B-707 prerequisite).
+
+    This is deliberately separate from collection admission: one accepted
+    event may open several bounded tool calls and buy model tokens, so limiting
+    only each individual SSH collection cannot prevent a flap from creating
+    unbounded runs. The same cross-process sliding-window primitive prevents
+    separate receiver processes from each believing they own the last slot.
+    """
+
+    admission_dir = _admission_dir()
+    if admission_dir is None:
+        return
+
+    window_seconds = _float_env(
+        NETTOOLS_EVENT_RUN_WINDOW_SECONDS_ENV, DEFAULT_EVENT_RUN_WINDOW_SECONDS
+    )
+    device_limit = max(
+        1,
+        _int_env(NETTOOLS_MAX_EVENT_RUNS_PER_DEVICE_ENV, DEFAULT_MAX_EVENT_RUNS_PER_DEVICE),
+    )
+    fabric_limit = max(
+        1,
+        _int_env(NETTOOLS_MAX_EVENT_RUNS_FABRIC_ENV, DEFAULT_MAX_EVENT_RUNS_FABRIC),
+    )
+    now = time.time()
+
+    device_path = admission_dir / f"events.{_sanitize(device_name)}.log"
+    if not _check_and_record_window(
+        device_path, limit=device_limit, window_seconds=window_seconds, now=now
+    ):
+        raise AdmissionDenied(
+            AdmissionRefusal(
+                scope="event_device",
+                reason=(
+                    f"{device_limit} event run(s) already started for {device_name} "
+                    f"in the last {window_seconds:g}s "
+                    f"(NETTOOLS_MAX_EVENT_RUNS_PER_DEVICE={device_limit})"
+                ),
+            )
+        )
+
+    fabric_path = admission_dir / "events.fabric.log"
+    if not _check_and_record_window(
+        fabric_path, limit=fabric_limit, window_seconds=window_seconds, now=now
+    ):
+        raise AdmissionDenied(
+            AdmissionRefusal(
+                scope="event_fabric",
+                reason=(
+                    f"{fabric_limit} event run(s) already started fabric-wide "
+                    f"in the last {window_seconds:g}s "
+                    f"(NETTOOLS_MAX_EVENT_RUNS_FABRIC={fabric_limit})"
+                ),
+            )
+        )
+
+
+def claim_event_id(event_id: str) -> None:
+    """Claim an event identity once per window, or raise on a replay.
+
+    Event retries and collector replays may reach separate receiver processes.
+    A process-local set would therefore provide no idempotency guarantee; this
+    uses the same flock-protected admission directory as the rate budgets.
+    """
+
+    admission_dir = _admission_dir()
+    if admission_dir is None:
+        return
+    window_seconds = _float_env(
+        NETTOOLS_EVENT_IDEMPOTENCY_WINDOW_SECONDS_ENV, DEFAULT_EVENT_IDEMPOTENCY_WINDOW_SECONDS
+    )
+    path = admission_dir / "events.idempotency.log"
+    now = time.time()
+    handle = open(path, "a+b")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        handle.seek(0)
+        cutoff = now - window_seconds
+        kept: list[tuple[float, str]] = []
+        duplicate = False
+        for line in handle.read().decode("utf-8", errors="ignore").splitlines():
+            try:
+                timestamp_text, prior_id = line.split(" ", 1)
+                timestamp = float(timestamp_text)
+            except ValueError:
+                continue
+            if timestamp >= cutoff:
+                kept.append((timestamp, prior_id))
+                duplicate = duplicate or prior_id == event_id
+        if duplicate:
+            raise AdmissionDenied(
+                AdmissionRefusal(
+                    scope="event_idempotency",
+                    reason=f"event_id {event_id} was already claimed in the last {window_seconds:g}s",
+                )
+            )
+        kept.append((now, event_id))
+        handle.seek(0)
+        handle.truncate()
+        handle.write("".join(f"{timestamp!r} {prior_id}\n" for timestamp, prior_id in kept).encode("utf-8"))
+        handle.flush()
+    finally:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
+
+
+def _event_state_path(admission_dir: Path) -> Path:
+    return admission_dir / "events.state.json"
+
+
+def _load_event_state(handle: IO[bytes]) -> dict[str, object]:
+    handle.seek(0)
+    try:
+        state = json.loads(handle.read().decode("utf-8"))
+    except (OSError, ValueError):
+        state = {}
+    if not isinstance(state, dict):
+        state = {}
+    events = state.get("events")
+    starts = state.get("starts")
+    if not isinstance(events, dict):
+        state["events"] = {}
+    if not isinstance(starts, list):
+        state["starts"] = []
+    return state
+
+
+def _write_event_state(handle: IO[bytes], state: dict[str, object]) -> None:
+    handle.seek(0)
+    handle.truncate()
+    handle.write(json.dumps(state, sort_keys=True).encode("utf-8"))
+    handle.flush()
+    os.fsync(handle.fileno())
+
+
+def admit_event_run(event_id: str, device_name: str) -> None:
+    """Atomically admit one event run across identity and both run budgets.
+
+    A refusal changes no counters. Accepted work has a bounded lease; a
+    terminal retryable failure releases its identity for a later attempt,
+    while a completed event remains deduplicated for the configured window.
+    """
+
+    admission_dir = _admission_dir()
+    if admission_dir is None:
+        return
+    window_seconds = _float_env(
+        NETTOOLS_EVENT_RUN_WINDOW_SECONDS_ENV, DEFAULT_EVENT_RUN_WINDOW_SECONDS
+    )
+    idempotency_window = _float_env(
+        NETTOOLS_EVENT_IDEMPOTENCY_WINDOW_SECONDS_ENV,
+        DEFAULT_EVENT_IDEMPOTENCY_WINDOW_SECONDS,
+    )
+    device_limit = max(
+        1, _int_env(NETTOOLS_MAX_EVENT_RUNS_PER_DEVICE_ENV, DEFAULT_MAX_EVENT_RUNS_PER_DEVICE)
+    )
+    fabric_limit = max(
+        1, _int_env(NETTOOLS_MAX_EVENT_RUNS_FABRIC_ENV, DEFAULT_MAX_EVENT_RUNS_FABRIC)
+    )
+    now = time.time()
+    lease_seconds = min(DEFAULT_EVENT_LEASE_SECONDS, max(1.0, idempotency_window))
+    path = _event_state_path(admission_dir)
+    handle = open(path, "a+b")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        state = _load_event_state(handle)
+        events = state["events"]
+        starts = state["starts"]
+        assert isinstance(events, dict) and isinstance(starts, list)
+        cutoff = now - window_seconds
+        idempotency_cutoff = now - idempotency_window
+        retained_starts = [
+            entry for entry in starts
+            if isinstance(entry, dict) and isinstance(entry.get("timestamp"), (int, float))
+            and entry["timestamp"] >= cutoff
+        ]
+        retained_events: dict[str, object] = {}
+        for prior_id, entry in events.items():
+            if not isinstance(entry, dict) or not isinstance(entry.get("updated"), (int, float)):
+                continue
+            if entry["updated"] >= idempotency_cutoff:
+                retained_events[str(prior_id)] = entry
+        prior = retained_events.get(event_id)
+        if isinstance(prior, dict):
+            status = prior.get("status")
+            active = status in {"accepted", "running"} and (
+                now - float(prior["updated"]) < lease_seconds
+            )
+            completed = status in {"completed", "terminal_failed"}
+            if active or completed:
+                raise AdmissionDenied(
+                    AdmissionRefusal(
+                        scope="event_idempotency",
+                        reason=(
+                            f"event_id {event_id} is {status} within the "
+                            f"{idempotency_window:g}s idempotency window"
+                        ),
+                    )
+                )
+        device_starts = sum(
+            1 for entry in retained_starts if entry.get("device") == device_name
+        )
+        if device_starts >= device_limit:
+            raise AdmissionDenied(
+                AdmissionRefusal(
+                    scope="event_device",
+                    reason=(
+                        f"{device_limit} event run(s) already started for {device_name} "
+                        f"in the last {window_seconds:g}s "
+                        f"(NETTOOLS_MAX_EVENT_RUNS_PER_DEVICE={device_limit})"
+                    ),
+                )
+            )
+        if len(retained_starts) >= fabric_limit:
+            raise AdmissionDenied(
+                AdmissionRefusal(
+                    scope="event_fabric",
+                    reason=(
+                        f"{fabric_limit} event run(s) already started fabric-wide "
+                        f"in the last {window_seconds:g}s "
+                        f"(NETTOOLS_MAX_EVENT_RUNS_FABRIC={fabric_limit})"
+                    ),
+                )
+            )
+        retained_starts.append({"timestamp": now, "device": device_name, "event_id": event_id})
+        retained_events[event_id] = {"device": device_name, "status": "accepted", "updated": now}
+        state["starts"] = retained_starts
+        state["events"] = retained_events
+        _write_event_state(handle, state)
+    finally:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
+
+
+def finish_event_run(event_id: str, *, completed: bool) -> None:
+    """Record a terminal outcome for an admitted event without raising."""
+
+    admission_dir = _admission_dir()
+    if admission_dir is None:
+        return
+    handle = open(_event_state_path(admission_dir), "a+b")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        state = _load_event_state(handle)
+        events = state["events"]
+        assert isinstance(events, dict)
+        entry = events.get(event_id)
+        if isinstance(entry, dict):
+            entry["status"] = "completed" if completed else "retryable_failed"
+            entry["updated"] = time.time()
+            _write_event_state(handle, state)
+    finally:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()

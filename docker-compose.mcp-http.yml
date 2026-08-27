@@ -1,0 +1,79 @@
+services:
+  mcp-state-init:
+    image: ${NETTOOLS_MCP_IMAGE:-ios-xr-nettools-mcp:http-dev}
+    build:
+      context: .
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        test -s /host-config/known_hosts
+        install -d -m 0700 -o 10001 -g 10001 \
+          /var/lib/nettools/admission \
+          /var/lib/nettools/evidence \
+          /var/lib/nettools/incidents \
+          /var/lib/nettools/session-memory \
+          /var/lib/nettools/state \
+          /var/lib/nettools/tickets
+        install -m 0600 -o 10001 -g 10001 \
+          /host-config/known_hosts /var/lib/nettools/known_hosts
+        if [ -d /bootstrap/tickets ] && [ -z "$(find /var/lib/nettools/tickets -maxdepth 1 -type f -name '*.md' -print -quit)" ]; then
+          cp -a /bootstrap/tickets/. /var/lib/nettools/tickets/
+          chown -R 10001:10001 /var/lib/nettools/tickets
+        fi
+    volumes:
+      - mcp-state:/var/lib/nettools
+      - ${NETTOOLS_MCP_HOST_CONFIG_DIR:-/home/rami/.config/nettools}:/host-config:ro
+      - ./tickets:/bootstrap/tickets:ro
+
+  mcp:
+    image: ${NETTOOLS_MCP_IMAGE:-ios-xr-nettools-mcp:http-dev}
+    build:
+      context: .
+    restart: unless-stopped
+    depends_on:
+      mcp-state-init:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+      - path: .env.mcp-http
+        required: false
+    environment:
+      NETTOOLS_MCP_TRANSPORT: streamable-http
+      NETTOOLS_MCP_HOST: 0.0.0.0
+      NETTOOLS_MCP_PORT: "8000"
+      # Docker service DNS avoids stale compose-subnet IPs inherited from .env.
+      NETBOX_URL: http://netbox:8080
+      NEO4J_URI: bolt://neo4j:7687
+      NETTOOLS_SSH_KNOWN_HOSTS: /var/lib/nettools/known_hosts
+      NETTOOLS_ADMISSION_DIR: /var/lib/nettools/admission
+      NETTOOLS_EVIDENCE_DIR: /var/lib/nettools/evidence
+      NETTOOLS_INCIDENT_DIR: /var/lib/nettools/incidents
+      NETTOOLS_SESSION_MEMORY_DIR: /var/lib/nettools/session-memory
+      NETTOOLS_TICKET_DIR: /var/lib/nettools/tickets
+      NETTOOLS_EVENT_DB_PATH: /var/lib/nettools/state/events.sqlite3
+      NETTOOLS_EVENT_NOTIFICATION_STATE_FILE: /var/lib/nettools/state/event-notifications.json
+      NETTOOLS_OPERATOR_AUDIT_LOG: /var/lib/nettools/state/operator-actions.jsonl
+    ports:
+      - "${NETTOOLS_MCP_HTTP_BIND_ADDRESS:-127.0.0.1}:${NETTOOLS_MCP_HTTP_BIND_PORT:-8000}:8000"
+    volumes:
+      - mcp-state:/var/lib/nettools
+    networks:
+      - router-management
+      - platform-services
+      - legacy-platform-services
+
+volumes:
+  mcp-state:
+    name: ios-xr-nettools-mcp-state
+
+networks:
+  router-management:
+    external: true
+    name: sota_mgmt
+  platform-services:
+    external: true
+    name: sota-lab-platform_labnet
+  legacy-platform-services:
+    external: true
+    name: sota-lab-platform_default

@@ -38,10 +38,13 @@ def test_record_verdict_counts_by_severity(tmp_path):
     collector.record_verdict("ok")
     collector.record_verdict("ok")
     collector.record_verdict("critical")
+    collector.record_verdict("unreachable")
     collector.record_verdict("not-a-real-severity")  # silently ignored
 
     snap = collector.snapshot()
-    assert snap["verdicts"] == {"ok": 2, "info": 0, "warning": 0, "critical": 1}
+    assert snap["verdicts"] == {
+        "ok": 2, "info": 0, "warning": 0, "unreachable": 1, "critical": 1,
+    }
 
 
 def test_snapshot_with_no_data_is_empty_but_well_shaped(tmp_path):
@@ -51,7 +54,9 @@ def test_snapshot_with_no_data_is_empty_but_well_shaped(tmp_path):
 
     assert snap["collections"] == {}
     assert snap["totals"] == {"success": 0, "failure": 0, "retries_total": 0}
-    assert snap["verdicts"] == {"ok": 0, "info": 0, "warning": 0, "critical": 0}
+    assert snap["verdicts"] == {
+        "ok": 0, "info": 0, "warning": 0, "unreachable": 0, "critical": 0,
+    }
 
 
 def test_reset_clears_in_memory_state(tmp_path):
@@ -269,8 +274,8 @@ def test_evaluate_device_records_verdict_severity_without_changing_the_verdict()
 
     verdict = evaluate_device(evidence, _device())
 
-    assert verdict["severity"] == "critical"  # Unaffected by metrics recording.
-    assert metrics.snapshot()["verdicts"]["critical"] == 1
+    assert verdict["severity"] == "unreachable"  # Unaffected by metrics recording.
+    assert metrics.snapshot()["verdicts"]["unreachable"] == 1
     metrics.reset()
 
 

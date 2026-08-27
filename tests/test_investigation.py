@@ -504,6 +504,29 @@ def test_the_model_cannot_influence_the_diagnosis():
            [(o.rung, o.device, o.status, o.result.reason) for o in with_model.outcomes]
 
 
+def test_shadow_narrowing_never_changes_the_deterministic_descent():
+    from agent_nettools.narrowing_pass import NarrowingMode
+
+    baseline = _run("broken")
+    shadow = investigation.investigate(
+        "RR1",
+        "10.255.0.12",
+        flow="bgp_session",
+        sender=fixture_sender(label="broken"),
+        narrowing_mode=NarrowingMode.SHADOW,
+        narrowing_raw_decision={"decision": "narrow", "index": 0},
+    )
+
+    assert shadow.descent.finding == baseline.descent.finding
+    assert shadow.descent.rung_path == baseline.descent.rung_path
+    assert shadow.descent.evidence_keys == baseline.descent.evidence_keys
+    assert [(item.rung, item.device, item.status) for item in shadow.descent.outcomes] == [
+        (item.rung, item.device, item.status) for item in baseline.descent.outcomes
+    ]
+    assert shadow.narrowing_shadow is not None
+    assert shadow.narrowing_shadow["active"] is False
+
+
 def test_the_model_is_called_exactly_twice_and_never_in_a_loop():
     """MVP-0 has no agent loop in this path. Two calls: correlate, then report.
 

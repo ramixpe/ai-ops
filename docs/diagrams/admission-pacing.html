@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ios-xr-nettools — admission &amp; pacing</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f5f5f5;
+      --color-ink:     #2d3142;
+      --color-muted:   #4f5d75;
+      --color-accent:  #eb6c36;
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      padding: 3rem 2rem;
+    }
+    .frame { max-width: 1080px; margin: 0 auto; }
+    .eyebrow {
+      font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500;
+      letter-spacing: 0.18em; text-transform: uppercase;
+      color: var(--color-muted); margin-bottom: 0.5rem;
+    }
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400; letter-spacing: -0.02em; line-height: 1.15;
+      color: var(--color-ink); margin-bottom: 0.5rem;
+    }
+    .standfirst {
+      font-size: 0.9rem; color: var(--color-muted);
+      max-width: 72ch; margin-bottom: 1.5rem; line-height: 1.5;
+    }
+    svg { width: 100%; min-width: 900px; display: block; }
+    .colophon {
+      margin-top: 2rem; padding-top: 1rem; border-top: 1px solid rgba(45,49,66,0.10);
+      font-family: var(--font-mono); font-size: 0.7rem; color: var(--color-muted);
+    }
+    a { color: var(--color-accent); }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">ios-xr-nettools · flowchart</p>
+    <h1>What stops a flapping link from becoming a storm</h1>
+    <p class="standfirst">Every event-triggered run passes one atomic, flock-protected gate before any model or tool activity &mdash; <code>admission.admit_event_run()</code> checks exact-replay identity (&le;1hr) and a sliding-window rate budget (&le;6/device or &le;30/fabric per &le;1hr) inside the same lock, because event-triggered runs are separately-spawned OS processes an in-process semaphore can't see across. A completed run's terminal outcome is then recorded by <code>finish_event_run()</code> &mdash; a retryable failure frees its event ID sooner than a completed run does. A third, separate gate, the one every SSH collection uses, caps live concurrency at &le;1/device and &le;4/fabric. No refusal is a silent empty success.</p>
+
+    <svg viewBox="0 0 1000 960" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="admission-pacing-title admission-pacing-desc">
+      <title id="admission-pacing-title">How admission.py bounds a flapping link</title>
+      <desc id="admission-pacing-desc">Flowchart of an event-triggered run passing one atomic admit_event_run() gate (an idempotency check and a rate-budget check under one lock) and a separate per-collection SSH concurrency gate before completing, with every refusal path surfacing as an explicit, non-silent, never-healthy error rather than a dead end.</desc>
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+      </defs>
+
+      <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+      <!-- ================= arrows (drawn before nodes) ================= -->
+
+      <!-- Start -> D2 -->
+      <line x1="500" y1="96" x2="500" y2="132" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <!-- D2 NO(not seen) -> D3 -->
+      <line x1="500" y1="228" x2="500" y2="272" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="484" y="244" width="32" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="500" y="253" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.12em">NO</text>
+
+      <!-- D2 YES(seen) -> merge, elbow: right then down, r=8 rounded bend -->
+      <path d="M 600 180 L 812 180 Q 820 180 820 188 L 820 320" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="664" y="174" width="32" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="680" y="183" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.12em">YES</text>
+
+      <!-- D3 NO(budget exceeded) -> Rect4, coral/happy continue -->
+      <line x1="500" y1="368" x2="500" y2="412" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+      <rect x="480" y="384" width="40" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="500" y="393" fill="#eb6c36" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.10em">NO</text>
+
+      <!-- D3 YES(exceeded) -> merge, straight (shared y) -->
+      <line x1="600" y1="320" x2="820" y2="320" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="694" y="314" width="32" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="710" y="323" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.12em">YES</text>
+
+      <!-- merge -> End8 -->
+      <line x1="820" y1="324" x2="820" y2="356" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <!-- Rect4 -> D5 -->
+      <line x1="500" y1="468" x2="500" y2="532" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <!-- annotation: terminal bookkeeping, clear of every node and path -->
+      <text x="616" y="490" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" letter-spacing="0.02em">on completion:</text>
+      <text x="616" y="502" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" letter-spacing="0.02em">finish_event_run()</text>
+      <text x="616" y="514" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" letter-spacing="0.02em">completed vs. retry</text>
+
+      <!-- D5 NO(no slot) -> End9, straight (shared y) -->
+      <line x1="600" y1="560" x2="710" y2="560" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="639" y="554" width="32" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="655" y="563" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.12em">NO</text>
+
+      <!-- D5 YES(slot free) -> Rect6 -->
+      <line x1="500" y1="608" x2="500" y2="672" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="482" y="634" width="36" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="500" y="643" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.12em">YES</text>
+
+      <!-- Rect6 -> End7 -->
+      <line x1="500" y1="728" x2="500" y2="772" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <!-- ================= editorial callout ================= -->
+      <text x="40" y="176" fill="#2d3142" font-size="14" font-style="italic" font-family="'Instrument Serif', serif">one call, two checks &mdash;</text>
+      <text x="40" y="192" fill="#2d3142" font-size="14" font-style="italic" font-family="'Instrument Serif', serif">exact replay: dedup</text>
+      <text x="40" y="208" fill="#2d3142" font-size="14" font-style="italic" font-family="'Instrument Serif', serif">real flap: rate budget</text>
+      <path d="M 220 214 Q 320 232 400 250" fill="none" stroke="rgba(45,49,66,0.40)" stroke-width="1" stroke-dasharray="4,3"/>
+      <circle cx="400" cy="250" r="2" fill="#2d3142"/>
+
+      <!-- ================= merge point ================= -->
+      <circle cx="820" cy="320" r="4" fill="#2d3142"/>
+
+      <!-- ================= nodes ================= -->
+
+      <!-- Start (oval) -->
+      <rect x="380" y="40" width="240" height="56" rx="28" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+      <text x="500" y="63" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Event-triggered</text>
+      <text x="500" y="79" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">run requested</text>
+
+      <!-- D2 diamond: idempotency -->
+      <polygon points="500,132 600,180 500,228 400,180" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="500" y="172" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Event ID seen</text>
+      <text x="500" y="186" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">recently?</text>
+      <text x="500" y="202" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle">identity check · ≤1hr</text>
+
+      <!-- D3 diamond: rate budget (the mechanism that bounds a flap) -->
+      <polygon points="500,272 600,320 500,368 400,320" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="500" y="312" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Rate budget</text>
+      <text x="500" y="326" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">exceeded?</text>
+      <text x="500" y="342" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle">≤6/dev · ≤30/fab · 1hr</text>
+
+      <!-- Rect4: admitted -->
+      <rect x="390" y="412" width="220" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="500" y="436" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Admitted</text>
+      <text x="500" y="452" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">identity + budget cleared</text>
+
+      <!-- D5 diamond: SSH concurrency -->
+      <polygon points="500,532 600,560 500,608 400,560" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="500" y="562" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">SSH slot</text>
+      <text x="500" y="576" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">free?</text>
+      <text x="500" y="592" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle">≤1/dev · ≤4/fab · flock</text>
+
+      <!-- Rect6: collect -->
+      <rect x="390" y="672" width="220" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="500" y="696" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Collect via SSH</text>
+      <text x="500" y="712" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">per rung · allowlisted only</text>
+
+      <!-- End7: verdict recorded (coral — the outcome the whole gate exists to protect) -->
+      <rect x="390" y="772" width="220" height="64" rx="32" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+      <text x="500" y="798" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Verdict recorded</text>
+      <text x="500" y="814" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">healthy or broken — real answer</text>
+
+      <!-- End8: event refused -->
+      <rect x="710" y="356" width="220" height="72" rx="36" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+      <text x="820" y="380" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Event refused</text>
+      <text x="820" y="396" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">ran=False · never silent</text>
+      <text x="820" y="410" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">(event_admission_refused)</text>
+
+      <!-- End9: collection refused -->
+      <rect x="710" y="522" width="220" height="76" rx="38" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+      <text x="820" y="548" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Collection refused</text>
+      <text x="820" y="564" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">status=error, unevaluated</text>
+      <text x="820" y="578" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">&mdash; never healthy</text>
+
+      <!-- ================= legend ================= -->
+      <line x1="40" y1="872" x2="960" y2="872" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+      <text x="40" y="888" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.18em">LEGEND · SHAPE CARRIES TYPE</text>
+
+      <rect x="40" y="904" width="24" height="12" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+      <text x="72" y="914" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Start / end</text>
+
+      <rect x="200" y="904" width="24" height="12" rx="2" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="232" y="914" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Step</text>
+
+      <polygon points="352,898 364,904 352,910 340,904" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="376" y="914" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Decision</text>
+
+      <circle cx="480" cy="910" r="4" fill="#2d3142"/>
+      <text x="492" y="914" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Merge point</text>
+
+      <line x1="596" y1="910" x2="624" y2="910" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+      <text x="632" y="914" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Admitted path</text>
+
+      <line x1="760" y1="910" x2="788" y2="910" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <text x="796" y="914" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Refusal path</text>
+    </svg>
+    <p class="colophon">Hand-authored with the diagram-design skill · derived from the ios-xr-nettools tree, 2026-08-27 · <a href="index.html">back to the diagram index</a></p>
+  </div>
+</body>
+</html>

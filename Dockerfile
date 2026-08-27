@@ -20,18 +20,23 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Copy metadata and source, then install runtime deps only (no dev/llm extras):
-# the MCP server needs netmiko + mcp + python-dotenv and nothing else.
+# Copy metadata and source, then install runtime deps only (no dev/llm extras).
+# The classic MCP surface includes graph topology, so the image installs the
+# narrow `graph` extra rather than leaving a public tool without its driver.
 # constraints.txt (EER-013) pins the exact versions verified to work together
 # rather than whatever each package's index happens to serve on build day.
 COPY pyproject.toml README.md constraints.txt ./
 COPY src/ ./src/
 COPY mcp_server/ ./mcp_server/
-RUN pip install --no-cache-dir -c constraints.txt .
+COPY scripts/campaign_phase_bridge.py ./scripts/campaign_phase_bridge.py
+RUN pip install --no-cache-dir -c constraints.txt ".[graph]"
 
 # Run as a non-root user.
 RUN useradd --create-home --uid 10001 appuser
 USER appuser
 
 # Credentials are provided at runtime via -e / --env-file, never baked in.
+# Stdio remains the default entrypoint. Native MCP HTTP mode is opt-in through
+# NETTOOLS_MCP_TRANSPORT and requires NETTOOLS_MCP_HTTP_BEARER_TOKEN.
+EXPOSE 8000
 ENTRYPOINT ["nettools-mcp"]

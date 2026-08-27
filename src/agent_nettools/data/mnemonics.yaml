@@ -73,22 +73,19 @@
   investigate_with: {flow: bgp_session, subject_hint: the peer address in the message}
   severity_note: Severity 5 — informational framing for an event that is usually the incident.
   trigger:
-    fires: false
+    fires: true
     reason: >
-      Not observed via Loki in the measured window, across all nine devices.
-      This is category (c): the on-device buffer confirms the mnemonic is
-      real and active on this fabric (tests/fixtures/cisco_xr/PE2/broken/
-      show-logging-last-200.txt has two occurrences), so its absence from
-      Loki is either "this fabric had no BGP transition in 7 days" or the
-      severity-5 platform gap (B-206a) — this measurement cannot tell the two
-      apart, and Coverage's own discipline says an absence claim over a
-      severity-gapped source proves neither. If this mnemonic is ever
-      observed live via Loki, it is the clearest fires:true candidate in this
-      table: MNEMONIC_FLOW_TABLE already extracts its subject correctly
-      (event_routing._ipv4_subject) and event_watch.py's dedup collapses
-      repeated ADJCHANGE lines for the SAME peer, so a flapping session would
-      not spam the operator once collapsed.
-    measured: 0 occurrences, all 9 devices, 2026-08-12 to 2026-08-19 (7d window).
+      Promoted after the B-706/B-717 controlled acceptance corpus. Shared
+      routing extracts the peer and refuses Up recoveries; event identity,
+      replay admission, event age, and per-device/fabric budgets run before
+      MCP/model activity. D2 observed zero losses for the isolated and
+      concurrent PE2/PE3/PE4 corpus, including RR1's formerly lost
+      "Peer closing down the session" class. Notification remains disabled.
+    measured: >
+      B-706/B-717 accepted 2026-08-23: PE2/PE3/PE4 concurrent corpus delivered
+      6/6 expected Downs through router buffer, syslog-ng, and Loki; host pcap
+      observed one copy of each BGP transition, 0 kernel drops, n=4 p50 4.922 ms
+      and nearest-rank p95 10.665 ms device-clock to bridge arrival.
 
 - mnemonic: ROUTING-ISIS-5-ADJCHANGE
   meaning: An IS-IS adjacency changed state.

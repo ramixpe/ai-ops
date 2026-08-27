@@ -171,8 +171,8 @@ first thing to specify and the first thing to test.
 
 [ANALYSIS] The right tool for the question the flat inventory cannot answer:
 *"what depends on this link,"* *"what is downstream of PE2,"* blast-radius and
-path queries — which `blast_radius` (next-level.md) and the wide flows both
-want. Appears twice on the board (a backend *and* part of the cache layer),
+path queries and the wide flows both want. Appears twice on the board (a backend
+*and* part of the cache layer),
 which fits: it is both a queryable topology store and a cache of derived
 structure.
 

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import pytest
 
+from agent_nettools.mcp_profiles import GUIDED_TOOL_NAMES
 from agent_nettools.model_ingress import (
     PIN_TABLE,
     STRUCTURALLY_EXCLUDED_TOOLS,
@@ -29,14 +30,7 @@ from agent_nettools.model_ingress import (
     resolve_arguments,
 )
 
-STAGED_TOOL_NAMES = (
-    "explore_lab",
-    "check_lab",
-    "lookup_lab",
-    "investigate_lab",
-    "history_lab",
-    "probe_lab",
-)
+STAGED_TOOL_NAMES = GUIDED_TOOL_NAMES
 
 
 # --------------------------------------------------------------------------- #
@@ -93,7 +87,10 @@ def _manifest() -> list[dict]:
                 {
                     "device_name": {"type": "string"},
                     "subject": {"type": "string"},
-                    "flow": {"type": "string", "enum": ["bgp_session", "interface"]},
+                    "flow": {
+                        "type": "string",
+                        "enum": ["bgp_session", "interface", "isis_adjacency", "ldp_session"],
+                    },
                 },
                 ["device_name", "subject"],
             ),
@@ -322,13 +319,18 @@ class TestContextualExclusion:
         assert "investigate_lab" not in {o.name for o in offers}
 
     def test_investigate_lab_absent_when_flow_is_not_one_this_tool_declares(self):
-        """`ldp_session` is a real flow elsewhere (`flows.FLOWS`) but is not
-        in investigate_lab's own Literal -- pinning it would build a call
-        the tool's own schema cannot represent."""
+        """A deliberately refused object type is not an investigate flow."""
 
-        context = PinnedContext(device="PE1", subject="Gi0/0/0/0", flow="ldp_session")
+        context = PinnedContext(device="PE1", subject="PE1", flow="device_health")
         offers = build_offers(_manifest(), context, allowlist=STAGED_TOOL_NAMES)
         assert "investigate_lab" not in {o.name for o in offers}
+
+    def test_investigate_lab_is_offered_for_ldp_session(self):
+        context = PinnedContext(device="PE1", subject="Gi0/0/0/0", flow="ldp_session")
+        offers = build_offers(_manifest(), context, allowlist=STAGED_TOOL_NAMES)
+
+        offer = _offer_named(offers, "investigate_lab")
+        assert offer.pinned["flow"] == "ldp_session"
 
     def test_probe_lab_absent_when_subject_is_interface_shaped(self):
         """A ping/traceroute target must be an IPv4 host address

@@ -175,6 +175,9 @@ RAW_TEXT_KEYS = frozenset({"commands", "unaccounted_lines"})
 #: `logging` entries above -- because a Loki record's `text`/`code` are the
 #: same concept the `logging` template's are (a syslog record's message body
 #: and its mnemonic's trailing code), not a coincidence of spelling.
+#: `raw_event` is the one deliberate exception: B-714 preserves the literal
+#: transport trigger for audit provenance, so the boundary must also treat
+#: that field name as untrusted wherever it appears.
 #: B-104: `config_interface`'s `description` is the config axis's one
 #: genuinely free-text field -- an operator-authored string, same character
 #: as the status-side `interface` template's `description` above (a
@@ -191,6 +194,7 @@ FREE_TEXT_FIELDS: frozenset[tuple[str, str]] = frozenset(
         ("config_interface", "description"),
         ("logs_for_device", "text"),
         ("logs_for_device", "code"),
+        ("logs_for_device", "raw_event"),
         # B-515: sr_policy_detail's "Last error" (e.g. "No path found") is
         # device-generated free text describing WHY a candidate path did not
         # resolve -- not a fixed enum the way admin_state/operational_state
@@ -320,7 +324,10 @@ ERROR_KINDS: tuple[tuple[str, str], ...] = (
     ("unknown intent", "the intent was not recognised; valid: facts, interfaces, bgp, lldp, isis, sr"),
     ("unknown kind", "the kind was not recognised; valid: route, bgp_neighbor, interface, logging (probe_lab: ping, traceroute)"),
     ("unknown mode", "the mode was not recognised; valid: latest_diff, golden_diff, flaps"),
-    ("unknown object type", "the flow was not recognised; implemented: bgp_session, interface"),
+    (
+        "unknown object type",
+        "the flow was not recognised; implemented: bgp_session, interface, isis_adjacency, ldp_session",
+    ),
     ("unknown check", "the check was not recognised; valid: facts, interfaces, bgp, lldp, isis, sr"),
     # --- logs_loki.py (Stage-2 M5): the Loki adapter's own refusals and
     # transport failures. `templates.py`-style messages ("expected a

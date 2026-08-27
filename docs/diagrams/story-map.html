@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ios-xr-nettools — Story map</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f5f5f5;
+      --color-ink:     #2d3142;
+      --color-muted:   #4f5d75;
+      --color-accent:  #eb6c36;
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      padding: 3rem 2rem;
+    }
+    .frame { max-width: 1080px; margin: 0 auto; }
+    .eyebrow {
+      font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500;
+      letter-spacing: 0.18em; text-transform: uppercase;
+      color: var(--color-muted); margin-bottom: 0.5rem;
+    }
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400; letter-spacing: -0.02em; line-height: 1.15;
+      color: var(--color-ink); margin-bottom: 0.5rem;
+    }
+    .standfirst {
+      font-size: 0.9rem; color: var(--color-muted);
+      max-width: 72ch; margin-bottom: 1.5rem; line-height: 1.5;
+    }
+    svg { width: 100%; min-width: 900px; display: block; }
+    .colophon {
+      margin-top: 2rem; padding-top: 1rem; border-top: 1px solid rgba(45,49,66,0.10);
+      font-family: var(--font-mono); font-size: 0.7rem; color: var(--color-muted);
+    }
+    a { color: var(--color-accent); }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">ios-xr-nettools · story map</p>
+    <h1>What an operator can do, release by release</h1>
+    <p class="standfirst">Five activities an operator walks through, from asking one question to being paged automatically. Everything above the cut shipped as v1.0.0&ndash;v1.2.0. Below it: the event pipeline is now armed &mdash; one mnemonic promoted and firing, notifications live on Telegram, delivery accepted against a controlled fault corpus &mdash; the newest capability on this map, with one deliberate gap left open: no remediation path exists.</p>
+    <svg viewBox="0 0 1268 464" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="story-map-title story-map-desc">
+      <title id="story-map-title">ios-xr-nettools story map: the operator's arc from v1.0.0 to the live event pipeline</title>
+      <desc id="story-map-desc">User story map with five narrative activities from investigating a device to being paged automatically, two release slices split by a cut line: everything shipped in v1.0.0 through v1.2.0 above it, and the now-armed event pipeline below it, with the auto-investigate-on-event story flagged as the newest capability and its one deliberate gap, no remediation path.</desc>
+      <defs></defs>
+
+      <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+      <!-- Slice band fills (band 1 tinted, band 2 plain) -->
+      <rect x="32" y="216" width="1204" height="80" fill="rgba(45,49,66,0.02)"/>
+
+      <!-- Column separators: gaps exist in both slices, so mark every column -->
+      <line x1="116" y1="108" x2="116" y2="376" stroke="rgba(45,49,66,0.10)" stroke-width="0.8" stroke-dasharray="4,4"/>
+      <line x1="340" y1="108" x2="340" y2="376" stroke="rgba(45,49,66,0.10)" stroke-width="0.8" stroke-dasharray="4,4"/>
+      <line x1="564" y1="108" x2="564" y2="376" stroke="rgba(45,49,66,0.10)" stroke-width="0.8" stroke-dasharray="4,4"/>
+      <line x1="788" y1="108" x2="788" y2="376" stroke="rgba(45,49,66,0.10)" stroke-width="0.8" stroke-dasharray="4,4"/>
+      <line x1="1012" y1="108" x2="1012" y2="376" stroke="rgba(45,49,66,0.10)" stroke-width="0.8" stroke-dasharray="4,4"/>
+      <line x1="1236" y1="108" x2="1236" y2="376" stroke="rgba(45,49,66,0.10)" stroke-width="0.8" stroke-dasharray="4,4"/>
+
+      <!-- Slice labels -->
+      <text x="48" y="256" fill="#2d3142" font-size="10" font-weight="600" font-family="'Geist', sans-serif" letter-spacing="0.04em">SHIPPED</text>
+      <text x="48" y="270" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.08em">V1.0.0&ndash;V1.2.0</text>
+      <text x="48" y="340" fill="#2d3142" font-size="10" font-weight="600" font-family="'Geist', sans-serif" letter-spacing="0.04em">NOW</text>
+      <text x="48" y="354" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.08em">EVENT PIPELINE</text>
+
+      <!-- Backbone: 5 activities, narrative left-to-right order -->
+      <rect x="128" y="40" width="200" height="64" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+      <text x="228" y="68" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Investigate a device</text>
+      <text x="228" y="88" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.14em">ACTIVITY 1</text>
+
+      <rect x="352" y="40" width="200" height="64" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+      <text x="452" y="68" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Trust the answer</text>
+      <text x="452" y="88" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.14em">ACTIVITY 2</text>
+
+      <rect x="576" y="40" width="200" height="64" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+      <text x="676" y="68" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Hand off the evidence</text>
+      <text x="676" y="88" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.14em">ACTIVITY 3</text>
+
+      <rect x="800" y="40" width="200" height="64" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+      <text x="900" y="68" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Track what was right</text>
+      <text x="900" y="88" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.14em">ACTIVITY 4</text>
+
+      <rect x="1024" y="40" width="200" height="64" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+      <text x="1124" y="68" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Get paged automatically</text>
+      <text x="1124" y="88" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.14em">ACTIVITY 5</text>
+
+      <!-- Walking skeleton: user steps under each activity -->
+      <rect x="144" y="120" width="168" height="32" rx="4" fill="#ffffff" stroke="#2d3142" stroke-width="0.8"/>
+      <text x="156" y="140" fill="#2d3142" font-size="12" font-family="'Geist', sans-serif">Run the descent</text>
+      <rect x="144" y="160" width="168" height="32" rx="4" fill="#ffffff" stroke="#2d3142" stroke-width="0.8"/>
+      <text x="156" y="180" fill="#2d3142" font-size="12" font-family="'Geist', sans-serif">Replay fixtures</text>
+
+      <rect x="368" y="120" width="168" height="32" rx="4" fill="#ffffff" stroke="#2d3142" stroke-width="0.8"/>
+      <text x="380" y="140" fill="#2d3142" font-size="12" font-family="'Geist', sans-serif">Cite the evidence</text>
+      <rect x="368" y="160" width="168" height="32" rx="4" fill="#ffffff" stroke="#2d3142" stroke-width="0.8"/>
+      <text x="380" y="180" fill="#2d3142" font-size="12" font-family="'Geist', sans-serif">Model narrates only</text>
+
+      <rect x="592" y="120" width="168" height="32" rx="4" fill="#ffffff" stroke="#2d3142" stroke-width="0.8"/>
+      <text x="604" y="140" fill="#2d3142" font-size="12" font-family="'Geist', sans-serif">Read the ticket back</text>
+      <rect x="592" y="160" width="168" height="32" rx="4" fill="#ffffff" stroke="#2d3142" stroke-width="0.8"/>
+      <text x="604" y="180" fill="#2d3142" font-size="12" font-family="'Geist', sans-serif">Escalate via MCP</text>
+
+      <rect x="816" y="120" width="168" height="32" rx="4" fill="#ffffff" stroke="#2d3142" stroke-width="0.8"/>
+      <text x="828" y="140" fill="#2d3142" font-size="12" font-family="'Geist', sans-serif">Record a diagnosis</text>
+      <rect x="816" y="160" width="168" height="32" rx="4" fill="#ffffff" stroke="#2d3142" stroke-width="0.8"/>
+      <text x="828" y="180" fill="#2d3142" font-size="12" font-family="'Geist', sans-serif">Record a verdict</text>
+
+      <rect x="1040" y="120" width="168" height="32" rx="4" fill="#ffffff" stroke="#2d3142" stroke-width="0.8"/>
+      <text x="1052" y="140" fill="#2d3142" font-size="12" font-family="'Geist', sans-serif">Event reaches a model</text>
+      <rect x="1040" y="160" width="168" height="32" rx="4" fill="#ffffff" stroke="#2d3142" stroke-width="0.8"/>
+      <text x="1052" y="180" fill="#2d3142" font-size="12" font-family="'Geist', sans-serif">Posts to Telegram</text>
+
+      <!-- SHIPPED row story cards (v1.0.0-v1.2.0) -->
+      <rect x="144" y="232" width="168" height="48" rx="4" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="156" y="250" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif">Deterministic descent</text>
+      <text x="156" y="266" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace">v1.0.0</text>
+
+      <rect x="368" y="232" width="168" height="48" rx="4" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="380" y="250" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif">SSH host verification</text>
+      <text x="380" y="266" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace">v1.1.0 &middot; EER-002</text>
+
+      <rect x="592" y="232" width="168" height="48" rx="4" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="604" y="250" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif">Ticket handover view</text>
+      <text x="604" y="266" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace">v1.2.0 &middot; B-446</text>
+
+      <rect x="816" y="232" width="168" height="48" rx="4" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="828" y="250" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif">Evaluation corpus</text>
+      <text x="828" y="266" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace">v1.2.0 &middot; B-427</text>
+
+      <!-- Release cut line - accent element 1 -->
+      <line x1="32" y1="296" x2="1236" y2="296" stroke="#eb6c36" stroke-width="1.5"/>
+      <rect x="1136" y="280" width="100" height="10" rx="2" fill="#f5f5f5"/>
+      <text x="1186" y="288" fill="#eb6c36" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">RELEASE CUT</text>
+
+      <!-- NOW row story cards (built, gated behind an opt-in flag) -->
+      <rect x="144" y="312" width="168" height="48" rx="4" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="156" y="330" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif">Admission control</text>
+      <text x="156" y="346" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace">B-444 &middot; B-408</text>
+
+      <!-- Newest story, one deliberate gap - accent element 2 -->
+      <rect x="1024" y="312" width="200" height="48" rx="4" fill="rgba(235,108,54,0.05)" stroke="#eb6c36" stroke-width="1" stroke-dasharray="4,4"/>
+      <text x="1036" y="330" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif">Auto-investigate events</text>
+      <text x="1036" y="346" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace">B-706/707/717 &#183; all DONE</text>
+      <rect x="1160" y="344" width="52" height="12" rx="2" fill="transparent" stroke="#eb6c36" stroke-width="0.8"/>
+      <text x="1186" y="353" fill="#eb6c36" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.04em">NO REPAIR</text>
+
+      <!-- Legend -->
+      <line x1="32" y1="400" x2="1236" y2="400" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+      <text x="32" y="416" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.18em">LEGEND</text>
+
+      <rect x="32" y="428" width="16" height="8" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="56" y="436" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Story card</text>
+
+      <rect x="232" y="428" width="16" height="8" fill="rgba(235,108,54,0.05)" stroke="#eb6c36" stroke-width="1" stroke-dasharray="4,4"/>
+      <text x="256" y="436" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Newest capability</text>
+
+      <line x1="432" y1="432" x2="464" y2="432" stroke="#eb6c36" stroke-width="1.5"/>
+      <text x="480" y="436" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Release cut</text>
+    </svg>
+    <p class="colophon">Hand-authored with the diagram-design skill &middot; derived from the ios-xr-nettools tree, 2026-08-27 &middot; <a href="index.html">back to the diagram index</a></p>
+  </div>
+</body>
+</html>

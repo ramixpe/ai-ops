@@ -47,15 +47,18 @@ else below is honesty about the much narrower guarantee that leaves.
 
 ## What is not enforced
 
-- **No authentication or RBAC.** Anything that can launch or reach the CLI or
-  the MCP server gets the full inventory and whatever the configured
-  credentials can read. `NETTOOLS_ACTOR` (`network_tools._resolve_actor`) is
-  **provenance, not authorization** — a label for "who ran this" in the audit
-  log, never consulted before a command runs, and trivially spoofable by
-  anyone who can set an environment variable. Real RBAC needs an identity
-  provider this project does not have: something a caller cannot simply
-  declare itself to be, e.g. a verified SSO/OIDC token or a signed client
-  certificate checked before any command runs.
+- **No identity or RBAC.** Native MCP HTTP/SSE mode requires a configured
+  bearer token before any request reaches the MCP surface, and uses a
+  constant-time comparison. This is shared-secret authentication for a
+  trusted LAN/VPN, not user identity, tenant isolation, or authorization:
+  every valid token holder receives the same full read surface. The CLI and
+  stdio MCP modes remain local-process trust boundaries. `NETTOOLS_ACTOR`
+  (`network_tools._resolve_actor`) is **provenance, not authorization** — a
+  label for "who ran this" in the audit log, never consulted before a command
+  runs, and trivially spoofable by anyone who can set an environment variable.
+  Real RBAC needs an identity provider this project does not have: something a
+  caller cannot simply declare itself to be, e.g. a verified SSO/OIDC token or
+  a signed client certificate checked before any command runs.
 - **Telegram chat IDs are delivery, not authorization.**
   `TELEGRAM_CHAT_ID`'s comma-separated allowlist controls where a report is
   *sent*; it grants nothing, because there is no inbound path to grant
@@ -81,15 +84,13 @@ None of the following have been designed for, tested against, or reviewed:
 - **Multi-user access.** One set of device credentials, one audit trail, no
   per-user scoping. Two people using the same deployment are indistinguishable
   in the audit log.
-- **An internet-exposed MCP server.** The MCP server assumes its caller is
-  already trusted — the same client that holds the device credentials. Putting
-  it behind a network boundary that admits untrusted callers hands them the
-  full read surface with no authentication in front of it.
+- **An internet-exposed MCP server.** Bearer-token HTTP mode is designed only
+  for a trusted LAN/VPN. Public exposure still lacks TLS termination, key
+  rotation, per-user identity, RBAC, rate limits, and a deployment review.
 - **Production paging or incident closure.** The deterministic `investigate`
   path is the only authoritative one; `analyze`, fabric analysis and the
-  free-form `agent` are exploratory and not grounded to the same standard (see
-  `docs/EXPERT-PEER-REVIEW-2026-08-17.md` §3, P0-02/P0-03). None of the outputs
-  here should drive automated remediation or unattended paging.
+  free-form `agent` are exploratory and not grounded to the same standard.
+  None of the outputs here should drive automated remediation.
 
 ## Reporting a security issue
 

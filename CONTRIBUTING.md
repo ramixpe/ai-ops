@@ -11,9 +11,10 @@ runs.
 **That provenance matters for what the evidence is worth.** It has been evaluated
 on a thirteen-node containerlab fabric, on one vendor, with a small number of
 blind fault-injection trials whose cases were designed by someone who knows the
-ladder. Three independent external reviews are in `docs/`, and
-`docs/design/peer-review-response.md` records which of our claims they forced us
-to withdraw. Nothing here has run in production.
+ladder. Review corrections and withdrawn claims are retained in
+[`docs/build/FINDINGS.md`](docs/build/FINDINGS.md), and the current audit is
+[`docs/build/DEEP-REVIEW-2026-08-27.md`](docs/build/DEEP-REVIEW-2026-08-27.md).
+Nothing here has run in production.
 
 If you are evaluating rather than contributing, `docs/README.md` has a reading
 path for that.

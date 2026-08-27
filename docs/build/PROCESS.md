@@ -1,10 +1,9 @@
 # Process — Rules of Engagement
 
-Extracted verbatim from `BUILD-PLAN.md`'s **PART 0** on 2026-08-20, ahead of the
-v1.0.0 tag, in the same commit that archived the rest of that file. Parts 1–8 of
-that plan — the 34-task build list, long since executed — are historical and now
-live at [`docs/archive/BUILD-PLAN.md`](../archive/BUILD-PLAN.md). This part is not
-historical: it is the process contract the build has operated under since
+Extracted verbatim from the retired `BUILD-PLAN.md` **PART 0** on 2026-08-20,
+ahead of the v1.0.0 tag. The executed task list was removed from the working
+tree during the 2026-08-27 documentation cleanup and remains available in Git
+history. This part is not historical: it is the process contract the build has operated under since
 2026-08-15 — the OBS-numbering convention, the frozen-files list (§0.5), the
 escalation ladder (§0.11), the FINDINGS.md entry format (§0.3) — and it stays
 live and binding for as long as this repository is under active development.
@@ -120,7 +119,7 @@ In this order:
 |---|---|
 | `CLAUDE.md` | Existing architecture, layers 0–5, the safety boundary |
 | `docs/design/design-thinking.md` | Decisions D1–D20 with rationale and growth paths |
-| `docs/design/lld-investigation-layer.md` | The delta specification this plan executes |
+| `docs/build/VERSION-2-EXECUTION-PLAN.md` | The current Version-2 execution plan |
 | `README.md` | CLI surface, env vars, fixtures |
 | `src/agent_nettools/platforms.py` | The allowlist and intent table |
 | `src/agent_nettools/parsers.py` | The parser contract new parsers must match |
@@ -688,7 +687,11 @@ A separate section from §0.13 because **the remedy is different**. §0.13 asks 
 
 Note what all four have in common: **the statement was accurate and the action it licensed was wrong.** No amount of re-checking the evidence corrects a misclassification, because the evidence supports the statement. Only asking what kind of claim it is does.
 
-The fifth was found in `peer-review-response.md`'s own deferral table — **a document written to apply this section committed it while doing so**, which is worth more than the entry. A misclassification is not a thing you check for once and clear; the table above is a list of shapes, not a list of closed cases. It also adds a check the other four did not need:
+The fifth was found in the historical peer-review response's own deferral table
+(retained in Git history) — **a document written to apply this section committed
+it while doing so**, which is worth more than the entry. A misclassification is
+not a thing you check for once and clear; the table above is a list of shapes,
+not a list of closed cases. It also adds a check the other four did not need:
 
 - **A deferral** — is the deferred thing the subject's *support*, or is it the subject? Deferring the second does not delay the work, it deletes it while leaving the name.
 
@@ -701,7 +704,9 @@ The fifth was found in `peer-review-response.md`'s own deferral table — **a do
 
 ### Deleting a stated limitation asserts a capability
 
-A corollary, and the case that prompted it (OBS-097). `MVP0-REVIEW.md` §5 said *"it cannot tell you nothing is wrong."* B-428 made that false. The tempting edit is to delete the sentence.
+A corollary, and the case that prompted it (OBS-097). The historical MVP-0
+review said *"it cannot tell you nothing is wrong."* B-428 made that false. The
+tempting edit is to delete the sentence.
 
 **Deleting it is not neutral.** A review that once named a limitation and no longer does is read as saying the limitation is gone — which is a *different claim* from the one the fix supports. B-428 lets the tool say *"no fault on the path between these two endpoints"*. It does not let it say *"this device is healthy"*, which was never the question a flow asks.
 
@@ -715,7 +720,10 @@ So §5 now reads *"read exit 0 as **not on this path**, not as **all clear**"* �
 
 > **A test protocol designed for clean measurement can systematically exclude the messiest and most common real case, and its cleanliness is what makes the exclusion invisible. Our trial protocol polls until propagation settles — written as an improvement over a fixed sleep — and in doing so removed the dominant production failure mode from the test surface. When a protocol is tightened for rigour, ask what condition the tightening now excludes.**
 
-Three external reviewers found this independently (`docs/design/peer-review-response.md` §2.1, §7). It is the sharpest self-criticism this project has produced, and it is worth being precise about why it landed.
+Three external reviewers found this independently; the review record remains in
+Git history and the resulting observations remain in `FINDINGS.md`. It is the
+sharpest self-criticism this project has produced, and it is worth being precise
+about why it landed.
 
 **The protocol was improved, correctly, and the improvement caused the gap.** "Poll until propagation completes, never sleep" is better methodology than a fixed wait: it removes a timing guess, makes trials reproducible, and stops a slow fabric producing a spurious failure. Every one of those is true. And the condition it removes — *the network is still changing while the tool runs* — is, per reviewer B, **one of the most common overnight incidents**.
 
@@ -765,14 +773,15 @@ The corollary matters as much: **planning is work and may legitimately be a whol
 ### The three tracking documents
 
 > **Note added 2026-08-20, not part of the original extraction.** This table
-> describes the MVP-0-era document set, both now archived (`docs/archive/BUILD-PLAN.md`,
-> `docs/archive/TRACKER.md`) along with the task list they tracked. Kept verbatim
+> describes the retired MVP-0-era document set (`BUILD-PLAN.md` and
+> `TRACKER.md`) along with the task list they tracked. Those files were removed
+> from the working tree on 2026-08-27 and remain in Git history. Kept verbatim
 > below because the rule it states — the plan and the tracker must agree, and the
 > tracker wins — is still the right rule; the live equivalent is `BACKLOG.md`
 > (status) beside `FINDINGS.md` (append-only log), with no separate task-status
 > file since there is no longer a fixed task list to track against.
 
-All three live in `docs/build/` and are maintained continuously, not at the end.
+The table below is historical and is not the current documentation map.
 
 | Document | Nature | Updated |
 |---|---|---|

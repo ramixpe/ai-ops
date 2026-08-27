@@ -448,7 +448,8 @@ def test_staged_surfaces_probe_lab_is_registered_through_the_gated_wrapper():
 
     source = inspect.getsource(staged_surface.apply)
     assert "register_probe = server_module._active_probe_tool" in source
-    assert "register_probe()(probe_lab)" in source
+    assert "RegistrationClass.ACTIVE_PROBE" in source
+    assert "register()(functions[capability.name])" in source
 
 
 # --------------------------------------------------------------------------- #

@@ -1,0 +1,173 @@
+{
+  "capture": {
+    "lines": 1,
+    "returncode": 0,
+    "source": "file"
+  },
+  "docker": {
+    "available": true,
+    "containers": {
+      "agitated_goodall": {
+        "addresses": [
+          "172.17.0.2"
+        ]
+      },
+      "clab-sota-xrd-CE1": {
+        "addresses": [
+          "172.20.250.41"
+        ]
+      },
+      "clab-sota-xrd-CE2": {
+        "addresses": [
+          "172.20.250.42"
+        ]
+      },
+      "clab-sota-xrd-CE3": {
+        "addresses": [
+          "172.20.250.43"
+        ]
+      },
+      "clab-sota-xrd-CE4": {
+        "addresses": [
+          "172.20.250.44"
+        ]
+      },
+      "clab-sota-xrd-P1": {
+        "addresses": [
+          "172.20.250.11"
+        ]
+      },
+      "clab-sota-xrd-P2": {
+        "addresses": [
+          "172.20.250.12"
+        ]
+      },
+      "clab-sota-xrd-P3": {
+        "addresses": [
+          "172.20.250.13"
+        ]
+      },
+      "clab-sota-xrd-P4": {
+        "addresses": [
+          "172.20.250.14"
+        ]
+      },
+      "clab-sota-xrd-PE1": {
+        "addresses": [
+          "172.20.250.21"
+        ]
+      },
+      "clab-sota-xrd-PE2": {
+        "addresses": [
+          "172.20.250.22"
+        ]
+      },
+      "clab-sota-xrd-PE3": {
+        "addresses": [
+          "172.20.250.23"
+        ]
+      },
+      "clab-sota-xrd-PE4": {
+        "addresses": [
+          "172.20.250.24"
+        ]
+      },
+      "clab-sota-xrd-RR1": {
+        "addresses": [
+          "172.20.250.31"
+        ]
+      },
+      "ios-xr-nettools-mcp-1": {
+        "addresses": [
+          "172.19.0.3",
+          "172.20.250.2",
+          "172.21.0.3"
+        ]
+      },
+      "sota-lab-platform-alertmanager-1": {
+        "addresses": [
+          "172.20.250.105",
+          "172.21.0.8"
+        ]
+      },
+      "sota-lab-platform-gnmic-1": {
+        "addresses": [
+          "172.20.250.100",
+          "172.21.0.7"
+        ]
+      },
+      "sota-lab-platform-grafana-1": {
+        "addresses": [
+          "172.20.250.104",
+          "172.21.0.12"
+        ]
+      },
+      "sota-lab-platform-lab-controller-1": {
+        "addresses": [
+          "172.20.250.3",
+          "172.21.0.10"
+        ]
+      },
+      "sota-lab-platform-loki-1": {
+        "addresses": [
+          "172.20.250.103",
+          "172.21.0.5"
+        ]
+      },
+      "sota-lab-platform-mgmt-bridge-policy-1": {
+        "addresses": [
+          "IP",
+          "invalid"
+        ]
+      },
+      "sota-lab-platform-neo4j-1": {
+        "addresses": [
+          "172.21.0.11"
+        ]
+      },
+      "sota-lab-platform-netbox-1": {
+        "addresses": [
+          "172.21.0.14"
+        ]
+      },
+      "sota-lab-platform-netbox-postgres-1": {
+        "addresses": [
+          "172.21.0.13"
+        ]
+      },
+      "sota-lab-platform-postgres-1": {
+        "addresses": [
+          "172.21.0.4"
+        ]
+      },
+      "sota-lab-platform-prometheus-1": {
+        "addresses": [
+          "172.20.250.102",
+          "172.21.0.2"
+        ]
+      },
+      "sota-lab-platform-redis-1": {
+        "addresses": [
+          "172.21.0.9"
+        ]
+      },
+      "sota-lab-platform-syslog-ng-1": {
+        "addresses": [
+          "172.20.250.101",
+          "172.21.0.6"
+        ]
+      },
+      "sota-lab-platform-syslog-ng-rotator-1": {
+        "addresses": [
+          "172.19.0.2"
+        ]
+      }
+    }
+  },
+  "summary": {
+    "attempts": 0,
+    "destinations": {},
+    "sources": {},
+    "window_seconds": 0.0
+  }
+}

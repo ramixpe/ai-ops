@@ -168,13 +168,13 @@ ledger's.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
 import re
 import sys
 import threading
-import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -245,6 +245,10 @@ TICKET_SCHEMA_VERSION = 1
 
 NETTOOLS_TICKET_DIR_ENV = "NETTOOLS_TICKET_DIR"
 DEFAULT_TICKETS_DIR = "tickets"
+_COUNTER_FILENAME = ".ticket-counter"
+NETTOOLS_INCIDENT_DIR_ENV = "NETTOOLS_INCIDENT_DIR"
+DEFAULT_INCIDENT_DIR = "~/.local/state/agent-nettools/incidents"
+_INCIDENT_COUNTER_FILENAME = ".incident-counter"
 
 #: Bound on `excerpt`/`detail`-shaped free-text fields. Same value and the
 #: same reasoning `mcp_server/boundary.py` once used for its own
@@ -597,6 +601,64 @@ def _claim_path(directory: Path, stamp: str, slug: str, header_text_parts: dict[
     return candidate, False, warning
 
 
+def _next_run_id(directory: Path) -> str:
+    """Reserve the next six-digit ticket ID under an inter-process lock."""
+
+    try:
+        _secure_mkdir(directory)
+        path = directory / _COUNTER_FILENAME
+        with open(path, "a+", encoding="utf-8") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                handle.seek(0)
+                raw = handle.read().strip()
+                current = int(raw) if raw.isdigit() else 0
+                next_value = current + 1
+                handle.seek(0)
+                handle.truncate()
+                handle.write(str(next_value))
+                handle.flush()
+                os.fsync(handle.fileno())
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        return f"{next_value:06d}"
+    except OSError:
+        # Ticket creation below will report the actual write failure. Keep
+        # that degrade-safe path reachable instead of raising during ID minting.
+        return "000000"
+
+
+def _next_incident_id() -> str:
+    """Reserve a global operator-facing incident identifier.
+
+    Unlike ``run_id``, this namespace is independent of a caller's ticket
+    artifact directory, so campaign and production tickets do not all display
+    ``000001`` merely because they were written into separate folders.
+    """
+
+    directory = Path(os.getenv(NETTOOLS_INCIDENT_DIR_ENV, DEFAULT_INCIDENT_DIR)).expanduser()
+    try:
+        _secure_mkdir(directory)
+        path = directory / _INCIDENT_COUNTER_FILENAME
+        with open(path, "a+", encoding="utf-8") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                handle.seek(0)
+                raw = handle.read().strip()
+                current = int(raw) if raw.isdigit() else 0
+                next_value = current + 1
+                handle.seek(0)
+                handle.truncate()
+                handle.write(str(next_value))
+                handle.flush()
+                os.fsync(handle.fileno())
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        return f"INC-{datetime.now(timezone.utc):%Y%m%d}-{next_value:05d}"
+    except OSError:
+        return f"INC-{datetime.now(timezone.utc):%Y%m%d}-00000"
+
+
 def _validate_outcome(outcome: str, by: str) -> tuple[str, str]:
     if outcome not in OUTCOMES:
         raise ValueError(f"outcome must be one of {OUTCOMES}, got {outcome!r}")
@@ -644,11 +706,13 @@ class Ticket:
         *,
         path: Path,
         run_id: str,
+        incident_id: str,
         header: dict[str, Any],
         open_result: TicketWriteResult,
     ) -> None:
         self.path = path
         self.run_id = run_id
+        self.incident_id = incident_id
         self.header = dict(header)
         #: The result of the header write specifically -- exposed so a
         #: caller can tell, right at `open_ticket()`, whether this ticket is
@@ -1284,6 +1348,7 @@ class TicketRecorder:
         device: str | None = None,
         flow: str | None = None,
         run_id: str | None = None,
+        incident_id: str | None = None,
         tool_version: str | None = None,
     ) -> Ticket:
         """Open one ticket: resolve the directory, mint (or accept) a
@@ -1300,21 +1365,21 @@ class TicketRecorder:
         entry point that forgot to pass one, exactly the failure mode
         `ledger.py`'s `source` field has no default to avoid.
 
-        ``run_id`` is minted with `uuid.uuid4().hex` when not supplied --
-        the same mechanism `ledger._new_id()` uses for a diagnosis id -- so
-        a caller that already has one (e.g. one minted once per interaction
-        and shared with a future `ledger.record_diagnosis` call once that
-        wiring exists) can pass it through instead, making this ticket's
-        `run_id` the join key the module docstring promises.
+        ``run_id`` is minted as a persistent six-digit counter when not
+        supplied. A caller that already has an ID (including a legacy UUID)
+        may pass it through unchanged, preserving existing ticket joins.
         """
 
         subject = _require_nonempty_str("subject", subject)
         entry_point = _require_nonempty_str("entry_point", entry_point)
-        run_id = run_id or uuid.uuid4().hex
         opened_at = _timestamp_now()
+        directory = self._resolve_dir()
+        run_id = run_id or _next_run_id(directory)
+        incident_id = incident_id or _next_incident_id()
         header: dict[str, Any] = {
             "schema_version": TICKET_SCHEMA_VERSION,
             "run_id": run_id,
+            "incident_id": incident_id,
             "opened_at_utc": opened_at,
             "entry_point": entry_point,
             "device": device,
@@ -1322,7 +1387,6 @@ class TicketRecorder:
             "flow": flow,
             "tool_version": tool_version or __version__,
         }
-        directory = self._resolve_dir()
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
         slug = _slug(subject)
 
@@ -1330,7 +1394,9 @@ class TicketRecorder:
         open_result = TicketWriteResult(
             path=str(path), recorded_at=opened_at, persisted=persisted, warning=warning
         )
-        return Ticket(path=path, run_id=run_id, header=header, open_result=open_result)
+        return Ticket(
+            path=path, run_id=run_id, incident_id=incident_id, header=header, open_result=open_result
+        )
 
 
 #: The process-wide default factory. Constructing it does no I/O (see
@@ -1347,12 +1413,13 @@ def open_ticket(
     device: str | None = None,
     flow: str | None = None,
     run_id: str | None = None,
+    incident_id: str | None = None,
     tool_version: str | None = None,
     recorder: TicketRecorder | None = None,
 ) -> Ticket:
     return (recorder or default_recorder).open(
         subject, entry_point=entry_point, device=device, flow=flow,
-        run_id=run_id, tool_version=tool_version,
+        run_id=run_id, incident_id=incident_id, tool_version=tool_version,
     )
 
 

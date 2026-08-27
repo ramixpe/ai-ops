@@ -236,6 +236,29 @@ jobs:
           timeout 20 "$RUNNER_TEMP/artifact-venv/bin/nettools-mcp" < /dev/null
           echo "nettools-mcp: started and exited cleanly on stdin EOF"
 
+      - name: Installed MCP server answers a credential-free tool call
+        # Startup alone only proves imports and registration. This opens a
+        # real stdio MCP session against the installed wheel and calls the
+        # inventory tool from outside the checkout, exercising the packaged
+        # inventory fallback at first use.
+        run: |
+          cd "$RUNNER_TEMP/elsewhere"
+          "$RUNNER_TEMP/artifact-venv/bin/python" - <<'PY'
+          import json
+
+          from agent_nettools.mcp_client import McpToolset
+
+          with McpToolset() as toolset:
+              names = {tool.name for tool in toolset.list_tools()}
+              assert "list_lab_devices" in names
+              result = toolset.call_tool("list_lab_devices", {}, timeout_s=20.0)
+
+          payload = json.loads(result.text)
+          assert payload["status"] == "success"
+          assert len(payload["data"]["devices"]) == 9
+          print("installed MCP server: list_lab_devices returned nine devices")
+          PY
+
       - name: Build the Docker image
         # `make docker-build` is documented but nothing ran it before this.
         run: docker build -t ios-xr-nettools-mcp .

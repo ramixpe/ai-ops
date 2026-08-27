@@ -4,9 +4,10 @@ Why a second surface instead of a replacement
 -----------------------------------------------
 B-113's consolidation is already justified by arithmetic — the reworded
 descriptions grew the classic manifest +86%, paid on every tool-list call —
-but collapsing the 21-tool surface would destroy the §9/§10 selection A/B
-whose third arm (Q1 during a live fault) is still owed. `MCP-EXPERIMENT.md`'s
-own Appendix A names the *between-surface* comparison as the right experiment.
+but collapsing the 21-tool surface would destroy the historical selection A/B
+whose third arm (Q1 during a live fault) is still owed. The experiment record
+(retained in Git history and summarised in `docs/build/FINDINGS.md`) names the
+*between-surface* comparison as the right experiment.
 So: **both surfaces exist**, selected by ``NETTOOLS_MCP_SURFACE``
 (``classic``, the default, or ``staged``), and the default flips only after
 the measurement lands.
@@ -38,6 +39,7 @@ from typing import Any, Literal
 
 from agent_nettools.health import evaluate_device, evaluate_fabric
 from agent_nettools.inventory_model import load_inventory_file
+from agent_nettools.mcp_profiles import GUIDED_CAPABILITIES, GUIDED_TOOL_NAMES, RegistrationClass
 from agent_nettools.network_tools import (
     CHECK_TOOLS,
     check_fabric,
@@ -58,10 +60,7 @@ from agent_nettools.network_tools import (
 
 __all__ = ["STAGED_TOOL_NAMES", "apply"]
 
-STAGED_TOOL_NAMES = (
-    "explore_lab", "check_lab", "lookup_lab", "investigate_lab",
-    "history_lab", "probe_lab",
-)
+STAGED_TOOL_NAMES = GUIDED_TOOL_NAMES
 
 _LOOKUPS = {
     "route": get_route,
@@ -159,7 +158,11 @@ def lookup_lab(device_name: str, kind: Literal["route", "bgp_neighbor", "interfa
     return fn(device_name, value)
 
 
-def investigate_lab(device_name: str, subject: str, flow: Literal["bgp_session", "interface"] = "bgp_session") -> dict:
+def investigate_lab(
+    device_name: str,
+    subject: str,
+    flow: Literal["bgp_session", "interface", "isis_adjacency", "ldp_session"] = "bgp_session",
+) -> dict:
     """Answers: *why is this broken?* — the one to prefer for any cause question.
 
     Walks the flow's dependency ladder deterministically and reports the
@@ -244,6 +247,14 @@ def apply(server_module: Any) -> None:
     register_passive = server_module._read_only_tool
     register_probe = server_module._active_probe_tool
 
-    for fn in (explore_lab, check_lab, lookup_lab, investigate_lab, history_lab):
-        register_passive()(fn)
-    register_probe()(probe_lab)
+    functions = {
+        "explore_lab": explore_lab,
+        "check_lab": check_lab,
+        "lookup_lab": lookup_lab,
+        "investigate_lab": investigate_lab,
+        "history_lab": history_lab,
+        "probe_lab": probe_lab,
+    }
+    for capability in GUIDED_CAPABILITIES:
+        register = register_probe if capability.registration is RegistrationClass.ACTIVE_PROBE else register_passive
+        register()(functions[capability.name])

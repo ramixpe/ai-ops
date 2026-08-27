@@ -62,12 +62,15 @@ malformed-row count.
 from __future__ import annotations
 
 import re
+import sys
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
 from ttp import ttp
+
+from .iosxr_syslog import IOSXR_SYSLOG_LINE
 
 # B-404 note: the ``from .parsers import (...)`` this module has always needed
 # (PARSE_FAILED/PARSE_OK/PARSE_UNAVAILABLE/ParseError -- see the module
@@ -1102,10 +1105,9 @@ _LEVEL_LOGGING = re.compile(
 _LOGGING_TO = re.compile(r"^Logging to (?P<address>\S+), \d+ message lines logged$")
 _LOG_BUFFER_SIZE = re.compile(r"^Log Buffer \((?P<size>\d+) bytes\):$")
 
-_LOG_ENTRY = re.compile(
-    r"^(?P<node>RP/0/RP0/CPU0):(?P<timestamp>\w{3}\s+\d+\s+\d{2}:\d{2}:\d{2}\.\d+\s+\w+): "
-    r"(?P<process>[A-Za-z0-9_]+)\[(?P<pid>\d+)\]: %(?P<mnemonic>[A-Za-z0-9_-]+) : (?P<text>.*)$"
-)
+# Compatibility alias for modules that document this parser as the logging
+# template's entry format. The regex itself lives in iosxr_syslog.py.
+_LOG_ENTRY = IOSXR_SYSLOG_LINE
 
 _LEVEL_META_KEY: dict[str, str] = {
     "Console": "console_level",
@@ -1853,11 +1855,19 @@ def parse_xr_sr_policy_detail(output: str) -> dict[str, Any]:
 # module's primitives (see this module's docstring's ordering note, a few
 # hundred lines up). config_section.py has nothing this module needs before
 # this point, so the import is safe here and would not be above it.
-from .config_section import (  # noqa: E402 - see the ordering note immediately above
-    CONFIG_RECORD_KEYS,
-    CONFIG_TEMPLATE_PARSERS,
-    CONFIG_VOLATILE_FIELDS,
-)
+_config_section = sys.modules.get("agent_nettools.config_section")
+if _config_section is not None and not hasattr(_config_section, "CONFIG_TEMPLATE_PARSERS"):
+    # config_section was imported first. It imports this module for parser
+    # primitives, so defer its registry merge until that module finishes.
+    CONFIG_RECORD_KEYS: dict[tuple[str, str], str | None] = {}
+    CONFIG_TEMPLATE_PARSERS: dict[tuple[str, str], Callable[[str], dict[str, Any]]] = {}
+    CONFIG_VOLATILE_FIELDS: dict[tuple[str, str], frozenset[str]] = {}
+else:
+    from .config_section import (  # noqa: E402 - see the ordering note immediately above
+        CONFIG_RECORD_KEYS,
+        CONFIG_TEMPLATE_PARSERS,
+        CONFIG_VOLATILE_FIELDS,
+    )
 
 # Keyed by (platform, template_name), mirroring parsers.PARSERS' (platform,
 # intent) shape. A template parser takes the single rendered command's output.

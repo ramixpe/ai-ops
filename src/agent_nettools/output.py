@@ -53,7 +53,7 @@ FORMATS: tuple[str, ...] = ("json", "table", "summary")
 
 # Worst-first, matching health.SEVERITY_ORDER's meaning but printed worst-first
 # for a summary line, since that is what a human scanning output cares about.
-SEVERITY_ORDER: tuple[str, ...] = ("critical", "warning", "info", "ok")
+SEVERITY_ORDER: tuple[str, ...] = ("critical", "unreachable", "warning", "info", "ok")
 
 
 def render(payload: dict[str, Any], fmt: Format) -> str:

@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>IOS-XR Nettools MCP User Guide</title>
+  <style>
+    @page { size: A4; margin: 18mm; }
+    :root { color: #17212b; font-family: "Segoe UI", "Helvetica Neue", sans-serif; }
+    body { font-size: 10.5pt; line-height: 1.48; margin: 0; }
+    h1 { color: #0b4f6c; font-size: 25pt; margin: 0 0 5pt; }
+    h2 { border-bottom: 1px solid #a9c8d6; color: #0b4f6c; font-size: 15pt; margin: 19pt 0 7pt; padding-bottom: 3pt; }
+    h3 { color: #174f69; font-size: 11.5pt; margin: 12pt 0 4pt; }
+    p { margin: 5pt 0; }
+    .subtitle { color: #4d6370; font-size: 12pt; margin-bottom: 17pt; }
+    .banner { background: #e8f3f7; border-left: 4px solid #0b7397; margin: 12pt 0; padding: 9pt 11pt; }
+    .warning { background: #fff5df; border-left: 4px solid #bd7600; margin: 12pt 0; padding: 9pt 11pt; }
+    code, pre { font-family: "SFMono-Regular", Consolas, monospace; font-size: 8.6pt; }
+    pre { background: #f3f6f7; border: 1px solid #d7e1e5; overflow-wrap: anywhere; padding: 9pt; white-space: pre-wrap; }
+    ul { margin: 4pt 0 8pt; padding-left: 19pt; }
+    li { margin: 2pt 0; }
+    table { border-collapse: collapse; margin: 8pt 0; width: 100%; }
+    th { background: #0b4f6c; color: white; text-align: left; }
+    th, td { border: 1px solid #c9d7dc; padding: 6pt; vertical-align: top; }
+    .footer { color: #60737d; font-size: 8.5pt; margin-top: 18pt; }
+  </style>
+</head>
+<body>
+  <h1>IOS-XR Nettools MCP</h1>
+  <p class="subtitle">User Guide for the authenticated, read-only network inspection service</p>
+
+  <div class="banner">
+    <strong>Service status:</strong> the MCP service runs in a persistent Docker container on a4000 and exposes native MCP streamable HTTP. It is bound to a4000 loopback by default and is intended to be reached through an SSH tunnel.
+  </div>
+
+  <h2>What This Service Does</h2>
+  <p>The service exposes reviewed Cisco IOS-XR lab inspection tools through the Model Context Protocol (MCP). It can inspect inventory, interface and routing protocol state, deterministic device health, tickets, logs, metrics, and selected topology sources.</p>
+  <ul>
+    <li>Device commands are reconstructed from typed inputs and an allowlist.</li>
+    <li>There is no arbitrary command tool, configuration mode, shell access, or network remediation capability.</li>
+    <li>Raw device command text is sanitized before MCP clients receive results.</li>
+    <li>Active probes are disabled by default.</li>
+  </ul>
+
+  <h2>Connect from a Mac</h2>
+  <h3>1. Create an encrypted tunnel</h3>
+  <pre>ssh -N -L 8000:127.0.0.1:8000 rami@a4000</pre>
+  <p>Keep this terminal open while using the MCP client. The client endpoint is then:</p>
+  <pre>http://127.0.0.1:8000/mcp</pre>
+
+  <h3>2. Configure an MCP client</h3>
+  <p>Use a client that supports MCP streamable HTTP. Supply the bearer token through the client’s secret store or a local environment variable. Do not place the token in a committed configuration file.</p>
+  <pre>{
+  "mcpServers": {
+    "ios-xr-nettools": {
+      "url": "http://127.0.0.1:8000/mcp",
+      "headers": {
+        "Authorization": "Bearer ${IOS_XR_NETTOOLS_MCP_TOKEN}"
+      }
+    }
+  }
+}</pre>
+  <p>Client configuration formats differ. The essential requirements are the endpoint URL and an <code>Authorization: Bearer &lt;token&gt;</code> header on every MCP request.</p>
+
+  <h2>Authentication and Access</h2>
+  <table>
+    <tr><th>Property</th><th>Current behavior</th></tr>
+    <tr><td>Transport</td><td>Native MCP streamable HTTP</td></tr>
+    <tr><td>Authentication</td><td>Shared bearer token; missing or invalid tokens receive HTTP 401</td></tr>
+    <tr><td>Encryption</td><td>The SSH tunnel encrypts traffic between the Mac and a4000</td></tr>
+    <tr><td>Network exposure</td><td>Loopback-only on a4000 by default</td></tr>
+    <tr><td>Authorization</td><td>All valid token holders receive the same read surface; there is no per-user RBAC</td></tr>
+  </table>
+  <div class="warning">
+    <strong>Do not expose this endpoint directly to the public internet.</strong> It does not currently provide TLS termination, per-user identity, token rotation, RBAC, or rate limiting. Share the bearer token only with trusted operators.
+  </div>
+
+  <h2>Useful First Calls</h2>
+  <table>
+    <tr><th>Tool</th><th>Use</th></tr>
+    <tr><td><code>list_lab_devices</code></td><td>List the lab inventory.</td></tr>
+    <tr><td><code>check_lab_interfaces</code></td><td>Inspect interface status for a device.</td></tr>
+    <tr><td><code>check_lab_bgp_neighbors</code></td><td>Inspect BGP neighbor state.</td></tr>
+    <tr><td><code>check_lab_isis_neighbors</code></td><td>Inspect IS-IS adjacency state.</td></tr>
+    <tr><td><code>assess_lab_device_health</code></td><td>Run deterministic health rules and return findings.</td></tr>
+    <tr><td><code>investigate_lab_session</code></td><td>Follow a deterministic dependency ladder for a BGP, interface, IS-IS, or LDP subject.</td></tr>
+    <tr><td><code>list_lab_tickets</code></td><td>List open tickets. Set <code>include_closed=true</code> to include completed investigations.</td></tr>
+  </table>
+
+  <h2>Operational Notes</h2>
+  <ul>
+    <li>The service uses strict SSH host-key verification for routers.</li>
+    <li>Tickets, evidence, admission state, and event state are persisted in a Docker named volume and survive container restart.</li>
+    <li>The service restarts automatically after a host reboot through Docker Compose.</li>
+    <li>NetBox and Neo4j tools use Docker service DNS when those backing services are running. If either backing service is down, its MCP tool returns a structured error.</li>
+    <li>External-source tools depend on the availability of their respective platform services.</li>
+  </ul>
+
+  <h2>Support Checklist</h2>
+  <ol>
+    <li>Confirm the SSH tunnel is running.</li>
+    <li>Confirm the MCP client sends the bearer token.</li>
+    <li>Call <code>list_lab_devices</code> before a device-specific tool.</li>
+    <li>For a returned object refusal, refresh the relevant device check and verify the requested object exists.</li>
+    <li>For NetBox or graph errors, verify the corresponding backing service is running before changing MCP configuration.</li>
+  </ol>
+
+  <p class="footer">IOS-XR Nettools MCP User Guide. This guide intentionally omits bearer tokens, router credentials, and internal secret values.</p>
+</body>
+</html>

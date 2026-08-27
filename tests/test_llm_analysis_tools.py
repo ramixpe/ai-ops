@@ -414,6 +414,30 @@ def test_openai_model_caller_constructs_client_with_no_base_url_kwarg(monkeypatc
     assert client_calls[0]["api_key"] == "test-openai-key"
 
 
+def test_openrouter_model_caller_wires_the_measurement_endpoint(monkeypatch):
+    from agent_nettools.llm_analysis import openrouter_model_caller
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
+    monkeypatch.delenv("OPENROUTER_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENROUTER_MODEL", raising=False)
+    client_calls = []
+    create_calls = []
+    install_fake_openai(
+        monkeypatch,
+        lambda **kwargs: fake_response(output_text="ok"),
+        captured_client=client_calls,
+        captured_calls=create_calls,
+    )
+
+    openrouter_model_caller(
+        system="", messages=[{"role": "user", "content": "hi"}], tools=[], timeout=None
+    )
+
+    assert client_calls[0]["base_url"] == "https://openrouter.ai/api/v1"
+    assert client_calls[0]["api_key"] == "test-openrouter-key"
+    assert create_calls[0]["model"] == "deepseek/deepseek-v4-flash-vision-exp"
+
+
 @pytest.mark.parametrize(
     ("error_name", "expected"),
     [

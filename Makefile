@@ -22,6 +22,7 @@ VENV := .venv
 VENV_BIN := $(VENV)/bin
 NETTOOLS := $(if $(wildcard $(VENV_BIN)/nettools),$(VENV_BIN)/nettools,nettools)
 NETTOOLS_MCP := $(if $(wildcard $(VENV_BIN)/nettools-mcp),$(VENV_BIN)/nettools-mcp,nettools-mcp)
+MCP_HTTP_COMPOSE := docker compose -f docker-compose.mcp-http.yml
 # ...with one refinement for the two that are DEPENDENCY console scripts
 # rather than this package's own. A console script is a generated file with the
 # interpreter path baked into its shebang, so it can exist and still be
@@ -64,7 +65,7 @@ KEEP_COUNT ?= 20
 .PHONY: help setup test lint inventory facts interfaces bgp lldp isis sr \
         fabric-bgp route bgp-neighbor interface sr-policy logging ping traceroute \
         analyze analyze-fabric agent demo diff capture learn-topology health health-fixtures \
-        baseline-pin baseline-show flaps evidence-prune metrics version mcp inspect \
+		baseline-pin baseline-show flaps evidence-prune metrics measure-ssh-concurrency version mcp mcp-http mcp-http-up mcp-http-down mcp-http-logs inspect \
         docker-build clean audit audit-fixtures config-check route-event \
         investigate ledger-summary ledger-verdict
 
@@ -204,11 +205,27 @@ evidence-prune:  ## Prune old snapshots (KEEP_DAYS=30 KEEP_COUNT=20 by default)
 metrics:  ## Report operational metrics (JSON; ARGS=--format=prometheus for text exposition)
 	$(NETTOOLS) metrics $(ARGS)
 
+measure-ssh-concurrency:  ## B-492 read-only SSH concurrency measurement; requires NETTOOLS_LIVE_LAB=1
+	$(VENV_BIN)/python scripts/concurrent_ssh_measurement.py $(ARGS)
+
 version:  ## Print the installed nettools version
 	$(NETTOOLS) version
 
 mcp:  ## Start the MCP server over stdio
 	$(NETTOOLS_MCP)
+
+mcp-http:  ## Start authenticated streamable MCP HTTP (requires NETTOOLS_MCP_HTTP_BEARER_TOKEN)
+	NETTOOLS_MCP_TRANSPORT=streamable-http $(NETTOOLS_MCP)
+
+mcp-http-up:  ## Start persistent authenticated MCP HTTP Compose deployment
+	@test -f .env.mcp-http || (echo "Create .env.mcp-http from .env.mcp-http.example first." >&2; exit 2)
+	$(MCP_HTTP_COMPOSE) up -d --build
+
+mcp-http-down:  ## Stop the MCP HTTP Compose deployment; persistent state remains
+	$(MCP_HTTP_COMPOSE) down
+
+mcp-http-logs:  ## Follow logs from the persistent MCP HTTP Compose deployment
+	$(MCP_HTTP_COMPOSE) logs -f mcp
 
 inspect:  ## Smoke-test the MCP server (or DEVICE=name)
 	$(NETTOOLS) inspect $(DEVICE)

@@ -1,0 +1,124 @@
+{
+  "groups": {
+    "fabric:1": {
+      "attempts": 10,
+      "failure_rate": 0.0,
+      "failures": 0,
+      "latency_seconds": {
+        "max": 1.594,
+        "mean": 1.453,
+        "min": 1.389,
+        "p50": 1.433,
+        "p95": 1.537
+      },
+      "retry_attempts": 0,
+      "retry_recovery_rate": null,
+      "status_counts": {
+        "success": 10
+      },
+      "successes": 10
+    },
+    "fabric:2": {
+      "attempts": 20,
+      "failure_rate": 0.0,
+      "failures": 0,
+      "latency_seconds": {
+        "max": 2.411,
+        "mean": 1.588,
+        "min": 1.401,
+        "p50": 1.545,
+        "p95": 1.774
+      },
+      "retry_attempts": 0,
+      "retry_recovery_rate": null,
+      "status_counts": {
+        "success": 20
+      },
+      "successes": 20
+    },
+    "fabric:4": {
+      "attempts": 40,
+      "failure_rate": 0.0,
+      "failures": 0,
+      "latency_seconds": {
+        "max": 1.911,
+        "mean": 1.691,
+        "min": 1.558,
+        "p50": 1.697,
+        "p95": 1.798
+      },
+      "retry_attempts": 0,
+      "retry_recovery_rate": null,
+      "status_counts": {
+        "success": 40
+      },
+      "successes": 40
+    },
+    "same-device:1": {
+      "attempts": 10,
+      "failure_rate": 0.0,
+      "failures": 0,
+      "latency_seconds": {
+        "max": 1.629,
+        "mean": 1.492,
+        "min": 1.384,
+        "p50": 1.476,
+        "p95": 1.597
+      },
+      "retry_attempts": 0,
+      "retry_recovery_rate": null,
+      "status_counts": {
+        "success": 10
+      },
+      "successes": 10
+    },
+    "same-device:2": {
+      "attempts": 20,
+      "failure_rate": 0.5,
+      "failures": 10,
+      "latency_seconds": {
+        "max": 1.578,
+        "mean": 0.724,
+        "min": 0.0,
+        "p50": 0.692,
+        "p95": 1.506
+      },
+      "retry_attempts": 0,
+      "retry_recovery_rate": null,
+      "status_counts": {
+        "admission_refused": 10,
+        "success": 10
+      },
+      "successes": 10
+    },
+    "same-device:4": {
+      "attempts": 40,
+      "failure_rate": 0.75,
+      "failures": 30,
+      "latency_seconds": {
+        "max": 1.533,
+        "mean": 0.365,
+        "min": 0.0,
+        "p50": 0.002,
+        "p95": 1.471
+      },
+      "retry_attempts": 0,
+      "retry_recovery_rate": null,
+      "status_counts": {
+        "admission_refused": 30,
+        "success": 10
+      },
+      "successes": 10
+    }
+  },
+  "levels": [
+    1,
+    2,
+    4
+  ],
+  "modes": [
+    "same-device",
+    "fabric"
+  ],
+  "runs": 10
+}

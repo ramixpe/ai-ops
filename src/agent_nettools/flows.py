@@ -178,6 +178,9 @@ class CollectStep:
     name: str
     parameter: str | None = None
     is_template: bool = False
+    #: A versioned static evidence source, collected locally without a device
+    #: session and re-read with its owning rung.
+    is_static: bool = False
     #: **How** the parameter is filled, as distinct from *which* parameter it
     #: is. `parameter` names a real template argument and is validated against
     #: the template's own signature; `fill` names the strategy the collector
@@ -733,6 +736,8 @@ LDP_SESSION_FLOW = Flow(
                 CollectStep("ldp"),
                 CollectStep("ldp_discovery"),
                 CollectStep("interfaces"),
+                CollectStep("config_ldp", is_template=True),
+                CollectStep("ldp_intent", is_static=True),
             ),
             check=_checks.ldp_session_up,
             finding="session_not_up",

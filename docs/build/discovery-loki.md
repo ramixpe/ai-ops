@@ -1,6 +1,6 @@
 # T-004 — Loki discovery
 
-**Task:** `docs/archive/BUILD-PLAN.md` T-004 `[NON-BLOCKING]` (archived 2026-08-20)
+**Historical task:** T-004 `[NON-BLOCKING]` from the retired build plan (available in Git history)
 **Question it answers:** Q-002 — is syslog-ng shipping to Loki, and do IOS-XR mnemonics survive into a queryable label?
 **Measured:** 2026-08-15, against the live `sota-lab-platform` stack.
 
@@ -25,12 +25,12 @@ Loki publishes **no host port** — `docker ps` shows `3100/tcp` unmapped. It is
 | Address | Network | Result |
 |---|---|---|
 | `http://172.20.250.103:3100` | `sota_mgmt` — **the same /24 as the lab devices** | `/ready` → 200 |
-| `http://172.19.0.6:3100` | `sota-lab-platform_labnet` | `/ready` → 200 |
+| `http://172.19.0.6:3100` | historical `sota-lab-platform_labnet` address | `/ready` → 200 |
 | `http://localhost:3100` | — | connection refused |
 
 ```
 ip route → 172.20.250.0/24 dev br-081212e31813 src 172.20.250.1
-           172.19.0.0/16   dev br-a5b72fa41872 src 172.19.0.1
+           historical 172.19.0.0/16; current `sota-lab-platform_labnet` is 172.21.0.0/16
 ```
 
 **Use `172.20.250.103`.** It is the management-network address, the same network `nettools` already reaches the devices on, so it needs no new network path. Container-internal callers use `loki:3100` (HTTP) / `loki:9096` (gRPC).

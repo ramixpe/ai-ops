@@ -106,24 +106,21 @@ def test_every_known_evaluation_document_family_carries_the_marker():
     """Defense against a NEW evaluation document silently escaping exclusion.
 
     The marker is a content convention, not a registry -- so nothing forces
-    a brand-new file to carry it except habit. This pins the filename
-    families every sealed round and re-test file in this corpus already
-    follows (round N+1 copied from round N, the next dated LM Studio run
-    named like the last) and fails loudly if one of them is ever added
-    without the marker, rather than trusting it silently.
+    a brand-new file to carry it except habit. The retained corpus uses one
+    canonical evaluation record; this pins that record's marker rather than
+    filename families for retired raw round reports.
     """
 
     root = K._repo_root()
     assert root is not None
     build = root / "docs" / "build"
-    patterns = ("ROUND-*.md", "LMSTUDIO-RUN-*.md", "*RETEST*.md", "*EXPERIMENT*.md")
-    candidates = {p for pattern in patterns for p in build.glob(pattern)}
-    assert candidates, "the patterns matched nothing -- they have drifted from the corpus"
+    candidates = {build / "EVALUATION-CORPUS.md"}
+    assert all(path.is_file() for path in candidates), "the retained evaluation corpus is missing"
     for path in candidates:
         lines = path.read_text(encoding="utf-8").splitlines()
         assert K._is_evaluation_material(lines), (
-            f"{path.relative_to(root)} matches a known evaluation-document naming "
-            "family but does not carry the exclusion marker"
+            f"{path.relative_to(root)} is evaluation material but does not carry "
+            "the exclusion marker"
         )
 
 

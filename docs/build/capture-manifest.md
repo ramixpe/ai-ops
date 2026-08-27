@@ -1,6 +1,6 @@
 # T-007 — Fixture gap analysis and capture manifest
 
-**Task:** `docs/archive/BUILD-PLAN.md` T-007 (archived 2026-08-20; Part 0's rules live on at `docs/build/PROCESS.md`)
+**Historical task:** T-007 from the retired build plan; its process rules remain in [`PROCESS.md`](PROCESS.md)
 **Consumed by:** T-011 (capture), then T-012–T-017 (the parsers), then T-025 (acceptance)
 **Written:** 2026-08-15
 

@@ -133,7 +133,7 @@ Event-driven. Syslog, SNMP or an alert wakes the agent; it runs the checks and r
 Standard procedures only — pre-approved actions to cut MTTR, then hand to a human. There is no Stage 4.
 
 ### `MVP-0`
-Descent to grounded report. No gate, no narrowing, no config axis, no memory. The subject of `docs/archive/BUILD-PLAN.md` (the executed task list) and `docs/build/PROCESS.md` (the rules it operated under).
+Descent to grounded report. No gate, no narrowing, no config axis, no memory. The executed MVP-0 scope; its operating rules now live in `docs/build/PROCESS.md`.
 
 ### `MVP-1`
 Adds the gate, the narrowing pass, and the config axis.

@@ -25,6 +25,7 @@ def _tickets_never_land_in_the_repo(tmp_path, monkeypatch):
     """
 
     monkeypatch.setenv("NETTOOLS_TICKET_DIR", str(tmp_path / "tickets"))
+    monkeypatch.setenv("NETTOOLS_INCIDENT_DIR", str(tmp_path / "incidents"))
 
 
 @pytest.fixture(autouse=True)

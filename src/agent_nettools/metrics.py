@@ -97,7 +97,7 @@ from .evidence_store import _atomic_write_text
 
 NETTOOLS_METRICS_FILE_ENV = "NETTOOLS_METRICS_FILE"
 
-SEVERITIES: tuple[str, ...] = ("ok", "info", "warning", "critical")
+SEVERITIES: tuple[str, ...] = ("ok", "info", "warning", "unreachable", "critical")
 
 _EMPTY_DEVICE_STATS: dict[str, float] = {
     "success": 0,

@@ -59,6 +59,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 REPO = Path(__file__).resolve().parent.parent
 FAULTLAB = REPO.parent / "faultlab"
@@ -200,7 +201,7 @@ def loki_events(mnemonics: list[str], since_s: int) -> list[dict]:
 # --------------------------------------------------------------------------- #
 
 
-def run_agent(line: str, device: str, ticket_dir: Path) -> dict:
+def run_agent(line: str, device: str, ticket_dir: Path, caller: Any) -> dict:
     from agent_nettools import event_agent as ea
     from agent_nettools import event_routing as er
 
@@ -224,10 +225,10 @@ def run_agent(line: str, device: str, ticket_dir: Path) -> dict:
     ea.build_trigger_index = lambda *a, **k: {decision.matched: {"fires": True, "reason": "CAMPAIGN BYPASS"}}
     ea.validate_trigger_table = lambda *a, **k: None
     os.environ["NETTOOLS_TICKET_DIR"] = str(ticket_dir)
+    os.environ["NETTOOLS_EVENT_NOTIFY"] = "0"
     try:
-        from agent_nettools.event_caller import minimax_event_caller
         t0 = time.monotonic()
-        run = ea.run_event(decision, caller=minimax_event_caller)
+        run = ea.run_event(decision, caller=caller)
         out["agent_seconds"] = round(time.monotonic() - t0, 1)
         out["event_run"] = run.as_dict()
     except Exception as exc:  # noqa: BLE001 -- a failed round is data, not a crash
@@ -288,7 +289,7 @@ def _fabric_once() -> dict:
 # --------------------------------------------------------------------------- #
 
 
-def one_round(n: int, fault: int, hold_s: float, outdir: Path, mnemonics: list[str],
+def one_round(n: int, fault: int, hold_s: float, outdir: Path, mnemonics: list[str], caller: Any,
               *, rehearse: bool = False) -> dict:
     log(f"round {n}: fault={fault} hold={hold_s}s{' [REHEARSAL, no device writes]' if rehearse else ''}")
     cmd = [str(PY), "fault_lab.py", "--max-hold", "5"]
@@ -387,7 +388,7 @@ def one_round(n: int, fault: int, hold_s: float, outdir: Path, mnemonics: list[s
             if fresh:
                 ev = fresh[-1]
                 log(f"  {len(fresh)} event(s); driving the agent on {ev['mnemonic']} @ {ev['host']}")
-                attempt = run_agent(ev["line"], ev["host"], outdir / "tickets")
+                attempt = run_agent(ev["line"], ev["host"], outdir / "tickets", caller)
                 record["agent"] = attempt
                 record["trigger_kind"] = "real"
                 routed_for_real = bool(attempt.get("routable"))
@@ -421,7 +422,7 @@ def one_round(n: int, fault: int, hold_s: float, outdir: Path, mnemonics: list[s
                          f"bgp[1084]: %ROUTING-BGP-5-ADJCHANGE : neighbor 10.255.0.31 Down - "
                          f"synthetic campaign probe, no real syslog fired")
                 log("  no syslog; waking the agent with a SYNTHETIC trigger to test honesty")
-                record["agent"] = run_agent(synth, TARGET, outdir / "tickets")
+                record["agent"] = run_agent(synth, TARGET, outdir / "tickets", caller)
                 record["trigger_kind"] = "synthetic"
                 record["synthetic_reason"] = (
                     "no matching syslog reached Loki within the cap; the agent was woken "
@@ -457,20 +458,14 @@ def main() -> int:
     ap.add_argument("--hours", type=float, default=9.0)
     ap.add_argument("--interval-min", type=float, default=20.0)
     ap.add_argument("--hold", type=float, default=90.0, help="MAXIMUM hold; polling stops early on detection")
-    #: 13 (maximum-prefix on the vpnv4 AF) is EXCLUDED and must stay excluded.
-    #: It is not safely revertible by config alone: exceeding the limit puts the
-    #: neighbour into `Idle (PfxCt)` on IOS-XR, and removing the config does not
-    #: clear that state -- nor does a neighbour shut/no-shut. It needs an exec
-    #: `clear bgp`, which neither this repo (read-only by design) nor fault_lab
-    #: (config push only) can issue.
-    #:
-    #: Measured 2026-08-23: round 7 left PE2's session to RR1 Idle for eight
-    #: hours. fault_lab's restore was CORRECT and reported success correctly --
-    #: the config really was byte-identical. Config-snapshot verification
-    #: cannot see protocol state, so a fault whose effect outlives its cause
-    #: passes every check the harness has.
-    ap.add_argument("--faults", default="1,2,3,4,5,6,7,8,9,10,11,12,14,15,16,17,17,17",
-                    help="comma-separated menu numbers; 13 excluded by default (see source)")
+    ap.add_argument("--provider", choices=("minimax", "openrouter"), default="minimax",
+                    help="one model provider for this sealed campaign")
+    #: This harness now refuses any fault lacking a declared restore-effect
+    #: contract. The nightly default therefore uses only PE2's evidence-backed
+    #: BGP faults plus a no-fault control: 7 (wrong remote-AS), 13
+    #: (maximum-prefix, recovered with clear bgp), and 17 (control).
+    ap.add_argument("--faults", default="7,13,17,17",
+                    help="comma-separated evidence-backed PE2 fault menu numbers")
     ap.add_argument("--seed", type=int, default=20260822)
     ap.add_argument("--out", default=str(REPO / "scripts" / "overnight_out"))
     ap.add_argument("--rehearse", action="store_true",
@@ -479,9 +474,6 @@ def main() -> int:
     args = ap.parse_args()
 
     pool = [int(x) for x in args.faults.split(",") if x.strip()]
-    if 13 in pool:
-        log("REFUSING fault 13: not revertible by config alone -- see --faults in the source")
-        pool = [f for f in pool if f != 13]
     rng = random.Random(args.seed)
     outdir = Path(args.out) / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     (outdir / "tickets").mkdir(parents=True, exist_ok=True)
@@ -496,15 +488,26 @@ def main() -> int:
                  "PKT_INFRA-LINEPROTO-5-UPDOWN", "ROUTING-ISIS-5-ADJCHANGE"]
 
     rounds = args.rounds or (1 if args.rehearse else int(args.hours * 60 / args.interval_min))
-    log(f"campaign: {rounds} round(s), pool={pool}, hold={args.hold}s -> {outdir}")
+    from agent_nettools import event_caller, llm_analysis
+
+    caller_by_provider = {
+        "minimax": ("MINIMAX_API_KEY", llm_analysis.minimax_model_caller),
+        "openrouter": ("OPENROUTER_API_KEY", llm_analysis.openrouter_model_caller),
+    }
+    key_name, model_caller = caller_by_provider[args.provider]
+    if not os.getenv(key_name):
+        log(f"model preflight FAILED: {key_name} is not configured")
+        return 2
+    caller = event_caller.build_event_caller(model_caller)
+
+    log(f"campaign: provider={args.provider}, rounds={rounds}, pool={pool}, hold={args.hold}s -> {outdir}")
 
     # Prove the model path works BEFORE spending a night on it. The first
     # campaign discovered its credentials were missing only by failing every
     # round, one at a time, for seven rounds.
     try:
-        from agent_nettools.event_caller import minimax_event_caller
-        probe = minimax_event_caller(system="Reply with OK.", tools=[], timeout_s=60,
-                                     messages=[{"role": "user", "content": "Reply with OK."}])
+        probe = caller(system="Reply with OK.", tools=[], timeout_s=60,
+                   messages=[{"role": "user", "content": "Reply with OK."}])
         log(f"model preflight OK: {str(probe.get('text'))[:40]!r}")
     except Exception as exc:  # noqa: BLE001
         log(f"model preflight FAILED: {type(exc).__name__}: {exc}")
@@ -518,7 +521,10 @@ def main() -> int:
     results = []
     start = time.monotonic()
     for n in range(1, rounds + 1):
-        rec = one_round(n, rng.choice(pool), args.hold, outdir, mnemonics, rehearse=args.rehearse)
+        rec = one_round(
+            n, rng.choice(pool), args.hold, outdir, mnemonics, caller, rehearse=args.rehearse
+        )
+        rec["provider"] = args.provider
         results.append(rec)
         (outdir / f"round_{n:02d}.json").write_text(json.dumps(rec, indent=2, default=str))
         (outdir / "campaign.json").write_text(json.dumps(results, indent=2, default=str))

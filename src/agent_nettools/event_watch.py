@@ -119,6 +119,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping
 
 from . import event_routing, logs_loki
+from . import trigger_table as _trigger_table
 from .coverage import Coverage
 from .event_routing import RoutingDecision
 from .inventory_model import load_inventory_file
@@ -150,21 +151,7 @@ DEFAULT_WATCH_WINDOW_SECONDS = 900
 DEFAULT_WATCH_LIMIT = 500
 
 
-class TriggerTableInconsistency(RuntimeError):
-    """`mnemonics.yaml` declares `trigger.fires: true` for a mnemonic this
-    module cannot actually route.
-
-    Raised, never swallowed — this is a configuration defect in data this
-    project owns and reviews like code, not a caller input problem
-    (`RoutingDecision`'s "always populate reason, never raise" contract is
-    for *events*, which are untrusted; a trigger-table entry is reviewed
-    knowledge, and a reviewer approving `fires: true` for a mnemonic with no
-    working extractor is exactly the OBS-191 shape — "a capability exists
-    and the surface does not name it", inverted: the surface promises a
-    capability that does not exist. Failing loudly here is `mutate_guards.
-    py`'s own "unresolvable and vacuous are different answers and must never
-    render the same" principle applied to data instead of a mutation.
-    """
+TriggerTableInconsistency = _trigger_table.TriggerTableInconsistency
 
 
 # --------------------------------------------------------------------------- #
@@ -186,11 +173,7 @@ def build_trigger_index(
     """
 
     entries = table if table is not None else load_mnemonic_table()
-    return {
-        entry["mnemonic"]: entry["trigger"]
-        for entry in entries
-        if isinstance(entry, Mapping) and "trigger" in entry
-    }
+    return _trigger_table.build_trigger_index(entries)
 
 
 def validate_trigger_table(table: Iterable[Mapping[str, Any]] | None = None) -> None:
@@ -206,27 +189,10 @@ def validate_trigger_table(table: Iterable[Mapping[str, Any]] | None = None) -> 
     """
 
     entries = table if table is not None else load_mnemonic_table()
-    routable_mnemonics = {m for m, _flow, _extract in event_routing.MNEMONIC_FLOW_TABLE}
-
-    for entry in entries:
-        if not isinstance(entry, Mapping):
-            continue
-        trigger = entry.get("trigger")
-        if not isinstance(trigger, Mapping) or not trigger.get("fires"):
-            continue
-        mnemonic = entry.get("mnemonic")
-        if not entry.get("investigate_with"):
-            raise TriggerTableInconsistency(
-                f"{mnemonic!r}: trigger.fires is true but investigate_with is "
-                "null — there is no flow to route to"
-            )
-        if mnemonic not in routable_mnemonics:
-            raise TriggerTableInconsistency(
-                f"{mnemonic!r}: trigger.fires is true but it has no "
-                "event_routing.MNEMONIC_FLOW_TABLE entry — there is no "
-                "subject extractor, so this mnemonic cannot actually be "
-                "routed no matter how many times Loki delivers it"
-            )
+    _trigger_table.validate_trigger_table(
+        entries,
+        routable_mnemonics=(mnemonic for mnemonic, _flow, _extract in event_routing.MNEMONIC_FLOW_TABLE),
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -303,58 +269,58 @@ def _group_records(
 # --------------------------------------------------------------------------- #
 
 
-def _decide(
-    device: str,
-    mnemonic: str,
-    subject: str | None,
+def _apply_trigger_policy(
+    decision: RoutingDecision,
     trigger_index: Mapping[str, Mapping[str, Any]],
 ) -> RoutingDecision:
+    """Apply reviewed Loki trigger policy after shared event routing."""
+
+    mnemonic = decision.matched
+    if mnemonic is None:
+        return decision
     entry = trigger_index.get(mnemonic)
 
     if entry is None:
         return RoutingDecision(
-            routable=False, source_kind="loki", matched=mnemonic, device=device,
+            routable=False, source_kind="loki", matched=mnemonic, device=decision.device,
             reason=f"mnemonic {mnemonic!r} has no trigger entry in "
                    "mnemonics.yaml — unclassified, not cleared to trigger",
+            transition=decision.transition, raw_event=decision.raw_event,
         )
 
     if not entry.get("fires"):
         return RoutingDecision(
-            routable=False, source_kind="loki", matched=mnemonic, device=device,
+            routable=False, source_kind="loki", matched=mnemonic, device=decision.device,
             reason=str(entry.get("reason") or "excluded by mnemonics.yaml's trigger table"),
+            transition=decision.transition, raw_event=decision.raw_event,
         )
-
-    # fires: true from here — validate_trigger_table() already proved (or
-    # will prove, if called first) that this mnemonic has a working
-    # MNEMONIC_FLOW_TABLE entry. Looked up again here rather than trusted
-    # from that earlier call so this function stays correct even if a
-    # caller invokes it without validating first (defence in depth, not
-    # redundant given TriggerTableInconsistency is meant to be loud and
-    # early, not the only thing standing between a bad table and a crash
-    # here).
-    found = _flow_and_extractor_for(mnemonic)
-    if found is None:
-        raise TriggerTableInconsistency(
-            f"{mnemonic!r}: trigger.fires is true but there is no "
-            "event_routing.MNEMONIC_FLOW_TABLE entry for it"
-        )
-    flow, _extract = found
-
-    if subject is None:
-        return RoutingDecision(
-            routable=False, source_kind="loki", matched=mnemonic, device=device,
-            flow=flow,
-            reason="no valid subject could be extracted from the message "
-                   "text in this window (a subject that does not parse is "
-                   "not a subject)",
-        )
-
+    if not decision.routable:
+        return decision
     return RoutingDecision(
-        routable=True, flow=flow, device=device, subject=subject,
-        source_kind="loki", matched=mnemonic,
-        reason=f"{mnemonic} routes to the {flow} flow "
+        routable=True, flow=decision.flow, device=decision.device, subject=decision.subject,
+        source_kind="loki", matched=mnemonic, transition=decision.transition,
+        reason=f"{mnemonic} routes to the {decision.flow} flow "
                "(cleared to trigger by mnemonics.yaml, observed via Loki)",
+        raw_event=decision.raw_event,
     )
+
+
+def _decision_for_group(
+    records: list[dict[str, Any]],
+    *,
+    device: str,
+    trigger_index: Mapping[str, Mapping[str, Any]],
+) -> RoutingDecision:
+    """Prefer a fault occurrence without treating a later recovery as one.
+
+    A collapsed Loki group can contain a Down followed by its Up recovery.
+    The former remains actionable; an all-recovery group is refused by the
+    shared router. Records are newest-first, so this chooses the newest fault.
+    """
+
+    decisions = [event_routing.route_loki_record(record, device=device) for record in records]
+    selected = next((decision for decision in decisions if decision.transition != "up"), decisions[0])
+    return _apply_trigger_policy(selected, trigger_index)
 
 
 # --------------------------------------------------------------------------- #
@@ -465,7 +431,11 @@ def watch_device(
     groups = _group_records(parsed["records"])
     observations = tuple(
         LokiObservation(
-            decision=_decide(device, mnemonic, subject, trigger_index),
+            decision=_decision_for_group(
+                group_records,
+                device=device,
+                trigger_index=trigger_index,
+            ),
             occurrence_count=len(group_records),
             last_seen=group_records[0].get("timestamp") or None,
             first_seen=group_records[-1].get("timestamp") or None,

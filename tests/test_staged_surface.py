@@ -77,6 +77,42 @@ def test_staged_registers_exactly_the_six(staged_server):
     assert _tool_names(staged_server) == set(STAGED_TOOL_NAMES)
 
 
+def test_offline_event_manifest_matches_the_live_staged_surface(staged_server):
+    """B-703: the planning, pinning, and live schemas must agree.
+
+    ``event_agent`` cannot import ``mcp_server`` at runtime, so its offline
+    planning manifest is necessarily a declared copy. That copy must still be
+    checked here, where tests may import both sides: a parameter added to the
+    staged surface without a PIN_TABLE treatment, or an offline schema that
+    no longer matches the live registry, must fail before a model sees either
+    manifest.
+    """
+
+    from agent_nettools import event_agent, model_ingress
+    from agent_nettools.mcp_profiles import GUIDED_CAPABILITIES, ModelPolicy
+    from mcp_server.staged_surface import STAGED_TOOL_NAMES
+
+    offline = {entry["name"]: entry["input_schema"] for entry in event_agent._PLANNING_TOOL_SCHEMAS}
+    expected = set(STAGED_TOOL_NAMES) - set(model_ingress.STRUCTURALLY_EXCLUDED_TOOLS)
+
+    assert {
+        capability.name for capability in GUIDED_CAPABILITIES if capability.model_policy is ModelPolicy.PINNED
+    } == expected
+
+    assert set(offline) == expected
+    assert set(model_ingress.PIN_TABLE) == expected
+
+    live = staged_server.mcp._tool_manager._tools
+    for name in expected:
+        live_schema = live[name].parameters
+        offline_schema = offline[name]
+        declared = {spec.name for spec in model_ingress.PIN_TABLE[name]}
+
+        assert set(live_schema["properties"]) == declared, name
+        assert set(offline_schema["properties"]) == declared, name
+        assert set(offline_schema.get("required", ())) == set(live_schema.get("required", ())), name
+
+
 def test_the_probe_keeps_its_distinct_annotation_on_staged(staged_server):
     """B-473 must survive consolidation -- folding probes into a passive tool
     would erase the distinction that wave built."""

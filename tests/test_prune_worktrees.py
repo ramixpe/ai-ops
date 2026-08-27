@@ -42,7 +42,6 @@ def test_generated_runtime_output_is_noise() -> None:
         "sub/.env",
         "run.log",
         "evidence-archive/x/y.jsonl",
-        "docs/diagrams/.facts_cache.json",
     ):
         assert pw.is_noise(path), path
 
@@ -57,6 +56,7 @@ def test_authored_work_is_never_noise() -> None:
         "docs/build/FINDINGS.md",
         "scripts/mutate_guards.py",
         "tests/fixtures/cisco_xr/PE1/t0/show-version.txt",
+        "docs/diagrams/high-level.html",
     ):
         assert not pw.is_noise(path), path
 

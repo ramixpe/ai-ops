@@ -45,6 +45,13 @@ SOURCES = {
     "interface": "show-interfaces-gi0-0-0-0.txt",
 }
 
+# `config_ldp` is collected by the LDP flow but has no committed real-output
+# fixture in this RR1 operational-state corpus. Its bounded parser and the
+# semantic configured-versus-silent decision are covered in
+# test_config_section.py and test_checks.py instead; do not invent a fixture
+# merely to make this field audit look complete.
+CONFIG_TEMPLATES_AUDITED_ELSEWHERE = frozenset({"config_ldp"})
+
 #: Measured 2026-08-16. `(fields parsed, fields any check reads)`.
 #:
 #: These are pinned so the ratio cannot drift silently in either direction: a
@@ -182,8 +189,9 @@ def test_every_diagnostic_template_is_covered_by_the_audit():
     }
 
     assert used, "no templates in any flow -- the audit would be vacuous"
-    assert used <= set(SOURCES), (
-        f"templates used by a flow but absent from the audit: {sorted(used - set(SOURCES))}"
+    unaudited = used - set(SOURCES) - CONFIG_TEMPLATES_AUDITED_ELSEWHERE
+    assert not unaudited, (
+        f"templates used by a flow but absent from the audit: {sorted(unaudited)}"
     )
 
 

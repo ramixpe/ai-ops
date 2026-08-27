@@ -300,6 +300,41 @@ SETTINGS: tuple[Setting, ...] = (
         "admission",
         minimum=0.001,
     ),
+    Setting(
+        "NETTOOLS_MAX_EVENT_RUNS_PER_DEVICE", "int", 6,
+        "Maximum live event-woken model runs started for one device within "
+        "NETTOOLS_EVENT_RUN_WINDOW_SECONDS. Cross-process rate limit.",
+        "admission",
+        minimum=1,
+    ),
+    Setting(
+        "NETTOOLS_MAX_EVENT_RUNS_FABRIC", "int", 30,
+        "Maximum live event-woken model runs started fabric-wide within "
+        "NETTOOLS_EVENT_RUN_WINDOW_SECONDS. Cross-process rate limit.",
+        "admission",
+        minimum=1,
+    ),
+    Setting(
+        "NETTOOLS_EVENT_RUN_WINDOW_SECONDS", "float", 3600.0,
+        "Sliding-window duration for the live event-run budgets.",
+        "admission",
+        minimum=0.001,
+    ),
+    Setting(
+        "NETTOOLS_EVENT_IDEMPOTENCY_WINDOW_SECONDS", "float", 3600.0,
+        "Replay-suppression window for one stable live event ID. The first "
+        "receiver claims it; later deliveries are refused before MCP/model use.",
+        "admission",
+        minimum=0.001,
+    ),
+    Setting(
+        "NETTOOLS_MAX_EVENT_AGE_SECONDS", "float", 300.0,
+        "Maximum age of a Loki-ingested event allowed to start a model/MCP "
+        "run. Direct receiver events are immediate; malformed Loki ingest "
+        "timestamps are refused.",
+        "event_agent",
+        minimum=0,
+    ),
     # -- credential_resolver.py --
     Setting(
         "NETTOOLS_CREDENTIAL_PROVIDER", "enum", "env",
@@ -337,6 +372,41 @@ SETTINGS: tuple[Setting, ...] = (
         "B-479 -- both exist so the selection A/B stays measurable).",
         "mcp_server.server",
         choices=("classic", "staged"),
+    ),
+    Setting(
+        "NETTOOLS_MCP_TRANSPORT", "enum", "stdio",
+        "MCP transport: 'stdio' for local subprocess clients, 'streamable-http' "
+        "for native HTTP clients, or 'sse' for compatible legacy clients. HTTP "
+        "transports require NETTOOLS_MCP_HTTP_BEARER_TOKEN.",
+        "mcp_server.server",
+        choices=("stdio", "streamable-http", "sse"),
+    ),
+    Setting(
+        "NETTOOLS_MCP_HOST", "string", "127.0.0.1",
+        "Bind address for native MCP HTTP transports. Use a LAN/VPN address only "
+        "with a bearer token and trusted network controls.",
+        "mcp_server.server",
+    ),
+    Setting(
+        "NETTOOLS_MCP_PORT", "int", 8000,
+        "TCP port for native MCP HTTP transports.",
+        "mcp_server.server",
+        minimum=1,
+        maximum=65535,
+    ),
+    Setting(
+        "NETTOOLS_MCP_HTTP_BEARER_TOKEN", "secret", None,
+        "Bearer token required before any MCP HTTP request reaches the tool surface. "
+        "It is unused by the default stdio transport and never logged.",
+        "mcp_server.server",
+        secret=True,
+    ),
+    Setting(
+        "NETTOOLS_PROCEDURE_APPROVAL_KEY", "secret", None,
+        "Single-operator shared key (minimum 32 bytes) for dry-run procedure approval receipts. "
+        "This is not per-user identity, RBAC, or a router-write authorization.",
+        "procedure_workflow",
+        secret=True,
     ),
     # B-493: MCP-EXPERIMENT.md 12.3 measured a 31B model following a clean
     # descent with an UNPROMPTED get_lab_ping -- the first time a model
@@ -391,6 +461,41 @@ SETTINGS: tuple[Setting, ...] = (
         "EER-008b -- the default-on applies to unset, not to a typo.",
         "mcp_server.server",
         unknown_bool_disables=True,
+    ),
+    Setting(
+        "NETTOOLS_MCP_OBJECT_EVIDENCE_TTL_SECONDS", "float", 10.0,
+        "Maximum age of evidence used to validate MCP BGP-peer and interface "
+        "identifiers. Set 0 for always-live validation during active "
+        "troubleshooting; use a longer value in production to reduce repeated "
+        "device collections.",
+        "mcp_server.server",
+        minimum=0,
+    ),
+    Setting(
+        "NETTOOLS_REASONING_GATE_MODE", "enum", "off",
+        "B-114 typed narrowing observation mode: 'off' (default) or 'shadow'. "
+        "Shadow records code-enumerated candidates but cannot dispatch collection "
+        "or alter a deterministic finding; active narrowing is unsupported.",
+        "narrowing_pass",
+        choices=("off", "shadow"),
+    ),
+    # -- B-710 measurement-only OpenRouter lane --
+    Setting(
+        "OPENROUTER_API_KEY", "string", None,
+        "API key for the B-710 second-provider adversarial measurement. It is "
+        "not used by normal provider selection or production event handling.",
+        "llm_analysis",
+    ),
+    Setting(
+        "OPENROUTER_BASE_URL", "string", "https://openrouter.ai/api/v1",
+        "OpenRouter's OpenAI-compatible endpoint used only by the B-710 "
+        "measurement caller.",
+        "llm_analysis",
+    ),
+    Setting(
+        "OPENROUTER_MODEL", "string", "deepseek/deepseek-v4-flash-vision-exp",
+        "OpenRouter model used by the B-710 second-provider measurement lane.",
+        "llm_analysis",
     ),
     # -- inventory_model.py --
     Setting(
@@ -542,6 +647,13 @@ SETTINGS: tuple[Setting, ...] = (
         "investigation that triggered it.",
         "ticket",
     ),
+    Setting(
+        "NETTOOLS_INCIDENT_DIR", "path", "~/.local/state/agent-nettools/incidents",
+        "Global incident-ID counter directory. Independent from ticket artifact "
+        "directories so campaign and production tickets share one readable "
+        "operator-facing incident sequence.",
+        "ticket",
+    ),
     # -- session_memory.py --
     Setting(
         "NETTOOLS_SESSION_MEMORY_DIR", "path", "session_memory",
@@ -577,6 +689,64 @@ SETTINGS: tuple[Setting, ...] = (
         "HTTP timeout for a notifier send (e.g. the Telegram API call).",
         "notifier",
         minimum=0.001,
+    ),
+    Setting(
+        "NETTOOLS_EVENT_NOTIFY", "bool", False,
+        "Enable the B-707 event ticket notification lifecycle. Default off: "
+        "a promoted trigger remains investigation-only until explicitly enabled.",
+        "event_notification",
+    ),
+    Setting(
+        "NETTOOLS_EVENT_NOTIFICATION_STATE_FILE", "path", "~/.local/state/agent-nettools/event-notifications.json",
+        "Persistent event lifecycle state. Defaults outside the checkout; "
+        "an explicit path is supported for managed deployments.",
+        "event_notification",
+    ),
+    Setting(
+        "NETTOOLS_TELEGRAM_LIVE_CARD", "bool", False,
+        "Enable the Version 2 editable Telegram investigation card. Default off; "
+        "the existing reply-chain lifecycle remains active until test-chat acceptance.",
+        "event_notification",
+    ),
+    Setting(
+        "NETTOOLS_TELEGRAM_LIVE_CARD_CHAT_IDS", "string", "",
+        "Comma-separated test-chat subset for editable Telegram cards. Values outside "
+        "TELEGRAM_CHAT_ID are ignored rather than widening delivery destinations.",
+        "event_notification",
+    ),
+    Setting(
+        "NETTOOLS_TELEGRAM_SHOW_REASONING_TAIL", "bool", False,
+        "Testing-only non-authoritative Telegram summary tail derived from deterministic "
+        "receipt fields. Default off; model and raw device prose are never eligible.",
+        "event_notification",
+    ),
+    Setting(
+        "NETTOOLS_TELEGRAM_WEBHOOK_SECRET", "secret", None,
+        "Telegram inbound webhook secret. Required by the local callback handler; "
+        "never log or send it through Telegram.",
+        "telegram_operator",
+        secret=True,
+    ),
+    Setting(
+        "NETTOOLS_OPERATOR_POLICY_FILE", "path", "~/.config/agent-nettools/telegram-operators.yaml",
+        "Versioned Telegram user-ID to role policy. Unknown or disabled users are refused.",
+        "telegram_operator",
+    ),
+    Setting(
+        "NETTOOLS_TELEGRAM_WEBHOOK_ENABLED", "bool", False,
+        "Enable authenticated Telegram callback handling. Default off until a public HTTPS endpoint is approved.",
+        "telegram_operator",
+    ),
+    Setting(
+        "NETTOOLS_OPERATOR_AUDIT_LOG", "path", "~/.local/state/agent-nettools/operator-actions.jsonl",
+        "Append-only audit log for authorized and refused Telegram operator actions.",
+        "telegram_operator",
+    ),
+    Setting(
+        "NETTOOLS_EVENT_DB_PATH", "path", "~/.local/state/agent-nettools/events.sqlite3",
+        "Version 2 event transaction database. It is not wired into the live "
+        "event path until repository parity is accepted.",
+        "event_store",
     ),
     Setting(
         "TELEGRAM_BOT_TOKEN", "secret", None,
@@ -705,12 +875,11 @@ SETTINGS: tuple[Setting, ...] = (
     # config show` should list it.
     Setting(
         "NEO4J_URI", "string", None,
-        "neo4j Bolt URI, e.g. bolt://172.19.0.16:7687 (this lab's neo4j "
-        "container publishes no port to the host, so a host-run process "
-        "needs the container's own IP on the compose network, not a "
-        "hostname -- see .env.example for how to find it). No default is "
-        "offered -- guessing wrong means silently writing to, or reading "
-        "\"success\" from, the wrong database, worse than refusing to run.",
+        "neo4j Bolt URI, e.g. bolt://neo4j:7687 from a connected Docker "
+        "network. A host-run process may need a reachable published endpoint "
+        "instead. No default is offered -- guessing wrong means silently "
+        "writing to, or reading \"success\" from, the wrong database, worse "
+        "than refusing to run.",
         "graph",
     ),
     Setting(

@@ -1,0 +1,319 @@
+%PDF-1.4
+% MCP User Guide
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R 5 0 R 7 0 R] /Count 3 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 9 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 1809 >>
+stream
+BT
+/F1 11 Tf
+48 792 Td
+15 TL
+/F1 18 Tf
+(IOS-XR Nettools MCP) Tj
+T*
+/F1 11 Tf
+(User Guide for the authenticated, read-only network inspection service) Tj
+T*
+/F1 11 Tf
+() Tj
+T*
+/F1 13 Tf
+(SERVICE OVERVIEW) Tj
+T*
+/F1 11 Tf
+(The MCP service runs in a persistent Docker container on a4000 and exposes) Tj
+T*
+/F1 11 Tf
+(native MCP streamable HTTP. It is loopback-bound by default and intended) Tj
+T*
+/F1 11 Tf
+(to be reached through an encrypted SSH tunnel.) Tj
+T*
+/F1 11 Tf
+() Tj
+T*
+/F1 13 Tf
+(WHAT THE SERVICE DOES) Tj
+T*
+/F1 11 Tf
+(- Exposes reviewed Cisco IOS-XR lab inspection tools through MCP.) Tj
+T*
+/F1 11 Tf
+(- Inspects inventory, interface and routing protocol state, deterministic) Tj
+T*
+/F1 11 Tf
+(  device health, tickets, logs, metrics, and selected topology sources.) Tj
+T*
+/F1 11 Tf
+(- Reconstructs device commands from typed inputs and an allowlist.) Tj
+T*
+/F1 11 Tf
+(- Sanitizes raw device command text before MCP clients receive results.) Tj
+T*
+/F1 11 Tf
+(- Does not expose arbitrary commands, configuration mode, shell access,) Tj
+T*
+/F1 11 Tf
+(  or network remediation capability.) Tj
+T*
+/F1 11 Tf
+(- Keeps active probes disabled by default.) Tj
+T*
+/F1 11 Tf
+() Tj
+T*
+/F1 13 Tf
+(CONNECT FROM A MAC) Tj
+T*
+/F1 11 Tf
+(1. Create an encrypted tunnel and keep it running:) Tj
+T*
+/F1 11 Tf
+(   ssh -N -L 8000:127.0.0.1:8000 rami@a4000) Tj
+T*
+/F1 11 Tf
+() Tj
+T*
+/F1 11 Tf
+(2. Point an MCP streamable-HTTP client at:) Tj
+T*
+/F1 11 Tf
+(   http://127.0.0.1:8000/mcp) Tj
+T*
+/F1 11 Tf
+() Tj
+T*
+/F1 11 Tf
+(3. Send this header with every MCP request:) Tj
+T*
+/F1 11 Tf
+(   Authorization: Bearer <token>) Tj
+T*
+/F1 11 Tf
+() Tj
+T*
+/F1 11 Tf
+(Use the client's secret store or a local environment variable for the) Tj
+T*
+/F1 11 Tf
+(token. Never commit, paste into a shared document, or embed it in source.) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 9 0 R >> >> /Contents 6 0 R >>
+endobj
+6 0 obj
+<< /Length 2013 >>
+stream
+BT
+/F1 11 Tf
+48 792 Td
+15 TL
+/F1 18 Tf
+(AUTHENTICATION AND ACCESS) Tj
+T*
+/F1 11 Tf
+(Transport: native MCP streamable HTTP.) Tj
+T*
+/F1 11 Tf
+(Authentication: shared bearer token; missing or invalid tokens receive 401.) Tj
+T*
+/F1 11 Tf
+(Encryption: the SSH tunnel encrypts traffic between the Mac and a4000.) Tj
+T*
+/F1 11 Tf
+(Exposure: loopback-only on a4000 by default.) Tj
+T*
+/F1 11 Tf
+(Authorization: every valid token holder receives the same read surface.) Tj
+T*
+/F1 11 Tf
+() Tj
+T*
+/F1 13 Tf
+(IMPORTANT LIMIT) Tj
+T*
+/F1 11 Tf
+(This is shared-secret access, not per-user identity or RBAC. Do not expose) Tj
+T*
+/F1 11 Tf
+(the endpoint directly to the public internet. Public deployment would need) Tj
+T*
+/F1 11 Tf
+(TLS termination, identity, token rotation, authorization, rate limits,) Tj
+T*
+/F1 11 Tf
+(and a separate deployment review.) Tj
+T*
+/F1 11 Tf
+() Tj
+T*
+/F1 13 Tf
+(USEFUL FIRST CALLS) Tj
+T*
+/F1 11 Tf
+(list_lab_devices             List the nine-device lab inventory.) Tj
+T*
+/F1 11 Tf
+(check_lab_interfaces         Inspect interface status for a device.) Tj
+T*
+/F1 11 Tf
+(check_lab_bgp_neighbors      Inspect BGP neighbor state.) Tj
+T*
+/F1 11 Tf
+(check_lab_isis_neighbors     Inspect IS-IS adjacency state.) Tj
+T*
+/F1 11 Tf
+(assess_lab_device_health     Run deterministic health rules and findings.) Tj
+T*
+/F1 11 Tf
+(investigate_lab_session      Follow a deterministic BGP, interface,) Tj
+T*
+/F1 11 Tf
+(                             IS-IS, or LDP dependency ladder.) Tj
+T*
+/F1 11 Tf
+(list_lab_tickets             List open tickets; set include_closed=true) Tj
+T*
+/F1 11 Tf
+(                             to include completed investigations.) Tj
+T*
+/F1 11 Tf
+() Tj
+T*
+/F1 13 Tf
+(CLIENT CONFIGURATION PATTERN) Tj
+T*
+/F1 11 Tf
+(Use the endpoint URL and bearer header required by your MCP client. A) Tj
+T*
+/F1 11 Tf
+(representative configuration has an MCP server URL of:) Tj
+T*
+/F1 11 Tf
+(   http://127.0.0.1:8000/mcp) Tj
+T*
+/F1 11 Tf
+(and an Authorization header sourced from a local secret variable.) Tj
+ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 9 0 R >> >> /Contents 8 0 R >>
+endobj
+8 0 obj
+<< /Length 1745 >>
+stream
+BT
+/F1 11 Tf
+48 792 Td
+15 TL
+/F1 18 Tf
+(OPERATIONAL NOTES) Tj
+T*
+/F1 11 Tf
+(- Router access uses strict SSH host-key verification.) Tj
+T*
+/F1 11 Tf
+(- Tickets, evidence, admission state, and event state use a persistent) Tj
+T*
+/F1 11 Tf
+(  Docker named volume and survive container restart.) Tj
+T*
+/F1 11 Tf
+(- Docker Compose restarts the service after host reboot.) Tj
+T*
+/F1 11 Tf
+(- NetBox and Neo4j use Docker service DNS when their backing services run.) Tj
+T*
+/F1 11 Tf
+(  A stopped backing service returns a structured MCP error.) Tj
+T*
+/F1 11 Tf
+(- External-source tools depend on their platform services being available.) Tj
+T*
+/F1 11 Tf
+() Tj
+T*
+/F1 13 Tf
+(SUPPORT CHECKLIST) Tj
+T*
+/F1 11 Tf
+(1. Confirm the SSH tunnel is running.) Tj
+T*
+/F1 11 Tf
+(2. Confirm the MCP client is sending the bearer token.) Tj
+T*
+/F1 11 Tf
+(3. Call list_lab_devices before a device-specific tool.) Tj
+T*
+/F1 11 Tf
+(4. For an object refusal, refresh the relevant device check and verify) Tj
+T*
+/F1 11 Tf
+(   that the requested object exists in current evidence.) Tj
+T*
+/F1 11 Tf
+(5. For NetBox or graph errors, verify the corresponding backing service) Tj
+T*
+/F1 11 Tf
+(   before changing MCP configuration.) Tj
+T*
+/F1 11 Tf
+() Tj
+T*
+/F1 13 Tf
+(CURRENT SERVICE CHARACTERISTICS) Tj
+T*
+/F1 11 Tf
+(- 37 MCP tools are exposed on the classic surface.) Tj
+T*
+/F1 11 Tf
+(- Device inspection tools are read-only and command allowlisted.) Tj
+T*
+/F1 11 Tf
+(- Raw command output is withheld or sanitized at the MCP boundary.) Tj
+T*
+/F1 11 Tf
+(- The service is reachable from a Mac through the SSH tunnel above.) Tj
+T*
+/F1 11 Tf
+() Tj
+T*
+/F1 11 Tf
+(This guide intentionally omits bearer tokens, router credentials,) Tj
+T*
+/F1 11 Tf
+(and internal secret values.) Tj
+ET
+endstream
+endobj
+9 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 10
+0000000000 65535 f 
+0000000026 00000 n 
+0000000075 00000 n 
+0000000144 00000 n 
+0000000270 00000 n 
+0000002131 00000 n 
+0000002257 00000 n 
+0000004322 00000 n 
+0000004448 00000 n 
+0000006245 00000 n 
+trailer
+<< /Size 10 /Root 1 0 R >>
+startxref
+6315
+%%EOF

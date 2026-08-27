@@ -88,8 +88,8 @@ _LINE_B = (
 # --------------------------------------------------------------------------- #
 
 
-def test_only_one_query_is_registered_today():
-    assert loki.known_loki_queries() == ("logs_for_device",)
+def test_only_declared_queries_are_registered():
+    assert loki.known_loki_queries() == ("logs_for_device", "logs_for_device_mnemonic")
 
 
 def test_unknown_query_name_is_refused_and_the_fetcher_is_never_called():
@@ -331,6 +331,38 @@ def test_selector_is_built_from_the_devices_resolved_mgmt_ip():
     assert int(params["end"]) - int(params["start"]) == 3600 * 1_000_000_000
 
 
+def test_declared_mnemonic_query_uses_a_closed_filter_across_the_requested_window():
+    calls: list = []
+    loki.run_named_query(
+        "logs_for_device_mnemonic",
+        device="PE1",
+        mnemonic="ROUTING-BGP-5-ADJCHANGE",
+        since_seconds=7 * 24 * 3600,
+        limit=1000,
+        fetcher=_canned_fetcher(_loki_ok([]), calls=calls),
+    )
+
+    [(_base_url, params)] = calls
+    assert params["query"] == f'{{source_ip="{_PE1_IP}"}} |= "%ROUTING-BGP-5-ADJCHANGE :"'
+    assert int(params["end"]) - int(params["start"]) == 7 * 24 * 3600 * 1_000_000_000
+
+
+def test_undeclared_mnemonic_filter_is_refused_before_loki_is_called():
+    calls: list = []
+    result = loki.run_named_query(
+        "logs_for_device_mnemonic",
+        device="PE1",
+        mnemonic='.*" | line_format "{{__line__}}',
+        since_seconds=60,
+        limit=10,
+        fetcher=_canned_fetcher(_loki_ok([]), calls=calls),
+    )
+
+    assert result["status"] == "error"
+    assert "declared mnemonic filter set" in result["errors"][0]
+    assert calls == []
+
+
 def test_envelope_matches_the_base_result_contract_on_success():
     response = _loki_ok([_stream(_PE1_LABELS, [("1787056163000000000", _LINE_A)])])
     result = loki.run_named_query(
@@ -370,6 +402,7 @@ def test_a_recognised_line_is_parsed_into_the_logging_template_shape():
     assert record["source_ip"] == _PE1_IP
     assert record["loki_severity_label"] == "err"
     assert record["ingest_timestamp_ns"] == "1787056163000000000"
+    assert record["raw_event"] == _LINE_A
 
 
 def test_an_unrecognised_line_is_kept_not_dropped_and_counted():
@@ -583,6 +616,14 @@ def test_the_free_text_canary_is_wrapped_in_the_projectors_delimiters():
     _assert_wrapped_exactly_once(payload, _CANARY)
 
 
+def test_raw_event_is_contained_before_loki_evidence_reaches_a_model():
+    envelope = _envelope_with_canary_line()
+    projected = model_egress.project_envelope(envelope)
+
+    [record] = projected["data"]["parsed"]["records"]
+    assert record["raw_event"].startswith(model_egress.DEVICE_TEXT_OPEN)
+
+
 def test_structured_fields_survive_the_projection_untouched():
     """Non-vacuous companion (§0.12): the canary test above must not be
     passing because the projector stripped everything."""
@@ -648,12 +689,9 @@ def test_every_return_path_sets_the_intent_context(make_envelope):
     assert isinstance(envelope["data"]["intent"], str) and envelope["data"]["intent"]
 
 
-def test_the_free_text_field_name_choice_adds_nothing_new_to_the_mcp_boundarys_flat_match_set():
-    """Documents and pins the reuse decision (module docstring, "Field-name
-    choice"): `text`/`code` were already members of
-    `boundary._FREE_TEXT_FIELD_NAMES` from the `logging` template's own
-    entries, so `logs_loki`'s entries change nothing about what the MCP
-    boundary matches anywhere else on the surface."""
+def test_the_free_text_field_name_choice_only_adds_reviewed_raw_event_provenance():
+    """`text`/`code` reuse existing boundary names; B-714's literal trigger
+    is the one intentional new untrusted name and must stay explicit."""
 
     names_without_loki = frozenset(
         field
@@ -662,7 +700,7 @@ def test_the_free_text_field_name_choice_adds_nothing_new_to_the_mcp_boundarys_f
     )
     names_with_loki = frozenset(field for _context, field in model_egress.FREE_TEXT_FIELDS)
 
-    assert names_with_loki == names_without_loki
+    assert names_with_loki - names_without_loki == {"raw_event"}
 
 
 def test_boundary_sanitize_also_wraps_the_same_field():

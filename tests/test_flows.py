@@ -27,10 +27,17 @@ def test_every_collect_step_names_a_real_intent_or_template():
 
     intents = set(all_intents())
     templates = set(PLATFORM_TEMPLATES[LAB_PLATFORM])
+    static_sources = {"ldp_intent"}
 
     for object_type, flow in flows.FLOWS.items():
         for rung in flow.descent:
             for step in rung.collect:
+                if step.is_static:
+                    assert step.name in static_sources, (
+                        f"{object_type}/{rung.name}: collect step {step.name!r} is "
+                        "not a known static evidence source"
+                    )
+                    continue
                 if step.is_template:
                     assert step.name in templates, (
                         f"{object_type}/{rung.name}: collect step {step.name!r} is "
@@ -58,6 +65,12 @@ def test_every_template_collect_step_names_a_real_parameter():
                     )
                     continue
                 template = PLATFORM_TEMPLATES[LAB_PLATFORM][step.name]
+                if not template.params:
+                    assert step.parameter is None, (
+                        f"{object_type}/{rung.name}: parameterless template "
+                        f"{step.name!r} must not declare a parameter"
+                    )
+                    continue
                 assert step.parameter in template.params, (
                     f"{object_type}/{rung.name}: {step.name!r} has no parameter "
                     f"{step.parameter!r}; it takes {sorted(template.params)}"
@@ -456,7 +469,7 @@ def test_ldp_session_reuses_interface_exists_for_subject_presence():
     )
 
 
-def test_the_ldp_session_top_rung_reads_ldp_ldp_discovery_and_interfaces():
+def test_the_ldp_session_top_rung_reads_operational_and_config_evidence():
     """The top rung's `collect` must name every section its check reads --
     the epoch coherence re-read (`epoch._collect_one_rung`) re-collects
     *exactly* this tuple, same reasoning as isis_adjacency's own top rung
@@ -465,8 +478,9 @@ def test_the_ldp_session_top_rung_reads_ldp_ldp_discovery_and_interfaces():
     rung = flows.flow_for("ldp_session").descent[0]
     assert rung.name == "ldp_session"
     names = {step.name for step in rung.collect}
-    assert names == {"ldp", "ldp_discovery", "interfaces"}
-    assert all(not step.is_template for step in rung.collect)
+    assert names == {"ldp", "ldp_discovery", "interfaces", "config_ldp", "ldp_intent"}
+    assert all(not step.is_template for step in rung.collect if step.name != "config_ldp")
+    assert next(step for step in rung.collect if step.name == "ldp_intent").is_static is True
 
 
 def test_all_ldp_session_findings_are_reachable_from_a_rung():

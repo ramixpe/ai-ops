@@ -1,4 +1,0 @@
-{
-  "skipped": true,
-  "reason": "NETTOOLS_LIVE_LAB is not set to a truthy value; skipping the live-lab condition by default, same convention as tests/test_live_lab.py. Run with NETTOOLS_LIVE_LAB=1 plus real DEVICE_USERNAME/DEVICE_PASSWORD to opt in."
-}

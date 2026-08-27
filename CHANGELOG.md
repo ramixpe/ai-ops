@@ -84,14 +84,14 @@ are **not** repository changes:
   structurally cannot catch this: enumerating every rung's evidence input
   across all four flows, none reads a log source, and the fault exists only
   as a *rate of rejected connection attempts*, never as state. This is the
-  false-clean class `ROADMAP.md` singles out as unmeasured, arriving on real
+  false-clean class the current SOTA plan singles out as unmeasured, arriving on real
   hardware, and it is the strongest justification yet for the log axis
   shipped in this same release.
 
 ## [1.1.0] — 2026-08-20
 
 Boundary repair. Closes the remaining findings from the independent
-engineering review of `v1.0.0` (`docs/ELITE-ENGINEERING-REVIEW-2026-08-20.md`),
+engineering review of `v1.0.0`,
 whose verdict was that the core is sound but *"several boundary layers do not
 preserve the guarantees claimed by the core."* Every fix below was verified by
 probe against the real system, not inferred from the change.
@@ -157,7 +157,8 @@ probe against the real system, not inferred from the change.
   OBS-645, including why one is not currently fixable.
 - Dependency upper bounds, a digest-pinned base image, and a constraints file
   (EER-013).
-- `docs/build/ROADMAP.md` — the ten-epic roadmap and standing non-goals.
+- Current planning and non-goals now live in `docs/build/SOTA-PLAN-2026-08-23.md`
+  and `docs/build/BACKLOG.md`.
 - `BACKLOG.md` is now machine-checkable: one authoritative status per item, a
   documented vocabulary, and a test that enforces both (EER-016).
 - Makefile targets work without a pre-activated venv (EER-020).

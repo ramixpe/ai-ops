@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# preflight.sh — everything §2 of OPERATOR-RUNBOOK.md asks for, before a lab window.
+# preflight.sh — repository and lab safety checks before a lab window.
 #
 # Exits non-zero on anything unexpected. Logs to a file so the run is evidence
 # rather than scrollback.

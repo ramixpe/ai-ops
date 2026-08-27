@@ -173,6 +173,149 @@ def test_call_list_lab_devices_through_a_real_session_returns_the_envelope():
     assert "PE1" in names and "RR1" in names
 
 
+def test_registration_refuses_an_unknown_device_before_calling_the_tool(monkeypatch):
+    """B-703's inventory layer applies before the classic tool body runs.
+
+    `get_lab_route` is a useful discriminator: without the registration gate,
+    this patched dependency would be reached; with it, the tool returns the
+    ordinary sanitized inventory refusal and the dependency stays untouched.
+    """
+
+    def must_not_run(device_name, prefix):
+        raise AssertionError("unknown device reached get_route")
+
+    monkeypatch.setattr(server, "get_route", must_not_run)
+
+    result = server.get_lab_route("NOT-A-LAB-DEVICE", "10.255.0.12")
+
+    assert result["status"] == "error"
+    assert "not in the inventory" in result["errors"][0]
+
+
+def test_registration_allows_a_known_device_to_reach_the_tool(monkeypatch):
+    """Positive control for B-703: the same wrapper passes known devices."""
+
+    expected = {
+        "tool": "get_route",
+        "device": "PE1",
+        "status": "success",
+        "data": {},
+        "errors": [],
+    }
+    monkeypatch.setattr(server, "get_route", lambda device_name, prefix: expected)
+
+    assert server.get_lab_route("PE1", "10.255.0.12") == expected
+
+
+def _object_evidence(
+    *, peer: str = "10.255.0.31", interface: str = "GigabitEthernet0/0/0/0"
+):
+    return {
+        "device": "PE1",
+        "bgp": {
+            "status": "success",
+            "data": {"parse_status": "ok", "parsed": {"records": [{"neighbor": peer}]}},
+        },
+        "interfaces": {
+            "status": "success",
+            "data": {"parse_status": "ok", "parsed": {"records": [{"interface": interface}]}},
+        },
+    }
+
+
+def test_registration_refuses_an_absent_bgp_peer_before_the_tool_runs(monkeypatch):
+    server._clear_object_evidence_cache()
+    monkeypatch.setenv(server.NETTOOLS_MCP_OBJECT_EVIDENCE_TTL_SECONDS_ENV, "10")
+    monkeypatch.setattr(server, "collect_evidence", lambda device_name: _object_evidence())
+    monkeypatch.setattr(
+        server, "get_bgp_neighbor", lambda *_args: (_ for _ in ()).throw(AssertionError("tool ran"))
+    )
+
+    result = server.get_lab_bgp_neighbor("PE1", "10.255.0.99")
+
+    assert result["status"] == "error"
+    assert "current evidence" in result["errors"][0]
+
+
+def test_object_request_contract_distinguishes_assertions_from_lookups():
+    assert server._object_request_contract(server.get_lab_bgp_neighbor) == "asserted"
+    assert server._object_request_contract(server.get_lab_interface) == "asserted"
+    assert server._object_request_contract(server.get_lab_route) == "lookup"
+    assert server._object_request_contract(server.get_lab_sr_policy_detail) == "lookup"
+
+
+def test_registration_allows_an_absent_route_lookup_to_reach_the_tool(monkeypatch):
+    expected = {"tool": "get_route", "device": "PE1", "status": "success", "data": {}, "errors": []}
+    monkeypatch.setattr(server, "get_route", lambda *_args: expected)
+
+    assert server.get_lab_route("PE1", "10.255.0.99") == expected
+
+
+def test_registration_accepts_existing_interface_and_reuses_evidence_within_ttl(monkeypatch):
+    server._clear_object_evidence_cache()
+    monkeypatch.setenv(server.NETTOOLS_MCP_OBJECT_EVIDENCE_TTL_SECONDS_ENV, "10")
+    calls: list[str] = []
+    monkeypatch.setattr(
+        server,
+        "collect_evidence",
+        lambda device_name: calls.append(device_name) or _object_evidence(),
+    )
+    expected = {"tool": "get_interface", "device": "PE1", "status": "success", "data": {}, "errors": []}
+    monkeypatch.setattr(server, "get_interface", lambda *_args: expected)
+
+    assert server.get_lab_interface("PE1", "Gi0/0/0/0") == expected
+    assert server.get_lab_interface("PE1", "GigabitEthernet0/0/0/0") == expected
+    assert calls == ["PE1"]
+
+
+def test_zero_object_evidence_ttl_collects_on_every_validation(monkeypatch):
+    server._clear_object_evidence_cache()
+    monkeypatch.setenv(server.NETTOOLS_MCP_OBJECT_EVIDENCE_TTL_SECONDS_ENV, "0")
+    calls: list[str] = []
+    monkeypatch.setattr(
+        server,
+        "collect_evidence",
+        lambda device_name: calls.append(device_name) or _object_evidence(),
+    )
+    expected = {"tool": "get_bgp_neighbor", "device": "PE1", "status": "success", "data": {}, "errors": []}
+    monkeypatch.setattr(server, "get_bgp_neighbor", lambda *_args: expected)
+
+    assert server.get_lab_bgp_neighbor("PE1", "10.255.0.31") == expected
+    assert server.get_lab_bgp_neighbor("PE1", "10.255.0.31") == expected
+    assert calls == ["PE1", "PE1"]
+
+
+def test_epoch_cache_validation_avoids_a_second_collection(monkeypatch):
+    from datetime import datetime, timezone
+
+    from agent_nettools.epoch import EvidenceEpoch, Observation
+    from agent_nettools.evidence_cache import EvidenceCache
+
+    server._clear_object_evidence_cache()
+    monkeypatch.setenv(server.NETTOOLS_MCP_OBJECT_EVIDENCE_TTL_SECONDS_ENV, "10")
+    monkeypatch.setattr(server, "collect_evidence", lambda *_args: (_ for _ in ()).throw(AssertionError("collected")))
+    cache = EvidenceCache()
+    cache.put_epoch(
+        EvidenceEpoch(
+            observations=(
+                Observation(
+                    "bgp",
+                    "PE1",
+                    0.0,
+                    1.0,
+                    _object_evidence()["bgp"],
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+        )
+    )
+    expected = {"tool": "get_bgp_neighbor", "device": "PE1", "status": "success", "data": {}, "errors": []}
+    monkeypatch.setattr(server, "get_bgp_neighbor", lambda *_args: expected)
+
+    with server.use_epoch_validation_cache(cache):
+        assert server.get_lab_bgp_neighbor("PE1", "10.255.0.31") == expected
+
+
 def test_call_assess_lab_device_health_through_a_real_session(monkeypatch):
     """Exercises a Phase 8 tool end to end. No credentials in the environment
     on purpose: collect_evidence()'s underlying commands will fail to reach a
@@ -191,7 +334,7 @@ def test_call_assess_lab_device_health_through_a_real_session(monkeypatch):
     payload = json.loads(_content_text(result))
     assert payload["device"] == "PE1"
     assert "severity" in payload
-    assert payload["severity"] in ("ok", "info", "warning", "critical")
+    assert payload["severity"] in ("ok", "info", "warning", "unreachable", "critical")
 
 
 # --------------------------------------------------------------------------- #
@@ -498,6 +641,79 @@ def test_importing_the_server_does_not_load_dotenv(monkeypatch, tmp_path):
     finally:
         monkeypatch.delenv(poison_var, raising=False)
         importlib.reload(server)  # restore a clean module for later tests
+
+
+def test_mcp_transport_defaults_to_stdio_without_http_settings(monkeypatch):
+    monkeypatch.delenv("NETTOOLS_MCP_TRANSPORT", raising=False)
+    monkeypatch.delenv("NETTOOLS_MCP_HOST", raising=False)
+    monkeypatch.delenv("NETTOOLS_MCP_PORT", raising=False)
+    monkeypatch.delenv("NETTOOLS_MCP_HTTP_BEARER_TOKEN", raising=False)
+
+    config = server.mcp_transport_config()
+
+    assert config.transport == "stdio"
+    assert config.host == "127.0.0.1"
+    assert config.port == 8000
+    assert config.bearer_token is None
+
+
+def test_mcp_http_transport_requires_a_bearer_token(monkeypatch):
+    monkeypatch.setenv("NETTOOLS_MCP_TRANSPORT", "streamable-http")
+    monkeypatch.delenv("NETTOOLS_MCP_HTTP_BEARER_TOKEN", raising=False)
+
+    with pytest.raises(ValueError, match="bearer token"):
+        server.mcp_transport_config()
+
+
+def test_mcp_http_transport_accepts_a_bearer_token_without_exposing_it(monkeypatch):
+    monkeypatch.setenv("NETTOOLS_MCP_TRANSPORT", "sse")
+    monkeypatch.setenv("NETTOOLS_MCP_HOST", "0.0.0.0")
+    monkeypatch.setenv("NETTOOLS_MCP_PORT", "8123")
+    monkeypatch.setenv("NETTOOLS_MCP_HTTP_BEARER_TOKEN", "test-secret")
+
+    config = server.mcp_transport_config()
+
+    assert config.transport == "sse"
+    assert config.host == "0.0.0.0"
+    assert config.port == 8123
+    assert "test-secret" not in repr(config)
+
+
+def test_main_keeps_stdio_as_the_default_transport(monkeypatch):
+    calls = []
+    monkeypatch.delenv("NETTOOLS_MCP_TRANSPORT", raising=False)
+    monkeypatch.setattr(server, "load_dotenv", lambda *args: False)
+    monkeypatch.setattr(server, "find_dotenv", lambda **kwargs: "")
+    monkeypatch.setattr(server, "protect_stdio", lambda: ())
+    monkeypatch.setattr(server.mcp, "run", lambda: calls.append("stdio"))
+
+    server.main()
+
+    assert calls == ["stdio"]
+
+
+def test_main_uses_authenticated_http_server_for_streamable_transport(monkeypatch):
+    calls = []
+    monkeypatch.setenv("NETTOOLS_MCP_TRANSPORT", "streamable-http")
+    monkeypatch.setenv("NETTOOLS_MCP_HOST", "0.0.0.0")
+    monkeypatch.setenv("NETTOOLS_MCP_PORT", "8123")
+    monkeypatch.setenv("NETTOOLS_MCP_HTTP_BEARER_TOKEN", "test-secret")
+    monkeypatch.setattr(server, "load_dotenv", lambda *args: False)
+    monkeypatch.setattr(server, "find_dotenv", lambda **kwargs: "")
+    monkeypatch.setattr(
+        "mcp_server.http_api.serve_authenticated_mcp",
+        lambda mcp, **kwargs: calls.append((mcp, kwargs)),
+    )
+    monkeypatch.setattr(server.mcp, "run", lambda: (_ for _ in ()).throw(AssertionError("stdio")))
+
+    server.main()
+
+    assert calls == [
+        (
+            server.mcp,
+            {"transport": "streamable-http", "host": "0.0.0.0", "port": 8123, "bearer_token": "test-secret"},
+        )
+    ]
 
 
 def test_the_investigate_tool_advertises_every_implemented_flow():

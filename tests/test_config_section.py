@@ -37,19 +37,22 @@ from agent_nettools.platforms import (
 # --------------------------------------------------------------------------- #
 
 
-def test_registry_has_both_config_parsers():
+def test_registry_has_all_config_parsers():
     assert tp.has_template_parser("cisco_xr", "config_isis")
     assert tp.has_template_parser("cisco_xr", "config_interface")
+    assert tp.has_template_parser("cisco_xr", "config_ldp")
 
 
 def test_record_keys_and_volatile_fields_are_registered():
     assert tp.template_record_key("cisco_xr", "config_isis") == "interface"
     # Meta-only shape: nothing to key a records table by.
     assert tp.template_record_key("cisco_xr", "config_interface") is None
+    assert tp.template_record_key("cisco_xr", "config_ldp") == "interface"
     # Configuration does not drift between two captures of an unchanged
     # device the way operational counters do.
     assert tp.template_volatile_fields("cisco_xr", "config_isis") == frozenset()
     assert tp.template_volatile_fields("cisco_xr", "config_interface") == frozenset()
+    assert tp.template_volatile_fields("cisco_xr", "config_ldp") == frozenset()
 
 
 def test_config_templates_are_declared_cisco_xr_only():
@@ -64,6 +67,28 @@ def test_config_templates_are_declared_cisco_xr_only():
     assert "config_isis" not in PLATFORM_TEMPLATES.get("juniper_junos", {})
     assert "config_interface" not in PLATFORM_TEMPLATES.get("cisco_iosxe", {})
     assert "config_interface" not in PLATFORM_TEMPLATES.get("juniper_junos", {})
+    assert "config_ldp" not in PLATFORM_TEMPLATES.get("cisco_iosxe", {})
+    assert "config_ldp" not in PLATFORM_TEMPLATES.get("juniper_junos", {})
+
+
+def test_config_ldp_parses_only_configured_interfaces():
+    raw = (
+        "mpls ldp\n"
+        " address-family ipv4\n"
+        "  interface GigabitEthernet0/0/0/0\n"
+        "  interface GigabitEthernet0/0/0/1\n"
+        " !\n"
+        "!\n"
+    )
+
+    parsed, status = tp.parse_template_output("cisco_xr", "config_ldp", raw)
+
+    assert status is tp.PARSE_OK
+    assert parsed["records"] == [
+        {"interface": "GigabitEthernet0/0/0/0"},
+        {"interface": "GigabitEthernet0/0/0/1"},
+    ]
+    assert parsed["meta"]["unaccounted_lines"] == []
 
 
 # --------------------------------------------------------------------------- #
@@ -482,15 +507,21 @@ def test_config_isis_takes_no_parameters_at_all():
 
 
 @pytest.mark.parametrize("platform", known_platforms())
-def test_every_config_template_format_string_contains_running_config_router_or_interface(platform):
+def test_every_config_template_format_string_contains_a_bounded_config_section(platform):
     """Belt-and-braces alongside the two exact-match refusal tests above:
     every `config_*` template name, on every platform that ever declares
-    one, must be scoped to a named section -- `router <protocol>` or
-    `interface <name>` -- not just "not exactly the bare string"."""
+    one, must be scoped to a named section -- `router <protocol>`,
+    `interface <name>`, or `mpls ldp` -- not just "not exactly the bare
+    string"."""
 
     for name, template in PLATFORM_TEMPLATES.get(platform, {}).items():
         if not name.startswith("config_"):
             continue
-        assert " router " in f" {template.format_string} " or " interface " in f" {template.format_string} ", (
+        scoped = f" {template.format_string} "
+        assert (
+            " router " in scoped
+            or " interface " in scoped
+            or " mpls ldp" in scoped
+        ), (
             f"{platform}.{name}: {template.format_string!r} is not scoped to a named section"
         )

@@ -229,7 +229,10 @@ ERROR_KINDS: tuple[tuple[str, str], ...] = (
     ("unknown intent", "the intent was not recognised; valid: facts, interfaces, bgp, lldp, isis, sr"),
     ("unknown kind", "the kind was not recognised; valid: route, bgp_neighbor, interface, logging (probe_lab: ping, traceroute)"),
     ("unknown mode", "the mode was not recognised; valid: latest_diff, golden_diff, flaps"),
-    ("unknown object type", "the flow was not recognised; implemented: bgp_session, interface"),
+    (
+        "unknown object type",
+        "the flow was not recognised; implemented: bgp_session, interface, isis_adjacency, ldp_session",
+    ),
     ("unknown check", "the check was not recognised; valid: facts, interfaces, bgp, lldp, isis, sr"),
     # --- logs_loki.py (Stage-2 M5): kept byte-identical to
     # `agent_nettools.model_egress.ERROR_KINDS`'s own copy of this block --

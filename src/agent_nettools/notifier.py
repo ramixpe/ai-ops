@@ -224,6 +224,25 @@ class NotifierError(Exception):
     point a caller in the investigation path should use.
     """
 
+    def __init__(self, message: str, *, retry_after_seconds: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+
+
+def _telegram_retry_after(exc: urllib.error.HTTPError) -> float | None:
+    """Extract Telegram's 429 retry hint without exposing response content."""
+
+    if exc.code != 429:
+        return None
+    try:
+        parsed = json.loads(exc.read().decode("utf-8", errors="replace"))
+        value = parsed.get("parameters", {}).get("retry_after")
+        if isinstance(value, (int, float)) and value >= 0:
+            return float(value)
+    except (AttributeError, OSError, TypeError, ValueError):
+        return None
+    return None
+
 
 def _redact(text: str) -> str:
     """Remove the bot token from anything that might be logged or raised.
@@ -369,7 +388,7 @@ class Notifier(ABC):
         trustworthy: bool | None = None,
         cause: dict | None = None,
         ticket_id: str | None = None,
-    ) -> None:
+    ) -> list[int] | None:
         """Deliver, or raise :class:`NotifierError`.
 
         Raising is correct here and is swallowed one level up, in
@@ -404,7 +423,7 @@ class NoOpNotifier(Notifier):
         trustworthy: bool | None = None,
         cause: dict | None = None,
         ticket_id: str | None = None,
-    ) -> None:
+    ) -> list[int] | None:
         return None
 
 
@@ -441,34 +460,31 @@ class TelegramNotifier(Notifier):
         raw = os.getenv(TELEGRAM_CHAT_ENV, "")
         return [part.strip() for part in raw.split(",") if part.strip()]
 
-    def send(
+    def send_text(
         self,
-        report: dict,
+        text: str,
         *,
-        subject: str,
-        device: str,
-        finding: str,
-        trustworthy: bool | None = None,
-        cause: dict | None = None,
-        ticket_id: str | None = None,
-    ) -> None:
+        reply_to_message_ids: Sequence[int] = (),
+        require_message_ids: bool = True,
+    ) -> list[int]:
+        """Send bounded, code-authored lifecycle text and return message IDs.
+
+        ``reply_to_message_ids`` follows the configured chat-id order, so an
+        event lifecycle can append progress beneath one root notification in
+        each configured Telegram chat without persisting a destination.
+        """
+
         token = os.getenv(TELEGRAM_TOKEN_ENV, "").strip()
         if not token:
             raise NotifierError(
                 f"{TELEGRAM_TOKEN_ENV} is not set; the telegram notifier cannot send"
             )
-
         chat_ids = self._chat_ids()
         if not chat_ids:
             raise NotifierError(
                 f"{TELEGRAM_CHAT_ENV} is empty; refusing to send to nobody rather "
                 "than guessing a destination"
             )
-
-        text = render_report_text(
-            report, device=device, subject=subject, finding=finding,
-            trustworthy=trustworthy, cause=cause, ticket_id=ticket_id,
-        )
         max_chars = _int_env(TELEGRAM_MAX_CHARS_ENV, DEFAULT_MAX_CHARS)
         if len(text) > max_chars:
             raise NotifierError(
@@ -480,12 +496,15 @@ class TelegramNotifier(Notifier):
         timeout = _float_env(TIMEOUT_ENV, DEFAULT_TIMEOUT_SECONDS)
         url = f"{self.api_base}/bot{token}/sendMessage"
         failures: list[str] = []
-
-        for chat_id in chat_ids:
-            payload = json.dumps({"chat_id": chat_id, "text": text}).encode("utf-8")
+        retry_delays: list[float] = []
+        message_ids: list[int] = []
+        for index, chat_id in enumerate(chat_ids):
+            payload: dict[str, Any] = {"chat_id": chat_id, "text": text}
+            if index < len(reply_to_message_ids):
+                payload["reply_to_message_id"] = reply_to_message_ids[index]
             request = urllib.request.Request(
                 url,
-                data=payload,
+                data=json.dumps(payload).encode("utf-8"),
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
@@ -494,13 +513,118 @@ class TelegramNotifier(Notifier):
                     status = getattr(response, "status", None)
                     if status is not None and not (200 <= int(status) < 300):
                         failures.append(f"chat {chat_id}: HTTP {status}")
+                        continue
+                    reader = getattr(response, "read", None)
+                    body = reader().decode("utf-8", errors="replace") if callable(reader) else ""
+                    parsed = json.loads(body) if body else {}
+                    message_id = parsed.get("result", {}).get("message_id") if isinstance(parsed, dict) else None
+                    if isinstance(message_id, int):
+                        message_ids.append(message_id)
+                    elif require_message_ids:
+                        failures.append(f"chat {chat_id}: response omitted message_id")
+            except urllib.error.HTTPError as exc:
+                retry_after = _telegram_retry_after(exc)
+                if retry_after is not None:
+                    retry_delays.append(retry_after)
+                failures.append(f"chat {chat_id}: HTTP {exc.code}")
             except (urllib.error.URLError, OSError, ValueError) as exc:
-                # _redact, because the token is in the URL and urllib puts the
-                # URL in the exception.
                 failures.append(f"chat {chat_id}: {_redact(str(exc))}")
-
         if failures:
-            raise NotifierError("; ".join(failures))
+            raise NotifierError(
+                "; ".join(failures),
+                retry_after_seconds=max(retry_delays) if retry_delays else None,
+            )
+        return message_ids
+
+    def edit_text(self, *, chat_id: str, message_id: int, text: str) -> int:
+        """Edit one allowlisted investigation card through ``editMessageText``.
+
+        This deliberately takes one destination/message pair rather than
+        reusing ``send_text``'s configured-chat fan-out: an incident card has a
+        distinct provider receipt per chat, and editing the wrong pair would
+        overwrite an unrelated incident surface.
+        """
+
+        token = os.getenv(TELEGRAM_TOKEN_ENV, "").strip()
+        if not token:
+            raise NotifierError(
+                f"{TELEGRAM_TOKEN_ENV} is not set; the telegram notifier cannot edit"
+            )
+        if chat_id not in self._chat_ids():
+            raise NotifierError("chat is not in the configured Telegram destination allowlist")
+        if not isinstance(message_id, int) or message_id <= 0:
+            raise NotifierError("Telegram message_id must be a positive integer")
+        max_chars = _int_env(TELEGRAM_MAX_CHARS_ENV, DEFAULT_MAX_CHARS)
+        if len(text) > max_chars:
+            raise NotifierError(
+                f"card renders to {len(text)} characters, over the {max_chars} limit"
+            )
+        request = urllib.request.Request(
+            f"{self.api_base}/bot{token}/editMessageText",
+            data=json.dumps({"chat_id": chat_id, "message_id": message_id, "text": text}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with self._opener(request, timeout=_float_env(TIMEOUT_ENV, DEFAULT_TIMEOUT_SECONDS)) as response:
+                status = getattr(response, "status", None)
+                if status is not None and not (200 <= int(status) < 300):
+                    raise NotifierError(f"chat {chat_id}: HTTP {status}")
+                reader = getattr(response, "read", None)
+                body = reader().decode("utf-8", errors="replace") if callable(reader) else ""
+                parsed = json.loads(body) if body else {}
+        except urllib.error.HTTPError as exc:
+            raise NotifierError(
+                f"chat {chat_id}: HTTP {exc.code}",
+                retry_after_seconds=_telegram_retry_after(exc),
+            ) from exc
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            raise NotifierError(f"chat {chat_id}: {_redact(str(exc))}") from exc
+        result = parsed.get("result") if isinstance(parsed, dict) else None
+        returned_id = result.get("message_id") if isinstance(result, dict) else None
+        if not isinstance(returned_id, int):
+            raise NotifierError(f"chat {chat_id}: edit response omitted message_id")
+        return returned_id
+
+    def send_text_to(self, *, chat_id: str, text: str) -> int:
+        """Send one initial live card to one configured destination."""
+
+        if chat_id not in self._chat_ids():
+            raise NotifierError("chat is not in the configured Telegram destination allowlist")
+        sent = TelegramNotifier(opener=self._opener, chat_ids=[chat_id]).send_text(text)
+        if len(sent) != 1:
+            raise NotifierError(f"chat {chat_id}: send response did not produce one message_id")
+        return sent[0]
+
+    def send_reply_text(self, *, chat_id: str, reply_to_message_id: int, text: str) -> int:
+        """Send one bounded activity reply beneath a persisted incident card."""
+
+        if chat_id not in self._chat_ids():
+            raise NotifierError("chat is not in the configured Telegram destination allowlist")
+        sent = TelegramNotifier(opener=self._opener, chat_ids=[chat_id]).send_text(
+            text,
+            reply_to_message_ids=(reply_to_message_id,),
+        )
+        if len(sent) != 1:
+            raise NotifierError(f"chat {chat_id}: reply response did not produce one message_id")
+        return sent[0]
+
+    def send(
+        self,
+        report: dict,
+        *,
+        subject: str,
+        device: str,
+        finding: str,
+        trustworthy: bool | None = None,
+        cause: dict | None = None,
+        ticket_id: str | None = None,
+    ) -> list[int] | None:
+        text = render_report_text(
+            report, device=device, subject=subject, finding=finding,
+            trustworthy=trustworthy, cause=cause, ticket_id=ticket_id,
+        )
+        return self.send_text(text, require_message_ids=False)
 
 
 _NOTIFIERS: dict[str, type[Notifier]] = {
@@ -576,7 +700,7 @@ def notify(
 
     record: dict[str, Any] = {
         "attempted": False, "provider": None, "ok": False, "error": None,
-        "silenced": False, "silence": None,
+        "silenced": False, "silence": None, "message_ids": [],
     }
     if silence is not None:
         record["silenced"] = True
@@ -601,10 +725,12 @@ def notify(
 
     record["attempted"] = True
     try:
-        target.send(
+        message_ids = target.send(
             report, subject=subject, device=device, finding=finding,
             trustworthy=trustworthy, cause=cause, ticket_id=ticket_id,
         )
+        if isinstance(message_ids, list) and all(isinstance(value, int) for value in message_ids):
+            record["message_ids"] = message_ids
         record["ok"] = True
     except Exception as exc:  # noqa: BLE001 -- delivery is never fatal
         record["error"] = _redact(f"{exc.__class__.__name__}: {exc}")

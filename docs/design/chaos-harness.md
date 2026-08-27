@@ -325,18 +325,15 @@ A single accuracy figure hides the thing worth knowing: **whether failures clust
 
 **Steps 3 and 7 verify by reading the device, never by the write's report.** A push that reported failure may have succeeded; a push that raised may still have applied. This rule was written after a restore reported failure three times while having succeeded on the first attempt.
 
-### 6.1d Every round's full payload is **committed**, not its finding
+### 6.1d Every scored round has a committed regression record
 
 Added 2026-08-17, after a semantic change could not be checked against round 4.
 
-> **A round's record is the complete `investigate` payload — every rung, its
-> device, its status, its reason, its evidence keys, the coherence block — not
-> the finding it produced.**
+> **A scored round is retained as a committed regression vector and a concise
+> entry in `EVALUATION-CORPUS.md` — not only as a finding transcript.**
 >
-> **End state:** `git ls-files evidence-archive/round-N/` lists the samples. Not
-> "the harness wrote them", not "they were copied" — *listed by git*. That is the
-> check, and it is the only one that distinguishes an archive from a directory
-> (OBS-131, §0.13's procedure face).
+> **End state:** the vector is executable under `tests/test_rounds_regression.py`
+> and the outcome is summarized in `EVALUATION-CORPUS.md`.
 
 Round 4's stored record is a rung-status vector and a finding. When
 `EACH_PATH_INTERFACE` changed what the interface rung is evaluated over (B-456),
@@ -350,30 +347,17 @@ are the payload. Any round archived as a conclusion is spent the first time the
 logic that produced it changes, which is exactly when its evidence is most
 wanted.
 
-**Rounds 1–5 have this gap.** Round 5's per-probe payloads were archived
-(`evidence-archive/round5/`) and are replayable; rounds 1–4 kept findings and
-metrics only. Their entries in `test_rounds_regression.py` therefore assert what
+**Rounds 1–5 have this gap.** Their retained entries in
+`test_rounds_regression.py` assert what
 the *finding logic* does with a given vector — which is still a true and useful
 assertion — and **not** that the vector is still producible. The two are
 different claims and the file now says so.
 
-Cheap to fix going forward: the payload is already JSON on stdout, and round 5's
-harness writes one file per probe. Nothing new is needed except doing it every
-time.
+Future rounds should add their scored vector to the regression suite and their
+concise outcome to `EVALUATION-CORPUS.md` before the result is treated as durable.
 
-**Archiving means *committed*, not *written to disk*.** Added 2026-08-17 after
-two round-7 run directories were deleted during a tidy-up, taking a 158-sample
-result with them.
-
-A payload in an untracked working directory is one `git clean` from gone, and
-the repository's own `.gitignore` carried a blanket `*.jsonl` that swept round
-samples into "scratch" — so the archive step *looked* done while producing
-nothing durable. It was noticed only because the same mistake was made twice: a
-copy into `evidence-archive/` committed the verdict files and silently dropped
-every `samples.jsonl` beside them.
-
-> **A round is archived when its payload is committed. Until then it is a
-> working file that happens to still exist.**
+> **A round is durable only when its regression vector and evaluated outcome
+> are committed. Until then it is a working result.**
 
 And the corollary, which is §6.1d's rule pointed the other way: **a count quoted
 in a transcript is not evidence once its payload is gone.** §6.1d was written

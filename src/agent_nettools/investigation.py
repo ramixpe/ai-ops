@@ -51,7 +51,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -69,6 +69,7 @@ from .epoch import (
 from .grounding import GroundingResult, ground_correlation, ground_report
 from .log_window import ShapedWindow, coverage_from_logging, shape_window
 from .metrics import record_paraphrase
+from .narrowing_pass import NarrowingMode, shadow_decision, shadow_payload
 from .network_tools import collect_evidence, run_template
 from .prompt_library import (
     CURRENT_VERSION,
@@ -311,6 +312,10 @@ class InvestigationResult:
     #: dict) does not carry.
     observations: tuple[Observation, ...] | None = None
 
+    #: A non-authoritative B-114 shadow decision. It is derived from the
+    #: existing epoch and cannot dispatch a collection or alter this descent.
+    narrowing_shadow: dict | None = None
+
     #: Non-semantic fixes applied to a model response, e.g. a stripped fence.
     repairs: tuple[str, ...] = field(default_factory=tuple)
     #: What the model calls cost, when the analyst reports it (B-425). `None`
@@ -378,6 +383,7 @@ class InvestigationResult:
             "reason": descent.reason,
             "origin_unresolved": self.origin_unresolved,
             "operator_notes": list(self.operator_notes),
+            "narrowing_shadow": self.narrowing_shadow,
             # Suppressed for the findings that name no cause -- see
             # `_FINDINGS_WITHOUT_A_CAUSE`. The rungs are still all present under
             # "rungs", so a broken-but-off-path rung is reported, just not as an
@@ -698,6 +704,8 @@ def investigate(
     window: Callable[[str], ShapedWindow] | None = None,
     sender=None,
     skew_bound_seconds: float = DEFAULT_SKEW_BOUND_SECONDS,
+    narrowing_mode: NarrowingMode = NarrowingMode.OFF,
+    narrowing_raw_decision: Mapping[str, Any] | None = None,
 ) -> InvestigationResult:
     """Run one investigation end to end.
 
@@ -805,6 +813,17 @@ def investigate(
         origin_prefix=origin,
     )
 
+    narrowing_shadow = None
+    if narrowing_mode is NarrowingMode.SHADOW and epoch is not None:
+        narrowing_shadow = shadow_payload(
+            shadow_decision(
+                descent,
+                evidence_for=epoch.for_device,
+                raw_decision=narrowing_raw_decision,
+                mode=narrowing_mode,
+            )
+        )
+
     # -- Operator notes for every device the walk touched (B-210). -----------
     touched = {device} | {o.device for o in descent.outcomes}
     # CollectStep.name is an intent OR a template name -- both are valid
@@ -846,7 +865,7 @@ def investigate(
             correlation=correlation, correlation_status=correlation_status,
             coverage=coverage, origin_unresolved=origin_unresolved,
             operator_notes=operator_notes, session_summary=session_summary,
-            observations=observations,
+            observations=observations, narrowing_shadow=narrowing_shadow,
         )
 
     # -- The paraphrase. A model, and nothing downstream may prefer it. ------
@@ -941,6 +960,7 @@ def investigate(
         correlation_grounding=correlation_grounding, coverage=coverage,
         origin_unresolved=origin_unresolved, operator_notes=operator_notes,
         session_summary=session_summary, observations=observations,
+        narrowing_shadow=narrowing_shadow,
         paraphrase=paraphrase, paraphrase_status=paraphrase_status,
         paraphrase_grounding=paraphrase_grounding,
         correlation_paraphrase=correlation_paraphrase,

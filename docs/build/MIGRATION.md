@@ -41,7 +41,7 @@ a broken tool.
 `AutoAddPolicy` and will keep working perfectly against the same devices. You
 will see the injector succeed while the tool fails, and conclude the tool is
 broken. It is not — it is the only one of the two that is checking. This is
-recorded in `ROUND-6.md`'s preflight for exactly this reason.
+recorded in the retained evaluation corpus for exactly this reason.
 
 ```bash
 python3 scripts/enroll_host_keys.py

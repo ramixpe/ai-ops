@@ -368,6 +368,10 @@ PLATFORM_TEMPLATES: dict[str, dict[str, Template]] = {
             format_string="show running-config interface {interface}",
             params={"interface": InterfaceNameParam()},
         ),
+        "config_ldp": Template(
+            name="config_ldp",
+            format_string="show running-config mpls ldp",
+        ),
         # B-515: the SR-TE policy detail a model needs to name WHICH SID or
         # segment list is involved in a down policy, not just that no
         # candidate path resolves (MCP §14b) -- `check_lab_sr_policies`
