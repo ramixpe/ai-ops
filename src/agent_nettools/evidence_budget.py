@@ -74,6 +74,34 @@ _MARKER_RESERVE = 48
 _MIN_KEEP = 20
 
 
+def _budget_disclosure(omitted_chars: int) -> str:
+    """Render the model-visible omission margin for one evidence section."""
+
+    return json.dumps({"budget_truncated_chars": omitted_chars}, separators=(",", ":"))
+
+
+def _truncate_with_disclosure(text: str, budget: int) -> tuple[str, int]:
+    """Bound ``text`` while retaining its structured omission disclosure."""
+
+    if budget <= 0 or len(text) <= budget:
+        return text, 0
+
+    full_omission = _budget_disclosure(len(text))
+    minimum_marker = "[TRUNCATED: 0 characters omitted]"
+    if budget < len(full_omission) + len(minimum_marker) + _MIN_KEEP + 2:
+        return full_omission, len(text)
+
+    omitted = 0
+    for _ in range(8):
+        disclosure = _budget_disclosure(omitted)
+        content_budget = max(0, budget - len(disclosure) - 1)
+        truncated, next_omitted = _truncate_middle(text, content_budget)
+        if next_omitted == omitted:
+            return f"{truncated}\n{disclosure}", omitted
+        omitted = next_omitted
+    return f"{truncated}\n{_budget_disclosure(omitted)}", omitted
+
+
 def _env_int(name: str, default: int) -> int:
     raw = os.getenv(name)
     if not raw:
@@ -185,7 +213,7 @@ def budget_device_evidence(
         if not isinstance(section, dict):
             continue  # "device", "platform", "timestamp" are plain strings.
         text = _section_text(section)
-        truncated_text, omitted = _truncate_middle(text, per_intent_chars)
+        truncated_text, omitted = _truncate_with_disclosure(text, per_intent_chars)
         sections[intent] = truncated_text
         if omitted:
             report.append({"device": device_name, "intent": intent, "omitted_chars": omitted})
@@ -231,7 +259,7 @@ def budget_fabric_evidence(
                 section_budget = max(_MIN_KEEP, int(len(text) * scale))
                 if len(text) <= section_budget:
                     continue
-                truncated_text, omitted = _truncate_middle(text, section_budget)
+                truncated_text, omitted = _truncate_with_disclosure(text, section_budget)
                 sections[intent] = truncated_text
                 if omitted:
                     report.append({"device": device_name, "intent": intent, "omitted_chars": omitted})

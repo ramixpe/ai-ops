@@ -337,6 +337,30 @@ def test_rr1_to_pe1_yields_the_full_established_session():
         "VPNv6 Unicast",
         "L2VPN EVPN",
     ]
+    meta_supplemental = parsed["meta"]["supplemental"]
+    assert meta_supplemental["bfd"] == {
+        "enabled": True,
+        "session_state": "down",
+        "remote_configured": False,
+    }
+    assert meta_supplemental["configured_timers"] == {
+        "hold_time": 180,
+        "keepalive": 60,
+        "minimum_acceptable_hold_time": 3,
+    }
+    assert meta_supplemental["connections"] == {"established": 2, "dropped": 1}
+    vpnv4 = next(record for record in parsed["records"] if record["address_family"] == "VPNv4 Unicast")
+    assert vpnv4["supplemental"] == {
+        "prefixes_denied": {"exact": 0, "cumulative": 0},
+        "advertisements": {"advertised": 13, "suppressed": 0, "withdrawn": 4},
+        "slow_peer": {
+            "state": "Detection-only",
+            "detected_state": "FALSE",
+            "detection_threshold": 300,
+            "detection_count": 0,
+            "recovery_count": 0,
+        },
+    }
 
 
 def test_a_p_router_with_no_bgp_process_is_found_false_but_parse_ok():
@@ -729,6 +753,19 @@ def test_a_physical_interface_yields_the_full_counter_block():
     counters = {r["counter"] for r in parsed["records"]}
     assert "input_errors" in counters
     assert "carrier_transitions" in counters
+    assert meta["supplemental"] == {
+        "link_quality": {
+            "reliability": {"numerator": 255, "denominator": 255},
+            "txload": {"numerator": 0, "denominator": 255},
+            "rxload": {"numerator": 0, "denominator": 255},
+        },
+        "link": {"duplex": "full", "speed": "1000Mb/s", "media": "unknown", "link_type": "force-up"},
+        "activity": {"last_input": "00:00:00", "last_output": "00:00:00"},
+        "five_minute_rates": {
+            "input": {"minutes": 5, "bits_per_second": 0, "packets_per_second": 0},
+            "output": {"minutes": 5, "bits_per_second": 0, "packets_per_second": 0},
+        },
+    }
 
 
 def test_pe1_gi0_0_0_2_300_is_the_only_line_down_interface_fixture():

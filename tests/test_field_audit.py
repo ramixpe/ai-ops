@@ -60,10 +60,12 @@ CONFIG_TEMPLATES_AUDITED_ELSEWHERE = frozenset({"config_ldp"})
 #: in the commit.
 EXPECTED = {
     # 23 -> 25 at B-432: socket_armed_read/write promoted from IgnoreRule to
-    # parsed. 7 -> 9 read: those two, plus state_reason, minus none.
-    "bgp_neighbor": (25, 9),
+    # parsed. 25 -> 26 when the typed supplemental session/per-AF evidence
+    # replaced BGP neighbor deferred lines. 7 -> 9 read: those two, plus
+    # state_reason, minus none.
+    "bgp_neighbor": (26, 9),
     "route": (8, 2),
-    "interface": (14, 5),
+    "interface": (15, 5),
 }
 
 #: Unread fields whose entire purpose is to explain *why* something is in the
@@ -97,7 +99,7 @@ def _parsed_fields(template: str) -> set[str]:
     fields = set(parsed.get("meta") or {})
     for record in parsed.get("records") or []:
         fields |= set(record)
-    return fields - {"unaccounted_lines", "unparsed_rows"}
+    return fields - {"unaccounted_lines", "unparsed_rows", "evidence_accounting"}
 
 
 def _fields_read_by_any_check() -> str:
@@ -215,7 +217,7 @@ def test_every_diagnostic_template_is_covered_by_the_audit():
 #: which SID/segment list a down policy is missing) -- reviewed, not a
 #: default; see `SR_POLICY_DETAIL_IGNORES` in template_parsers.py for each
 #: one's own comment.
-EXPECTED_DEFERRED = 27
+EXPECTED_DEFERRED = 12
 
 
 def _ignore_rules():
@@ -267,9 +269,8 @@ def test_the_deferred_set_is_the_reviewed_one():
 def test_the_deferred_ones_are_the_diagnostic_ones():
     """Spot-checks, so the classification is not just a label.
 
-    Each of these carries a signal a check could plausibly want, and each is
-    currently unread: a duplex mismatch, a slow peer, a policy denying every
-    prefix, a session flapping, an interface up but carrying nothing.
+    Each of these carries a signal a check could plausibly want and remains
+    unread after BGP neighbor and interface supplemental evidence was promoted.
     """
 
     from agent_nettools.template_parsers import IgnoreKind
@@ -278,8 +279,7 @@ def test_the_deferred_ones_are_the_diagnostic_ones():
         r.pattern for _, r in _ignore_rules() if r.kind is IgnoreKind.NOT_NEEDED_YET
     )
 
-    for signal in ("Full-duplex", "Slow Peer State", "prefixes denied",
-                   "Connections established", "reliability", "minute input rate"):
+    for signal in ("Requested BSID", "Maximum SID Depth", "Standby Candidate Paths", "Local label"):
         assert signal in deferred, f"{signal!r} should be classified as deferred"
 
 

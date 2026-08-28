@@ -393,6 +393,10 @@ PIN_TABLE: Mapping[str, tuple[ParamSpec, ...]] = {
 #: literally. There is no safe static schema for this tool, so it is
 #: refused whole rather than partially, silently offered.
 STRUCTURALLY_EXCLUDED_TOOLS: Mapping[str, str] = {
+    "expand_lab_evidence": (
+        "expand_lab_evidence requires an opaque, short-lived investigation context "
+        "created by a prior human-guided call. It has no stable event-model binding."
+    ),
     "lookup_lab": (
         "lookup_lab's `value` parameter has no single legitimate binding: "
         "for kind in {route, bgp_neighbor, interface} it must be a network "

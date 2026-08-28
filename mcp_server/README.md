@@ -595,8 +595,9 @@ can reach one. `tests/test_mcp_server.py` asserts that.
 - **`classic`** (default) — the full per-function tool set listed above,
   byte-identical in behaviour to before the flag existed. This is the
   **expert** profile for manual, granular inspection.
-- **`staged`** — five stage-shaped tools plus a probe (`explore_lab`,
-  `check_lab`, `lookup_lab`, `investigate_lab`, `history_lab`, `probe_lab`),
+- **`staged`** — six stage-shaped tools plus a probe (`explore_lab`,
+  `check_lab`, `lookup_lab`, `investigate_lab`, `expand_lab_evidence`,
+  `history_lab`, `probe_lab`),
   each a thin composition of the same already-safe functions through the same
   sanitisation boundary, with the active probe still separately annotated.
   This is the **guided** profile for model-assisted troubleshooting.
@@ -604,6 +605,9 @@ can reach one. `tests/test_mcp_server.py` asserts that.
   `interface`, `isis_adjacency`, and `ldp_session`. Event routing currently
   produces only BGP and interface flows; IS-IS and LDP are available through
   explicit guided MCP calls until measured event mappings exist.
+  When present, `investigate_lab`'s `evidence_expansion.expansion_id` permits
+  bounded expansion of one already-disclosed log key for five minutes. The
+  opaque context is server-memory only and cannot recollect device output.
 
 Both exist because the historical tool-selection A/B needs both surfaces
 measurable; the staged manifest is

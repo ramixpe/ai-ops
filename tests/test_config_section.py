@@ -217,6 +217,46 @@ def test_the_healthy_rr1_pair_shows_no_asymmetry():
         assert parsed["meta"]["ipv4_address"] is not None, f"{name}: expected an IPv4 address"
 
 
+def test_config_isis_captures_global_and_interface_supplemental_settings():
+    raw = _load_fixture("cisco_xr", "RR1", "healthy", "show-running-config-router-isis.txt")
+    parsed, status = tp.parse_template_output("cisco_xr", "config_isis", raw)
+
+    assert status is tp.PARSE_OK
+    assert parsed["meta"]["supplemental"] == {
+        "log_adjacency_changes": True,
+        "lsp_gen_interval_maximum_wait": 1000,
+        "address_families": [
+            {
+                "family": "ipv4",
+                "metric_style": {"style": "wide", "level": 2},
+                "traffic_eng_level_2_only": True,
+                "segment_routing_mpls": True,
+            },
+            {
+                "family": "ipv6",
+                "metric_style": {"style": "wide", "level": 2},
+                "traffic_eng_level_2_only": False,
+                "segment_routing_mpls": False,
+            },
+        ],
+        "flex_algorithms": [{"algorithm": 128, "metric_type": "delay", "advertise_definition": True}],
+    }
+    records = {record["interface"]: record for record in parsed["records"]}
+    assert records["Loopback0"]["supplemental"]["prefix_sid"] == {
+        "index": 31,
+        "algorithms": [{"algorithm": 128, "index": 128031}],
+    }
+    assert records["GigabitEthernet0/0/0/0"]["supplemental"] == {
+        "bfd": {"minimum_interval": 100, "multiplier": 3},
+        "hello_padding_disabled": True,
+        "address_families": {
+            "ipv4": {"fast_reroute_per_prefix": True, "ti_lfa": True},
+            "ipv6": {"fast_reroute_per_prefix": True, "ti_lfa": True},
+        },
+        "prefix_sid": {"index": None, "algorithms": []},
+    }
+
+
 # --------------------------------------------------------------------------- #
 # A synthetic case the live corpus cannot supply: `shutdown`.
 # Same pattern `test_garbage_input_raises_parse_error_and_reports_parse_failed`

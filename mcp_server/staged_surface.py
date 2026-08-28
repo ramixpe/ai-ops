@@ -1,4 +1,4 @@
-"""The staged MCP surface: five stage-shaped tools plus a probe. B-479.
+"""The staged MCP surface: six stage-shaped tools plus a probe. B-479.
 
 Why a second surface instead of a replacement
 -----------------------------------------------
@@ -35,8 +35,14 @@ the boundary rather than withheld (walkthrough stumble 8).
 
 from __future__ import annotations
 
+import secrets
+import threading
+import time
+from collections import OrderedDict
+from dataclasses import dataclass
 from typing import Any, Literal
 
+from agent_nettools.evidence_expand import disclose_log_window, expand_evidence
 from agent_nettools.health import evaluate_device, evaluate_fabric
 from agent_nettools.inventory_model import load_inventory_file
 from agent_nettools.mcp_profiles import GUIDED_CAPABILITIES, GUIDED_TOOL_NAMES, RegistrationClass
@@ -58,9 +64,54 @@ from agent_nettools.network_tools import (
     traceroute_device,
 )
 
-__all__ = ["STAGED_TOOL_NAMES", "apply"]
+__all__ = ["STAGED_TOOL_NAMES", "apply", "expand_lab_evidence"]
 
 STAGED_TOOL_NAMES = GUIDED_TOOL_NAMES
+_EXPANSION_TTL_SECONDS = 300.0
+_EXPANSION_CACHE_LIMIT = 32
+
+
+@dataclass(frozen=True)
+class _ExpansionContext:
+    descent: Any
+    disclosed: Any
+    raw_log_text: str
+    expires_at: float
+
+
+_expansion_contexts: OrderedDict[str, _ExpansionContext] = OrderedDict()
+_expansion_lock = threading.Lock()
+
+
+def _store_expansion_context(result: Any) -> str | None:
+    if result.log_window is None or result.raw_log_text is None:
+        return None
+    context_id = secrets.token_urlsafe(24)
+    cause_device = result.descent.cause.device if result.descent.cause else result.device
+    context = _ExpansionContext(
+        descent=result.descent,
+        disclosed=disclose_log_window(cause_device, result.log_window),
+        raw_log_text=result.raw_log_text,
+        expires_at=time.monotonic() + _EXPANSION_TTL_SECONDS,
+    )
+    with _expansion_lock:
+        now = time.monotonic()
+        for key, entry in list(_expansion_contexts.items()):
+            if entry.expires_at <= now:
+                del _expansion_contexts[key]
+        _expansion_contexts[context_id] = context
+        while len(_expansion_contexts) > _EXPANSION_CACHE_LIMIT:
+            _expansion_contexts.popitem(last=False)
+    return context_id
+
+
+def _expansion_context(context_id: str) -> _ExpansionContext | None:
+    with _expansion_lock:
+        context = _expansion_contexts.get(context_id)
+        if context is None or context.expires_at <= time.monotonic():
+            _expansion_contexts.pop(context_id, None)
+            return None
+        return context
 
 _LOOKUPS = {
     "route": get_route,
@@ -78,7 +129,7 @@ def _device_record(name: str):
 
 
 # --------------------------------------------------------------------------- #
-# The six tools, as plain functions. `apply()` registers them.
+# The seven tools, as plain functions. `apply()` registers them.
 # --------------------------------------------------------------------------- #
 
 
@@ -173,7 +224,44 @@ def investigate_lab(
 
     from agent_nettools.investigation import investigate
 
-    return investigate(device_name, subject, flow=flow).to_payload()
+    result = investigate(device_name, subject, flow=flow)
+    payload = result.to_payload()
+    expansion_id = _store_expansion_context(result)
+    payload["evidence_expansion"] = (
+        {"expansion_id": expansion_id, "expires_in_seconds": int(_EXPANSION_TTL_SECONDS)}
+        if expansion_id is not None
+        else None
+    )
+    return payload
+
+
+def expand_lab_evidence(expansion_id: str, evidence_key: str) -> dict:
+    """Expand one already-disclosed log key from a recent investigation only."""
+
+    context = _expansion_context(expansion_id)
+    if context is None:
+        return {
+            "tool": "expand_lab_evidence",
+            "device": None,
+            "status": "error",
+            "data": {},
+            "errors": ["unknown or expired evidence expansion context"],
+        }
+    try:
+        return expand_evidence(
+            evidence_key,
+            result=context.descent,
+            disclosed=context.disclosed,
+            raw_log_text=context.raw_log_text,
+        )
+    except ValueError as exc:
+        return {
+            "tool": "expand_lab_evidence",
+            "device": None,
+            "status": "error",
+            "data": {},
+            "errors": [str(exc)],
+        }
 
 
 def history_lab(device_name: str, mode: Literal["latest_diff", "golden_diff", "flaps"] = "latest_diff") -> dict:
@@ -252,6 +340,7 @@ def apply(server_module: Any) -> None:
         "check_lab": check_lab,
         "lookup_lab": lookup_lab,
         "investigate_lab": investigate_lab,
+        "expand_lab_evidence": expand_lab_evidence,
         "history_lab": history_lab,
         "probe_lab": probe_lab,
     }

@@ -1972,7 +1972,7 @@ def protect_stdio() -> list[str]:
 # --------------------------------------------------------------------------- #
 # Surface selection (B-479). `classic` (default) is everything registered
 # above, byte-identical in behaviour to before this flag existed. `staged`
-# replaces it with five stage-shaped tools plus a probe -- see
+# replaces it with six stage-shaped tools plus a probe -- see
 # `staged_surface.py` for why both exist (the §9/§10 A/B must stay
 # measurable) and why apply() fails loudly rather than half-applying.
 # --------------------------------------------------------------------------- #
@@ -1997,7 +1997,7 @@ def _select_surface() -> None:
 
     EER-008b (2026-08-20): an unrecognized value (e.g. `stage`, a typo for
     `staged`) used to fall back to `classic` -- the WIDER of the two surfaces
-    (the full per-function tool set vs. `staged`'s five stage-shaped tools
+    (the full per-function tool set vs. `staged`'s six stage-shaped tools
     plus a probe) -- with only a `logging.warning`. That is fail-OPEN: a
     misspelled env var silently handed an MCP client a larger tool manifest
     than either the unset default or the value someone actually typed would

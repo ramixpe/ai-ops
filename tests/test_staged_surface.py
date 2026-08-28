@@ -6,6 +6,11 @@ import importlib
 import os
 
 import pytest
+from helpers import set_device_environment
+
+from agent_nettools.evidence_expand import build_log_evidence_key
+from agent_nettools.fixtures import fixture_sender
+from agent_nettools.investigation import investigate
 
 
 @pytest.fixture()
@@ -71,10 +76,50 @@ def test_a_genuinely_unset_surface_still_defaults_to_classic(monkeypatch):
     assert "investigate_lab_session" in _tool_names(server)
 
 
-def test_staged_registers_exactly_the_six(staged_server):
+def test_staged_registers_the_declared_guided_tools(staged_server):
     from mcp_server.staged_surface import STAGED_TOOL_NAMES
 
     assert _tool_names(staged_server) == set(STAGED_TOOL_NAMES)
+
+
+def test_expansion_context_expands_only_same_run_disclosed_evidence(monkeypatch):
+    import mcp_server.staged_surface as staged
+
+    set_device_environment(monkeypatch)
+    staged._expansion_contexts.clear()
+    result = investigate(
+        "RR1", "10.255.0.12", flow="bgp_session",
+        resolver=lambda subject: {"10.255.0.12": "PE2"}[subject],
+        sender=fixture_sender(label="broken"),
+    )
+    context_id = staged._store_expansion_context(result)
+    assert context_id is not None
+    context = staged._expansion_context(context_id)
+    assert context is not None
+    aggregate = context.disclosed.aggregates[0]
+
+    expanded = staged.expand_lab_evidence(
+        context_id, build_log_evidence_key(context.disclosed.device, aggregate.mnemonic)
+    )
+
+    assert expanded["status"] == "ok"
+    assert "raw_log_text" not in result.to_payload()
+
+
+def test_expansion_context_expiry_refuses_without_recollection(monkeypatch):
+    import mcp_server.staged_surface as staged
+
+    staged._expansion_contexts.clear()
+    monkeypatch.setattr(staged.time, "monotonic", lambda: 1000.0)
+    result = type("Result", (), {"log_window": object(), "raw_log_text": "raw", "device": "PE1"})()
+    result.descent = type("Descent", (), {"cause": None})()
+    monkeypatch.setattr(staged, "disclose_log_window", lambda *_: object())
+    context_id = staged._store_expansion_context(result)
+    monkeypatch.setattr(staged.time, "monotonic", lambda: 2000.0)
+
+    assert staged.expand_lab_evidence(context_id, "logs:PE1:TEST")["errors"] == [
+        "unknown or expired evidence expansion context"
+    ]
 
 
 def test_offline_event_manifest_matches_the_live_staged_surface(staged_server):

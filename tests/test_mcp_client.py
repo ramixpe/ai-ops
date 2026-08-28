@@ -304,7 +304,7 @@ def test_env_overrides_reach_the_spawned_servers_surface_selection():
 
     assert staged_names == {
         "explore_lab", "check_lab", "lookup_lab",
-        "investigate_lab", "history_lab", "probe_lab",
+        "investigate_lab", "expand_lab_evidence", "history_lab", "probe_lab",
     }
     assert "list_lab_devices" in classic_names
     assert "explore_lab" not in classic_names

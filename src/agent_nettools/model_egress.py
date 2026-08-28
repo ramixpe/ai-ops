@@ -204,6 +204,7 @@ FREE_TEXT_FIELDS: frozenset[tuple[str, str]] = frozenset(
         # than borrowing an unrelated field name just to add zero new
         # entries.
         ("sr_policy_detail", "last_error"),
+        ("sr", "last_error"),
     }
 )
 

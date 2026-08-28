@@ -105,7 +105,6 @@ class ParseError(ValueError):
 # everything imported here is defined in template_parsers.py *before* that
 # module reaches back into this one -- see the module docstring.
 from .template_parsers import (  # noqa: E402 - see the ordering note in the module docstring
-    IgnoreKind,
     IgnoreRule,
     finalize,
 )
@@ -346,6 +345,7 @@ _XR_BGP_META = re.compile(
 # speak IS-IS) answers with this message instead of the usual summary block. That
 # is a real, legitimate device state -- not a parse failure.
 _XR_BGP_INACTIVE = re.compile(r"^% BGP instance '(?P<instance>[^']*)' not active")
+_XR_BGP_TABLE_STATE = re.compile(r"^BGP table state: (?P<table_state>\S+)$")
 
 # Section 0.10 accounting for ``show bgp summary``. Everything here is process-
 # or table-level bookkeeping the 10-column neighbour table and the router-id
@@ -359,12 +359,6 @@ BGP_IGNORES: tuple[IgnoreRule, ...] = (
         "configured scan-interval setting, not required by the schema",
     ),
     IgnoreRule(r"^Non-stop routing is enabled$", "NSR flag, not required by the schema"),
-    IgnoreRule(
-        r"^BGP table state: \S+$",
-        "table-level state flag; only 'Active' has been observed in this lab, but a "
-        "non-Active value would be a real process-health signal nothing currently reads",
-        kind=IgnoreKind.NOT_NEEDED_YET,
-    ),
     IgnoreRule(
         r"^Table ID: \S+\s+RD version: \d+$",
         "internal table identifier and RD-version counter, not required by the schema",
@@ -447,7 +441,11 @@ def parse_xr_bgp(outputs: dict[str, str]) -> dict[str, Any]:
             meta["router_id"] = match["router_id"]
             meta["local_as"] = match["local_as"]
             consumed.append(stripped)
-            break
+            continue
+        if match := _XR_BGP_TABLE_STATE.match(stripped):
+            meta["table_state"] = match["table_state"]
+            consumed.append(stripped)
+            continue
         if match := _XR_BGP_INACTIVE.match(stripped):
             meta["active"] = False
             meta["instance"] = match["instance"]
@@ -526,12 +524,6 @@ BGP_VPNV4_IGNORES: tuple[IgnoreRule, ...] = (
     ),
     IgnoreRule(r"^Non-stop routing is enabled$", "NSR flag, not required by the schema"),
     IgnoreRule(
-        r"^BGP table state: \S+$",
-        "table-level state flag; only 'Active' has been observed in this lab, but a "
-        "non-Active value would be a real process-health signal nothing currently reads",
-        kind=IgnoreKind.NOT_NEEDED_YET,
-    ),
-    IgnoreRule(
         r"^Table ID: \S+$",
         "internal table identifier, not required by the schema; the VPNv4 AF's summary "
         "carries no RD-version counter the way the default AF's does",
@@ -605,7 +597,11 @@ def parse_xr_bgp_vpnv4(outputs: dict[str, str]) -> dict[str, Any]:
             meta["router_id"] = match["router_id"]
             meta["local_as"] = match["local_as"]
             consumed.append(stripped)
-            break
+            continue
+        if match := _XR_BGP_TABLE_STATE.match(stripped):
+            meta["table_state"] = match["table_state"]
+            consumed.append(stripped)
+            continue
         if match := _XR_BGP_INACTIVE.match(stripped):
             meta["active"] = False
             meta["instance"] = match["instance"]
@@ -685,12 +681,6 @@ LLDP_IGNORES: tuple[IgnoreRule, ...] = (
         r"^Device\s+ID\s+Local\s+Intf\s+Hold-time\s+Capability\s+Port\s+ID$",
         "column header, decorative",
     ),
-    IgnoreRule(
-        r"^Total entries displayed: \d+$",
-        "the device's own reported neighbor count; neighbor_count is derived by counting "
-        "records instead, and nothing currently cross-checks the two",
-        kind=IgnoreKind.NOT_NEEDED_YET,
-    ),
 )
 
 
@@ -714,10 +704,13 @@ def parse_xr_lldp(outputs: dict[str, str]) -> dict[str, Any]:
     rows = _after_header(lines, lambda line: line.strip().startswith("Device ID"))
     records = []
     consumed: list[str] = []
+    reported_neighbor_count: int | None = None
     unparsed_rows = 0
     for line in rows:
         stripped = line.strip()
         if stripped.startswith("Total entries"):
+            reported_neighbor_count = int(stripped.rsplit(" ", 1)[1])
+            consumed.append(stripped)
             break
         fields = stripped.split()
         if len(fields) != 5:
@@ -738,7 +731,7 @@ def parse_xr_lldp(outputs: dict[str, str]) -> dict[str, Any]:
 
     return finalize(
         raw=text,
-        meta={"neighbor_count": len(records)},
+        meta={"neighbor_count": len(records), "reported_neighbor_count": reported_neighbor_count},
         records=records,
         consumed=consumed,
         ignores=LLDP_IGNORES,
@@ -1101,6 +1094,9 @@ _XR_SR_STATUS = re.compile(
     r"^Admin: (?P<admin>\S+)\s+Operational: (?P<operational>\S+)"
     r"(?: for (?P<duration>\S+))?(?: \(since (?P<since>[^)]+)\))?"
 )
+_SR_PREFERENCE = re.compile(r"^Preference: (?P<preference>\d+) \(configuration\) \((?P<state>active|inactive)\)$")
+_SR_EXPLICIT = re.compile(r"^Explicit: segment-list (?P<segment_list>\S+) \((?P<state>valid|invalid)\)$")
+_SR_SID = re.compile(r"^SID\[(?P<index>\d+)\]: (?P<sid>\d+)$")
 
 # Section 0.10 accounting for ``show segment-routing traffic-eng policy``.
 # Surveyed against the only fixtures on disk that ever carry a policy (PE1,
@@ -1121,12 +1117,6 @@ SR_IGNORES: tuple[IgnoreRule, ...] = (
     ),
     IgnoreRule(r"^Candidate-paths:$", "candidate-paths section header, decorative"),
     IgnoreRule(
-        r"^Preference: \d+ \(configuration\) \((?:active|inactive)\)$",
-        "per-candidate-path preference value and active/inactive state; the policy-level "
-        "admin/operational state is captured instead, not this per-path detail",
-        kind=IgnoreKind.NOT_NEEDED_YET,
-    ),
-    IgnoreRule(
         r"^Requested BSID: \S+$",
         "per-path binding-SID request mode, not required by the schema",
     ),
@@ -1140,32 +1130,8 @@ SR_IGNORES: tuple[IgnoreRule, ...] = (
         "configured max-SID-depth constraint, not required by the schema",
     ),
     IgnoreRule(
-        r"^Explicit: segment-list \S+ \((?:valid|invalid)\)$",
-        "explicit segment-list name and its validity; a real per-path diagnostic with no "
-        "consumer yet",
-        kind=IgnoreKind.NOT_NEEDED_YET,
-    ),
-    IgnoreRule(
         r"^Weight: \d+, Metric Type: \S+$",
         "path weight and configured metric type, not required by the schema",
-    ),
-    IgnoreRule(
-        r"^SID\[\d+\]: \d+$",
-        "one label of the explicit path's SID stack; real per-path diagnostic content with "
-        "no consumer yet",
-        kind=IgnoreKind.NOT_NEEDED_YET,
-    ),
-    IgnoreRule(
-        r"^Dynamic \(inactive\)$",
-        "a dynamic (computed, not explicit) candidate path that is currently inactive -- "
-        "real diagnostic content with no consumer yet",
-        kind=IgnoreKind.NOT_NEEDED_YET,
-    ),
-    IgnoreRule(
-        r"^Last error: .+$",
-        "the reason a dynamic path computation failed -- real diagnostic content with no "
-        "consumer yet, the SR-TE analogue of bgp_neighbor's state_reason",
-        kind=IgnoreKind.NOT_NEEDED_YET,
     ),
     IgnoreRule(
         r"^Metric Type: \S+,\s+Path Accumulated Metric: \d+$",
@@ -1205,6 +1171,7 @@ def parse_xr_sr(outputs: dict[str, str]) -> dict[str, Any]:
     records: list[dict[str, Any]] = []
     consumed: list[str] = []
     current: dict[str, Any] | None = None
+    candidate: dict[str, Any] | None = None
 
     for raw_line in text.splitlines():
         line = raw_line.strip()
@@ -1213,8 +1180,10 @@ def parse_xr_sr(outputs: dict[str, str]) -> dict[str, Any]:
                 "policy": f"{match['color']}:{match['endpoint']}",
                 "color": match["color"],
                 "endpoint": match["endpoint"],
+                "supplemental": {"candidate_paths": []},
             }
             records.append(current)
+            candidate = None
             consumed.append(line)
         elif current is None:
             continue
@@ -1231,6 +1200,29 @@ def parse_xr_sr(outputs: dict[str, str]) -> dict[str, Any]:
             consumed.append(line)
         elif line.startswith("Binding SID: "):
             current.setdefault("binding_sid", line[len("Binding SID: ") :])
+            consumed.append(line)
+        elif match := _SR_PREFERENCE.match(line):
+            candidate = {
+                "preference": int(match["preference"]),
+                "state": match["state"],
+                "explicit": None,
+                "dynamic_inactive": False,
+                "last_error": None,
+                "sid_stack": [],
+            }
+            current["supplemental"]["candidate_paths"].append(candidate)
+            consumed.append(line)
+        elif candidate is not None and (match := _SR_EXPLICIT.match(line)):
+            candidate["explicit"] = {"segment_list": match["segment_list"], "state": match["state"]}
+            consumed.append(line)
+        elif candidate is not None and (match := _SR_SID.match(line)):
+            candidate["sid_stack"].append({"index": int(match["index"]), "sid": int(match["sid"])})
+            consumed.append(line)
+        elif candidate is not None and line == "Dynamic (inactive)":
+            candidate["dynamic_inactive"] = True
+            consumed.append(line)
+        elif candidate is not None and line.startswith("Last error: "):
+            candidate["last_error"] = line.removeprefix("Last error: ")
             consumed.append(line)
 
     # An empty SR-TE database is legitimate: no policies configured. Measured

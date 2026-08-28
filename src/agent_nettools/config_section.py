@@ -167,38 +167,136 @@ def _indent(raw_line: str) -> int:
 # code below before this table is ever consulted for it -- see
 # `parse_xr_config_isis`'s docstring.
 CONFIG_ISIS_IGNORES: tuple[IgnoreRule, ...] = (
-    IgnoreRule(r"^log adjacency changes$", "operational logging toggle, not a dependency", IgnoreKind.NOT_NEEDED_YET),
-    IgnoreRule(r"^lsp-gen-interval maximum-wait \d+$", "LSP pacing timer, not a dependency", IgnoreKind.NOT_NEEDED_YET),
-    IgnoreRule(r"^metric-style wide level \d+$", "global AF metric encoding, not an adjacency dependency", IgnoreKind.NOT_NEEDED_YET),
-    IgnoreRule(r"^mpls traffic-eng level-2-only$", "global AF traffic-engineering toggle", IgnoreKind.NOT_NEEDED_YET),
-    IgnoreRule(r"^segment-routing mpls$", "global AF segment-routing toggle", IgnoreKind.NOT_NEEDED_YET),
-    IgnoreRule(
-        r"^address-family (ipv4|ipv6) unicast$",
-        "global-scope AF opener -- the per-interface occurrence of this same "
-        "line is consumed directly by the interface-record extraction below, "
-        "never reaches this table",
-        IgnoreKind.NOT_NEEDED_YET,
-    ),
-    IgnoreRule(r"^flex-algo \d+$", "flexible-algorithm definition, unrelated to adjacency formation", IgnoreKind.NOT_NEEDED_YET),
-    IgnoreRule(r"^metric-type delay$", "flex-algo metric type", IgnoreKind.NOT_NEEDED_YET),
-    IgnoreRule(r"^advertise-definition$", "flex-algo advertisement toggle", IgnoreKind.NOT_NEEDED_YET),
-    IgnoreRule(r"^prefix-sid index \d+$", "SR prefix-SID index, traffic-engineering detail", IgnoreKind.NOT_NEEDED_YET),
-    IgnoreRule(r"^prefix-sid algorithm \d+ index \d+$", "SR flex-algo prefix-SID index", IgnoreKind.NOT_NEEDED_YET),
-    IgnoreRule(r"^bfd minimum-interval \d+$", "BFD timer, not an IS-IS adjacency dependency", IgnoreKind.NOT_NEEDED_YET),
-    IgnoreRule(r"^bfd multiplier \d+$", "BFD timer", IgnoreKind.NOT_NEEDED_YET),
-    IgnoreRule(r"^hello-padding disable$", "Hello PDU padding toggle", IgnoreKind.NOT_NEEDED_YET),
-    IgnoreRule(r"^fast-reroute per-prefix$", "FRR toggle, traffic-engineering detail", IgnoreKind.NOT_NEEDED_YET),
-    IgnoreRule(r"^fast-reroute per-prefix ti-lfa$", "FRR TI-LFA toggle", IgnoreKind.NOT_NEEDED_YET),
     IgnoreRule(r"^!$", "block-end marker at any nesting depth", IgnoreKind.NO_EXTRACTABLE_FIELD),
 )
 
-_CONFIG_ISIS_META_KEYS: tuple[str, ...] = ("instance", "is_type", "net", "authentication_configured")
+_CONFIG_ISIS_META_KEYS: tuple[str, ...] = (
+    "instance",
+    "is_type",
+    "net",
+    "authentication_configured",
+    "supplemental",
+)
 
 
 def _empty_config_isis_meta() -> dict[str, Any]:
     meta: dict[str, Any] = dict.fromkeys(_CONFIG_ISIS_META_KEYS)
     meta["authentication_configured"] = False
+    meta["supplemental"] = {
+        "log_adjacency_changes": False,
+        "lsp_gen_interval_maximum_wait": None,
+        "address_families": [],
+        "flex_algorithms": [],
+    }
     return meta
+
+
+def _config_isis_supplemental(lines: list[str]) -> tuple[dict[str, Any], dict[str, dict[str, Any]], list[str]]:
+    global_data: dict[str, Any] = {
+        "log_adjacency_changes": False,
+        "lsp_gen_interval_maximum_wait": None,
+        "address_families": [],
+        "flex_algorithms": [],
+    }
+    interfaces: dict[str, dict[str, Any]] = {}
+    consumed: list[str] = []
+    current_interface: str | None = None
+    current_scope: dict[str, Any] | None = None
+    scope_depth: int | None = None
+
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        indent = _indent(raw_line)
+        if stripped == "!":
+            current_scope = None
+            scope_depth = None
+            continue
+        if indent == 1 and stripped.startswith("interface "):
+            current_interface = stripped.removeprefix("interface ").strip()
+            interfaces.setdefault(
+                current_interface,
+                {
+                    "bfd": {"minimum_interval": None, "multiplier": None},
+                    "hello_padding_disabled": False,
+                    "address_families": {},
+                    "prefix_sid": {"index": None, "algorithms": []},
+                },
+            )
+            current_scope = None
+            scope_depth = None
+            continue
+        if indent == 1:
+            current_interface = None
+            if stripped == "log adjacency changes":
+                global_data["log_adjacency_changes"] = True
+                consumed.append(stripped)
+            elif stripped.startswith("lsp-gen-interval maximum-wait "):
+                global_data["lsp_gen_interval_maximum_wait"] = int(stripped.rsplit(" ", 1)[1])
+                consumed.append(stripped)
+            elif stripped.startswith("address-family "):
+                current_scope = {"family": stripped.split()[1], "metric_style": None, "traffic_eng_level_2_only": False, "segment_routing_mpls": False}
+                global_data["address_families"].append(current_scope)
+                scope_depth = indent
+                consumed.append(stripped)
+            elif stripped.startswith("flex-algo "):
+                current_scope = {"algorithm": int(stripped.split()[1]), "metric_type": None, "advertise_definition": False}
+                global_data["flex_algorithms"].append(current_scope)
+                scope_depth = indent
+                consumed.append(stripped)
+            continue
+        if current_interface is not None and indent == 2:
+            interface_data = interfaces[current_interface]
+            if stripped.startswith("bfd minimum-interval "):
+                interface_data["bfd"]["minimum_interval"] = int(stripped.rsplit(" ", 1)[1])
+                consumed.append(stripped)
+            elif stripped.startswith("bfd multiplier "):
+                interface_data["bfd"]["multiplier"] = int(stripped.rsplit(" ", 1)[1])
+                consumed.append(stripped)
+            elif stripped == "hello-padding disable":
+                interface_data["hello_padding_disabled"] = True
+                consumed.append(stripped)
+            elif stripped.startswith("address-family "):
+                family = stripped.split()[1]
+                current_scope = interface_data["address_families"].setdefault(
+                    family, {"fast_reroute_per_prefix": False, "ti_lfa": False}
+                )
+                scope_depth = indent
+                consumed.append(stripped)
+            continue
+        if current_scope is None or scope_depth is None or indent <= scope_depth:
+            continue
+        if current_interface is None:
+            if stripped.startswith("metric-style wide level "):
+                current_scope["metric_style"] = {"style": "wide", "level": int(stripped.rsplit(" ", 1)[1])}
+                consumed.append(stripped)
+            elif stripped == "mpls traffic-eng level-2-only":
+                current_scope["traffic_eng_level_2_only"] = True
+                consumed.append(stripped)
+            elif stripped == "segment-routing mpls":
+                current_scope["segment_routing_mpls"] = True
+                consumed.append(stripped)
+            elif stripped == "metric-type delay":
+                current_scope["metric_type"] = "delay"
+                consumed.append(stripped)
+            elif stripped == "advertise-definition":
+                current_scope["advertise_definition"] = True
+                consumed.append(stripped)
+        else:
+            interface_data = interfaces[current_interface]
+            if stripped == "fast-reroute per-prefix":
+                current_scope["fast_reroute_per_prefix"] = True
+                consumed.append(stripped)
+            elif stripped == "fast-reroute per-prefix ti-lfa":
+                current_scope["ti_lfa"] = True
+                consumed.append(stripped)
+            elif stripped.startswith("prefix-sid algorithm "):
+                _, _, algorithm, _, index = stripped.split()
+                interface_data["prefix_sid"]["algorithms"].append({"algorithm": int(algorithm), "index": int(index)})
+                consumed.append(stripped)
+            elif stripped.startswith("prefix-sid index "):
+                interface_data["prefix_sid"]["index"] = int(stripped.rsplit(" ", 1)[1])
+                consumed.append(stripped)
+    return global_data, interfaces, consumed
 
 
 def parse_xr_config_isis(output: str) -> dict[str, Any]:
@@ -239,6 +337,9 @@ def parse_xr_config_isis(output: str) -> dict[str, Any]:
     meta = _empty_config_isis_meta()
     records: list[dict[str, Any]] = []
     consumed: list[str] = []
+    supplemental, interface_supplemental, supplemental_consumed = _config_isis_supplemental(lines)
+    meta["supplemental"] = supplemental
+    consumed.extend(supplemental_consumed)
 
     current: dict[str, Any] | None = None
     interface_depth: int | None = None
@@ -320,6 +421,17 @@ def parse_xr_config_isis(output: str) -> dict[str, Any]:
 
     if meta["instance"] is None:
         raise ParseError("no 'router isis <tag>' header line found")
+
+    for record in records:
+        record["supplemental"] = interface_supplemental.get(
+            record["interface"],
+            {
+                "bfd": {"minimum_interval": None, "multiplier": None},
+                "hello_padding_disabled": False,
+                "address_families": {},
+                "prefix_sid": {"index": None, "algorithms": []},
+            },
+        )
 
     return finalize(
         raw=output,

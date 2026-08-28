@@ -102,6 +102,7 @@ def test_budget_device_evidence_reports_per_intent_truncation():
 
     assert len(sections["bgp"]) <= 500
     assert "[TRUNCATED:" in sections["bgp"]
+    assert '"budget_truncated_chars":' in sections["bgp"]
     entries = {(e["device"], e["intent"]) for e in report}
     assert ("PE1", "bgp") in entries
     assert ("PE1", "isis") not in entries  # small section, never touched.
@@ -122,6 +123,7 @@ def test_budget_fabric_evidence_enforces_a_total_ceiling_across_devices():
     total = sum(len(text) for sections in per_device.values() for text in sections.values())
     assert total <= 1000 + 200  # small slack for markers/formatting, still far below 12000 raw.
     assert report  # something was reported as truncated.
+    assert all('"budget_truncated_chars":' in text for sections in per_device.values() for text in sections.values())
 
 
 def test_render_budgeted_evidence_includes_every_device_and_intent():

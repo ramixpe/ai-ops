@@ -188,15 +188,13 @@ def test_every_declared_ignore_rule_pinned_by_count():
     shrink silently -- update the number and say why in the commit if it
     ever needs to move.
 
-    54 -> 67 at the protocol-coverage sweep (2026-08-19): ``BGP_VPNV4_IGNORES``
-    is a new, deliberately separate 13-rule constant for ``show bgp vpnv4
-    unicast summary`` -- see its module comment for why it is not merged into
-    ``BGP_IGNORES`` even though 12 of its 13 patterns are identical.
+    67 -> 59 after the parser-coverage sweep promoted eight previously
+    deferred SR-policy detail fields into typed evidence.
     """
 
     rules = _declared_ignore_rules()
-    assert len(rules) == 67, (
-        f"{len(rules)} ignore rules declared across parsers.py's seven intents, expected 67"
+    assert len(rules) == 59, (
+        f"{len(rules)} ignore rules declared across parsers.py's seven intents, expected 59"
     )
 
 

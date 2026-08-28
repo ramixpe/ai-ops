@@ -68,6 +68,7 @@ GUIDED_CAPABILITIES = (
     Capability("check_lab", RegistrationClass.PASSIVE, ObjectContract.NONE, ModelPolicy.PINNED),
     Capability("lookup_lab", RegistrationClass.PASSIVE, ObjectContract.LOOKUP, ModelPolicy.EXCLUDED),
     Capability("investigate_lab", RegistrationClass.PASSIVE, ObjectContract.ASSERTED, ModelPolicy.PINNED),
+    Capability("expand_lab_evidence", RegistrationClass.PASSIVE, ObjectContract.NONE, ModelPolicy.EXCLUDED),
     Capability("history_lab", RegistrationClass.PASSIVE, ObjectContract.NONE, ModelPolicy.PINNED),
     Capability("probe_lab", RegistrationClass.ACTIVE_PROBE, ObjectContract.NONE, ModelPolicy.PINNED),
 )

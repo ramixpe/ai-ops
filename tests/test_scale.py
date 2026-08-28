@@ -108,7 +108,7 @@ def test_the_mcp_tool_surface_does_not_grow_with_the_fabric(large_fabric):
     # The staged surface is a fixed tuple of stage-shaped tools; the classic
     # surface is a fixed set of decorated functions. Neither is derived from
     # the inventory, and this is the assertion that keeps it that way.
-    assert len(staged_surface.STAGED_TOOL_NAMES) == 6
+    assert len(staged_surface.STAGED_TOOL_NAMES) == 7
 
 
 def test_one_investigation_touches_the_path_not_the_fabric(large_fabric):

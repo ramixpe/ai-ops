@@ -28,12 +28,13 @@ def test_explicit_unknown_surface_fails_closed_to_guided():
     assert profile.tool_names == GUIDED_TOOL_NAMES
 
 
-def test_guided_surface_has_exactly_the_six_registration_names():
+def test_guided_surface_has_the_declared_registration_names():
     assert profile_for("staged").tool_names == (
         "explore_lab",
         "check_lab",
         "lookup_lab",
         "investigate_lab",
+        "expand_lab_evidence",
         "history_lab",
         "probe_lab",
     )
@@ -57,10 +58,11 @@ def test_guided_registry_declares_model_and_object_contracts():
     assert by_name["investigate_lab"].object_contract is ObjectContract.ASSERTED
     assert by_name["lookup_lab"].object_contract is ObjectContract.LOOKUP
     assert by_name["lookup_lab"].model_policy is ModelPolicy.EXCLUDED
+    assert by_name["expand_lab_evidence"].model_policy is ModelPolicy.EXCLUDED
     assert all(
         capability.model_policy is ModelPolicy.PINNED
         for capability in GUIDED_CAPABILITIES
-        if capability.name != "lookup_lab"
+        if capability.name not in {"lookup_lab", "expand_lab_evidence"}
     )
 
 

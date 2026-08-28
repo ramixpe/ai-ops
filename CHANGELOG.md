@@ -5,6 +5,28 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); this
 project does not yet promise semantic-versioning stability outside the CLI
 and MCP surfaces (see README's "product surface for 1.0" note).
 
+## [2.1.0] — 2026-08-28
+
+### Added
+
+- `expand_lab_evidence`, a staged-MCP-only, bounded log-evidence drill-down.
+  It accepts only an opaque identifier issued by a recent `investigate_lab`
+  result and one previously disclosed evidence key; contexts expire after five
+  minutes, are memory-only, and never recollect or persist raw device output.
+- Reproducible parser and model-visible evidence coverage auditors.
+
+### Changed
+
+- Parser coverage on the unchanged 13,335-line committed fixture corpus rose
+  from 63.01% to 71.48% structured lines (+8.47 percentage points): all 1,129
+  deferred lines now parse into typed evidence, with zero unaccounted lines.
+- Budget-truncated model evidence now carries a structured omission disclosure.
+
+### Security
+
+- The staged evidence-expansion capability is structurally excluded from
+  event-model offers, preventing fabricated or cross-run expansion contexts.
+
 ## [2.0.0] — 2026-08-28
 
 ### Added

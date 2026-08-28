@@ -258,6 +258,10 @@ class InvestigationResult:
     correlation_status: str = NOT_ATTEMPTED
     correlation_grounding: GroundingResult = field(default_factory=GroundingResult)
     coverage: Coverage | None = None
+    #: Private same-run log context for bounded evidence expansion. Deliberately
+    #: omitted from ``to_payload()`` because it retains raw device text.
+    log_window: ShapedWindow | None = field(default=None, repr=False)
+    raw_log_text: str | None = field(default=None, repr=False)
 
     #: A model's readable restatement of the report. **Non-authoritative**, and
     #: structurally separate so nothing downstream can prefer it to `report` by
@@ -638,6 +642,13 @@ def _log_window(device: str, *, sender=None, count: int = 200) -> ShapedWindow:
     # `render_command` (canonicalize by reconstruction), so an int is rejected at
     # the boundary rather than coerced. Passing 200 instead of "200" made every
     # log read fail with `count: expected a string, got int` -- OBS-077.
+    window, _raw = _log_window_context(device, sender=sender, count=count)
+    return window
+
+
+def _log_window_context(device: str, *, sender=None, count: int = 200) -> tuple[ShapedWindow, str | None]:
+    """Return one shaped logging window and its private source text."""
+
     result = run_template(device, "logging", sender=sender, count=str(count))
 
     # `commands`, not `outputs`. `run_template` stores output under the same key
@@ -648,15 +659,13 @@ def _log_window(device: str, *, sender=None, count: int = 200) -> ShapedWindow:
     raw = next(iter(commands.values()), "") if isinstance(commands, dict) else ""
 
     if result.get("status") != "success" or not raw:
-        return ShapedWindow(total_in=0, coverage=None)
+        return ShapedWindow(total_in=0, coverage=None), None
 
     parsed, status = parse_template_output("cisco_xr", "logging", raw)
     if status is not PARSE_OK or parsed is None:
-        return ShapedWindow(total_in=0, coverage=None)
+        return ShapedWindow(total_in=0, coverage=None), None
 
-    return shape_window(
-        parsed["records"], coverage=coverage_from_logging(parsed, device)
-    )
+    return shape_window(parsed["records"], coverage=coverage_from_logging(parsed, device)), raw
 
 
 def _notes_for_devices(devices: set[str], intents_read: set[str]) -> tuple[dict, ...]:
@@ -850,10 +859,13 @@ def investigate(
     correlation_status = NOT_ATTEMPTED
     coverage: Coverage | None = None
     shaped: ShapedWindow | None = None
+    raw_log_text: str | None = None
 
     if cause is not None:
-        read_window = window or (lambda d: _log_window(d, sender=sender))
-        shaped = read_window(cause.device)
+        if window is None:
+            shaped, raw_log_text = _log_window_context(cause.device, sender=sender)
+        else:
+            shaped = window(cause.device)
         coverage = shaped.coverage
         correlation = render_correlation(descent, shaped)
         correlation_status = EMITTED
@@ -866,6 +878,7 @@ def investigate(
             coverage=coverage, origin_unresolved=origin_unresolved,
             operator_notes=operator_notes, session_summary=session_summary,
             observations=observations, narrowing_shadow=narrowing_shadow,
+            log_window=shaped, raw_log_text=raw_log_text,
         )
 
     # -- The paraphrase. A model, and nothing downstream may prefer it. ------
@@ -969,4 +982,5 @@ def investigate(
         # Duck-typed: an analyst that does not record usage simply has none.
         usage=getattr(analyst, "usage", None),
         exchanges=tuple(exchanges),
+        log_window=shaped, raw_log_text=raw_log_text,
     )

@@ -65,7 +65,7 @@ KEEP_COUNT ?= 20
 .PHONY: help setup test lint inventory facts interfaces bgp lldp isis sr \
         fabric-bgp route bgp-neighbor interface sr-policy logging ping traceroute \
         analyze analyze-fabric agent demo diff capture learn-topology health health-fixtures \
-		baseline-pin baseline-show flaps evidence-prune metrics measure-ssh-concurrency version mcp mcp-http mcp-http-up mcp-http-down mcp-http-logs inspect \
+		baseline-pin baseline-show flaps evidence-prune metrics measure-ssh-concurrency parser-coverage model-visible-coverage version mcp mcp-http mcp-http-up mcp-http-down mcp-http-logs inspect \
         docker-build clean audit audit-fixtures config-check route-event \
         investigate ledger-summary ledger-verdict
 
@@ -207,6 +207,12 @@ metrics:  ## Report operational metrics (JSON; ARGS=--format=prometheus for text
 
 measure-ssh-concurrency:  ## B-492 read-only SSH concurrency measurement; requires NETTOOLS_LIVE_LAB=1
 	$(VENV_BIN)/python scripts/concurrent_ssh_measurement.py $(ARGS)
+
+parser-coverage:  ## Measure parser structured/deferred/presentation coverage on committed fixtures
+	$(VENV_BIN)/python tools/measure_parser_coverage.py $(ARGS)
+
+model-visible-coverage:  ## Measure fixture evidence after model projection and budgeting
+	@$(VENV_BIN)/python tools/measure_model_visible_evidence.py $(ARGS)
 
 version:  ## Print the installed nettools version
 	$(NETTOOLS) version

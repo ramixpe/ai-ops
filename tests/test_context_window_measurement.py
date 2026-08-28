@@ -100,7 +100,7 @@ def test_manifest_sizes_are_pinned_within_a_band_that_catches_a_doubling(mc):
 
     # Structural: only moves on a deliberate change to which tools exist.
     assert classic["tool_count"] >= 23
-    assert staged["tool_count"] == 6
+    assert staged["tool_count"] == 7
 
     # B-518: classic is NOT checked against a fixed absolute band any more.
     # It went 20,117 (B-501) -> 31,669 (B-518) chars as real tool waves

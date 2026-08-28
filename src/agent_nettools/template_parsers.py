@@ -63,6 +63,7 @@ from __future__ import annotations
 
 import re
 import sys
+from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from enum import Enum
@@ -99,6 +100,7 @@ __all__ = [
     "TRACEROUTE_IGNORES",
     "XR_COMMON_IGNORES",
     "IgnoreRule",
+    "accounting_summary",
     "ParseError",
     "account_lines",
     "finalize",
@@ -198,19 +200,62 @@ def account_lines(
     """
 
     rules = (*XR_COMMON_IGNORES, *ignores) if include_common else tuple(ignores)
-    consumed_set = {line.strip() for line in consumed}
+    consumed_counts = Counter(line.strip() for line in consumed)
 
     unaccounted: list[str] = []
     for line in raw.splitlines():
         stripped = line.strip()
         if not stripped:
             continue
-        if stripped in consumed_set:
+        if consumed_counts[stripped]:
+            consumed_counts[stripped] -= 1
             continue
         if any(rule.matches(line) or rule.matches(stripped) for rule in rules):
             continue
         unaccounted.append(stripped)
     return unaccounted
+
+
+def accounting_summary(
+    raw: str,
+    *,
+    consumed: Iterable[str] = (),
+    ignores: Sequence[IgnoreRule] = (),
+    unparsed_rows: int = 0,
+) -> dict[str, int]:
+    """Return model-safe accounting counts for one parser result."""
+
+    counts = Counter()
+    consumed_counts = Counter(line.strip() for line in consumed)
+    rules = (*XR_COMMON_IGNORES, *ignores)
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        counts["source_nonblank_lines"] += 1
+        if consumed_counts[stripped]:
+            consumed_counts[stripped] -= 1
+            counts["structured_lines"] += 1
+            continue
+        matched = next((rule for rule in rules if rule.matches(line) or rule.matches(stripped)), None)
+        if matched is None:
+            counts["unknown_lines"] += 1
+        elif matched.kind is IgnoreKind.NOT_NEEDED_YET:
+            counts["deferred_lines"] += 1
+        else:
+            counts["presentation_lines"] += 1
+    counts["malformed_rows"] = unparsed_rows
+    return {
+        key: counts[key]
+        for key in (
+            "source_nonblank_lines",
+            "structured_lines",
+            "deferred_lines",
+            "presentation_lines",
+            "unknown_lines",
+            "malformed_rows",
+        )
+    }
 
 
 def finalize(
@@ -230,11 +275,18 @@ def finalize(
     function that builds one.
     """
 
+    materialized_consumed = tuple(consumed)
     return {
         "meta": {
             **(meta or {}),
-            "unaccounted_lines": account_lines(raw, consumed=consumed, ignores=ignores),
+            "unaccounted_lines": account_lines(raw, consumed=materialized_consumed, ignores=ignores),
             "unparsed_rows": unparsed_rows,
+            "evidence_accounting": accounting_summary(
+                raw,
+                consumed=materialized_consumed,
+                ignores=ignores,
+                unparsed_rows=unparsed_rows,
+            ),
         },
         "records": list(records or []),
     }
@@ -305,6 +357,28 @@ _LAST_RESET = re.compile(
     r"^Last reset (?P<last_reset_ago>\S+?),\s*due to\s+(?P<last_reset_reason>.+)$"
 )
 _LAST_RESET_FALLBACK = re.compile(r"^Last reset (?P<last_reset_ago>.+)$")
+_BFD_ENABLED = re.compile(
+    r"^BFD enabled \(session (?P<session_state>\S+), BFD "
+    r"(?P<remote_configured>not configured|configured) on remote neighbor\)$"
+)
+_LAST_READ = re.compile(
+    r"^Last read (?P<last_read>\S+), Last read before reset (?P<last_read_before_reset>\S+)$"
+)
+_CONFIGURED_TIMERS = re.compile(
+    r"^Configured hold time: (?P<hold_time>\d+), keepalive: (?P<keepalive>\d+), "
+    r"min acceptable hold time: (?P<minimum_acceptable_hold_time>\d+)$"
+)
+_PREFIX_DENIED_EXACT = re.compile(r"^Exact no\. of prefixes denied\s*:\s*(?P<value>\d+)\.$")
+_PREFIX_DENIED_CUMULATIVE = re.compile(r"^Cumulative no\. of prefixes denied:\s*(?P<value>\d+)\.$")
+_PREFIX_ADVERTISED = re.compile(
+    r"^Prefix advertised (?P<advertised>\d+), suppressed (?P<suppressed>\d+), withdrawn (?P<withdrawn>\d+)$"
+)
+_SLOW_PEER_STATE = re.compile(r"^Slow Peer State: (?P<state>\S+)$")
+_SLOW_PEER_DETECTED = re.compile(
+    r"^Detected state: (?P<detected_state>\S+), Detection threshold: (?P<detection_threshold>\d+)$"
+)
+_SLOW_PEER_COUNTS = re.compile(r"^Detection Count: (?P<detection_count>\d+), Recovery Count: (?P<recovery_count>\d+)$")
+_CONNECTIONS = re.compile(r"^Connections established (?P<established>\d+); dropped (?P<dropped>\d+)$")
 
 # TTP template for the repeated "For Address Family: <afi>" sections -- a
 # shape TTP suits well precisely because it repeats identically five times per
@@ -331,11 +405,6 @@ BGP_NEIGHBOR_IGNORES: tuple[IgnoreRule, ...] = (
     IgnoreRule(r"^Cluster ID \S+$", "route-reflector cluster ID, present only on the RR's own view of a client"),
     IgnoreRule(r"^Last Received Message: \S+$", "last BGP message type received, not required by the schema"),
     IgnoreRule(r"^NSR State: .+$", "non-stop routing state detail, not required by the schema"),
-    IgnoreRule(r"^BFD enabled \(.+\)$", "BFD session detail, not required by the schema", kind=IgnoreKind.NOT_NEEDED_YET),
-    IgnoreRule(r"^Last read \S+, Last read before reset \S+$", "read-activity timestamps, volatile bookkeeping", kind=IgnoreKind.NOT_NEEDED_YET),
-    IgnoreRule(
-        r"^Configured hold time: \d+, keepalive: \d+, min acceptable hold time: \d+$",
-        "configured (not negotiated) timers restated; the negotiated 'Hold time is' line is captured instead", kind=IgnoreKind.NOT_NEEDED_YET),
     # Write-pulse bookkeeping: several generations of internal "last write"
     # diagnostics IOS-XR logs for the TCP session, none needed by the schema.
     IgnoreRule(r"^Last write \S+, attempted \d+, written \d+$", "write-pulse bookkeeping"),
@@ -372,9 +441,6 @@ BGP_NEIGHBOR_IGNORES: tuple[IgnoreRule, ...] = (
     IgnoreRule(r"^NEXT_HOP is always this router$", "next-hop-self policy detail, not required by the schema"),
     IgnoreRule(r"^Extended Nexthop Encoding: .+$", "negotiated capability, not required by the schema"),
     IgnoreRule(r"^Route refresh request: received \d+, sent \d+$", "route-refresh counters, not in the schema"),
-    IgnoreRule(r"^Exact no\. of prefixes denied\s*:\s*\d+\.$", "prefix-denial counter, not required by the schema", kind=IgnoreKind.NOT_NEEDED_YET),
-    IgnoreRule(r"^Cumulative no\. of prefixes denied:\s*\d+\.$", "prefix-denial counter, not required by the schema", kind=IgnoreKind.NOT_NEEDED_YET),
-    IgnoreRule(r"^Prefix advertised \d+, suppressed \d+, withdrawn \d+$", "advertised-prefix counters, not in the schema", kind=IgnoreKind.NOT_NEEDED_YET),
     IgnoreRule(r"^AIGP is enabled$", "AIGP attribute flag, not required by the schema"),
     IgnoreRule(r"^An EoR was( not)? received during read-only mode$", "end-of-RIB marker, not required by the schema"),
     IgnoreRule(r"^Last ack version \d+, Last synced ack version \d+$", "version bookkeeping, not required by the schema"),
@@ -385,11 +451,7 @@ BGP_NEIGHBOR_IGNORES: tuple[IgnoreRule, ...] = (
         r"^Advertise routes with local-label via Unicast SAFI$",
         "label-advertisement flag (IPv4 Unicast only), not required by the schema",
     ),
-    IgnoreRule(r"^Slow Peer State: \S+$", "slow-peer detection header, not required by the schema", kind=IgnoreKind.NOT_NEEDED_YET),
-    IgnoreRule(r"^Detected state: \S+, Detection threshold: \d+$", "slow-peer detection detail", kind=IgnoreKind.NOT_NEEDED_YET),
-    IgnoreRule(r"^Detection Count: \d+, Recovery Count: \d+$", "slow-peer detection detail", kind=IgnoreKind.NOT_NEEDED_YET),
     # Tail bookkeeping after the last address-family section.
-    IgnoreRule(r"^Connections established \d+; dropped \d+$", "connection-attempt counters, not in the schema", kind=IgnoreKind.NOT_NEEDED_YET),
     IgnoreRule(r"^Local host: \S+, Local port: \d+, IF Handle: \S+$", "local TCP endpoint detail, not in the schema"),
     IgnoreRule(r"^Foreign host: \S+, Foreign port: \d+$", "remote TCP endpoint detail, not in the schema"),
     IgnoreRule(
@@ -452,6 +514,7 @@ _BGP_NEIGHBOR_META_KEYS: tuple[str, ...] = (
     "up_for",
     "messages_received",
     "messages_sent",
+    "supplemental",
 )
 
 
@@ -465,6 +528,16 @@ def _empty_bgp_neighbor_meta() -> dict[str, Any]:
 
     meta: dict[str, Any] = dict.fromkeys(_BGP_NEIGHBOR_META_KEYS)
     meta["found"] = False
+    meta["supplemental"] = {
+        "bfd": {"enabled": None, "session_state": None, "remote_configured": None},
+        "read_activity": {"last_read": None, "last_read_before_reset": None},
+        "configured_timers": {
+            "hold_time": None,
+            "keepalive": None,
+            "minimum_acceptable_hold_time": None,
+        },
+        "connections": {"established": None, "dropped": None},
+    }
     return meta
 
 
@@ -489,16 +562,25 @@ def _parse_bgp_neighbor_address_families(output: str) -> tuple[list[dict[str, An
         accepted_prefixes = raw.get("accepted_prefixes")
         best_paths = raw.get("best_paths")
 
-        records.append(
-            {
-                "address_family": address_family,
-                "neighbor_version": neighbor_version,
-                "policy_in": policy_in,
-                "policy_out": policy_out,
-                "accepted_prefixes": accepted_prefixes,
-                "route_reflector_client": route_reflector_client,
-            }
-        )
+        records.append({
+            "address_family": address_family,
+            "neighbor_version": neighbor_version,
+            "policy_in": policy_in,
+            "policy_out": policy_out,
+            "accepted_prefixes": accepted_prefixes,
+            "route_reflector_client": route_reflector_client,
+            "supplemental": {
+                "prefixes_denied": {"exact": None, "cumulative": None},
+                "advertisements": {"advertised": None, "suppressed": None, "withdrawn": None},
+                "slow_peer": {
+                    "state": None,
+                    "detected_state": None,
+                    "detection_threshold": None,
+                    "detection_count": None,
+                    "recovery_count": None,
+                },
+            },
+        })
 
         # Reconstructed verbatim from the same literal IOS-XR phrasing the TTP
         # template above matches, so account_lines (which compares stripped
@@ -514,6 +596,38 @@ def _parse_bgp_neighbor_address_families(output: str) -> tuple[list[dict[str, An
             consumed.append(f"Policy for outgoing advertisements is {policy_out}")
         if accepted_prefixes is not None and best_paths is not None:
             consumed.append(f"{accepted_prefixes} accepted prefixes, {best_paths} are bestpaths")
+
+    records_by_family = {record["address_family"]: record for record in records}
+    current_record: dict[str, Any] | None = None
+    for line in (line.strip() for line in output.splitlines() if line.strip()):
+        if line.startswith("For Address Family: "):
+            current_record = records_by_family.get(line.removeprefix("For Address Family: "))
+        elif current_record is not None and (match := _PREFIX_DENIED_EXACT.match(line)):
+            current_record["supplemental"]["prefixes_denied"]["exact"] = int(match["value"])
+            consumed.append(line)
+        elif current_record is not None and (match := _PREFIX_DENIED_CUMULATIVE.match(line)):
+            current_record["supplemental"]["prefixes_denied"]["cumulative"] = int(match["value"])
+            consumed.append(line)
+        elif current_record is not None and (match := _PREFIX_ADVERTISED.match(line)):
+            current_record["supplemental"]["advertisements"] = {
+                key: int(match[key]) for key in ("advertised", "suppressed", "withdrawn")
+            }
+            consumed.append(line)
+        elif current_record is not None and (match := _SLOW_PEER_STATE.match(line)):
+            current_record["supplemental"]["slow_peer"]["state"] = match["state"]
+            consumed.append(line)
+        elif current_record is not None and (match := _SLOW_PEER_DETECTED.match(line)):
+            current_record["supplemental"]["slow_peer"].update({
+                "detected_state": match["detected_state"],
+                "detection_threshold": int(match["detection_threshold"]),
+            })
+            consumed.append(line)
+        elif current_record is not None and (match := _SLOW_PEER_COUNTS.match(line)):
+            current_record["supplemental"]["slow_peer"].update({
+                "detection_count": int(match["detection_count"]),
+                "recovery_count": int(match["recovery_count"]),
+            })
+            consumed.append(line)
 
     return records, consumed
 
@@ -588,6 +702,27 @@ def parse_xr_bgp_neighbor(output: str) -> dict[str, Any]:
             # still worth recording, and the line must still be consumed rather
             # than surfacing as unaccounted.
             meta["last_reset_ago"] = match["last_reset_ago"]
+            consumed.append(line)
+        elif match := _BFD_ENABLED.match(line):
+            meta["supplemental"]["bfd"] = {
+                "enabled": True,
+                "session_state": match["session_state"],
+                "remote_configured": match["remote_configured"] == "configured",
+            }
+            consumed.append(line)
+        elif match := _LAST_READ.match(line):
+            meta["supplemental"]["read_activity"] = dict(match.groupdict())
+            consumed.append(line)
+        elif match := _CONFIGURED_TIMERS.match(line):
+            meta["supplemental"]["configured_timers"] = {
+                key: int(match[key]) for key in ("hold_time", "keepalive", "minimum_acceptable_hold_time")
+            }
+            consumed.append(line)
+        elif match := _CONNECTIONS.match(line):
+            meta["supplemental"]["connections"] = {
+                "established": int(match["established"]),
+                "dropped": int(match["dropped"]),
+            }
             consumed.append(line)
 
     if not found_neighbor:
@@ -836,6 +971,22 @@ _MTU_BW = re.compile(r"^MTU (?P<mtu>\d+) bytes, BW (?P<bw>\d+) Kbit(?: \(Max: \d
 # here and discarded rather than captured into a field.
 _ENCAPSULATION = re.compile(r"^Encapsulation (?P<encap>ARPA|Loopback|802\.1Q Virtual LAN),(?:\s+loopback not set,)?$")
 _LAST_LINK_FLAPPED = re.compile(r"^Last link flapped (?P<flap>\S+)$")
+_LINK_QUALITY = re.compile(
+    r"^reliability (?P<reliability>\d+/\d+|Unknown), "
+    r"txload (?P<txload>\d+/\d+|Unknown), rxload (?P<rxload>\d+/\d+|Unknown)$"
+)
+_DUPLEX_SPEED = re.compile(
+    r"^(?P<duplex>Full|Half)-duplex, (?P<speed>\S+), (?P<media>\S+), "
+    r"link type is (?P<link_type>\S+)$"
+)
+_LAST_ACTIVITY = re.compile(
+    r"^Last input (?P<last_input>never|Unknown|\d{2}:\d{2}:\d{2}), "
+    r"output (?P<last_output>never|Unknown|\d{2}:\d{2}:\d{2})$"
+)
+_FIVE_MINUTE_RATE = re.compile(
+    r"^(?P<minutes>\d+) minute (?P<direction>input|output) rate "
+    r"(?P<bits_per_second>\d+) bits/sec, (?P<packets_per_second>\d+) packets/sec$"
+)
 
 # Counter-block lines. Each is matched independently -- see the shape note
 # above -- so a fixture missing some of them (Loopback: none; a down VLAN
@@ -890,16 +1041,10 @@ _COUNTER_LINES: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = (
 # covers and why it is not part of the schema.
 INTERFACE_IGNORES: tuple[IgnoreRule, ...] = (
     IgnoreRule(
-        r"^reliability (?:\d+/\d+|Unknown), txload (?:\d+/\d+|Unknown), rxload (?:\d+/\d+|Unknown)$",
-        "link-quality/load snapshot, not required by the schema", kind=IgnoreKind.NOT_NEEDED_YET),
-    IgnoreRule(
         r"^loopback not set,$",
         "loopback-test state flag on a physical interface; folded onto the Encapsulation "
         "line instead for Loopback/VLAN shapes, not required by the schema",
     ),
-    IgnoreRule(
-        r"^Full-duplex, \S+, \S+, link type is \S+$",
-        "duplex/speed/link-type summary, not required by the schema", kind=IgnoreKind.NOT_NEEDED_YET),
     IgnoreRule(
         r"^output flow control is \S+, input flow control is \S+$",
         "flow-control negotiation state, not required by the schema",
@@ -913,18 +1058,9 @@ INTERFACE_IGNORES: tuple[IgnoreRule, ...] = (
         "ARP encapsulation/timeout setting, not required by the schema",
     ),
     IgnoreRule(
-        r"^Last input (?:never|Unknown|\d{2}:\d{2}:\d{2}), output (?:never|Unknown|\d{2}:\d{2}:\d{2})$",
-        "last-input/output activity timestamps; last_link_flapped is the field captured instead", kind=IgnoreKind.NOT_NEEDED_YET),
-    IgnoreRule(
         r'^Last clearing of "show interface" counters (?:never|Unknown)$',
         "counter-clear timestamp, not required by the schema",
     ),
-    IgnoreRule(
-        r"^\d+ minute input rate \d+ bits/sec, \d+ packets/sec$",
-        "5-minute smoothed input rate; the raw packet/byte counters are captured instead", kind=IgnoreKind.NOT_NEEDED_YET),
-    IgnoreRule(
-        r"^\d+ minute output rate \d+ bits/sec, \d+ packets/sec$",
-        "5-minute smoothed output rate; the raw packet/byte counters are captured instead", kind=IgnoreKind.NOT_NEEDED_YET),
     IgnoreRule(
         r"^Input/output data rate is disabled\.$",
         "loopback rate-disabled notice -- a Loopback has no counter block at all -- "
@@ -957,7 +1093,15 @@ _INTERFACE_META_KEYS: tuple[str, ...] = (
     "state_transitions",
     "last_link_flapped",
     "hardware_type",
+    "supplemental",
 )
+
+
+def _ratio(value: str) -> dict[str, int] | None:
+    if value == "Unknown":
+        return None
+    numerator, denominator = value.split("/", 1)
+    return {"numerator": int(numerator), "denominator": int(denominator)}
 
 
 def parse_xr_interface(output: str) -> dict[str, Any]:
@@ -972,6 +1116,12 @@ def parse_xr_interface(output: str) -> dict[str, Any]:
     lines = [line.strip() for line in output.splitlines() if line.strip()]
 
     meta: dict[str, Any] = dict.fromkeys(_INTERFACE_META_KEYS)
+    meta["supplemental"] = {
+        "link_quality": {"reliability": None, "txload": None, "rxload": None},
+        "link": {"duplex": None, "speed": None, "media": None, "link_type": None},
+        "activity": {"last_input": None, "last_output": None},
+        "five_minute_rates": {"input": None, "output": None},
+    }
     records: list[dict[str, Any]] = []
     consumed: list[str] = []
     found_interface = False
@@ -1023,6 +1173,36 @@ def parse_xr_interface(output: str) -> dict[str, Any]:
             continue
         if match := _LAST_LINK_FLAPPED.match(line):
             meta["last_link_flapped"] = match["flap"]
+            consumed.append(line)
+            continue
+        if match := _LINK_QUALITY.match(line):
+            meta["supplemental"]["link_quality"] = {
+                key: _ratio(match[key]) for key in ("reliability", "txload", "rxload")
+            }
+            consumed.append(line)
+            continue
+        if match := _DUPLEX_SPEED.match(line):
+            meta["supplemental"]["link"] = {
+                "duplex": match["duplex"].lower(),
+                "speed": match["speed"],
+                "media": match["media"],
+                "link_type": match["link_type"],
+            }
+            consumed.append(line)
+            continue
+        if match := _LAST_ACTIVITY.match(line):
+            meta["supplemental"]["activity"] = {
+                key: None if match[key] in {"never", "Unknown"} else match[key]
+                for key in ("last_input", "last_output")
+            }
+            consumed.append(line)
+            continue
+        if match := _FIVE_MINUTE_RATE.match(line):
+            meta["supplemental"]["five_minute_rates"][match["direction"]] = {
+                "minutes": int(match["minutes"]),
+                "bits_per_second": int(match["bits_per_second"]),
+                "packets_per_second": int(match["packets_per_second"]),
+            }
             consumed.append(line)
             continue
 
@@ -1718,7 +1898,7 @@ SR_POLICY_DETAIL_IGNORES: tuple[IgnoreRule, ...] = (
         kind=IgnoreKind.NOT_NEEDED_YET,
     ),
     IgnoreRule(
-        r"^      Binding SID: \d+$",
+        r"^Binding SID: \d+$",
         "the LSP's own copy of the policy's Binding SID, already captured "
         "from the 4-space-indented Attributes line",
     ),
