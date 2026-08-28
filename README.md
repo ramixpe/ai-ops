@@ -423,7 +423,7 @@ not assume one scheme.
 
 ### Design documents
 
-`docs/design/` carries the reasoning: `design-thinking.md`,
+`docs/design/` carries the maintained reasoning: `architecture.md`,
 `evidence-reduction.md` (how large sources are made model-readable without a
 model reading them), `chaos-harness.md` (fault-injection acceptance), and
 `glossary.md` — read that one first, since `intent`

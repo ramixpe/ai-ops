@@ -40,7 +40,7 @@ dependencies = [
     # every call, so the package cannot do its job without it. Base install is
     # ~1.1 MB with zero runtime dependencies of its own -- every entry in ttp's
     # requires_dist sits behind its "full" or "docs" extras, which we do not
-    # install. See docs/build/FINDINGS.md OBS-029 for the Genie comparison.
+    # install. The Genie comparison remains in Git history.
     "ttp>=0.9,<1.0",
 ]
 

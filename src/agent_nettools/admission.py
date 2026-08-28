@@ -86,8 +86,8 @@ parsing prose out of `errors`.
 Active-probe budgeting (B-408)
 -------------------------------
 `NETTOOLS_ALLOW_ACTIVE_PROBES` is already a binary gate (network_tools.py).
-This module adds the rate on top, exactly what D13 (design-thinking.md)
-asked for: "a separate allowlist class with its own budget... passive reads
+This module adds the rate on top: "a separate allowlist class with its own
+budget... passive reads
 unlimited; active probes rate-limited per device and per run." Unlike the
 concurrency caps above, there is no failure threshold to discover here by
 sending more ICMP at the lab -- the "right" probe rate is a traffic-generation

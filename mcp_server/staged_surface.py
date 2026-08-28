@@ -6,7 +6,7 @@ B-113's consolidation is already justified by arithmetic — the reworded
 descriptions grew the classic manifest +86%, paid on every tool-list call —
 but collapsing the 21-tool surface would destroy the historical selection A/B
 whose third arm (Q1 during a live fault) is still owed. The experiment record
-(retained in Git history and summarised in `docs/build/FINDINGS.md`) names the
+(retained in Git history) names the
 *between-surface* comparison as the right experiment.
 So: **both surfaces exist**, selected by ``NETTOOLS_MCP_SURFACE``
 (``classic``, the default, or ``staged``), and the default flips only after

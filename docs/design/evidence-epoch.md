@@ -4,7 +4,7 @@
 
 Addresses the convergent finding (§2.1, all three reviewers) and A's device-load concern (§4.6).
 
-> **Correction, 2026-08-17, after implementation.** This document originally claimed the change also answers B's speed objection (§3.4) — "one change, three defects". **Measured, it does not.** The deterministic descent went from **8.5 s to 5.8 s** live; the 114–122 s an operator experiences is ~105 s of model latency from two calls in the interactive path, which this change does not touch. The claim was inherited from the review and never measured by anyone, including me. B's objection is answered by **B-439** (deterministic report rendering), not by this. See OBS-108 in `docs/build/FINDINGS.md`; the point-in-time peer response remains in Git history.
+> **Correction, 2026-08-17, after implementation.** This document originally claimed the change also answers B's speed objection (§3.4) — "one change, three defects". **Measured, it does not.** The deterministic descent went from **8.5 s to 5.8 s** live; the 114–122 s an operator experiences is ~105 s of model latency from two calls in the interactive path, which this change does not touch. The claim was inherited from the review and never measured by anyone, including me. B's objection is answered by **B-439** (deterministic report rendering), not by this. OBS-108 and the point-in-time peer response remain in Git history.
 
 ---
 

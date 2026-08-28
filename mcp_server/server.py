@@ -1343,7 +1343,7 @@ def detect_lab_flaps(device_name: str, min_transitions: int = 3) -> dict:
 
 # --------------------------------------------------------------------------- #
 # B-512 (Job 2): Loki/Prometheus as external-source tools -- the temporal
-# evidence axis (stage-2-architecture.md §2.4a). Each tool below wraps
+# temporal evidence axis. Each tool below wraps
 # exactly ONE named query from `logs_loki.LOKI_QUERIES` /
 # `metrics_prometheus.PROMETHEUS_QUERIES`, with that query's own declared,
 # validated slots as its ONLY parameters. There is deliberately no

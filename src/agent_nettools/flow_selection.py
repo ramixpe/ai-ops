@@ -14,8 +14,8 @@ Why no model
 ------------
 B-112's brief is explicit that this must not become "ask a model to parse the
 sentence". The architecture's central claim — repeated throughout
-`docs/design/design-thinking.md` — is that a model *selects from a menu*, it
-never *authors* the selection. A free-text parser is exactly the kind of
+the project — is that a model *selects from a menu*, it never *authors* the
+selection. A free-text parser is exactly the kind of
 component where that boundary is easiest to blur, because natural language
 looks like the model's home turf. It is not the model's job here: the menu is
 two flows, matching against it is a handful of declared regular expressions,

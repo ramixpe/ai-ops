@@ -3,16 +3,16 @@ not a device.
 
 Grounding
 ---------
-`docs/design/stage-2-architecture.md` §2.4/§2.4a: metrics and logs are
-evidence, read as a **context** input for the wide flow step, never as a
+Metrics and logs are evidence, read as a **context** input for the wide flow
+step, never as a
 descent rung -- "the narrow rung still compares parsed fields, and the
 history is context around it, never the thing a verdict turns on." This
 module is the read side only: it fetches and shapes; it is not wired into
 `flows.py`/`checks.py`/`investigation.py` (out of scope by the build's own
 instruction -- "expose the adapter, do not consume it in a descent").
 
-`docs/build/discovery-loki.md` (T-004) is the measured groundwork this module
-implements against: Loki 2.9.8 at the lab's management address, four labels
+The original Loki survey measured the groundwork this module implements
+against: Loki 2.9.8 at the lab's management address, four labels
 (`host`/`job`/`severity`/`source_ip`), `source_ip` as the join key (not
 `host`'s `.sota-xrd`-suffixed convention, which is a syslog-ng rewrite rule
 this repository does not own), two independent timestamps (Loki's own is
@@ -87,7 +87,7 @@ that from reading as "nothing happened":
 * :func:`coverage_from_loki` builds a `coverage.Coverage` (the same
   `unevaluated`-style discipline `coverage_from_logging` already applies to
   `show logging`) whose `severity_available` is the *measured* ceiling this
-  pipeline carries today -- `(3, 4)`, per discovery-loki.md §6.1/B-206a --
+    pipeline originally carried -- `(3, 4)` --
   so `Coverage.gaps()` refuses an absence claim over this source
   structurally, the same way `test_a_source_that_drops_severities_can_never_
   support_a_negative` already pins for the identical Loki case.
@@ -161,8 +161,8 @@ SOURCE_LOKI = "loki"
 # --------------------------------------------------------------------------- #
 
 LOKI_URL_ENV = "NETTOOLS_LOKI_URL"
-#: discovery-loki.md §1: the management-network address of the live stack,
-#: measured 2026-08-15/18. Its own caveat applies -- "this is a container IP,
+#: Management-network address of the live stack, measured 2026-08-15/18.
+#: Its caveat applies -- "this is a container IP,
 #: not a stable service address... the URL belongs in an environment
 #: variable, never a literal" -- and that is honoured by *never referencing
 #: this constant directly*; every call site reads `_loki_url()`, which is
@@ -195,7 +195,7 @@ DEFAULT_TIMEOUT_SECONDS = 10.0
 #: configured to send.
 #:
 #: Historical, kept because it is why the constant exists: measured 2026-08-15
-#: (discovery-loki.md §6.1) and reconfirmed 2026-08-18 (B-206a) as only
+#: and reconfirmed 2026-08-18 (B-206a) as only
 #: severities 3 (`err`) and 4 (`warning`).
 #: Confirmed NOT to be the devices' own trap level (OBS-041) -- every device
 #: reports `Trap logging: level informational` (severities 0-6), so the drop
@@ -252,8 +252,8 @@ class LokiTransportError(Exception):
 class _DeviceSlot:
     """A bare device name (`"PE2"`), validated against the inventory --
     never against Loki's own `.sota-xrd`-suffixed `host` label, which is a
-    syslog-ng rewrite rule this repository does not own (discovery-loki.md
-    §2). Resolves to the device's `mgmt_ip`, re-parsed through
+    syslog-ng rewrite rule this repository does not own. Resolves to the
+    device's `mgmt_ip`, re-parsed through
     `ipaddress.IPv4Address` for the same canonicalize-by-reconstruction
     reason `templates.py` re-parses every value it accepts rather than
     trusting the inventory's own prior pydantic validation: the value that
@@ -376,7 +376,7 @@ LOKI_QUERIES: dict[str, LokiQuery] = {
         name="logs_for_device",
         params={
             "device": _DeviceSlot(),
-            # Loki's own retention_period is 168h (discovery-loki.md §4) --
+            # Loki's own retention_period is 168h --
             # asking further back than the source retains is a caller error
             # worth refusing explicitly rather than silently returning less
             # than asked.
@@ -551,7 +551,7 @@ def _record_from_line(labels: Mapping[str, Any], ingest_ns: str, line: str) -> d
         # so the two are never confused.
         "loki_severity_label": labels.get("severity"),
         # syslog-ng stamps this destination with `timestamp("current")` --
-        # ingest time, never event time (discovery-loki.md §3). Kept
+        # ingest time, never event time. Kept
         # separate from `timestamp` (the device's own clock, inside the
         # message body) for exactly that reason; a correlation step must use
         # `timestamp`, never this field, as the event time.
@@ -723,8 +723,8 @@ def run_named_query(
         return envelope
 
     total_before_dedup = len(records)
-    # B-206b / discovery-loki.md §6.2: one event stored 1,346 times in the
-    # T-004 sample. `log_window.dedupe` keys on (device timestamp, mnemonic,
+    # B-206b: one event was stored 1,346 times in the original sample.
+    # `log_window.dedupe` keys on (device timestamp, mnemonic,
     # text), never ingest time -- exactly the shape this module's records
     # use, by construction (see `_record_from_line`).
     deduped = log_window.dedupe(records)

@@ -213,7 +213,7 @@ BGP_SUBJECT_LOOPBACKS: tuple[str, ...] = (
 
 # `show logging last N`. 200 is enough to carry a fault's own log lines without
 # turning every fixture into a megabyte of the SSH churn that dominates this
-# fabric's syslog (see docs/build/discovery-loki.md section 6).
+# fabric's syslog.
 LOGGING_LINES = 200
 
 # The reachability target for ping/traceroute. RR1 is the natural choice --
@@ -261,8 +261,7 @@ def template_manifest_for(
 ) -> list[tuple[str, dict[str, str]]]:
     """Build one device's template capture manifest.
 
-    Implements docs/build/capture-manifest.md section 5b. Returned as
-    ``(template_name, params)`` pairs for ``run_templates``, which validates
+    Returns ``(template_name, params)`` pairs for ``run_templates``, which validates
     every one of them by reconstruction before any credential is loaded.
 
     Takes no device identity of its own -- ``router_id`` (to skip a device's

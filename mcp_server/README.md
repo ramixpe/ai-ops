@@ -108,8 +108,8 @@ MCP-only gate:
 
 `get_lab_logs`, `get_lab_interface_rate_history`,
 `get_lab_isis_adjacency_history`, `get_lab_ldp_session_history` and
-`get_lab_device_uptime_history` are the temporal evidence axis
-(`stage-2-architecture.md` §2.4a) exposed as MCP tools: history read as
+`get_lab_device_uptime_history` expose the temporal evidence axis as MCP tools:
+history is read as
 *context*, never as a descent rung -- nothing in `flows.py`/`checks.py`/
 `investigation.py` imports these modules, and neither does this server file
 outside these five tool bodies.
@@ -261,8 +261,8 @@ belonged here once the graph held real data.
 
 **Derived, never authoritative -- stated in the tool's own description, same
 as NetBox's.** The graph is a *projection* of this project's own parsed
-LLDP/IS-IS evidence (`stage-2-architecture.md` §2.3), replaced wholesale each
-time the collector runs, never a live read and never a second place topology
+LLDP/IS-IS evidence, replaced wholesale each time the collector runs, never a
+live read and never a second place topology
 gets typed in. `data.parsed.nodes` lists every device the graph has evidence
 for, **including one with zero edges on every protocol** -- a real and
 interesting shape (an isolated device), deliberately not hidden by an
@@ -570,10 +570,8 @@ named `_read_only_tool`, and `pin_lab_golden_snapshot` wrote to the thing the
 system uses as its own epistemic ground truth: a model could pin an outage state
 as golden, after which drift comparison suppresses that fault indefinitely.
 
-That contradicted **D12** (execution is never behind MCP) and **D14** (memory is
-derived, never authored). The external-review correction is retained in
-`docs/build/FINDINGS.md` and the removed point-in-time review remains in Git
-history.
+That contradicted the rules that execution is never behind MCP and memory is
+derived, never authored. The external-review correction remains in Git history.
 
 The diff tools also stopped persisting their fresh collection, which the CLI
 still does. Snapshot history is what `detect_lab_flaps` reads, so a model

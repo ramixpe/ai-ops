@@ -785,7 +785,7 @@ SETTINGS: tuple[Setting, ...] = (
         "NETTOOLS_LOKI_URL", "string", "http://172.20.250.103:3100",
         "Base URL of the Loki instance `logs_loki.run_named_query` queries. "
         "The default is the lab's management-network address as measured "
-        "2026-08-15/18 (discovery-loki.md) -- a container IP, not a "
+        "2026-08-15/18 -- a container IP, not a "
         "guaranteed-stable service address; override it explicitly in any "
         "environment where that measurement does not hold.",
         "logs_loki",
@@ -803,7 +803,7 @@ SETTINGS: tuple[Setting, ...] = (
         "Base URL of the Prometheus instance "
         "`metrics_prometheus.run_named_query` queries. The default is the "
         "lab's management-network address as measured 2026-08-15/19 "
-        "(discovery-alerting.md) -- a container IP, not a guaranteed-stable "
+        "-- a container IP, not a guaranteed-stable "
         "service address; override it explicitly in any environment where "
         "that measurement does not hold.",
         "metrics_prometheus",
@@ -828,7 +828,7 @@ SETTINGS: tuple[Setting, ...] = (
     ),
     # -- netbox.py (Stage-2 M3b): the read-only-by-default NetBox inventory
     # collector. NetBox is DERIVED from parsed device evidence, never
-    # authored (stage-2-architecture.md §4) -- see the module docstring.
+    # authored -- see the module docstring.
     Setting(
         "NETBOX_URL", "string", None,
         "Base URL of the NetBox instance write_records() pushes into (e.g. "
@@ -872,7 +872,7 @@ SETTINGS: tuple[Setting, ...] = (
         minimum=0.001,
     ),
     # -- graph.py (B-517): the neo4j topology collector/reader. neo4j is
-    # DERIVED, never authored (stage-2-architecture.md §2.3) -- see the
+    # DERIVED, never authored -- see the
     # module docstring. `write_graph` (the operator-run collector) and
     # `run_named_read` (behind get_lab_graph_topology, MCP) read the SAME
     # four variables below -- never a second credential pair for the read

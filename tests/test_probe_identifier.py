@@ -2,8 +2,8 @@
 
 OBS-194/OBS-195: excluding evaluation documents from `search_lab_knowledge` (B-511's
 corpus half, see `tests/test_knowledge.py`) was necessary and not sufficient -- the
-answer to the leaked Q4 probe (`10.255.0.99`) is also quoted in `FINDINGS.md`,
-`BACKLOG.md`, `archive/VERIFICATION.md` and `design/peer-review-response.md`, none of
+answer to the leaked Q4 probe (`10.255.0.99`) is also quoted in `BACKLOG.md`,
+`archive/VERIFICATION.md` and `design/peer-review-response.md`, none of
 which should be excluded from the corpus (they are legitimate engineering records, not
 evaluation material). The durable fix is on the question: generate a fresh identifier
 per run, never write it down, and a leak becomes impossible rather than patched. This
@@ -63,7 +63,7 @@ def test_reserved_from_inventory_holds_every_declared_device_address(G):
 
 def test_reserved_from_repo_grep_finds_the_leaked_probe(G):
     """The exact regression B-511 exists to close: `10.255.0.99` is written
-    into FINDINGS.md, BACKLOG.md and design docs (OBS-195) -- none of which
+    into BACKLOG.md and design docs (OBS-195) -- none of which
     `search_knowledge`'s exclusion touches, because they are legitimate
     records, not evaluation material. The grep check must find it anyway,
     since it does not trust any per-document marker at all.

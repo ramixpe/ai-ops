@@ -3,8 +3,8 @@ axis's second source (`logs_loki.py` is the first).
 
 Grounding
 ---------
-`docs/design/stage-2-architecture.md` §2.4a: "history is a first-class input"
--- utilisation trend, CPU/packet-drop history, read as *context* for the wide
+History is a first-class input: utilisation trend and CPU/packet-drop history
+are read as *context* for the wide
 flow step, never as a descent rung. The load-bearing sentence: **"absence of
 a sample is not a value of zero, and the parse/trust layer must distinguish
 them the same way `checks.py` already distinguishes `unevaluated` from
@@ -13,12 +13,12 @@ is not wired into `flows.py`/`checks.py`/`investigation.py`/`cli.py`/the MCP
 surface (out of scope by the build's own instruction, and `logs_loki.py`'s
 precedent: "expose the adapter, do not consume it in a descent").
 
-`docs/build/discovery-alerting.md` (T-005) is the measured groundwork this
-module implements against, reconfirmed live 2026-08-19: Prometheus v2.51.2 at
+The original alerting survey measured the groundwork this module implements
+against, reconfirmed live 2026-08-19: Prometheus v2.51.2 at
 the lab's management address, 572 metric names, the `source` label carrying
 bare device names (`P1`...`RR1`) exactly as `inventory/lab.yaml` spells them
--- **no translation needed**, unlike Loki's IP-based join (discovery-loki.md
-§2). Retention is `1w or 500MiB` (`/api/v1/status/runtimeinfo`), which is why
+-- **no translation needed**, unlike Loki's IP-based join. Retention is `1w or
+500MiB` (`/api/v1/status/runtimeinfo`), which is why
 `since_seconds`'s ceiling below and the existence-check lookback are both one
 week: asking further back than the source retains is a caller error worth
 refusing/bounding explicitly, the same reasoning `logs_loki.LOKI_QUERIES`
@@ -34,8 +34,8 @@ not (§5 below):
   the same "canonicalize by reconstruction, never pass-through" reason
   `logs_loki._DeviceSlot` gives.
 * **A single BGP neighbor series carries ~150 labels**, including
-  `peer_reset_reason`/`reset_reason` (discovery-alerting.md §3, "a
-  cardinality smell"). This module does not query BGP metrics -- still
+    `peer_reset_reason`/`reset_reason`, a cardinality smell. This module does not
+    query BGP metrics -- still
   true after the B-530 TSDB survey added LDP and device-uptime history --
   specifically *because* every metric family it does query (IS-IS adjacency
   uptime, `infra_statsd_oper` interface counters, LDP session uptime,
@@ -116,7 +116,7 @@ same "extract only what was reviewed" discipline applied rather than
 assumed safe by pattern-matching against the isis/interface precedent. So
 the free-text risk the build brief warns about ("a metric label value is
 device-authored... an interface description can appear in one") is real *in
-general* -- discovery-alerting.md §3 measured it on the BGP series this
+general* -- the original alerting survey measured it on the BGP series this
 module still does not touch, see "Why BGP is still not queried" below -- and
 is closed here **structurally**, by never extracting a label this module has
 not named, rather than by wrapping a value after the fact.
@@ -127,7 +127,7 @@ not merely wrapped.
 
 If a future query needs a metric whose labels *do* carry free text, it must
 add `(query_name, field)` to `model_egress.FREE_TEXT_FIELDS` and
-`mcp_server/boundary.py`'s copy in the same commit, per the build's own
+`mcp_server/boundary.py`'s copy in the same commit, per the project's
 instruction -- and per that same instruction, should prefer reusing an
 existing field name (`"text"`) over inventing a new one, for the reason
 `logs_loki.py`'s own "Field-name choice" section gives (`boundary.sanitize`
@@ -316,8 +316,8 @@ SOURCE_PROMETHEUS = "prometheus"
 # --------------------------------------------------------------------------- #
 
 PROMETHEUS_URL_ENV = "NETTOOLS_PROMETHEUS_URL"
-#: Measured 2026-08-15 (discovery-alerting.md §1) and reconfirmed live
-#: 2026-08-19 (`/-/ready` -> 200). A container IP, not a guaranteed-stable
+#: Measured 2026-08-15 and reconfirmed live 2026-08-19 (`/-/ready` -> 200).
+#: A container IP, not a guaranteed-stable
 #: service address -- `_prometheus_url()` is env-then-this-default, and every
 #: call site reads that function rather than this constant directly, the same
 #: convention `logs_loki.DEFAULT_LOKI_URL`'s own docstring explains.
@@ -390,7 +390,7 @@ class _DeviceSlot:
     Unlike `logs_loki._DeviceSlot` (which must translate a device name to an
     IP because Loki's `host` label carries a syslog-ng rewrite this repo does
     not own), Prometheus's `source` label already carries the bare inventory
-    name (discovery-alerting.md §3: "no mapping, no suffix"). But "the join
+    name ("no mapping, no suffix"). But "the join
     key needs no translation" is not the same claim as "the caller's string
     is safe to embed" -- so this slot still re-looks-up the name through
     `inventory_model.find_device` and re-validates the *returned* record's
@@ -912,8 +912,7 @@ PROMETHEUS_QUERIES: dict[str, PrometheusQuery] = {
             "Per-second rate of one allowlisted interface counter (bytes/"
             "packets sent+received, or an error/drop counter) on one "
             "device's interface, sampled every `step_seconds` over the last "
-            "`since_seconds` -- the utilisation/error-rate trend history "
-            "stage-2-architecture.md §2.4a asks for."
+            "`since_seconds` -- the utilisation/error-rate trend history."
         ),
     ),
     "isis_adjacency_history": PrometheusQuery(

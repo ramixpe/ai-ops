@@ -17,7 +17,7 @@ observations. That is the spec this module builds against.
 The one rule that makes this module worth building at all
 -----------------------------------------------------------
 **The ticket records what the CODE observed, never what a model SAYS it
-did.** `docs/build/FINDINGS.md` OBS-165 and `MCP-EXPERIMENT.md` §12.5 measured
+did.** OBS-165 and `MCP-EXPERIMENT.md` §12.5, retained in Git history, measured
 this directly: one model claimed it covered all five dependency rungs while
 listing three, a second model correctly named the two rungs it omitted --
 and the two self-reports were **indistinguishable at read time**. Both were

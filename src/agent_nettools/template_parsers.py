@@ -1058,8 +1058,8 @@ def parse_xr_interface(output: str) -> dict[str, Any]:
 # typo to normalise away. node is always "RP/0/RP0/CPU0" on this fabric, so
 # it is matched literally rather than with a wildcard.
 #
-# The mnemonic is the field this parser exists for. discovery-loki.md (T-004)
-# found it present on 100% of lines in the live Loki corpus too, in the same
+# The mnemonic is the field this parser exists for. The original Loki survey
+# found it present on 100% of lines in the live corpus too, in the same
 # FACILITY-SEVERITY-CODE shape -- and it is what lets Stage 2 route an event
 # to a flow by table lookup rather than a model judgement (D5). Splitting on
 # the *last two* hyphens (``str.rsplit("-", 2)``) rather than a fixed-arity
@@ -1072,8 +1072,8 @@ def parse_xr_interface(output: str) -> dict[str, Any]:
 #
 # The device's own embedded timestamp -- not the "Sat Aug 15 ... UTC" banner
 # IOS-XR prefixes the whole response with, and not any ingest time -- is the
-# only true event time: discovery-loki.md found that syslog-ng stamps Loki's
-# copy with ingest time (``timestamp("current")``), so the in-body timestamp
+# only true event time: the Loki survey found that syslog-ng stamps its copy
+# with ingest time (``timestamp("current")``), so the in-body timestamp
 # is authoritative and is kept as the device's literal string, never
 # reformatted or parsed into a datetime.
 #
@@ -1091,7 +1091,7 @@ _SYSLOG_LOGGING = re.compile(
 # feeds a different meta key. "Trap logging" is the OBS-041 field -- the
 # evidence that the drop diagnosed there is downstream of the device, not on
 # it, because the trap level is "informational" while only severities 3 and
-# 4 ever reach the log collector (discovery-loki.md, section 6.1).
+# 4 reached the log collector in the original survey.
 # The message count is captured, not discarded: `Buffer logging: level
 # debugging, 593 messages logged` against 200 records returned is the exact,
 # unambiguous statement that this window is count-limited and 393 buffered
@@ -1966,8 +1966,8 @@ TEMPLATE_RECORD_KEYS: dict[tuple[str, str], str | None] = {
     # device share history but the set of entries only grows -- there is no
     # meaningful way to match "this record in capture A" to "this record in
     # capture B" by any field, timestamp included (a duplicate device
-    # timestamp is not even guaranteed unique, per discovery-loki.md's
-    # duplication finding). None is this contract's documented way to say
+    # timestamp is not even guaranteed unique, per the Loki duplication
+    # finding). None is this contract's documented way to say
     # "positional, cannot be matched by identity" -- do not "fix" this to
     # "timestamp"; that would make diff_evidence produce nonsense (every
     # entry in a newer, longer window would misalign against the older one).

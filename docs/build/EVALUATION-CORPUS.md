@@ -380,8 +380,8 @@ IS-IS, and interface rungs remained healthy. The event ticket recorded
 Explicit revert restored the config; the declared `clear bgp 10.255.0.31`
 recovery restored `Established` on the first attempt; an independent post-run
 preflight passed. The injector's sealed receipt is
-`faultlab/runs/20260824-085930-pe2/truth.jsonl`; the event summary and ticket
-are under `scripts/measure_event_agent_out/20260824-fault7-e2e/`.
+`faultlab/runs/20260824-085930-pe2/truth.jsonl`; the removed event-agent output
+remains available in Git history.
 
 This validates fault containment, event-agent execution, ticket/notification
 delivery, deterministic localization, and restore. It does **not** estimate
@@ -401,8 +401,8 @@ interface RCA merely because another PE2 interface was administratively down.
 Explicit revert restored the configuration. Faultlab verified the configured
 interface up/up, IS-IS adjacency on that interface, and BGP Established on the
 first attempt; independent post-run preflight passed. The sealed receipt is
-`faultlab/runs/20260824-095044-pe2/truth.jsonl`; event output is under
-`scripts/measure_event_agent_out/20260824-fault3-e2e/`.
+`faultlab/runs/20260824-095044-pe2/truth.jsonl`; the removed event-agent output
+remains available in Git history.
 
 This acceptance validates the true-negative/absorbed-fault reporting path and
 restore contract. It is operational evidence, not a sealed blind trial or an

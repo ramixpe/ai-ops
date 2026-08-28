@@ -846,7 +846,7 @@ LDP_SESSION_FLOW = Flow(
 #
 # Investigated, not skipped -- and refused, though on a different axis than
 # device_health's. Q-004 settled the naming scheme (`<pe>:<vrf>`, OBS-035) and
-# `docs/build/discovery-l3vpn.md`'s live captures (2026-08-15) confirm this
+# live captures from 2026-08-15 confirm this
 # fabric runs a genuine L3VPN service: three VRFs across four PEs (CUSTA on
 # PE1/PE3, CUSTB on PE2/PE4, SHARED-SVCS on PE1 only), real RT import/export
 # policy, and MP-BGP VPNv4 Established with non-zero prefixes on RR1 and all
@@ -888,8 +888,8 @@ LDP_SESSION_FLOW = Flow(
 # --------------------------------------------------
 # `subject_present` (B-459) asks the *device*, not a document, whether the
 # named object exists -- and there is no command that lists a PE's VRFs at
-# all. `<pe>:<vrf>`'s existence could only be answered from
-# `discovery-l3vpn.md`'s static table, which would make it a second,
+# all. `<pe>:<vrf>`'s existence could only be answered from a static table,
+# which would make it a second,
 # unverified source of the same fact a device's own evidence should answer --
 # exactly the failure `graph.py`'s docstring warns about, and one this fabric
 # already paid for once (OBS-103/B-435): an authored source of topology
@@ -899,8 +899,8 @@ LDP_SESSION_FLOW = Flow(
 #
 # What IS observable does not discriminate by VRF, and that is not a minor gap
 # ------------------------------------------------------------------------------
-# The CE-facing physical interface (`GigabitEthernet0/0/0/2` on every PE, per
-# `discovery-l3vpn.md` §2) is fully observable today with zero new commands --
+# The CE-facing physical interface (`GigabitEthernet0/0/0/2` on every PE) is
+# fully observable today with zero new commands --
 # but its up/down state is exactly what the existing `interface` flow already
 # reports, under a name that carries no VRF at all. A ladder built only from
 # what is collectible would produce the **identical** verdict for `PE1:CUSTA`
@@ -908,8 +908,8 @@ LDP_SESSION_FLOW = Flow(
 # ladder cannot see the thing its own subject names.
 #
 # And the fabric's own documented failure mode would be invisible to it.
-# `discovery-l3vpn.md` §1 calls SHARED-SVCS "a service whose reachability
-# depends on RT policy rather than on the protocol stack" and says outright
+# SHARED-SVCS is a service whose reachability depends on RT policy rather than
+# on the protocol stack, and the original survey says outright
 # that "the `bgp_session` descent's ladder ... would find every rung healthy
 # and still not explain a leak failure, because the fault would live in RT
 # import/export." Every rung this build could construct today (VPNv4 session
@@ -946,8 +946,8 @@ LDP_SESSION_FLOW = Flow(
 # "topology" is an object with a lowest-broken-rung at all, and every framing
 # tried says no.
 #
-# D5's test: "is this an object, or a symptom of one?" `design-thinking.md`
-# itself answers this before a ladder is even sketched -- its own D5 table
+# D5's test, "is this an object, or a symptom of one?", answers this before a
+# ladder is even sketched -- the original design table
 # lists `get_topology(scope)` under "Relationships, multi-device flows": a
 # query that returns a graph, not a protocol with a health FSM. There is no
 # "topology session" that is Established or not, Up or not, the way every
@@ -976,7 +976,7 @@ LDP_SESSION_FLOW = Flow(
 #    consistency rules (`nettools audit`, B-477 -- "the fabric judged against
 #    itself"), and `graph.py`'s pure LLDP/IS-IS graph projection -- a
 #    library-level module, not yet its own CLI/MCP surface, but exactly the
-#    shape `design-thinking.md`'s own D5 table names for this question
+#    shape the original design table names for this question
 #    (`get_topology(scope)`) -- which deliberately keeps the two protocols'
 #    edges apart rather than merging them into one "link is up" fact (see its
 #    own docstring, and `test_isis_broken_pe3_p2_is_lldp_only`).
@@ -1026,17 +1026,16 @@ _L3VPN_SERVICE_REFUSAL = (
     "refused, not merely unbuilt -- see the comment block above FLOWS in "
     "flows.py for the full reasoning). The naming scheme is settled "
     "(`<pe>:<vrf>`, Q-004/OBS-035) and this fabric runs a real L3VPN service "
-    "-- three VRFs, real RT-leak policy, see docs/build/discovery-l3vpn.md -- "
+    "-- three VRFs with RT-leak policy -- "
     "but this build has no VRF-scoped collection surface at all: no `show "
     "vrf`, no VRF-qualified route or interface command, and the one VPNv4 "
     "intent that exists (`bgp_vpnv4`) is device-wide, already read by "
     "`bgp_session`'s own top rung under a different AFI (OBS-183). Without a "
     "VRF-scoped command, neither the subject's own existence nor any rung "
     "beneath it can be told apart per VRF, and even the protocol-stack "
-    "evidence this build could collect would report a fabric-documented "
-    "RT-policy failure (SHARED-SVCS) as healthy. Read "
-    "docs/build/discovery-l3vpn.md for what this fabric actually carries; "
-    "there is currently no tool surface that investigates a specific VRF's "
+    "evidence this build could collect would report an RT-policy failure "
+    "(SHARED-SVCS) as healthy. There is currently no tool surface that "
+    "investigates a specific VRF's "
     "service."
 )
 

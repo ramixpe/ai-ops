@@ -1,11 +1,10 @@
 """Project parsed device evidence into NetBox-shaped inventory records, and
 (optionally) push them into NetBox over its REST API.
 
-**NetBox is DERIVED, never authored** (docs/design/stage-2-architecture.md
-§4, "NetBox inventory -- DECIDED, build now": *"a simple collector script
-reads the network and feeds NetBox (the same derive-don't-author rule as
-neo4j: NetBox is populated from parsed device evidence, not hand-maintained,
-so it cannot become a second source of truth that drifts)"*). This module is
+**NetBox is DERIVED, never authored.** A collector reads the network and feeds
+NetBox using the same derive-don't-author rule as neo4j: NetBox is populated
+from parsed device evidence, not hand-maintained, so it cannot become a second
+source of truth that drifts. This module is
 that collector, and it is :mod:`graph`'s sibling -- read that module's
 docstring first; the reasoning is not repeated here, only the parts that
 differ.
@@ -452,7 +451,7 @@ def build_records(evidence_by_device: dict[str, dict[str, Any]]) -> NetBoxRecord
     on. So :func:`write_records` upserts by natural key instead of replacing
     wholesale -- cheaper, and it does not require deleting and recreating
     objects other NetBox users (or a future NetBox MCP, per
-    stage-2-architecture.md §4) may be holding references to between runs.
+    collector may be holding references to between runs.
     """
 
     devices = []

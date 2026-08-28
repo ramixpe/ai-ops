@@ -35,7 +35,7 @@ What they record:
 
 **These two labels are frozen.** `test_health.py`, `test_fabric_prompt_contains_pe2_pe4_isolation_and_rr1_idle_peers`, the `diff` suite and the T-025 acceptance test are all pinned to exactly this state. Do not recapture them, do not add template captures to them, do not "refresh" them after a lab rebuild — a rebuild produces a *different fabric*, and overwriting `t0` with it would silently invalidate every test that depends on the brokenness. New states get new labels.
 
-> The live fabric was rebuilt on ~2026-08-13 and came up clean: all 16 BGP sessions Established, PE2/PE4 back to 2 IS-IS adjacencies. `t0`/`t1` still describe the pre-rebuild fabric and remain correct as recordings. See `docs/build/FINDINGS.md` OBS-017.
+> The live fabric was rebuilt on ~2026-08-13 and came up clean: all 16 BGP sessions Established, PE2/PE4 back to 2 IS-IS adjacencies. `t0`/`t1` still describe the pre-rebuild fabric and remain correct as recordings.
 
 ### `healthy` — the clean fabric
 
@@ -169,6 +169,5 @@ nettools capture --all --label <label>
 | Where | What |
 |---|---|
 | `src/agent_nettools/fixtures.py` | `load_fixture_evidence`, built on the `sender=` seam so replay reuses real envelope construction |
-| `docs/build/FINDINGS.md` | OBS-017 (the rebuild), OBS-019 (this label scheme and the capture protocol) |
-| `docs/build/capture-manifest.md` | T-007 — which templates and parameters each label must contain |
+| Git history | OBS-017 (the rebuild), OBS-019 (this label scheme and the capture protocol), and T-007 (capture requirements) |
 | `CLAUDE.md` → "Testing seams" | How fixture replay sits alongside `sender=` and the fake netmiko module |

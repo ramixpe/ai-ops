@@ -14,7 +14,7 @@ Terms used across the design documents, the build plan, and the code. There is o
 
 **Not:** "intended state." That is the **config axis** — see below.
 
-Earlier drafts of `design-thinking.md` used `domain` for this concept and `intent` for intended state. Both were renamed to match the code. If you find `domain` used as an enum of question names in any document, it means `intent`.
+Earlier design drafts used `domain` for this concept and `intent` for intended state. Both were renamed to match the code. If you find `domain` used as an enum of question names in any document, it means `intent`.
 
 ---
 

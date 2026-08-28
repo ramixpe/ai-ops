@@ -2,7 +2,7 @@
 
 How the agent's diagnostic accuracy is measured rather than believed.
 
-Companion to `design-thinking.md` (D6, the dependency descent), `docs/build/PROCESS.md` §0.13 (the evidence-bounds-conclusion family, formerly `BUILD-PLAN.md`'s Part 0), and `interfaces.md`. Backlog items **B-426** (the harness) and **B-427** (the evaluation corpus).
+Companion to `docs/build/PROCESS.md` §0.13 (the evidence-bounds-conclusion family, formerly `BUILD-PLAN.md`'s Part 0) and `interfaces.md`. Backlog items **B-426** (the harness) and **B-427** (the evaluation corpus).
 
 ---
 

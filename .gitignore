@@ -93,3 +93,4 @@ telegram-operators.test.yaml
 
 # Generated campaign runs; immutable evidence belongs in evidence-archive/.
 scripts/overnight_out/
+scripts/measure_event_agent_out/

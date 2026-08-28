@@ -926,8 +926,8 @@ def test_the_mnemonic_splits_into_facility_severity_and_code():
 def test_severity_across_the_real_corpus_is_exactly_what_stage_2_can_route_on():
     """Stage 2 routes an event to a flow by looking the mnemonic up in a
     table -- that only works as a deterministic lookup if the severities
-    actually observed on this fabric are the small, fixed set discovery-loki.md
-    found (T-004): 3, 6, and 7. This pins that guarantee against all 1800
+    actually observed on this fabric are the small, fixed set found by the
+    original Loki survey (T-004): 3, 6, and 7. This pins that guarantee against all 1800
     entries across all 9 devices, not just one fixture."""
 
     severities: set[str] = set()

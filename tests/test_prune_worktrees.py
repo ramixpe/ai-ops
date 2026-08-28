@@ -53,7 +53,7 @@ def test_authored_work_is_never_noise() -> None:
     for path in (
         "src/agent_nettools/descent.py",
         "tests/test_flows.py",
-        "docs/build/FINDINGS.md",
+        "docs/build/PROCESS.md",
         "scripts/mutate_guards.py",
         "tests/fixtures/cisco_xr/PE1/t0/show-version.txt",
         "docs/diagrams/high-level.html",

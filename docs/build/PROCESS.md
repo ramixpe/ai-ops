@@ -29,12 +29,14 @@ If a task looks unnecessary because of something you discovered in an earlier ta
 ## 0.2 Every task ends with three actions
 
 1. Set the task's status in this file: `DONE`, `BLOCKED`, `SKIPPED`, or `PARTIAL`.
-2. Append at least one entry to `docs/build/FINDINGS.md`.
+2. Update the closest maintained documentation or `CHANGELOG.md` when behavior changes.
 3. Run `make test` and `make lint`. **Never leave the tree red.** If a task cannot be completed without breaking tests, mark it `BLOCKED` and stop.
 
 ## 0.3 The observations log book
 
-`docs/build/FINDINGS.md` is the single record of everything learned during the build. It is not a changelog — git already does that. It is where surprises, wrong assumptions, deferred decisions, and things that smell wrong are written down so they can be reviewed together at the end.
+Git history retains superseded reviews and implementation context. Maintained
+documentation should describe current behavior; `CHANGELOG.md` records
+user-visible changes.
 
 **Write an entry whenever any of these is true:**
 
@@ -118,8 +120,6 @@ In this order:
 | File | Why |
 |---|---|
 | `CLAUDE.md` | Existing architecture, layers 0–5, the safety boundary |
-| `docs/design/design-thinking.md` | Decisions D1–D20 with rationale and growth paths |
-| `docs/build/VERSION-2-EXECUTION-PLAN.md` | The current Version-2 execution plan |
 | `README.md` | CLI surface, env vars, fixtures |
 | `src/agent_nettools/platforms.py` | The allowlist and intent table |
 | `src/agent_nettools/parsers.py` | The parser contract new parsers must match |

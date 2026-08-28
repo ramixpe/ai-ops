@@ -1,7 +1,7 @@
 """Project parsed device evidence into a topology graph, and (optionally) push it into neo4j.
 
-**neo4j is DERIVED, never authored** (docs/design/stage-2-architecture.md
-§2.3). It is a projection of this fabric's own parsed LLDP/IS-IS evidence into
+**neo4j is DERIVED, never authored.** It is a projection of this fabric's own
+parsed LLDP/IS-IS evidence into
 a graph -- not a second place topology gets typed in. Two authored sources of
 topology that can disagree is OBS-103's shape exactly (the LLDP-hostname
 drift, corrected in B-435): P1 ran the configured hostname
@@ -280,7 +280,7 @@ def build_graph(evidence_by_device: dict[str, dict[str, Any]]) -> Graph:
 
 # The label/relationship-type this collector owns exclusively. Deliberately
 # not the generic `Device`/`ADJACENT` a future NetBox- or n8n-fed backend
-# sharing this same neo4j instance (stage-2-architecture.md §2.1's backend
+# sharing this same neo4j instance (the backend
 # table) might reasonably also want to use -- scoping the DETACH DELETE below
 # to a name only this collector writes is what makes "replace everything" safe
 # rather than a landmine for whoever adds the next writer.

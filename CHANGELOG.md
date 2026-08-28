@@ -157,7 +157,7 @@ probe against the real system, not inferred from the change.
   OBS-645, including why one is not currently fixable.
 - Dependency upper bounds, a digest-pinned base image, and a constraints file
   (EER-013).
-- Current planning and non-goals now live in `docs/build/SOTA-PLAN-2026-08-23.md`
+- Current planning and non-goals were consolidated; the superseded plan remains in Git history.
   and `docs/build/BACKLOG.md`.
 - `BACKLOG.md` is now machine-checkable: one authoritative status per item, a
   documented vocabulary, and a test that enforces both (EER-016).

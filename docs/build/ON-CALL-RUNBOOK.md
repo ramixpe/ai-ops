@@ -36,7 +36,7 @@ and `examples/n8n/investigate-on-alert.json` show — **both are named
 "EXAMPLE, not shipped code"** in their own files; whatever actually paged you
 may be one of these almost verbatim, or something your team wrote from
 scratch). If you don't know which, that not-knowing is itself tracked —
-`docs/build/FINDINGS.md`'s Q-008 asks "which host runs `nettools`, and does
+The original build review asked "which host runs `nettools`, and does
 it have egress to Telegram" and is still open.
 
 One thing that did **not** page you: `event_watch.py`, the module that reads
@@ -337,5 +337,5 @@ nettools ledger verdict DIAGNOSIS_ID confirmed_correct|incorrect|unknown \
   modes" section if this is genuinely how your team runs this.
 - `examples/README.md` — the orchestrator boundary rule and the two example
   pipelines (n8n, systemd) that can turn an alert into a page.
-- `docs/build/FINDINGS.md` Q-008 — which host runs this, and does it have
+- Original build review Q-008 — which host runs this, and does it have
   egress to Telegram. Open.

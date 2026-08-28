@@ -11,10 +11,8 @@ runs.
 **That provenance matters for what the evidence is worth.** It has been evaluated
 on a thirteen-node containerlab fabric, on one vendor, with a small number of
 blind fault-injection trials whose cases were designed by someone who knows the
-ladder. Review corrections and withdrawn claims are retained in
-[`docs/build/FINDINGS.md`](docs/build/FINDINGS.md), and the current audit is
-[`docs/build/DEEP-REVIEW-2026-08-27.md`](docs/build/DEEP-REVIEW-2026-08-27.md).
-Nothing here has run in production.
+ladder. Review history remains available in Git history. Nothing here has run
+in production.
 
 If you are evaluating rather than contributing, `docs/README.md` has a reading
 path for that.
@@ -41,8 +39,8 @@ failing with a bare `command not found` that reads like a broken build.
 
 ## The rules that are not up for negotiation
 
-These exist because each one was learned expensively. `docs/build/FINDINGS.md`
-has the incident behind every one.
+These exist because each one was learned expensively. Git history retains the
+reviews and incident records behind them.
 
 ### 1. Frozen files
 
@@ -140,10 +138,9 @@ Three SSH-free seams, in `tests/helpers.py`. Prefer them over mocking netmiko:
 
 ## Writing it down
 
-`docs/build/FINDINGS.md` is **append-only**. When something turns out to be wrong,
-append the correction and leave the original visible — the order things were
-learned in is most of the file's value, and this project has repeatedly found that
-the wrong turn is more instructive than the destination.
+Record user-visible changes in `CHANGELOG.md` and explain safety-relevant design
+decisions in the closest maintained document. Git history retains superseded
+reviews and the order in which conclusions changed.
 
 If you correct a claim in any document, **grep for its other statements before
 you call the correction done.** A stale constant fails a test; a stale sentence

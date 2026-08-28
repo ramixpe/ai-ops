@@ -2,7 +2,7 @@
 
 How large evidence sources are made model-readable without a model reading them.
 
-Companion to `design-thinking.md` D8 (the three evidence axes) and D16 (the context budget). This document generalises D16 beyond configuration and specifies the historical axis in detail, because logs are where the problem is worst in production.
+This document describes the three evidence axes and generalises the context budget beyond configuration, specifying the historical axis in detail because logs are where the problem is worst in production.
 
 > **Merged revision, 2026-08-16.** Revision 1 was amended during T-028/T-029 by six divergences measured against captured output; revision 2 restructured the document and added five capabilities. This is the merge. §16 logs both sets of changes and the three places revision 2's prose was corrected against measurement. **Measured numbers in this document come from the committed fixtures and can be re-derived; where a claim is projection rather than measurement it says so.**
 

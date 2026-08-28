@@ -241,9 +241,8 @@ class Observation:
     the same moment as ``started``. It exists because monotonic time has no
     meaning outside the process that read it -- ``time.monotonic()``'s own
     clock has an arbitrary, process-specific epoch, so ``started``/``completed``
-    cannot be compared against another run's, which a future cache/invalidation
-    milestone (the shared-evidence layer `stage-2-architecture.md` sketches)
-    will need to do: "is this observation still fresher than that one, read by
+    cannot be compared against another run's, which cache invalidation needs
+    to determine: "is this observation still fresher than that one, read by
     a different `nettools` invocation." **This does not change what skew
     means or how it is computed** -- `EvidenceEpoch.skew_seconds` and
     `Coherence` still do their arithmetic on `started`/`completed` only, on

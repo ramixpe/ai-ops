@@ -1,6 +1,6 @@
 # Human Interaction Interfaces
 
-How people interact with the agent, staged against what the architecture can actually support at each point. Companion to `design-thinking.md` D3 (the maturity ladder) and `BUILD-PLAN.md` T-035.
+How people interact with the agent, staged against what the architecture can actually support at each point. Companion to `BUILD-PLAN.md` T-035.
 
 ---
 

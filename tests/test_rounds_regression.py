@@ -240,7 +240,7 @@ def test_no_fault_on_path_is_in_the_flow_s_closed_finding_set():
 #: Round 5's device list, matching round 3's: rungs 1-3 are `DeviceScope.LOCAL`
 #: to RR1 (the subject's owner is resolved for rungs 4-5 only), and both rounds
 #: share the same subject, `10.255.0.12` (PE2's loopback) -- see `ROUND-5.md`
-#: S1 and `docs/build/FINDINGS.md` OBS-091.
+#: S1 and OBS-091, retained in Git history.
 _ROUND5_DEVICES = ["RR1", "RR1", "RR1", "PE2", "PE2"]
 
 

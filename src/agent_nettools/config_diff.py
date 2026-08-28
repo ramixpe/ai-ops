@@ -57,8 +57,8 @@ probe it had no credentials for in this worktree:
    never through a `use` reference (see the fixtures under
    `tests/fixtures/cisco_xr/*/isis-broken/show-running-config-router-isis.txt`
    and the `healthy` label's equivalents).
-2. `docs/build/discovery-l3vpn.md` S5 (T-006, live read-only SSH to PE1-PE4,
-   2026-08-15) recorded PE1's `router bgp 65000` neighbour toward RR1 with
+2. A live read-only SSH survey of PE1-PE4 on 2026-08-15 recorded PE1's
+    `router bgp 65000` neighbour toward RR1 with
    its attributes named directly (`update-source Loopback0`, `route-policy
    PASS in/out`, BFD) -- the shape group-based inheritance would replace.
 3. `docs/build/ROUND-8.md` S0 (B-463, live read of `show running-config

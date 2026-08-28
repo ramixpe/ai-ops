@@ -148,9 +148,9 @@ def test_device_health_is_refused_not_merely_unbuilt():
 
 def test_l3vpn_service_is_refused_not_merely_unbuilt():
     """B-110. Q-004/OBS-035 settled the naming (`<pe>:<vrf>`) and
-    `docs/build/discovery-l3vpn.md` confirms this fabric runs a real L3VPN
-    service (three VRFs, real RT-leak policy, MP-BGP VPNv4 Established with
-    non-zero prefixes everywhere, per OBS-183). The flow is refused anyway, on
+    this fabric runs a real L3VPN service (three VRFs, real RT-leak policy,
+    MP-BGP VPNv4 Established with non-zero prefixes everywhere, per OBS-183).
+    The flow is refused anyway, on
     a different axis than device_health's: this build has no VRF-scoped
     collection surface at all -- verified directly against
     `platforms.PLATFORM_INTENTS` and `templates.PLATFORM_TEMPLATES` rather
@@ -164,7 +164,7 @@ def test_l3vpn_service_is_refused_not_merely_unbuilt():
     message = str(excinfo.value)
     assert "l3vpn_service" in message
     assert "vrf" in message.lower()
-    assert "discovery-l3vpn.md" in message
+    assert "RT-leak policy" in message
 
     # Positive control: this is not "every flow is refused" -- an implemented
     # flow still resolves, and carries none of l3vpn_service's own wording.

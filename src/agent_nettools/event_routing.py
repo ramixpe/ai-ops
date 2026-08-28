@@ -10,7 +10,7 @@ It listens on nothing, calls nothing, retries nothing
 ------------------------------------------------------
 The receiving process is the operator's infrastructure choice — n8n, a
 ten-line systemd service, the platform stack's existing relay container.
-T-005 (`discovery-alerting.md`) measured Alertmanager already doing grouping,
+The original alerting survey measured Alertmanager already doing grouping,
 deduplication, inhibition and repeat-suppression natively and concluded a
 workflow engine is not needed for the trigger; this repo therefore ships the
 *decision* and `examples/`, never the listener. And per `OPS-WAVE-PLAN.md`'s
