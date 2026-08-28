@@ -30,7 +30,7 @@
   <p class="subtitle">User Guide for the authenticated, read-only network inspection service</p>
 
   <div class="banner">
-    <strong>Service status:</strong> the MCP service runs in a persistent Docker container on a4000 and exposes native MCP streamable HTTP. It is bound to a4000 loopback by default and is intended to be reached through an SSH tunnel.
+    <strong>Service status:</strong> the MCP service runs in a persistent Docker container on a4000 and exposes native MCP streamable HTTP directly on port 8000. The host publishes plain HTTP on all interfaces for trusted LAN/VPN clients.
   </div>
 
   <h2>What This Service Does</h2>
@@ -42,18 +42,17 @@
     <li>Active probes are disabled by default.</li>
   </ul>
 
-  <h2>Connect from a Mac</h2>
-  <h3>1. Create an encrypted tunnel</h3>
-  <pre>ssh -N -L 8000:127.0.0.1:8000 rami@a4000</pre>
-  <p>Keep this terminal open while using the MCP client. The client endpoint is then:</p>
-  <pre>http://127.0.0.1:8000/mcp</pre>
+  <h2>Connect an MCP Client</h2>
+  <h3>1. Use the direct HTTP endpoint</h3>
+  <p>Replace <code>&lt;a4000-host-or-ip&gt;</code> with the host name or LAN/VPN address reachable from the client:</p>
+  <pre>http://&lt;a4000-host-or-ip&gt;:8000/mcp</pre>
 
   <h3>2. Configure an MCP client</h3>
   <p>Use a client that supports MCP streamable HTTP. Supply the bearer token through the client’s secret store or a local environment variable. Do not place the token in a committed configuration file.</p>
   <pre>{
   "mcpServers": {
     "ios-xr-nettools": {
-      "url": "http://127.0.0.1:8000/mcp",
+      "url": "http://&lt;a4000-host-or-ip&gt;:8000/mcp",
       "headers": {
         "Authorization": "Bearer ${IOS_XR_NETTOOLS_MCP_TOKEN}"
       }
@@ -67,12 +66,12 @@
     <tr><th>Property</th><th>Current behavior</th></tr>
     <tr><td>Transport</td><td>Native MCP streamable HTTP</td></tr>
     <tr><td>Authentication</td><td>Shared bearer token; missing or invalid tokens receive HTTP 401</td></tr>
-    <tr><td>Encryption</td><td>The SSH tunnel encrypts traffic between the Mac and a4000</td></tr>
-    <tr><td>Network exposure</td><td>Loopback-only on a4000 by default</td></tr>
+    <tr><td>Encryption</td><td>None. Traffic and bearer tokens travel over plain HTTP.</td></tr>
+    <tr><td>Network exposure</td><td>All host interfaces on TCP port 8000 by default (<code>0.0.0.0:8000</code>)</td></tr>
     <tr><td>Authorization</td><td>All valid token holders receive the same read surface; there is no per-user RBAC</td></tr>
   </table>
   <div class="warning">
-    <strong>Do not expose this endpoint directly to the public internet.</strong> It does not currently provide TLS termination, per-user identity, token rotation, RBAC, or rate limiting. Share the bearer token only with trusted operators.
+    <strong>Use this endpoint only on a trusted LAN or VPN; never expose it directly to the public internet.</strong> It does not provide TLS termination, per-user identity, token rotation, RBAC, or rate limiting. Plain HTTP does not protect the bearer token from network observers.
   </div>
 
   <h2>Useful First Calls</h2>
@@ -98,7 +97,7 @@
 
   <h2>Support Checklist</h2>
   <ol>
-    <li>Confirm the SSH tunnel is running.</li>
+    <li>Confirm the client can reach <code>&lt;a4000-host-or-ip&gt;:8000</code> over the trusted LAN/VPN.</li>
     <li>Confirm the MCP client sends the bearer token.</li>
     <li>Call <code>list_lab_devices</code> before a device-specific tool.</li>
     <li>For a returned object refusal, refresh the relevant device check and verify the requested object exists.</li>

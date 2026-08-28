@@ -51,7 +51,7 @@
   <div class="frame">
     <p class="eyebrow">ios-xr-nettools · deployment</p>
     <h1>Where this actually runs</h1>
-    <p class="standfirst">One physical host carries two independent container layers — a containerlab fabric of 9 IOS-XR routers plus 4 CE traffic generators, and a 24-service Docker Compose platform (14 running now). ollama is the only process holding the machine's NVIDIA RTX&nbsp;A4000 (16376&nbsp;MiB, driver 580.173.02) — a host-level systemd service outside both container layers; nothing in Compose requests the GPU. New since the last measurement: <code>nettools-mcp</code> itself now also runs containerized, as a bearer-token-authenticated HTTP transport bound to loopback — a second deployment shape for the same package alongside the bare host-level CLI.</p>
+    <p class="standfirst">One physical host carries two independent container layers — a containerlab fabric of 9 IOS-XR routers plus 4 CE traffic generators, and a 24-service Docker Compose platform (14 running now). ollama is the only process holding the machine's NVIDIA RTX&nbsp;A4000 (16376&nbsp;MiB, driver 580.173.02) — a host-level systemd service outside both container layers; nothing in Compose requests the GPU. <code>nettools-mcp</code> also runs containerized as a bearer-token-authenticated, plain-HTTP transport published on <code>0.0.0.0:8000</code> for trusted LAN/VPN clients.</p>
     <svg viewBox="0 0 1160 520" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="deployment-title deployment-desc">
       <title id="deployment-title">ios-xr-nettools deployment</title>
       <desc id="deployment-desc">Deployment diagram placing the agent_nettools CLI, a new containerized authenticated-HTTP nettools-mcp transport, and ollama directly on one physical host, alongside a nested containerlab router fabric and a nested Docker Compose platform of twenty-four defined services, fourteen of them running.</desc>
@@ -128,7 +128,7 @@
       <text x="668" y="120" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">agent_nettools</text>
       <rect x="596" y="132" width="144" height="24" rx="4" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="0.8"/>
       <text x="604" y="148" fill="#2d3142" font-size="12" font-family="'Geist', sans-serif">agent_nettools</text>
-      <text x="732" y="148" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="end">1.2.0</text>
+      <text x="732" y="148" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="end">2.0.0</text>
 
       <!-- nettools-mcp HTTP (host-level, containerized, NEW — the same package's second deployment shape) -->
       <rect x="820" y="80" width="160" height="84" rx="6" fill="#f5f5f5"/>

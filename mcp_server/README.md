@@ -535,12 +535,16 @@ cp .env.mcp-http.example .env.mcp-http
 docker compose -f docker-compose.mcp-http.yml up -d --build
 ```
 
-The default port publication is `127.0.0.1:8000`. Reach it from a Mac through
-an encrypted tunnel instead of exposing plaintext bearer authentication:
+The default port publication is `0.0.0.0:8000`, so trusted LAN/VPN clients can
+connect directly:
 
 ```bash
-ssh -N -L 8000:127.0.0.1:8000 rami@a4000
+http://<a4000-host-or-ip>:8000/mcp
 ```
+
+This endpoint uses plain HTTP. Bearer authentication remains required, but
+there is no transport encryption; never expose it directly to the public
+internet.
 
 Before the first start, refresh the dedicated strict SSH trust store only after
 verifying recreated-router fingerprints through the lab control plane:

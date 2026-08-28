@@ -5,6 +5,33 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); this
 project does not yet promise semantic-versioning stability outside the CLI
 and MCP surfaces (see README's "product surface for 1.0" note).
 
+## [2.0.0] — 2026-08-28
+
+### Added
+
+- Durable SQLite event, incident, notification-outbox, procedure-approval,
+  campaign-reporting, and autonomous recovery workflows.
+- Persistent Docker recovery sidecar with fenced event/outbox leases,
+  heartbeat renewal, recovery observability, and conservative compaction.
+- Bearer-authenticated MCP streamable HTTP deployment with persistent state and
+  direct trusted-LAN/VPN access on plain HTTP port 8000.
+
+### Changed
+
+- MCP HTTP deployment now publishes directly on `0.0.0.0:8000`; SSH tunneling
+  and transport encryption are no longer part of the deployment.
+- Telegram event delivery uses durable editable cards, retry/backoff handling,
+  dead letters, campaign phase updates, and operator audit provenance.
+- Public documentation and repository contents were consolidated for release;
+  generated measurements and internal review history remain available in Git
+  history rather than the current tree.
+
+### Security
+
+- Direct MCP HTTP remains protected by a required bearer token but has no TLS.
+  It is intended only for trusted LAN/VPN networks and must not be exposed
+  directly to the public internet.
+
 ## [1.2.0] — 2026-08-21
 
 An overnight wave run as five parallel lanes with one orchestrator. Every

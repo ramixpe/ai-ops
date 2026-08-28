@@ -20,6 +20,9 @@ def test_compose_http_service_is_persistent_authenticated_and_restartable():
     assert mcp["environment"]["NEO4J_URI"] == "bolt://neo4j:7687"
     assert {"path": ".env.mcp-http", "required": False} in mcp["env_file"]
     assert "NETTOOLS_MCP_HTTP_BEARER_TOKEN" not in mcp["environment"]
+    assert mcp["ports"] == [
+        "${NETTOOLS_MCP_HTTP_BIND_ADDRESS:-0.0.0.0}:${NETTOOLS_MCP_HTTP_BIND_PORT:-8000}:8000"
+    ]
     assert "mcp-state:/var/lib/nettools" in mcp["volumes"]
     assert mcp["networks"] == [
         "router-management",

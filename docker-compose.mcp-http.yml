@@ -55,7 +55,7 @@ services:
       NETTOOLS_EVENT_NOTIFICATION_STATE_FILE: /var/lib/nettools/state/event-notifications.json
       NETTOOLS_OPERATOR_AUDIT_LOG: /var/lib/nettools/state/operator-actions.jsonl
     ports:
-      - "${NETTOOLS_MCP_HTTP_BIND_ADDRESS:-127.0.0.1}:${NETTOOLS_MCP_HTTP_BIND_PORT:-8000}:8000"
+      - "${NETTOOLS_MCP_HTTP_BIND_ADDRESS:-0.0.0.0}:${NETTOOLS_MCP_HTTP_BIND_PORT:-8000}:8000"
     volumes:
       - mcp-state:/var/lib/nettools
     networks:

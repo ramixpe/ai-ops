@@ -342,10 +342,10 @@
         </ul>
       </div>
       <div class="card">
-        <p class="eyebrow">REMOTE, TUNNELED &middot; NEW</p>
+        <p class="eyebrow">REMOTE, DIRECT HTTP</p>
         <div class="card-header"><span class="card-dot accent"></span><h3>nettools-mcp (HTTP)</h3></div>
         <ul>
-          <li>A bearer-token-authenticated <code>streamable-http</code> transport (<code>mcp_server/http_api.py</code>), containerized and bound to loopback (<code>127.0.0.1:8000</code>) for an SSH-tunneled client off-host.</li>
+          <li>A bearer-token-authenticated <code>streamable-http</code> transport (<code>mcp_server/http_api.py</code>), containerized and published directly as plain HTTP on <code>0.0.0.0:8000</code> for trusted LAN/VPN clients.</li>
           <li>No <code>NETTOOLS_MCP_SURFACE</code> is forced in its Compose environment, so it defaults to <code>classic</code> &mdash; the same 37-tool surface and registration wrapper as any other classic caller.</li>
         </ul>
       </div>
