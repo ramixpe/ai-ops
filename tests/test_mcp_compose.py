@@ -18,6 +18,7 @@ def test_compose_http_service_is_persistent_authenticated_and_restartable():
     assert mcp["environment"]["NETTOOLS_MCP_TRANSPORT"] == "streamable-http"
     assert mcp["environment"]["NETBOX_URL"] == "http://netbox:8080"
     assert mcp["environment"]["NEO4J_URI"] == "bolt://neo4j:7687"
+    assert {"path": ".env", "required": False} in mcp["env_file"]
     assert {"path": ".env.mcp-http", "required": False} in mcp["env_file"]
     assert "NETTOOLS_MCP_HTTP_BEARER_TOKEN" not in mcp["environment"]
     assert mcp["ports"] == [
@@ -32,6 +33,10 @@ def test_compose_http_service_is_persistent_authenticated_and_restartable():
     assert compose["networks"]["router-management"]["name"] == "sota_mgmt"
     assert compose["networks"]["platform-services"]["name"] == "sota-lab-platform_labnet"
     assert compose["networks"]["legacy-platform-services"]["name"] == "sota-lab-platform_default"
+
+    recovery = compose["services"]["event-recovery"]
+    assert {"path": ".env", "required": False} in recovery["env_file"]
+    assert {"path": ".env.mcp-http", "required": False} in recovery["env_file"]
 
 
 def test_compose_initializer_requires_and_copies_verified_host_keys():

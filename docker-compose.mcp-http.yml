@@ -35,7 +35,8 @@ services:
       mcp-state-init:
         condition: service_completed_successfully
     env_file:
-      - .env
+      - path: .env
+        required: false
       - path: .env.mcp-http
         required: false
     environment:
@@ -71,7 +72,8 @@ services:
       mcp-state-init:
         condition: service_completed_successfully
     env_file:
-      - .env
+      - path: .env
+        required: false
       - path: .env.mcp-http
         required: false
     environment:
